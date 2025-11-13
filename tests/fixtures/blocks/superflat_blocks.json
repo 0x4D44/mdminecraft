@@ -1,0 +1,4 @@
+﻿[
+  { "name": "air", "opaque": false },
+  { "name": "stone", "opaque": true }
+]

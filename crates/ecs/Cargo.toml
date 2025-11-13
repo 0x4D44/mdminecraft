@@ -1,0 +1,14 @@
+﻿[package]
+name = "mdminecraft-ecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy_ecs = { workspace = true }
+mdminecraft-core = { path = "../core" }
+tracing = { workspace = true }

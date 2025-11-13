@@ -1,0 +1,14 @@
+﻿[package]
+name = "mdminecraft-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }

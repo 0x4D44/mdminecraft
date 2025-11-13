@@ -1,0 +1,16 @@
+﻿[package]
+name = "mdminecraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+mdminecraft-client = { path = "../client" }
+mdminecraft-render = { path = "../render" }
+mdminecraft-world = { path = "../world" }
+mdminecraft-assets = { path = "../assets" }
+mdminecraft-testkit = { path = "../testkit" }

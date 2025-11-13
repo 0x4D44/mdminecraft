@@ -1,0 +1,16 @@
+﻿[package]
+name = "mdminecraft-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+mdminecraft-core = { path = "../core" }

@@ -1,0 +1,20 @@
+﻿[package]
+name = "mdminecraft-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+wgpu = { workspace = true }
+tracing = { workspace = true }
+mdminecraft-world = { path = "../world" }
+mdminecraft-assets = { path = "../assets" }
+blake3 = { workspace = true }
+bytemuck = { workspace = true }
+mdminecraft-testkit = { path = "../testkit" }
+

@@ -1,0 +1,14 @@
+﻿[package]
+name = "mdminecraft-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+mdminecraft-server = { path = "../server" }

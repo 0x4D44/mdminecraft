@@ -1,0 +1,15 @@
+﻿[package]
+name = "mdminecraft-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+quinn = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
