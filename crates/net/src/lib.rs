@@ -7,6 +7,7 @@ mod chunk_streaming;
 mod codec;
 mod connection;
 mod entity_replication;
+mod prediction;
 mod protocol;
 mod transport;
 
@@ -19,6 +20,10 @@ pub use codec::{
 };
 pub use connection::{ClientConnection, ServerConnection};
 pub use entity_replication::{create_entity_state, EntityReplicationTracker};
+pub use prediction::{
+    ClientPredictor, EntityInterpolator, PredictionMetrics, ReconciliationResult, ServerSnapshot,
+    SnapshotBuffer,
+};
 pub use protocol::{
     BlockAction, ChunkDataMessage, ClientMessage, EntityDeltaMessage, EntityUpdate,
     EntityUpdateType, InputBundle, InventoryAction, MovementInput, ServerMessage, Transform,
