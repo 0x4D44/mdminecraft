@@ -105,7 +105,6 @@ impl RegionStore {
     /// Save a chunk to its region file.
     pub fn save_chunk(&self, chunk: &Chunk) -> Result<()> {
         let (region_x, region_z) = chunk_to_region(chunk.position());
-        let region_path = self.region_path(region_x, region_z);
 
         // Load existing region or create new one.
         let mut region_data = self.load_region(region_x, region_z).unwrap_or_default();
