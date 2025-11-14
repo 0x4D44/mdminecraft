@@ -1006,6 +1006,7 @@ dependencies = [
  "bitflags 2.10.0",
  "lru",
  "mdminecraft-core",
+ "mdminecraft-testkit",
  "serde",
  "tracing",
 ]
