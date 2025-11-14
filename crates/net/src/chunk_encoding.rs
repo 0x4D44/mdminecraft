@@ -239,7 +239,7 @@ mod tests {
         data[2] = 1;
         data[3] = 3;
 
-        let (palette, indices) = build_palette(&data);
+        let (palette, _indices) = build_palette(&data);
 
         assert!(palette.contains(&0));
         assert!(palette.contains(&1));
