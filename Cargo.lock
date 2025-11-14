@@ -1040,6 +1040,7 @@ dependencies = [
  "mdminecraft-core",
  "mdminecraft-testkit",
  "serde",
+ "serde_json",
  "tracing",
  "zstd",
 ]
