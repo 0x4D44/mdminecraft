@@ -3,6 +3,7 @@
 
 mod channel;
 mod codec;
+mod connection;
 mod protocol;
 mod transport;
 
@@ -11,6 +12,7 @@ pub use codec::{
     compute_schema_hash, decode_client_message, decode_server_message, encode_client_message,
     encode_server_message,
 };
+pub use connection::{ClientConnection, ServerConnection};
 pub use protocol::{
     BlockAction, ChunkDataMessage, ClientMessage, EntityDeltaMessage, EntityUpdate,
     EntityUpdateType, InputBundle, InventoryAction, MovementInput, ServerMessage, Transform,
