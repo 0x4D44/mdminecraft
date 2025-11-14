@@ -8,7 +8,7 @@ use crate::codec::{
     encode_server_message,
 };
 use crate::protocol::{ClientMessage, ServerMessage, PROTOCOL_VERSION};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::net::SocketAddr;
 use tracing::{debug, info, warn};
 
