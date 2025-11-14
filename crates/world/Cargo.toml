@@ -15,6 +15,9 @@ mdminecraft-core = { path = "../core" }
 tracing = { workspace = true }
 bitflags = { workspace = true }
 lru = { workspace = true }
+bincode = { workspace = true }
+zstd = { workspace = true }
+crc32fast = { workspace = true }
 
 [dev-dependencies]
 mdminecraft-testkit = { path = "../testkit" }
