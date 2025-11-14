@@ -5,6 +5,7 @@ mod channel;
 mod chunk_encoding;
 mod codec;
 mod connection;
+mod entity_replication;
 mod protocol;
 mod transport;
 
@@ -15,6 +16,7 @@ pub use codec::{
     encode_server_message,
 };
 pub use connection::{ClientConnection, ServerConnection};
+pub use entity_replication::{create_entity_state, EntityReplicationTracker};
 pub use protocol::{
     BlockAction, ChunkDataMessage, ClientMessage, EntityDeltaMessage, EntityUpdate,
     EntityUpdateType, InputBundle, InventoryAction, MovementInput, ServerMessage, Transform,
