@@ -18,7 +18,7 @@ pub type BlockState = u16;
 pub const BLOCK_AIR: BlockId = 0;
 
 /// Chunk-local position (X, Y, Z).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {
     pub x: usize,
     pub y: usize,

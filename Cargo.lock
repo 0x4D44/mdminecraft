@@ -888,6 +888,7 @@ dependencies = [
 name = "mdminecraft-assets"
 version = "0.1.0"
 dependencies = [
+ "mdminecraft-world",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
