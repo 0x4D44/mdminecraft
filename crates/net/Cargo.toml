@@ -11,5 +11,11 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 quinn = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+tokio = { workspace = true }
+postcard = { workspace = true }
+blake3 = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
+thiserror = { workspace = true }
