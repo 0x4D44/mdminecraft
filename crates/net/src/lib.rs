@@ -1,6 +1,12 @@
 #![warn(missing_docs)]
 //! Networking abstractions shared by the client/server.
 
+mod channel;
+mod transport;
+
+pub use channel::{ChannelManager, ChannelType};
+pub use transport::{ClientEndpoint, ServerEndpoint};
+
 use serde::{Deserialize, Serialize};
 
 /// Schema hash placeholder for on-the-wire compatibility checks.
