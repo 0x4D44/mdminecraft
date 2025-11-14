@@ -9,6 +9,7 @@ mod connection;
 mod entity_replication;
 mod prediction;
 mod protocol;
+mod replay;
 mod transport;
 
 pub use channel::{ChannelManager, ChannelType};
@@ -28,6 +29,10 @@ pub use protocol::{
     BlockAction, ChunkDataMessage, ClientMessage, EntityDeltaMessage, EntityUpdate,
     EntityUpdateType, InputBundle, InventoryAction, MovementInput, ServerMessage, Transform,
     PROTOCOL_MAGIC, PROTOCOL_VERSION,
+};
+pub use replay::{
+    EventLogger, InputLogEntry, InputLogger, NetworkEvent, ReplayPlayer, ReplayValidator,
+    ValidationError,
 };
 pub use transport::{ClientEndpoint, ServerEndpoint};
 
