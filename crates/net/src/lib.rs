@@ -2,9 +2,20 @@
 //! Networking abstractions shared by the client/server.
 
 mod channel;
+mod codec;
+mod protocol;
 mod transport;
 
 pub use channel::{ChannelManager, ChannelType};
+pub use codec::{
+    compute_schema_hash, decode_client_message, decode_server_message, encode_client_message,
+    encode_server_message,
+};
+pub use protocol::{
+    BlockAction, ChunkDataMessage, ClientMessage, EntityDeltaMessage, EntityUpdate,
+    EntityUpdateType, InputBundle, InventoryAction, MovementInput, ServerMessage, Transform,
+    PROTOCOL_MAGIC, PROTOCOL_VERSION,
+};
 pub use transport::{ClientEndpoint, ServerEndpoint};
 
 use serde::{Deserialize, Serialize};
