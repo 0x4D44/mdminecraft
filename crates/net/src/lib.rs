@@ -2,12 +2,14 @@
 //! Networking abstractions shared by the client/server.
 
 mod channel;
+mod chunk_encoding;
 mod codec;
 mod connection;
 mod protocol;
 mod transport;
 
 pub use channel::{ChannelManager, ChannelType};
+pub use chunk_encoding::{compression_ratio, decode_chunk_data, encode_chunk_data};
 pub use codec::{
     compute_schema_hash, decode_client_message, decode_server_message, encode_client_message,
     encode_server_message,
