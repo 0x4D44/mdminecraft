@@ -1203,6 +1203,7 @@ dependencies = [
  "mdminecraft-render",
  "mdminecraft-testkit",
  "mdminecraft-world",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]
