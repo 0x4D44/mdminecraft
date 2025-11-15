@@ -1,6 +1,7 @@
 mod biome;
 mod chunk;
 mod crafting;
+mod drop_item;
 mod heightmap;
 mod inventory;
 mod lighting;
@@ -16,6 +17,7 @@ mod weather;
 pub use biome::*;
 pub use chunk::*;
 pub use crafting::*;
+pub use drop_item::*;
 pub use heightmap::*;
 pub use inventory::*;
 pub use lighting::*;
