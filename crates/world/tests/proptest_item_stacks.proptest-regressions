@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b4ee00956f6a707ac58f3aedc6858091ae302802e67c0e7cb5526774a9696af5 # shrinks to item_type = RawPork, count = 17
