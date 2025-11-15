@@ -1,7 +1,9 @@
 mod chunk;
 mod crafting;
+mod heightmap;
 mod inventory;
 mod lighting;
+mod noise;
 mod persist;
 mod storage;
 mod time;
@@ -9,8 +11,10 @@ mod weather;
 
 pub use chunk::*;
 pub use crafting::*;
+pub use heightmap::*;
 pub use inventory::*;
 pub use lighting::*;
+pub use noise::*;
 pub use persist::*;
 pub use storage::*;
 pub use time::*;
