@@ -9,6 +9,7 @@ mod persist;
 mod storage;
 mod terrain;
 mod time;
+mod trees;
 mod weather;
 
 pub use biome::*;
@@ -22,4 +23,5 @@ pub use persist::*;
 pub use storage::*;
 pub use terrain::*;
 pub use time::*;
+pub use trees::*;
 pub use weather::*;
