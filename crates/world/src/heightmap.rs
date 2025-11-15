@@ -2,13 +2,8 @@
 //!
 //! Converts noise layers into block heights for chunk generation.
 
+use crate::chunk::{CHUNK_SIZE_X, CHUNK_SIZE_Z};
 use crate::noise::LayeredNoise;
-
-/// Size of chunk in X dimension (blocks).
-pub const CHUNK_SIZE_X: usize = 16;
-
-/// Size of chunk in Z dimension (blocks).
-pub const CHUNK_SIZE_Z: usize = 16;
 
 /// Minimum height for terrain generation.
 pub const MIN_HEIGHT: i32 = 0;
