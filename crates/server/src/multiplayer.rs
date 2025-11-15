@@ -6,13 +6,13 @@ use bevy_ecs::world::World;
 use mdminecraft_core::SimTick;
 use mdminecraft_ecs::{build_default_schedule, run_tick};
 use mdminecraft_net::{
-    ChunkStreamer, EntityReplicationTracker, EventLogger, InputLogEntry, InputLogger,
+    ChunkStreamer, EntityReplicationTracker, EventLogger, InputLogger,
     NetworkEvent, ServerConnection, ServerEndpoint, ServerMessage, Transform,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, instrument};
 
 /// Client state tracked by the server.
 pub struct ConnectedClient {
@@ -99,7 +99,10 @@ impl MultiplayerServer {
     /// - Apply inputs to player entities
     /// - Stream chunks based on player position
     /// - Send entity deltas
+    #[instrument(skip(self), fields(tick = self.current_tick.0, client_count = self.clients.len()))]
     pub async fn tick(&mut self) -> Result<()> {
+        debug!("Running server tick");
+
         // Run deterministic simulation
         run_tick(&mut self.world, &mut self.schedules, self.current_tick);
 
@@ -137,10 +140,11 @@ impl MultiplayerServer {
     /// Accept a new client connection.
     ///
     /// This should be called in a loop to handle incoming connections.
+    #[instrument(skip(self))]
     pub async fn accept_client(&mut self) -> Result<()> {
         if let Some(incoming) = self.endpoint.accept().await {
             let addr = incoming.remote_address();
-            debug!("New connection from {}", addr);
+            info!("New connection from {}", addr);
 
             match incoming.await {
                 Ok(quinn_connection) => {
@@ -155,11 +159,13 @@ impl MultiplayerServer {
     }
 
     /// Handle a newly connected client.
+    #[instrument(skip(self, quinn_connection), fields(addr = %addr))]
     async fn handle_new_client(
         &mut self,
         addr: SocketAddr,
         quinn_connection: quinn::Connection,
     ) -> Result<()> {
+        debug!("Processing new client handshake");
         let connection = ServerConnection::new(quinn_connection);
 
         // Perform handshake
@@ -170,8 +176,8 @@ impl MultiplayerServer {
                 self.next_entity_id += 1;
 
                 info!(
-                    "Client {} authenticated as entity {}",
-                    addr, player_entity_id
+                    player_entity_id,
+                    "Client authenticated successfully"
                 );
 
                 // Create client state

@@ -6,6 +6,7 @@ use crate::biome::{BiomeAssigner, BiomeData, BiomeId};
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
 use crate::heightmap::Heightmap;
 use crate::trees::{generate_tree_positions, Tree, TreeType};
+use tracing::{debug, instrument};
 
 /// Common block IDs for terrain generation.
 pub mod blocks {
@@ -42,7 +43,9 @@ impl TerrainGenerator {
     /// Generate terrain for a chunk at the given position.
     ///
     /// Returns a fully populated chunk with blocks placed based on heightmap and biome.
+    #[instrument(skip(self), fields(chunk_pos = ?chunk_pos, world_seed = self.world_seed))]
     pub fn generate_chunk(&self, chunk_pos: ChunkPos) -> Chunk {
+        debug!("Starting terrain generation");
         let mut chunk = Chunk::new(chunk_pos);
 
         // Generate heightmap for this chunk
@@ -83,6 +86,7 @@ impl TerrainGenerator {
         // Population pass: Add trees
         self.populate_trees(&mut chunk, &heightmap, chunk_origin_x, chunk_origin_z);
 
+        debug!("Terrain generation complete");
         chunk
     }
 
