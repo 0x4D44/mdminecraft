@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use tracing::{debug, info, warn, instrument};
 
 /// Magic number for region file identification ("MDRG" = mdminecraft region).
 const REGION_MAGIC: u32 = 0x4D445247;
@@ -103,14 +104,17 @@ impl RegionStore {
     }
 
     /// Save a chunk to its region file.
+    #[instrument(skip(self, chunk), fields(chunk_pos = ?chunk.position()))]
     pub fn save_chunk(&self, chunk: &Chunk) -> Result<()> {
         let (region_x, region_z) = chunk_to_region(chunk.position());
+        debug!(region_x, region_z, "Saving chunk to region");
 
         // Load existing region or create new one.
         let mut region_data = self.load_region(region_x, region_z).unwrap_or_default();
 
         // Serialize chunk data.
         let chunk_data = serialize_chunk(chunk)?;
+        debug!(chunk_data_size = chunk_data.len(), "Serialized chunk data");
 
         // Store in region map.
         region_data.insert(chunk.position(), chunk_data);
@@ -118,25 +122,34 @@ impl RegionStore {
         // Write region file.
         self.write_region(region_x, region_z, &region_data)?;
 
+        debug!(chunk_count = region_data.len(), "Chunk saved successfully");
         Ok(())
     }
 
     /// Load a chunk from its region file.
+    #[instrument(skip(self), fields(chunk_pos = ?pos))]
     pub fn load_chunk(&self, pos: ChunkPos) -> Result<Chunk> {
         let (region_x, region_z) = chunk_to_region(pos);
+        debug!(region_x, region_z, "Loading chunk from region");
+
         let region_data = self.load_region(region_x, region_z)?;
 
         let chunk_data = region_data.get(&pos).context("Chunk not found in region")?;
+        debug!(chunk_data_size = chunk_data.len(), "Found chunk data in region");
 
-        deserialize_chunk(pos, chunk_data)
+        let chunk = deserialize_chunk(pos, chunk_data)?;
+        debug!("Chunk loaded successfully");
+        Ok(chunk)
     }
 
     /// Load an entire region file into memory.
+    #[instrument(skip(self), fields(region_x, region_z))]
     fn load_region(&self, region_x: i32, region_z: i32) -> Result<HashMap<ChunkPos, Vec<u8>>> {
         let region_path = self.region_path(region_x, region_z);
+        debug!(path = %region_path.display(), "Loading region file");
 
         if !region_path.exists() {
-            anyhow::bail!("Region file does not exist");
+            anyhow::bail!("Region file does not exist: {}", region_path.display());
         }
 
         let mut file = File::open(&region_path).context("Failed to open region file")?;
@@ -146,6 +159,7 @@ impl RegionStore {
         file.read_exact(&mut header_bytes)
             .context("Failed to read region header")?;
         let header = RegionHeader::from_bytes(&header_bytes)?;
+        debug!(version = header.version, payload_len = header.payload_len, "Read region header");
 
         // Read compressed payload.
         let mut compressed = vec![0u8; header.payload_len as usize];
@@ -158,25 +172,43 @@ impl RegionStore {
         let computed_crc = hasher.finalize();
 
         if computed_crc != header.crc32 {
+            warn!(
+                expected_crc = format!("{:08X}", header.crc32),
+                computed_crc = format!("{:08X}", computed_crc),
+                "CRC32 mismatch in region file"
+            );
             anyhow::bail!(
                 "CRC32 mismatch: expected {:08X}, got {:08X}",
                 header.crc32,
                 computed_crc
             );
         }
+        debug!("CRC32 validation passed");
 
         // Decompress payload.
         let decompressed =
             zstd::decode_all(&compressed[..]).context("Failed to decompress region")?;
+        let compression_ratio = decompressed.len() as f64 / compressed.len() as f64;
+        debug!(
+            compressed_size = compressed.len(),
+            decompressed_size = decompressed.len(),
+            compression_ratio = format!("{:.2}x", compression_ratio),
+            "Region decompressed"
+        );
 
         // Deserialize region data.
         let region_data: HashMap<ChunkPos, Vec<u8>> =
             bincode::deserialize(&decompressed).context("Failed to deserialize region")?;
 
+        info!(
+            chunk_count = region_data.len(),
+            "Region file loaded successfully"
+        );
         Ok(region_data)
     }
 
     /// Write an entire region file to disk.
+    #[instrument(skip(self, data), fields(region_x, region_z, chunk_count = data.len()))]
     fn write_region(
         &self,
         region_x: i32,
@@ -184,18 +216,27 @@ impl RegionStore {
         data: &HashMap<ChunkPos, Vec<u8>>,
     ) -> Result<()> {
         let region_path = self.region_path(region_x, region_z);
+        debug!(path = %region_path.display(), "Writing region file");
 
         // Serialize region data.
         let serialized = bincode::serialize(data).context("Failed to serialize region")?;
+        debug!(serialized_size = serialized.len(), "Region data serialized");
 
         // Compress with zstd (level 3 for balanced speed/compression).
         let compressed =
             zstd::encode_all(&serialized[..], 3).context("Failed to compress region")?;
+        let compression_ratio = serialized.len() as f64 / compressed.len() as f64;
+        debug!(
+            compressed_size = compressed.len(),
+            compression_ratio = format!("{:.2}x", compression_ratio),
+            "Region data compressed"
+        );
 
         // Compute CRC32.
         let mut hasher = Hasher::new();
         hasher.update(&compressed);
         let crc32 = hasher.finalize();
+        debug!(crc32 = format!("{:08X}", crc32), "CRC32 computed");
 
         // Create header.
         let header = RegionHeader::new(crc32, compressed.len() as u32);
@@ -207,6 +248,10 @@ impl RegionStore {
         file.write_all(&compressed)
             .context("Failed to write payload")?;
 
+        info!(
+            path = %region_path.display(),
+            "Region file written successfully"
+        );
         Ok(())
     }
 
