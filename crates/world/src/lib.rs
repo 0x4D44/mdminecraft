@@ -7,6 +7,7 @@ mod lighting;
 mod noise;
 mod persist;
 mod storage;
+mod terrain;
 mod time;
 mod weather;
 
@@ -19,5 +20,6 @@ pub use lighting::*;
 pub use noise::*;
 pub use persist::*;
 pub use storage::*;
+pub use terrain::*;
 pub use time::*;
 pub use weather::*;
