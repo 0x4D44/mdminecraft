@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 //! Authoritative simulation host scaffolding.
 
+pub mod multiplayer;
+
 use anyhow::Result;
 use bevy_ecs::schedule::Schedules;
 use bevy_ecs::world::World;
