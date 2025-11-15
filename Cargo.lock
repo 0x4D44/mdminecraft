@@ -1232,7 +1232,10 @@ dependencies = [
  "bevy_ecs",
  "mdminecraft-core",
  "mdminecraft-ecs",
+ "mdminecraft-net",
  "mdminecraft-world",
+ "quinn",
+ "tokio",
  "tracing",
 ]
 

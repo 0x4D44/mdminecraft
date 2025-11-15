@@ -14,4 +14,7 @@ tracing = { workspace = true }
 mdminecraft-ecs = { path = "../ecs" }
 mdminecraft-world = { path = "../world" }
 mdminecraft-core = { path = "../core" }
+mdminecraft-net = { path = "../net" }
 bevy_ecs = { workspace = true }
+tokio = { workspace = true }
+quinn = { workspace = true }
