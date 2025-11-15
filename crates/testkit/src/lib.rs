@@ -1,12 +1,16 @@
 #![warn(missing_docs)]
 //! Deterministic testing surfaces (event stream + replay plumbing scaffolding).
 
+mod metrics;
+
 use anyhow::Result;
 use mdminecraft_core::SimTick;
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+
+pub use metrics::*;
 
 /// Primary event record captured by headless tests.
 #[derive(Debug, Serialize)]

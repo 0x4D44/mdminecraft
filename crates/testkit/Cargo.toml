@@ -13,4 +13,5 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+chrono = { workspace = true }
 mdminecraft-core = { path = "../core" }
