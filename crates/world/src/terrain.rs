@@ -5,6 +5,7 @@
 use crate::biome::{BiomeAssigner, BiomeData, BiomeId};
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
 use crate::heightmap::Heightmap;
+use crate::trees::{generate_tree_positions, Tree, TreeType};
 
 /// Common block IDs for terrain generation.
 pub mod blocks {
@@ -78,6 +79,9 @@ impl TerrainGenerator {
                 );
             }
         }
+
+        // Population pass: Add trees
+        self.populate_trees(&mut chunk, &heightmap, chunk_origin_x, chunk_origin_z);
 
         chunk
     }
@@ -196,6 +200,60 @@ impl TerrainGenerator {
                         ..Default::default()
                     },
                 );
+            }
+        }
+    }
+
+    /// Populate chunk with trees based on biome.
+    fn populate_trees(
+        &self,
+        chunk: &mut Chunk,
+        heightmap: &Heightmap,
+        chunk_origin_x: i32,
+        chunk_origin_z: i32,
+    ) {
+        let chunk_pos = chunk.position();
+
+        // Sample biome at chunk center to determine dominant biome
+        let center_x = chunk_origin_x + CHUNK_SIZE_X as i32 / 2;
+        let center_z = chunk_origin_z + CHUNK_SIZE_Z as i32 / 2;
+        let biome = self.biome_assigner.get_biome(center_x, center_z);
+
+        // Check if this biome supports trees
+        let tree_type = match TreeType::for_biome(biome) {
+            Some(t) => t,
+            None => return, // No trees for this biome
+        };
+
+        // Generate tree positions
+        let tree_positions = generate_tree_positions(
+            self.world_seed,
+            chunk_pos.x,
+            chunk_pos.z,
+            biome,
+            64, // placeholder height
+        );
+
+        // Place trees
+        for (local_x, local_z) in tree_positions {
+            if local_x >= CHUNK_SIZE_X || local_z >= CHUNK_SIZE_Z {
+                continue;
+            }
+
+            // Get surface height at this position
+            let surface_height = heightmap.get(local_x, local_z);
+
+            // Calculate world position
+            let world_x = chunk_origin_x + local_x as i32;
+            let world_z = chunk_origin_z + local_z as i32;
+            let world_y = surface_height + 1; // Place on top of surface
+
+            // Check if surface is suitable for trees (grass or dirt)
+            let surface_block = chunk.voxel(local_x, surface_height as usize, local_z);
+            if surface_block.id == blocks::GRASS || surface_block.id == blocks::DIRT {
+                // Create and place tree
+                let tree = Tree::new(world_x, world_y, world_z, tree_type);
+                tree.generate_into_chunk(chunk, chunk_origin_x, chunk_origin_z);
             }
         }
     }
@@ -351,6 +409,8 @@ mod tests {
 
     #[test]
     fn test_biome_specific_surface_blocks() {
+        use crate::trees::tree_blocks;
+
         let gen = TerrainGenerator::new(999);
 
         // Test multiple chunks to find different biomes
@@ -362,12 +422,18 @@ mod tests {
                 for y in (50..100).rev() {
                     let voxel = chunk.voxel(8, y, 8);
                     if voxel.id != blocks::AIR && voxel.id != blocks::WATER && voxel.id != blocks::ICE {
-                        // Found surface block, should be a valid surface type
+                        // Found surface block, should be a valid surface or tree block
                         assert!(
                             voxel.id == blocks::GRASS
                                 || voxel.id == blocks::SAND
                                 || voxel.id == blocks::SNOW
-                                || voxel.id == blocks::DIRT,
+                                || voxel.id == blocks::DIRT
+                                || voxel.id == tree_blocks::LOG
+                                || voxel.id == tree_blocks::LEAVES
+                                || voxel.id == tree_blocks::BIRCH_LOG
+                                || voxel.id == tree_blocks::BIRCH_LEAVES
+                                || voxel.id == tree_blocks::PINE_LOG
+                                || voxel.id == tree_blocks::PINE_LEAVES,
                             "Invalid surface block: {}",
                             voxel.id
                         );
