@@ -1,3 +1,4 @@
+mod biome;
 mod chunk;
 mod crafting;
 mod heightmap;
@@ -9,6 +10,7 @@ mod storage;
 mod time;
 mod weather;
 
+pub use biome::*;
 pub use chunk::*;
 pub use crafting::*;
 pub use heightmap::*;
