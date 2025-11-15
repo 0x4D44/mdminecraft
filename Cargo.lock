@@ -1153,7 +1153,11 @@ name = "mdminecraft-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "mdminecraft-core",
+ "mdminecraft-net",
  "mdminecraft-server",
+ "quinn",
+ "tokio",
  "tracing",
 ]
 
