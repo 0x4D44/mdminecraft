@@ -61,6 +61,49 @@ cargo run --bin mdminecraft-client --release
 
 ---
 
+## Developer Tools
+
+### Performance Regression Detection
+
+**metrics-diff** - Automated performance comparison for CI/CD integration:
+
+```bash
+# Compare worldtest metrics
+cargo run --bin metrics-diff -- baseline.json current.json
+
+# With custom thresholds
+cargo run --bin metrics-diff -- baseline.json current.json \
+  --threshold-warning 0.05 --threshold-failure 0.10
+
+# JSON output for automation
+cargo run --bin metrics-diff -- baseline.json current.json --format json
+```
+
+See [Metrics Diff Tool Usage](wrk_docs/2025.11.15%20-%20DOC%20-%20Metrics%20Diff%20Tool%20Usage.md) for complete documentation.
+
+### World Generation Debugging
+
+**debug-world** - Visual debugging and validation tools:
+
+```bash
+# Visualize heightmap (ASCII art)
+cargo run --bin debug-world -- heightmap --seed 12345 --region -2,-2,2,2
+
+# Display biome distribution
+cargo run --bin debug-world -- biomes --seed 12345 --region -5,-5,5,5
+
+# Validate chunk seams
+cargo run --bin debug-world -- validate-seams --seed 12345 --region -10,-10,10,10
+```
+
+Features:
+- Heightmap visualization (5 height levels: █ ▓ ▒ ░ ·)
+- Biome map display (14 biome types)
+- Seam validation (chunk boundary continuity)
+- File export support
+
+---
+
 ## Project Structure
 
 ```
@@ -87,18 +130,31 @@ mdminecraft/
 
 ## Documentation
 
+### Getting Started
+
+- **[Examples and FAQ](wrk_docs/2025.11.15%20-%20GUI%20-%20Examples%20and%20FAQ.md)** - Real-world examples, troubleshooting, and common questions
+- **[Error Handling Best Practices](wrk_docs/2025.11.15%20-%20GUI%20-%20Error%20Handling%20Best%20Practices.md)** - Guidelines for contributors
+
 ### For Developers
 
 - **[Architecture Overview](wrk_docs/2025.11.15%20-%20DOC%20-%20Architecture%20Overview.md)** - System design and technical details
 - **[Worldtest Usage Guide](wrk_docs/2025.11.15%20-%20DOC%20-%20Worldtest%20Usage%20Guide.md)** - Running and writing large-scale tests
 - **[Performance Baselines](wrk_docs/2025.11.15%20-%20BAS%20-%20Performance%20Baselines.md)** - Performance targets and regression thresholds
-- **[Stage 5 Completion Summary](wrk_docs/2025.11.15%20-%20SUM%20-%20Stage%205%20Completion%20Summary.md)** - Latest milestone achievements
+
+### Tool Documentation
+
+- **[Metrics Diff Tool Usage](wrk_docs/2025.11.15%20-%20DOC%20-%20Metrics%20Diff%20Tool%20Usage.md)** - Performance regression detection for CI/CD
+
+### Project Milestones
+
+- **[Stage 5 Completion Summary](wrk_docs/2025.11.15%20-%20SUM%20-%20Stage%205%20Completion%20Summary.md)** - MVP completion
+- **[Polish Sprint Complete](wrk_docs/2025.11.15%20-%20SUM%20-%20Polish%20Sprint%20Complete.md)** - Developer tools and documentation
+- **[Project Status](wrk_docs/2025.11.15%20-%20SUM%20-%20Project%20Status%20and%20Next%20Steps.md)** - Current state and roadmap
 
 ### Planning Documents
 
 - **[High-Level Design](wrk_docs/2025.11.12%20-%20HLD%20-%20Deterministic%20Voxel%20Sandbox.md)** - System requirements and design
 - **[Implementation Plan](wrk_docs/2025.11.12%20-%20PLN%20-%20Deterministic%20Voxel%20Sandbox%20Implementation.md)** - Multi-stage development plan
-- **[Project Status](wrk_docs/2025.11.15%20-%20SUM%20-%20Project%20Status%20and%20Next%20Steps.md)** - Current state and next steps
 
 ---
 
