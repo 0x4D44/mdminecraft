@@ -43,6 +43,9 @@ struct App {
 
     // Block interaction
     targeted_block: Option<([i32; 3], [i32; 3])>, // (block_pos, normal)
+    selected_block: u16, // Block ID in hotbar (for placing)
+    last_mouse_left: bool,  // Track previous frame state for click detection
+    last_mouse_right: bool,
 
     // UI state
     ui_state: UiState,
@@ -108,6 +111,9 @@ impl App {
             state: GameState::MainMenu,  // Start in main menu
             chunks,
             targeted_block: None,
+            selected_block: 2,  // Start with grass block
+            last_mouse_left: false,
+            last_mouse_right: false,
             ui_state: UiState::new(),
             egui_ctx,
             egui_state,
@@ -196,9 +202,28 @@ impl App {
         // Perform raycast to find targeted block
         self.perform_raycast();
 
-        // Handle block breaking (left mouse button)
-        if self.input.mouse_button_pressed(winit::event::MouseButton::Left) {
+        // Handle hotbar selection (1-8 keys)
+        self.handle_hotbar_input();
+
+        // Detect mouse clicks (not holds)
+        let mouse_left = self.input.mouse_button_pressed(winit::event::MouseButton::Left);
+        let mouse_right = self.input.mouse_button_pressed(winit::event::MouseButton::Right);
+
+        let left_click = mouse_left && !self.last_mouse_left;
+        let right_click = mouse_right && !self.last_mouse_right;
+
+        // Update previous state
+        self.last_mouse_left = mouse_left;
+        self.last_mouse_right = mouse_right;
+
+        // Handle block breaking (left click)
+        if left_click {
             self.break_block();
+        }
+
+        // Handle block placing (right click)
+        if right_click {
+            self.place_block();
         }
     }
 
@@ -275,6 +300,98 @@ impl App {
 
                 tracing::info!("broke block at ({}, {}, {}) in chunk {}", x, y, z, chunk_pos);
             }
+        }
+    }
+
+    /// Place a block adjacent to the targeted block.
+    fn place_block(&mut self) {
+        if let Some((block_pos, normal)) = self.targeted_block {
+            // Calculate placement position (adjacent to targeted block, in direction of normal)
+            let [x, y, z] = block_pos;
+            let [nx, ny, nz] = normal;
+
+            let place_x = x + nx;
+            let place_y = y + ny;
+            let place_z = z + nz;
+
+            // Don't place blocks where the player is standing
+            let player_pos = self.camera.position;
+            let player_block_x = player_pos.x.floor() as i32;
+            let player_block_y = player_pos.y.floor() as i32;
+            let player_block_z = player_pos.z.floor() as i32;
+
+            // Check if placement would collide with player (check feet and head)
+            if place_x == player_block_x && place_z == player_block_z &&
+                (place_y == player_block_y || place_y == player_block_y + 1) {
+                return; // Don't place block inside player
+            }
+
+            // Convert to chunk position and local position
+            let chunk_x = place_x.div_euclid(16);
+            let chunk_z = place_z.div_euclid(16);
+            let chunk_w = self.camera.w_slice();
+
+            let local_x = place_x.rem_euclid(16) as usize;
+            let local_y = place_y as usize;
+            let local_z = place_z.rem_euclid(16) as usize;
+
+            // Check bounds
+            if local_y >= 256 {
+                return;
+            }
+
+            let chunk_pos = ChunkPos::new_4d(chunk_x, chunk_z, chunk_w);
+
+            // Place the block
+            if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                // Only place if target position is air
+                let current = chunk.voxel(local_x, local_y, local_z);
+                if current.id == BLOCK_AIR {
+                    chunk.set_voxel(local_x, local_y, local_z, Voxel {
+                        id: self.selected_block,
+                        state: 0,
+                        light_sky: 15,
+                        light_block: 0,
+                    });
+
+                    // Regenerate mesh
+                    let mesh = mesh_chunk(chunk, &self.registry);
+                    self.renderer.upload_chunk_mesh(chunk_pos, &mesh);
+
+                    tracing::info!("placed block {} at ({}, {}, {}) in chunk {}",
+                                   self.selected_block, place_x, place_y, place_z, chunk_pos);
+                }
+            }
+        }
+    }
+
+    /// Handle hotbar selection input (number keys 1-8).
+    fn handle_hotbar_input(&mut self) {
+        use winit::keyboard::KeyCode;
+
+        // Map number keys to block IDs
+        // 1=stone, 2=grass, 3=dirt, 4=sand, 5=wood, 6=leaves, 7=snow
+        if self.input.key_just_pressed(KeyCode::Digit1) {
+            self.selected_block = 1; // stone
+            tracing::info!("selected block: stone");
+        } else if self.input.key_just_pressed(KeyCode::Digit2) {
+            self.selected_block = 2; // grass
+            tracing::info!("selected block: grass");
+        } else if self.input.key_just_pressed(KeyCode::Digit3) {
+            self.selected_block = 3; // dirt
+            tracing::info!("selected block: dirt");
+        } else if self.input.key_just_pressed(KeyCode::Digit4) {
+            self.selected_block = 4; // sand
+            tracing::info!("selected block: sand");
+        } else if self.input.key_just_pressed(KeyCode::Digit5) {
+            self.selected_block = 5; // wood
+            tracing::info!("selected block: wood");
+        } else if self.input.key_just_pressed(KeyCode::Digit6) {
+            self.selected_block = 6; // leaves
+            tracing::info!("selected block: leaves");
+        } else if self.input.key_just_pressed(KeyCode::Digit7) {
+            self.selected_block = 7; // snow
+            tracing::info!("selected block: snow");
         }
     }
 
