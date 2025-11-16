@@ -15,7 +15,8 @@ members = [
     "crates/camera",
     "crates/input",
     "crates/ui",
-    "crates/app"
+    "crates/app",
+    "crates/math4d"
 ]
 resolver = "2"
 
