@@ -478,16 +478,24 @@ fn create_test_registry() -> BlockRegistry {
     ])
 }
 
-/// Simple 2D noise function for terrain generation.
-/// Uses a combination of sine waves for smooth, rolling hills.
-fn terrain_height(world_x: i32, world_z: i32) -> usize {
+/// 4D noise function for terrain generation.
+/// Uses a combination of sine waves with W-based variation.
+/// Each W slice generates unique terrain patterns.
+fn terrain_height(world_x: i32, world_z: i32, world_w: i32) -> usize {
     let x = world_x as f32;
     let z = world_z as f32;
+    let w = world_w as f32;
 
-    // Multiple octaves of sine waves for more natural terrain
-    let octave1 = ((x * 0.05).sin() + (z * 0.05).sin()) * 8.0;
-    let octave2 = ((x * 0.1).sin() + (z * 0.1).cos()) * 4.0;
-    let octave3 = ((x * 0.2 + z * 0.1).sin()) * 2.0;
+    // Use W to create phase shifts in the terrain generation
+    // This makes each W slice have a completely different terrain pattern
+    let w_offset1 = w * 100.0;  // Large offset for major terrain differences
+    let w_offset2 = w * 50.0;   // Medium offset for variation
+    let w_offset3 = w * 25.0;   // Small offset for detail
+
+    // Multiple octaves of sine waves with W-based phase shifts
+    let octave1 = ((x * 0.05 + w_offset1).sin() + (z * 0.05 + w_offset1).sin()) * 8.0;
+    let octave2 = ((x * 0.1 + w_offset2).sin() + (z * 0.1 + w_offset2).cos()) * 4.0;
+    let octave3 = ((x * 0.2 + z * 0.1 + w_offset3).sin()) * 2.0;
 
     let height = 68.0 + octave1 + octave2 + octave3;
     height.max(60.0).min(80.0) as usize
@@ -684,8 +692,8 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                     let world_x = x as i32 + cx * 16;
                     let world_z = z as i32 + cz * 16;
 
-                    // Get terrain height from noise function
-                    let height = terrain_height(world_x, world_z);
+                    // Get terrain height from 4D noise function (includes W coordinate)
+                    let height = terrain_height(world_x, world_z, cw);
 
                     for y in 0usize..height {
                         let block_id = if y == height - 1 {
