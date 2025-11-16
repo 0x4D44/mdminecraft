@@ -22,16 +22,19 @@ pub struct MeshBuffers {
 pub struct MeshHash(pub [u8; 32]);
 
 /// Packed vertex layout produced by the mesher.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MeshVertex {
     /// Position in chunk-local coordinates.
     pub position: [f32; 3],
     /// Face normal (unit length).
     pub normal: [f32; 3],
     /// Block identifier baked into the face for material lookup.
-    pub block_id: BlockId,
+    pub block_id: u16,
     /// Combined light level (max of skylight and blocklight), range 0-15.
     pub light: u8,
+    /// Padding to align to 4 bytes
+    _padding: u8,
 }
 
 impl MeshBuffers {
@@ -74,6 +77,7 @@ impl MeshBuilder {
                 normal,
                 block_id,
                 light,
+                _padding: 0,
             });
         }
         let indices = if normal_positive {
