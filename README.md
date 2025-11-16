@@ -25,6 +25,7 @@ mdminecraft is a production-ready voxel sandbox engine featuring deterministic w
 - 🧪 **Comprehensive Testing** - 159 tests covering all major subsystems
 - ⚡ **High Performance** - 6-166× faster than performance targets
 - 📊 **Metrics Infrastructure** - Automated performance tracking and regression detection
+- 🎨 **3D Voxel Renderer** - Full GPU-accelerated 3D visualization with first-person controls
 
 ---
 
