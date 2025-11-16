@@ -30,6 +30,8 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     /// Block identifier baked into the face for material lookup.
     pub block_id: BlockId,
+    /// Combined light level (max of skylight and blocklight), range 0-15.
+    pub light: u8,
 }
 
 impl MeshBuffers {
@@ -63,6 +65,7 @@ impl MeshBuilder {
         normal: [f32; 3],
         corners: [[f32; 3]; 4],
         normal_positive: bool,
+        light: u8,
     ) {
         let base = self.vertices.len() as u32;
         for &corner in &corners {
@@ -70,6 +73,7 @@ impl MeshBuilder {
                 position: corner,
                 normal,
                 block_id,
+                light,
             });
         }
         let indices = if normal_positive {
@@ -89,6 +93,7 @@ impl MeshBuilder {
             hasher.update(bytemuck::cast_slice(&vertex.position));
             hasher.update(bytemuck::cast_slice(&vertex.normal));
             hasher.update(&vertex.block_id.to_le_bytes());
+            hasher.update(&[vertex.light]);
         }
         hasher.update(bytemuck::cast_slice(&indices));
         MeshBuffers {
@@ -196,12 +201,24 @@ impl GreedyMesher {
 
         match (front, back) {
             (Some(a), Some(b)) => match (is_opaque(a, registry), is_opaque(b, registry)) {
-                (true, false) => Some(FaceDesc::new(a.id, axis, true)),
-                (false, true) => Some(FaceDesc::new(b.id, axis, false)),
+                (true, false) => {
+                    let light = a.light_sky.max(a.light_block);
+                    Some(FaceDesc::new(a.id, axis, true, light))
+                }
+                (false, true) => {
+                    let light = b.light_sky.max(b.light_block);
+                    Some(FaceDesc::new(b.id, axis, false, light))
+                }
                 _ => None,
             },
-            (Some(a), None) if is_opaque(a, registry) => Some(FaceDesc::new(a.id, axis, true)),
-            (None, Some(b)) if is_opaque(b, registry) => Some(FaceDesc::new(b.id, axis, false)),
+            (Some(a), None) if is_opaque(a, registry) => {
+                let light = a.light_sky.max(a.light_block);
+                Some(FaceDesc::new(a.id, axis, true, light))
+            }
+            (None, Some(b)) if is_opaque(b, registry) => {
+                let light = b.light_sky.max(b.light_block);
+                Some(FaceDesc::new(b.id, axis, false, light))
+            }
             _ => None,
         }
     }
@@ -247,6 +264,7 @@ impl GreedyMesher {
             normal,
             [v0, v1, v2, v3],
             cell.normal[axis] > 0,
+            cell.light,
         );
     }
 }
@@ -255,13 +273,18 @@ impl GreedyMesher {
 struct FaceDesc {
     block_id: BlockId,
     normal: [i8; 3],
+    light: u8,
 }
 
 impl FaceDesc {
-    fn new(block_id: BlockId, axis: usize, positive: bool) -> Self {
+    fn new(block_id: BlockId, axis: usize, positive: bool, light: u8) -> Self {
         let mut normal = [0i8; 3];
         normal[axis] = if positive { 1 } else { -1 };
-        Self { block_id, normal }
+        Self {
+            block_id,
+            normal,
+            light,
+        }
     }
 }
 

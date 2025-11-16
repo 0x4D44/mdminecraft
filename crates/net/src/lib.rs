@@ -1,6 +1,41 @@
 #![warn(missing_docs)]
 //! Networking abstractions shared by the client/server.
 
+mod channel;
+mod chunk_encoding;
+mod chunk_streaming;
+mod codec;
+mod connection;
+mod entity_replication;
+mod prediction;
+mod protocol;
+mod replay;
+mod transport;
+
+pub use channel::{ChannelManager, ChannelType};
+pub use chunk_encoding::{compression_ratio, decode_chunk_data, encode_chunk_data};
+pub use chunk_streaming::{ChunkStreamer, StreamingMetrics};
+pub use codec::{
+    compute_schema_hash, decode_client_message, decode_server_message, encode_client_message,
+    encode_server_message,
+};
+pub use connection::{ClientConnection, ServerConnection};
+pub use entity_replication::{create_entity_state, EntityReplicationTracker};
+pub use prediction::{
+    ClientPredictor, EntityInterpolator, PredictionMetrics, ReconciliationResult, ServerSnapshot,
+    SnapshotBuffer,
+};
+pub use protocol::{
+    BlockAction, ChunkDataMessage, ClientMessage, EntityDeltaMessage, EntityUpdate,
+    EntityUpdateType, InputBundle, InventoryAction, MovementInput, ServerMessage, Transform,
+    PROTOCOL_MAGIC, PROTOCOL_VERSION,
+};
+pub use replay::{
+    EventLogger, InputLogEntry, InputLogger, NetworkEvent, ReplayPlayer, ReplayValidator,
+    ValidationError,
+};
+pub use transport::{ClientEndpoint, ServerEndpoint};
+
 use serde::{Deserialize, Serialize};
 
 /// Schema hash placeholder for on-the-wire compatibility checks.

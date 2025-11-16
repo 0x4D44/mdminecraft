@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 //! Thin client façade for prediction + presentation glue.
 
+pub mod multiplayer;
+
 use anyhow::Result;
 use mdminecraft_server::Server;
 
