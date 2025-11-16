@@ -302,6 +302,11 @@ impl App {
         let camera_pitch = self.camera.pitch;
         let current_speed = self.current_speed;
 
+        // Get biome-specific sky colors
+        let biome = Biome::from_w(camera_w_slice);
+        let sky_horizon = biome.sky_horizon();
+        let sky_zenith = biome.sky_zenith();
+
         // Use Cell to capture state changes from within egui closure
         let requested_state = Cell::new(None);
 
@@ -348,11 +353,11 @@ impl App {
         match self.state {
             GameState::MainMenu | GameState::Paused => {
                 // Render just the UI for menus
-                self.renderer.render_with_ui(&self.camera, Some((self.egui_ctx.clone(), full_output)))
+                self.renderer.render_with_ui(&self.camera, sky_horizon, sky_zenith, Some((self.egui_ctx.clone(), full_output)))
             }
             GameState::InGame => {
                 // Render full 3D scene + UI
-                self.renderer.render_with_ui(&self.camera, Some((self.egui_ctx.clone(), full_output)))
+                self.renderer.render_with_ui(&self.camera, sky_horizon, sky_zenith, Some((self.egui_ctx.clone(), full_output)))
             }
         }
     }
@@ -535,6 +540,28 @@ impl Biome {
             Biome::Forest => 5,   // 5% - dense
             Biome::Taiga => 4,    // 4% - moderate-dense
             Biome::Tundra => 1,   // 1% - very sparse
+        }
+    }
+
+    /// Get sky horizon color (RGB, 0.0-1.0 range)
+    fn sky_horizon(&self) -> [f32; 3] {
+        match self {
+            Biome::Desert => [0.95, 0.85, 0.65],  // Warm sandy yellow
+            Biome::Plains => [0.75, 0.88, 0.97],  // Light clear blue
+            Biome::Forest => [0.70, 0.85, 0.95],  // Medium blue (default)
+            Biome::Taiga => [0.65, 0.80, 0.93],   // Cool crisp blue
+            Biome::Tundra => [0.85, 0.88, 0.90],  // Cold gray-white
+        }
+    }
+
+    /// Get sky zenith color (RGB, 0.0-1.0 range)
+    fn sky_zenith(&self) -> [f32; 3] {
+        match self {
+            Biome::Desert => [0.85, 0.70, 0.45],  // Deeper sandy orange
+            Biome::Plains => [0.40, 0.60, 0.90],  // Bright blue
+            Biome::Forest => [0.30, 0.50, 0.85],  // Deep blue (default)
+            Biome::Taiga => [0.25, 0.45, 0.80],   // Deeper cool blue
+            Biome::Tundra => [0.70, 0.73, 0.75],  // Overcast gray
         }
     }
 }

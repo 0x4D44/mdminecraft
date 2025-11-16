@@ -220,6 +220,8 @@ impl Renderer {
     pub fn render_with_ui(
         &mut self,
         camera: &Camera,
+        sky_horizon: [f32; 3],
+        sky_zenith: [f32; 3],
         egui_primitives: Option<(egui::Context, egui::FullOutput)>,
     ) -> Result<(), wgpu::SurfaceError> {
         let surface = match &self.surface {
@@ -241,8 +243,8 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
-        // Update camera uniform
-        self.pipeline.update_camera(&self.queue, camera);
+        // Update camera uniform with sky colors
+        self.pipeline.update_camera(&self.queue, camera, sky_horizon, sky_zenith);
 
         {
             let depth_stencil_attachment = self.depth_texture.as_ref().map(|depth_view| {
@@ -263,9 +265,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.7,  // Sky horizon color (matches shader)
-                            g: 0.85,
-                            b: 0.95,
+                            r: sky_horizon[0] as f64,
+                            g: sky_horizon[1] as f64,
+                            b: sky_horizon[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -342,7 +344,8 @@ impl Renderer {
 
     /// Render a frame with the given camera (no UI).
     pub fn render(&mut self, camera: &Camera) -> Result<(), wgpu::SurfaceError> {
-        self.render_with_ui(camera, None)
+        // Default to Forest biome sky colors
+        self.render_with_ui(camera, [0.70, 0.85, 0.95], [0.30, 0.50, 0.85], None)
     }
 
     /// Resize the renderer's surface.

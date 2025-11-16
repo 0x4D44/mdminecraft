@@ -3,6 +3,8 @@
 struct CameraUniforms {
     view_proj: mat4x4<f32>,
     camera_pos: vec3<f32>,
+    sky_horizon: vec3<f32>,  // Sky color at horizon (biome-specific)
+    sky_zenith: vec3<f32>,   // Sky color at zenith (biome-specific)
 }
 
 struct ChunkUniforms {
@@ -13,15 +15,11 @@ struct ChunkUniforms {
 const FOG_START: f32 = 64.0;
 const FOG_END: f32 = 128.0;
 
-// Sky gradient colors
-const SKY_HORIZON: vec3<f32> = vec3<f32>(0.7, 0.85, 0.95); // Light blue/white at horizon
-const SKY_ZENITH: vec3<f32> = vec3<f32>(0.3, 0.5, 0.85);   // Deeper blue at zenith
-
-// Calculate sky color based on view direction
+// Calculate sky color based on view direction (uses biome-specific colors from uniforms)
 fn sky_color(view_dir: vec3<f32>) -> vec3<f32> {
     // Normalize y component to [0, 1] where 0 = horizontal, 1 = straight up
     let t = clamp(view_dir.y * 0.5 + 0.5, 0.0, 1.0);
-    return mix(SKY_HORIZON, SKY_ZENITH, t);
+    return mix(camera.sky_horizon, camera.sky_zenith, t);
 }
 
 @group(0) @binding(0)
@@ -78,6 +76,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         case 4u: { base_color = vec3<f32>(0.85, 0.75, 0.55); } // Sand - warm beige
         case 5u: { base_color = vec3<f32>(0.45, 0.30, 0.15); } // Wood - rich brown bark
         case 6u: { base_color = vec3<f32>(0.25, 0.65, 0.25); } // Leaves - forest green
+        case 7u: { base_color = vec3<f32>(0.95, 0.95, 0.98); } // Snow - bright white with slight blue tint
         default: { base_color = vec3<f32>(0.9, 0.2, 0.9); } // Magenta for unknown blocks
     }
 
