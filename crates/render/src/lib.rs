@@ -46,9 +46,34 @@ pub struct Renderer {
     surface_config: Option<wgpu::SurfaceConfiguration>,
     pipeline: pipeline::ChunkPipeline,
     chunk_meshes: HashMap<ChunkPos, GpuMesh>,
+    depth_texture: Option<wgpu::TextureView>,
 }
 
 impl Renderer {
+    /// Create a depth texture for depth testing.
+    fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let desc = wgpu::TextureDescriptor {
+            label: Some("Depth Texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+
+        let texture = device.create_texture(&desc);
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+
     /// Create a new renderer with a window surface.
     pub fn new(window: std::sync::Arc<winit::window::Window>, config: RendererConfig) -> Self {
         tracing::info!(?config, "initializing wgpu renderer");
@@ -100,6 +125,9 @@ impl Renderer {
 
         let pipeline = pipeline::ChunkPipeline::new(&device, surface_format);
 
+        // Create depth texture
+        let depth_texture = Self::create_depth_texture(&device, config.width, config.height);
+
         tracing::info!("wgpu renderer initialized successfully");
 
         Self {
@@ -110,6 +138,7 @@ impl Renderer {
             surface_config: Some(surface_config),
             pipeline,
             chunk_meshes: HashMap::new(),
+            depth_texture: Some(depth_texture),
         }
     }
 
@@ -152,12 +181,26 @@ impl Renderer {
             surface_config: None,
             pipeline,
             chunk_meshes: HashMap::new(),
+            depth_texture: None,
         }
     }
 
     /// Upload a chunk mesh to the GPU.
     pub fn upload_chunk_mesh(&mut self, pos: ChunkPos, mesh: &MeshBuffers) {
-        let gpu_mesh = GpuMesh::from_mesh_buffers(&self.device, mesh);
+        // Convert ChunkPos to world coordinates
+        // Chunks are 16x256x16, ChunkPos is (x, z) in chunk coordinates
+        let chunk_offset = [
+            (pos.x * 16) as f32,
+            0.0,  // Y offset is always 0 (chunks span full height)
+            (pos.z * 16) as f32,
+        ];
+
+        let gpu_mesh = GpuMesh::from_mesh_buffers(
+            &self.device,
+            mesh,
+            chunk_offset,
+            &self.pipeline.chunk_bind_group_layout,
+        );
         self.chunk_meshes.insert(pos, gpu_mesh);
     }
 
@@ -191,6 +234,17 @@ impl Renderer {
         self.pipeline.update_camera(&self.queue, camera);
 
         {
+            let depth_stencil_attachment = self.depth_texture.as_ref().map(|depth_view| {
+                wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }
+            });
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -198,15 +252,15 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
+                            r: 0.53,
+                            g: 0.81,
+                            b: 0.92,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
@@ -216,6 +270,8 @@ impl Renderer {
 
             // Draw all chunk meshes
             for (_pos, mesh) in &self.chunk_meshes {
+                // Set chunk-specific bind group (group 1)
+                render_pass.set_bind_group(1, &mesh.bind_group, &[]);
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
@@ -237,6 +293,11 @@ impl Renderer {
             surface_config.width = width;
             surface_config.height = height;
             surface.configure(&self.device, surface_config);
+        }
+
+        // Recreate depth texture with new size
+        if self.depth_texture.is_some() {
+            self.depth_texture = Some(Self::create_depth_texture(&self.device, width, height));
         }
     }
 }

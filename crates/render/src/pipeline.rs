@@ -14,10 +14,23 @@ struct CameraUniforms {
 unsafe impl bytemuck::Pod for CameraUniforms {}
 unsafe impl bytemuck::Zeroable for CameraUniforms {}
 
+/// Chunk uniform data sent to GPU.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ChunkUniforms {
+    /// Offset in world coordinates for this chunk.
+    pub offset: [f32; 3],
+    pub _padding: f32,
+}
+
+unsafe impl bytemuck::Pod for ChunkUniforms {}
+unsafe impl bytemuck::Zeroable for ChunkUniforms {}
+
 /// Render pipeline for chunk rendering.
 pub struct ChunkPipeline {
     pub render_pipeline: wgpu::RenderPipeline,
     pub camera_bind_group: wgpu::BindGroup,
+    pub chunk_bind_group_layout: wgpu::BindGroupLayout,
     camera_buffer: wgpu::Buffer,
 }
 
@@ -67,10 +80,26 @@ impl ChunkPipeline {
             }],
         });
 
+        // Create chunk bind group layout
+        let chunk_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Chunk Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Chunk Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout, &chunk_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -131,7 +160,13 @@ impl ChunkPipeline {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -143,6 +178,7 @@ impl ChunkPipeline {
         Self {
             render_pipeline,
             camera_bind_group,
+            chunk_bind_group_layout,
             camera_buffer,
         }
     }
