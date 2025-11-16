@@ -1804,6 +1804,7 @@ name = "mdminecraft-camera"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "mdminecraft-math4d",
 ]
 
 [[package]]

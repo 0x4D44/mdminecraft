@@ -173,6 +173,15 @@ impl App {
                 self.camera.move_down(move_speed);
             }
         }
+
+        // Handle W-axis movement (4D)
+        // Q = backward in W, E = forward in W
+        if self.input.key_pressed(winit::keyboard::KeyCode::KeyQ) {
+            self.camera.move_w_backward(move_speed);
+        }
+        if self.input.key_pressed(winit::keyboard::KeyCode::KeyE) {
+            self.camera.move_w_forward(move_speed);
+        }
     }
 
     /// Track previous state to detect transitions
@@ -287,6 +296,7 @@ impl App {
         // Collect data needed for UI rendering
         let render_stats = self.renderer.get_render_stats();
         let camera_pos = self.camera.position.to_array();
+        let camera_w = self.camera.w;
         let camera_yaw = self.camera.yaw;
         let camera_pitch = self.camera.pitch;
         let current_speed = self.current_speed;
@@ -310,6 +320,7 @@ impl App {
                     ui_state_ref.render(
                         ctx,
                         camera_pos,
+                        camera_w,
                         camera_yaw,
                         camera_pitch,
                         current_speed,

@@ -1,13 +1,18 @@
 #![warn(missing_docs)]
-//! Camera system for first-person 3D rendering.
+//! Camera system for first-person 3D rendering with 4D support.
 
 use glam::{Mat4, Vec3};
+use mdminecraft_math4d::Vec4;
 
 /// First-person camera with position, orientation, and projection.
+///
+/// The camera exists in 4D space but renders a 3D slice at the current W coordinate.
 #[derive(Debug, Clone)]
 pub struct Camera {
-    /// Camera position in world space.
+    /// Camera position in world space (3D components).
     pub position: Vec3,
+    /// W coordinate in 4D space (the "slice" we're viewing).
+    pub w: f32,
     /// Horizontal rotation in radians (around Y axis).
     pub yaw: f32,
     /// Vertical rotation in radians (around local X axis).
@@ -27,6 +32,7 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             position: Vec3::new(0.0, 100.0, 0.0),
+            w: 0.0, // Start at W=0
             yaw: 0.0,
             pitch: 0.0,
             fov: std::f32::consts::FRAC_PI_3, // 60 degrees
@@ -116,6 +122,26 @@ impl Camera {
     /// Move the camera down by the given distance (world Y axis).
     pub fn move_down(&mut self, distance: f32) {
         self.move_up(-distance);
+    }
+
+    /// Move forward in the W dimension (4th spatial dimension).
+    pub fn move_w_forward(&mut self, distance: f32) {
+        self.w += distance;
+    }
+
+    /// Move backward in the W dimension (4th spatial dimension).
+    pub fn move_w_backward(&mut self, distance: f32) {
+        self.w -= distance;
+    }
+
+    /// Get the camera's 4D position (x, y, z, w).
+    pub fn position_4d(&self) -> Vec4 {
+        Vec4::new(self.position.x, self.position.y, self.position.z, self.w)
+    }
+
+    /// Get the current W slice as an integer (for chunk lookups).
+    pub fn w_slice(&self) -> i32 {
+        self.w.floor() as i32
     }
 
     /// Rotate the camera (add to yaw and pitch).

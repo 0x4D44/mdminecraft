@@ -54,6 +54,7 @@ impl UiState {
         &self,
         ctx: &Context,
         camera_pos: [f32; 3],
+        camera_w: f32,
         camera_yaw: f32,
         camera_pitch: f32,
         camera_speed: f32,
@@ -64,7 +65,7 @@ impl UiState {
 
         // Render debug panel if visible
         if self.debug_visible {
-            self.render_debug_panel(ctx, camera_pos, camera_yaw, camera_pitch, camera_speed, render_stats);
+            self.render_debug_panel(ctx, camera_pos, camera_w, camera_yaw, camera_pitch, camera_speed, render_stats);
         }
     }
 
@@ -107,6 +108,7 @@ impl UiState {
         &self,
         ctx: &Context,
         camera_pos: [f32; 3],
+        camera_w: f32,
         camera_yaw: f32,
         camera_pitch: f32,
         camera_speed: f32,
@@ -147,12 +149,14 @@ impl UiState {
 
                 ui.separator();
 
-                // Camera info
-                ui.label(format!("Position: ({:.1}, {:.1}, {:.1})",
-                    camera_pos[0], camera_pos[1], camera_pos[2]));
+                // Camera info (4D position)
+                ui.label(format!("Position: ({:.1}, {:.1}, {:.1}, {:.1})",
+                    camera_pos[0], camera_pos[1], camera_pos[2], camera_w));
+                ui.label(format!("W Slice: {}", camera_w.floor() as i32));
                 ui.label(format!("Yaw: {:.2}°  Pitch: {:.2}°",
                     camera_yaw.to_degrees(), camera_pitch.to_degrees()));
                 ui.label(format!("Speed: {:.0} blocks/sec", camera_speed));
+                ui.label("Controls: Q/E to move in W dimension");
 
                 ui.separator();
 
