@@ -475,7 +475,68 @@ fn create_test_registry() -> BlockRegistry {
             name: "leaves".into(),
             opaque: true,
         },
+        BlockDescriptor {
+            name: "snow".into(),
+            opaque: true,
+        },
     ])
+}
+
+/// Biome types for different W slices
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Biome {
+    Desert,   // W=-2: Sandy, sparse vegetation
+    Plains,   // W=-1: Grassy, moderate vegetation
+    Forest,   // W=0:  Grassy, dense vegetation
+    Taiga,    // W=1:  Grassy, dense vegetation
+    Tundra,   // W=2:  Snowy, sparse vegetation
+}
+
+impl Biome {
+    /// Select biome based on W coordinate
+    fn from_w(w: i32) -> Self {
+        match w {
+            -2 => Biome::Desert,
+            -1 => Biome::Plains,
+            0 => Biome::Forest,
+            1 => Biome::Taiga,
+            2 => Biome::Tundra,
+            _ => Biome::Forest, // Default to forest for any other W values
+        }
+    }
+
+    /// Get surface block ID for this biome
+    fn surface_block(&self) -> u16 {
+        match self {
+            Biome::Desert => 4,  // sand
+            Biome::Plains => 2,  // grass
+            Biome::Forest => 2,  // grass
+            Biome::Taiga => 2,   // grass
+            Biome::Tundra => 7,  // snow
+        }
+    }
+
+    /// Get subsurface block ID for this biome (below surface layer)
+    fn subsurface_block(&self) -> u16 {
+        match self {
+            Biome::Desert => 4,  // sand (deeper)
+            Biome::Plains => 3,  // dirt
+            Biome::Forest => 3,  // dirt
+            Biome::Taiga => 3,   // dirt
+            Biome::Tundra => 7,  // snow (deeper layers)
+        }
+    }
+
+    /// Get tree spawn rate (0-100, percentage)
+    fn tree_density(&self) -> u32 {
+        match self {
+            Biome::Desert => 1,   // 1% - very sparse
+            Biome::Plains => 2,   // 2% - sparse
+            Biome::Forest => 5,   // 5% - dense
+            Biome::Taiga => 4,    // 4% - moderate-dense
+            Biome::Tundra => 1,   // 1% - very sparse
+        }
+    }
 }
 
 /// 4D noise function for terrain generation.
@@ -512,9 +573,10 @@ fn simple_hash(x: i32, z: i32) -> u32 {
 }
 
 /// Check if a tree should spawn at this location (deterministic).
-fn should_spawn_tree(world_x: i32, world_z: i32) -> bool {
+/// Spawn rate varies by biome.
+fn should_spawn_tree(world_x: i32, world_z: i32, biome: Biome) -> bool {
     let hash = simple_hash(world_x, world_z);
-    (hash % 100) < 3 // ~3% tree spawn rate
+    (hash % 100) < biome.tree_density()
 }
 
 /// Determine tree type based on position hash
@@ -680,6 +742,9 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
     // Create a 7x7 grid of chunks across multiple W slices
     // W slices from -2 to +2 (5 total slices)
     for cw in -2..=2 {
+        // Get biome for this W slice
+        let biome = Biome::from_w(cw);
+
         for cx in -3..=3 {
             for cz in -3..=3 {
                 let pos = ChunkPos::new_4d(cx, cz, cw);
@@ -696,12 +761,13 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                     let height = terrain_height(world_x, world_z, cw);
 
                     for y in 0usize..height {
+                        // Use biome-specific blocks
                         let block_id = if y == height - 1 {
-                            2 // grass
+                            biome.surface_block() // surface (grass/sand/snow)
                         } else if y > height - 4 {
-                            3 // dirt
+                            biome.subsurface_block() // subsurface (dirt/sand/snow)
                         } else {
-                            1 // stone
+                            1 // stone (deep layers same for all biomes)
                         };
 
                         chunk.set_voxel(
@@ -717,8 +783,8 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                         );
                     }
 
-                    // Spawn trees on surface
-                    if should_spawn_tree(world_x, world_z) {
+                    // Spawn trees on surface (rate varies by biome)
+                    if should_spawn_tree(world_x, world_z, biome) {
                         // Place tree on top of terrain
                         if height < 250 {
                             // Ensure we have room for the tree
