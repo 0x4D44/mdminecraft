@@ -28,6 +28,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GameState {
     MainMenu,
+    WorldSelection,
     InGame,
     Paused,
 }
@@ -46,6 +47,8 @@ struct App {
     // World data
     chunks: HashMap<ChunkPos, Chunk>,
     world_metadata: WorldMetadata,
+    available_worlds: Vec<WorldMetadata>,
+    selected_world_name: Option<String>,
 
     // Block interaction
     targeted_block: Option<([i32; 3], [i32; 3])>, // (block_pos, normal)
@@ -134,6 +137,8 @@ impl App {
             state: GameState::MainMenu,  // Start in main menu
             chunks,
             world_metadata,
+            available_worlds: Vec::new(),
+            selected_world_name: None,
             targeted_block: None,
             inventory,
             last_mouse_left: false,
@@ -428,6 +433,64 @@ impl App {
         Ok(())
     }
 
+    /// Load a world from disk.
+    fn load_world(&mut self, world_name: &str) -> Result<()> {
+        let (metadata, chunks) = world_save::load_world(world_name)?;
+
+        // Replace current world data
+        self.world_metadata = metadata;
+        self.chunks.clear();
+
+        // Upload chunks to renderer
+        for (pos, chunk) in &chunks {
+            let mesh = mesh_chunk(chunk, &self.registry);
+            self.renderer.upload_chunk_mesh(*pos, &mesh);
+        }
+
+        self.chunks = chunks;
+
+        // Position camera at spawn
+        self.camera.position = glam::Vec3::from_array(self.world_metadata.spawn_position);
+        self.camera.w = 0.0;
+
+        tracing::info!("loaded world '{}' with {} chunks", world_name, self.chunks.len());
+        Ok(())
+    }
+
+    /// Create a new world.
+    fn create_new_world(&mut self, name: &str) {
+        // Clear existing chunks
+        self.chunks.clear();
+
+        // Create new world with fresh chunks (use existing create_test_world)
+        let chunks = create_test_world(&mut self.renderer, &self.registry);
+        self.chunks = chunks;
+
+        // Create new metadata
+        self.world_metadata = WorldMetadata {
+            name: name.to_string(),
+            ..Default::default()
+        };
+
+        // Reset camera to spawn
+        self.camera.position = glam::Vec3::new(0.0, 72.0, 0.0);
+        self.camera.w = 0.0;
+        self.camera.yaw = 0.0;
+        self.camera.pitch = -0.1;
+
+        // Reset inventory
+        self.inventory = Inventory::new();
+        self.inventory.add_item(1, 64);
+        self.inventory.add_item(2, 64);
+        self.inventory.add_item(3, 64);
+        self.inventory.add_item(4, 64);
+        self.inventory.add_item(5, 64);
+        self.inventory.add_item(6, 64);
+        self.inventory.add_item(7, 64);
+
+        tracing::info!("created new world '{}'", name);
+    }
+
     /// Handle hotbar selection input (number keys 1-9).
     fn handle_hotbar_input(&mut self) {
         use winit::keyboard::KeyCode;
@@ -474,6 +537,22 @@ impl App {
                     let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
                     self.input.cursor_locked = true;
                 }
+                GameState::WorldSelection => {
+                    // Entering world selection - refresh world list
+                    match world_save::list_worlds() {
+                        Ok(worlds) => {
+                            self.available_worlds = worlds;
+                        }
+                        Err(e) => {
+                            tracing::error!("failed to list worlds: {}", e);
+                            self.available_worlds = Vec::new();
+                        }
+                    }
+                    // Unlock cursor
+                    window.set_cursor_visible(true);
+                    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+                    self.input.cursor_locked = false;
+                }
                 GameState::MainMenu | GameState::Paused => {
                     // Entering menu - unlock cursor
                     window.set_cursor_visible(true);
@@ -501,9 +580,9 @@ impl App {
 
                     // Menu buttons
                     if ui.add_sized([200.0, 50.0], egui::Button::new(
-                        egui::RichText::new("New Game").size(20.0)
+                        egui::RichText::new("Play").size(20.0)
                     )).clicked() {
-                        new_state = Some(GameState::InGame);
+                        new_state = Some(GameState::WorldSelection);
                     }
 
                     ui.add_space(10.0);
@@ -529,6 +608,106 @@ impl App {
                 });
             });
         new_state
+    }
+
+    /// Render world selection UI (returns new state and optional world name to load)
+    fn render_world_selection(
+        ctx: &egui::Context,
+        worlds: &[WorldMetadata],
+        selected: &mut Option<String>,
+    ) -> (Option<GameState>, bool) {
+        let mut new_state = None;
+        let mut should_create_new = false;
+
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(50.0);
+
+                    // Title
+                    ui.heading(egui::RichText::new("Select World").size(48.0).color(egui::Color32::WHITE));
+
+                    ui.add_space(30.0);
+
+                    // World list in a scroll area
+                    egui::ScrollArea::vertical()
+                        .max_height(400.0)
+                        .show(ui, |ui| {
+                            if worlds.is_empty() {
+                                ui.add_space(50.0);
+                                ui.label(egui::RichText::new("No worlds found")
+                                    .size(18.0)
+                                    .color(egui::Color32::GRAY));
+                                ui.label(egui::RichText::new("Create a new world to get started!")
+                                    .size(14.0)
+                                    .color(egui::Color32::DARK_GRAY));
+                            } else {
+                                for world in worlds {
+                                    let is_selected = selected.as_ref() == Some(&world.name);
+
+                                    let button_text = format!("{}\nLast played: {}",
+                                        world.name,
+                                        format_timestamp(world.last_played)
+                                    );
+
+                                    let button = egui::Button::new(
+                                        egui::RichText::new(button_text).size(16.0)
+                                    )
+                                    .min_size(egui::vec2(400.0, 60.0))
+                                    .fill(if is_selected {
+                                        egui::Color32::from_rgb(60, 60, 100)
+                                    } else {
+                                        egui::Color32::from_rgb(40, 40, 40)
+                                    });
+
+                                    if ui.add(button).clicked() {
+                                        *selected = Some(world.name.clone());
+                                    }
+
+                                    ui.add_space(5.0);
+                                }
+                            }
+                        });
+
+                    ui.add_space(20.0);
+
+                    // Action buttons
+                    ui.horizontal(|ui| {
+                        ui.add_space(100.0);
+
+                        if ui.add_sized([150.0, 40.0], egui::Button::new(
+                            egui::RichText::new("Create New").size(18.0)
+                        )).clicked() {
+                            should_create_new = true;
+                        }
+
+                        ui.add_space(20.0);
+
+                        let can_play = selected.is_some();
+                        let play_button = egui::Button::new(
+                            egui::RichText::new("Play Selected").size(18.0)
+                        )
+                        .min_size(egui::vec2(150.0, 40.0));
+
+                        if ui.add_enabled(can_play, play_button).clicked() {
+                            new_state = Some(GameState::InGame);
+                        }
+
+                        ui.add_space(20.0);
+
+                        if ui.add_sized([150.0, 40.0], egui::Button::new(
+                            egui::RichText::new("Back").size(18.0)
+                        )).clicked() {
+                            new_state = Some(GameState::MainMenu);
+                        }
+                    });
+
+                    ui.add_space(20.0);
+                });
+            });
+
+        (new_state, should_create_new)
     }
 
     /// Render hotbar at bottom of screen
@@ -683,11 +862,33 @@ impl App {
         let ui_state_ref = &mut self.ui_state;  // Borrow ui_state separately
         let current_state = self.state;
 
+        // Need mutable refs for world selection
+        let available_worlds = &self.available_worlds;
+        let selected_world = &mut self.selected_world_name;
+        let should_load_world = Cell::new(false);
+        let should_create_world = Cell::new(false);
+
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             match current_state {
                 GameState::MainMenu => {
                     if let Some(new_state) = Self::render_main_menu(ctx) {
                         requested_state.set(Some(new_state));
+                    }
+                }
+                GameState::WorldSelection => {
+                    let (new_state, create_new) = Self::render_world_selection(
+                        ctx,
+                        available_worlds,
+                        selected_world,
+                    );
+                    if let Some(state) = new_state {
+                        requested_state.set(Some(state));
+                        if state == GameState::InGame {
+                            should_load_world.set(true);
+                        }
+                    }
+                    if create_new {
+                        should_create_world.set(true);
                     }
                 }
                 GameState::InGame => {
@@ -717,12 +918,28 @@ impl App {
             self.state = new_state;
         }
 
+        // Handle world loading
+        if should_load_world.get() {
+            if let Some(world_name) = self.selected_world_name.clone() {
+                if let Err(e) = self.load_world(&world_name) {
+                    tracing::error!("failed to load world '{}': {}", world_name, e);
+                    self.state = GameState::WorldSelection;
+                }
+            }
+        }
+
+        // Handle world creation
+        if should_create_world.get() {
+            self.create_new_world("New World");
+            self.state = GameState::InGame;
+        }
+
         // Handle egui output
         self.egui_state.handle_platform_output(window, full_output.platform_output.clone());
 
         // Render 3D scene + UI (or just UI for menu)
         match self.state {
-            GameState::MainMenu | GameState::Paused => {
+            GameState::MainMenu | GameState::WorldSelection | GameState::Paused => {
                 // Render just the UI for menus
                 self.renderer.render_with_ui(&self.camera, sky_horizon, sky_zenith, Some((self.egui_ctx.clone(), full_output)))
             }
@@ -779,6 +996,12 @@ impl App {
                     // ESC to resume
                     if self.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
                         self.state = GameState::InGame;
+                    }
+                }
+                GameState::WorldSelection => {
+                    // ESC to go back to main menu
+                    if self.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
+                        self.state = GameState::MainMenu;
                     }
                 }
                 GameState::MainMenu => {
@@ -866,6 +1089,26 @@ fn create_test_registry() -> BlockRegistry {
             opaque: true,
         },
     ])
+}
+
+/// Format a Unix timestamp as a relative time string
+fn format_timestamp(timestamp: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let diff = now.saturating_sub(timestamp);
+
+    if diff < 60 {
+        "Just now".to_string()
+    } else if diff < 3600 {
+        format!("{} minutes ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{} hours ago", diff / 3600)
+    } else {
+        format!("{} days ago", diff / 86400)
+    }
 }
 
 /// Biome types for different W slices
