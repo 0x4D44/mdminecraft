@@ -35,22 +35,36 @@ impl LocalPos {
     }
 }
 
-/// Chunk coordinate (X,Z) in chunk space.
+/// Chunk coordinate (X, Z, W) in chunk space.
+///
+/// In a 4D world, chunks exist at different W coordinates.
+/// Each chunk is a 16×256×16 vertical slice at a specific (x, z, w) position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
+    pub w: i32,
 }
 
 impl ChunkPos {
     pub const fn new(x: i32, z: i32) -> Self {
-        Self { x, z }
+        Self { x, z, w: 0 }
+    }
+
+    /// Create a chunk position with explicit W coordinate.
+    pub const fn new_4d(x: i32, z: i32, w: i32) -> Self {
+        Self { x, z, w }
+    }
+
+    /// Get the 2D position (x, z), ignoring W.
+    pub const fn xz(&self) -> (i32, i32) {
+        (self.x, self.z)
     }
 }
 
 impl fmt::Display for ChunkPos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.x, self.z)
+        write!(f, "({}, {}, {})", self.x, self.z, self.w)
     }
 }
 

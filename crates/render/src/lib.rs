@@ -279,13 +279,17 @@ impl Renderer {
             render_pass.set_pipeline(&self.pipeline.render_pipeline);
             render_pass.set_bind_group(0, &self.pipeline.camera_bind_group, &[]);
 
-            // Draw all chunk meshes
-            for (_pos, mesh) in &self.chunk_meshes {
-                // Set chunk-specific bind group (group 1)
-                render_pass.set_bind_group(1, &mesh.bind_group, &[]);
-                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            // Draw chunk meshes only at the current W slice (4D rendering)
+            let camera_w_slice = camera.w_slice();
+            for (pos, mesh) in &self.chunk_meshes {
+                // Filter: only render chunks at the camera's W slice
+                if pos.w == camera_w_slice {
+                    // Set chunk-specific bind group (group 1)
+                    render_pass.set_bind_group(1, &mesh.bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                    render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                }
             }
         }
 
@@ -364,5 +368,22 @@ impl Renderer {
         let total_triangles = total_indices / 3;
         let chunk_count = self.chunk_meshes.len();
         (total_indices, total_triangles, chunk_count)
+    }
+
+    /// Get render statistics for a specific W slice.
+    /// Returns (indices, triangles, chunk_count) for chunks at the given W coordinate.
+    pub fn get_slice_stats(&self, w_slice: i32) -> (u32, u32, usize) {
+        let mut slice_indices = 0u32;
+        let mut slice_chunk_count = 0usize;
+
+        for (pos, mesh) in &self.chunk_meshes {
+            if pos.w == w_slice {
+                slice_indices += mesh.index_count;
+                slice_chunk_count += 1;
+            }
+        }
+
+        let slice_triangles = slice_indices / 3;
+        (slice_indices, slice_triangles, slice_chunk_count)
     }
 }

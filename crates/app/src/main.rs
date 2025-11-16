@@ -294,7 +294,8 @@ impl App {
 
     fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
         // Collect data needed for UI rendering
-        let render_stats = self.renderer.get_render_stats();
+        let camera_w_slice = self.camera.w_slice();
+        let render_stats = self.renderer.get_slice_stats(camera_w_slice);
         let camera_pos = self.camera.position.to_array();
         let camera_w = self.camera.w;
         let camera_yaw = self.camera.yaw;
@@ -668,11 +669,13 @@ fn place_pine_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize, world_x: i32
 fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
     use mdminecraft_world::Voxel;
 
-    // Create a 7x7 grid of chunks with smooth terrain
-    for cx in -3..=3 {
-        for cz in -3..=3 {
-            let pos = ChunkPos::new(cx, cz);
-            let mut chunk = Chunk::new(pos);
+    // Create a 7x7 grid of chunks across multiple W slices
+    // W slices from -2 to +2 (5 total slices)
+    for cw in -2..=2 {
+        for cx in -3..=3 {
+            for cz in -3..=3 {
+                let pos = ChunkPos::new_4d(cx, cz, cw);
+                let mut chunk = Chunk::new(pos);
 
             // Fill bottom layers with blocks
             for x in 0usize..16 {
@@ -717,13 +720,14 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                 }
             }
 
-            // Generate and upload mesh
-            let mesh = mesh_chunk(&chunk, registry);
-            renderer.upload_chunk_mesh(pos, &mesh);
+                // Generate and upload mesh
+                let mesh = mesh_chunk(&chunk, registry);
+                renderer.upload_chunk_mesh(pos, &mesh);
+            }
         }
     }
 
-    tracing::info!("created test world with 49 chunks (7×7 grid) + trees");
+    tracing::info!("created test world with 245 chunks (7×7 grid × 5 W slices) + trees");
 }
 
 fn main() -> Result<()> {
