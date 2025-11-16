@@ -22,6 +22,11 @@ struct App {
     input: InputState,
     last_frame: Instant,
     registry: BlockRegistry,
+
+    // Performance tracking
+    frame_count: u32,
+    fps_timer: Instant,
+    last_fps: f32,
 }
 
 impl App {
@@ -40,12 +45,20 @@ impl App {
         let registry = create_test_registry();
         create_test_world(&mut renderer, &registry);
 
-        // Position camera above the test world
-        let mut camera = Camera::new(glam::Vec3::new(8.0, 100.0, 8.0));
+        // Position camera at ground level for first-person view
+        // Terrain height is ~64-72, so place camera at y=72 (on top of terrain)
+        let mut camera = Camera::new(glam::Vec3::new(0.0, 72.0, 0.0));
         camera.set_aspect(size.width, size.height);
 
-        // Look down slightly
-        camera.pitch = -0.3;
+        // Look forward (slightly down to see terrain ahead)
+        camera.yaw = 0.0;  // Looking in +X direction
+        camera.pitch = -0.1;  // Slight downward angle
+
+        tracing::info!(
+            "camera initialized at pos=({:.1}, {:.1}, {:.1}) yaw={:.2} pitch={:.2}",
+            camera.position.x, camera.position.y, camera.position.z,
+            camera.yaw, camera.pitch
+        );
 
         Ok(Self {
             renderer,
@@ -53,6 +66,9 @@ impl App {
             input: InputState::new(),
             last_frame: Instant::now(),
             registry,
+            frame_count: 0,
+            fps_timer: Instant::now(),
+            last_fps: 0.0,
         })
     }
 
@@ -117,6 +133,31 @@ impl App {
 
     fn handle_device_event(&mut self, event: &winit::event::DeviceEvent) {
         self.input.handle_device_event(event);
+    }
+
+    /// Update FPS counter and return current FPS.
+    fn update_fps(&mut self) -> f32 {
+        self.frame_count += 1;
+
+        let elapsed = self.fps_timer.elapsed();
+        if elapsed.as_secs_f32() >= 1.0 {
+            self.last_fps = self.frame_count as f32 / elapsed.as_secs_f32();
+            self.frame_count = 0;
+            self.fps_timer = Instant::now();
+        }
+
+        self.last_fps
+    }
+
+    /// Get debug info string for display.
+    fn debug_info(&self) -> String {
+        format!(
+            "FPS: {:.0} | Pos: ({:.1}, {:.1}, {:.1}) | Chunks: 9",
+            self.last_fps,
+            self.camera.position.x,
+            self.camera.position.y,
+            self.camera.position.z
+        )
     }
 }
 
@@ -254,6 +295,12 @@ fn main() -> Result<()> {
                     WindowEvent::RedrawRequested => {
                         app.input.begin_frame();
                         app.update();
+
+                        // Update FPS counter
+                        app.update_fps();
+
+                        // Update window title with debug info
+                        window.set_title(&format!("mdminecraft | {}", app.debug_info()));
 
                         match app.render() {
                             Ok(_) => {}
