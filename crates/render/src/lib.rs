@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 //! Rendering facade built on top of wgpu + chunk meshing.
 
+use std::cell::RefCell;
+
 mod cache;
 mod camera;
 mod chunk_manager;
@@ -46,7 +48,7 @@ pub struct Renderer {
     context: Option<RenderContext>,
     pipeline: Option<VoxelPipeline>,
     camera: Camera,
-    ui: Option<UiManager>,
+    ui: Option<RefCell<UiManager>>,
 }
 
 impl Renderer {
@@ -69,26 +71,26 @@ impl Renderer {
         let context = RenderContext::new(window.clone()).await?;
         let pipeline = VoxelPipeline::new(&context)?;
 
-        // Initialize UI
+        // Initialize UI (wrapped in RefCell for interior mutability)
         let ui = UiManager::new(&context.device, context.config.format, &window);
 
         self.camera.set_aspect(context.aspect_ratio());
 
         self.context = Some(context);
         self.pipeline = Some(pipeline);
-        self.ui = Some(ui);
+        self.ui = Some(RefCell::new(ui));
 
         Ok(())
     }
 
-    /// Get mutable reference to UI manager.
-    pub fn ui_mut(&mut self) -> Option<&mut UiManager> {
-        self.ui.as_mut()
+    /// Get mutable reference to UI manager via RefCell.
+    pub fn ui_mut(&self) -> Option<std::cell::RefMut<UiManager>> {
+        self.ui.as_ref().map(|cell| cell.borrow_mut())
     }
 
-    /// Get reference to UI manager.
-    pub fn ui(&self) -> Option<&UiManager> {
-        self.ui.as_ref()
+    /// Get reference to UI manager via RefCell.
+    pub fn ui(&self) -> Option<std::cell::Ref<UiManager>> {
+        self.ui.as_ref().map(|cell| cell.borrow())
     }
 
     /// Get mutable reference to the camera.
