@@ -10,8 +10,8 @@ struct ChunkUniforms {
 }
 
 // Fog parameters
-const FOG_START: f32 = 48.0;
-const FOG_END: f32 = 96.0;
+const FOG_START: f32 = 64.0;
+const FOG_END: f32 = 128.0;
 const FOG_COLOR: vec3<f32> = vec3<f32>(0.53, 0.81, 0.92); // Sky blue
 
 @group(0) @binding(0)

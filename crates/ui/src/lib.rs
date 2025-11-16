@@ -146,8 +146,8 @@ impl UiState {
                 ui.separator();
 
                 // World info
-                ui.label("Chunks loaded: 9 (3×3 grid)");
-                ui.label("Render distance: 48 blocks");
+                ui.label("Chunks loaded: 49 (7×7 grid)");
+                ui.label("Render distance: 128 blocks");
 
                 ui.separator();
 
