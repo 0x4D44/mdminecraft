@@ -3,7 +3,7 @@
 use anyhow::Result;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_render::{
-    mesh_chunk, ChunkManager, DebugHud, InputState, Renderer, RendererConfig, WindowConfig,
+    mesh_chunk, ChunkManager, DebugHud, Frustum, InputState, Renderer, RendererConfig, WindowConfig,
     WindowManager,
 };
 use mdminecraft_world::{ChunkPos, TerrainGenerator};
@@ -98,6 +98,9 @@ fn main() -> Result<()> {
     debug_hud.total_vertices = total_vertices;
     debug_hud.total_triangles = total_indices / 3;
 
+    // Frustum culling stats
+    let mut chunks_visible = 0;
+
     // Run event loop
     window_manager.run(move |event, window| {
         // Let UI handle events first
@@ -151,6 +154,7 @@ fn main() -> Result<()> {
                             camera.position.z,
                         ];
                         debug_hud.camera_rot = [camera.yaw, camera.pitch];
+                        debug_hud.chunks_visible = chunks_visible;
 
                         // Update camera from input
                         update_camera(&mut renderer, &input, dt);
@@ -165,7 +169,13 @@ fn main() -> Result<()> {
                                 },
                             );
 
-                            // Render voxels
+                            // Create frustum for culling
+                            let camera = renderer.camera();
+                            let view_proj = camera.projection_matrix() * camera.view_matrix();
+                            let frustum = Frustum::from_matrix(&view_proj);
+
+                            // Render voxels with frustum culling
+                            chunks_visible = 0;
                             {
                                 let mut render_pass =
                                     resources.pipeline.begin_render_pass(&mut encoder, &frame.view);
@@ -177,8 +187,15 @@ fn main() -> Result<()> {
                                     &[],
                                 );
 
-                                // Render all chunks
+                                // Render only visible chunks
                                 for chunk_data in chunk_manager.chunks() {
+                                    // Frustum culling test
+                                    if !frustum.is_chunk_visible(chunk_data.chunk_pos) {
+                                        continue;
+                                    }
+
+                                    chunks_visible += 1;
+
                                     render_pass.set_bind_group(1, &chunk_data.chunk_bind_group, &[]);
                                     render_pass
                                         .set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
