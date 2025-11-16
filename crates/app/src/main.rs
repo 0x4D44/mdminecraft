@@ -1,6 +1,9 @@
 //! Main application entry point with 3D rendering.
 
+mod inventory;
+
 use anyhow::Result;
+use inventory::Inventory;
 use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,7 +46,7 @@ struct App {
 
     // Block interaction
     targeted_block: Option<([i32; 3], [i32; 3])>, // (block_pos, normal)
-    selected_block: u16, // Block ID in hotbar (for placing)
+    inventory: Inventory,
     last_mouse_left: bool,  // Track previous frame state for click detection
     last_mouse_right: bool,
 
@@ -102,6 +105,17 @@ impl App {
             None,
         );
 
+        // Create inventory with starting items
+        let mut inventory = Inventory::new();
+        // Give player some starting blocks
+        inventory.add_item(1, 64); // 64 stone
+        inventory.add_item(2, 64); // 64 grass
+        inventory.add_item(3, 64); // 64 dirt
+        inventory.add_item(4, 64); // 64 sand
+        inventory.add_item(5, 64); // 64 wood
+        inventory.add_item(6, 64); // 64 leaves
+        inventory.add_item(7, 64); // 64 snow
+
         Ok(Self {
             renderer,
             camera,
@@ -111,7 +125,7 @@ impl App {
             state: GameState::MainMenu,  // Start in main menu
             chunks,
             targeted_block: None,
-            selected_block: 2,  // Start with grass block
+            inventory,
             last_mouse_left: false,
             last_mouse_right: false,
             ui_state: UiState::new(),
@@ -202,8 +216,16 @@ impl App {
         // Perform raycast to find targeted block
         self.perform_raycast();
 
-        // Handle hotbar selection (1-8 keys)
+        // Handle hotbar selection (1-9 keys)
         self.handle_hotbar_input();
+
+        // Handle mouse wheel scrolling for hotbar
+        if self.input.mouse_wheel_delta != 0.0 {
+            let current = self.inventory.selected_slot() as i32;
+            let delta = if self.input.mouse_wheel_delta > 0.0 { -1 } else { 1 };
+            let new_slot = (current + delta).rem_euclid(9) as usize;
+            self.inventory.set_selected_slot(new_slot);
+        }
 
         // Detect mouse clicks (not holds)
         let mouse_left = self.input.mouse_button_pressed(winit::event::MouseButton::Left);
@@ -286,6 +308,9 @@ impl App {
 
             // Modify the chunk
             if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                // Get the block being broken
+                let broken_block = chunk.voxel(local_x, local_y, local_z);
+
                 // Set block to air
                 chunk.set_voxel(local_x, local_y, local_z, Voxel {
                     id: BLOCK_AIR,
@@ -294,17 +319,32 @@ impl App {
                     light_block: 0,
                 });
 
+                // Add the broken block to inventory (if not air)
+                if broken_block.id != BLOCK_AIR {
+                    let overflow = self.inventory.add_item(broken_block.id, 1);
+                    if overflow > 0 {
+                        tracing::warn!("inventory full, dropped block on ground");
+                        // TODO: spawn item entity on ground
+                    }
+                }
+
                 // Regenerate mesh
                 let mesh = mesh_chunk(chunk, &self.registry);
                 self.renderer.upload_chunk_mesh(chunk_pos, &mesh);
 
-                tracing::info!("broke block at ({}, {}, {}) in chunk {}", x, y, z, chunk_pos);
+                tracing::info!("broke block {} at ({}, {}, {}) in chunk {}",
+                               broken_block.id, x, y, z, chunk_pos);
             }
         }
     }
 
     /// Place a block adjacent to the targeted block.
     fn place_block(&mut self) {
+        // Check if player has a block to place
+        let Some(block_id) = self.inventory.selected_block_id() else {
+            return; // No block in selected slot
+        };
+
         if let Some((block_pos, normal)) = self.targeted_block {
             // Calculate placement position (adjacent to targeted block, in direction of normal)
             let [x, y, z] = block_pos;
@@ -347,8 +387,14 @@ impl App {
                 // Only place if target position is air
                 let current = chunk.voxel(local_x, local_y, local_z);
                 if current.id == BLOCK_AIR {
+                    // Remove one block from inventory
+                    let removed = self.inventory.remove_item(block_id, 1);
+                    if removed == 0 {
+                        return; // Shouldn't happen, but safety check
+                    }
+
                     chunk.set_voxel(local_x, local_y, local_z, Voxel {
-                        id: self.selected_block,
+                        id: block_id,
                         state: 0,
                         light_sky: 15,
                         light_block: 0,
@@ -359,39 +405,45 @@ impl App {
                     self.renderer.upload_chunk_mesh(chunk_pos, &mesh);
 
                     tracing::info!("placed block {} at ({}, {}, {}) in chunk {}",
-                                   self.selected_block, place_x, place_y, place_z, chunk_pos);
+                                   block_id, place_x, place_y, place_z, chunk_pos);
                 }
             }
         }
     }
 
-    /// Handle hotbar selection input (number keys 1-8).
+    /// Handle hotbar selection input (number keys 1-9).
     fn handle_hotbar_input(&mut self) {
         use winit::keyboard::KeyCode;
 
-        // Map number keys to block IDs
-        // 1=stone, 2=grass, 3=dirt, 4=sand, 5=wood, 6=leaves, 7=snow
-        if self.input.key_just_pressed(KeyCode::Digit1) {
-            self.selected_block = 1; // stone
-            tracing::info!("selected block: stone");
+        // Map number keys to hotbar slots (1-9 maps to slots 0-8)
+        let new_slot = if self.input.key_just_pressed(KeyCode::Digit1) {
+            Some(0)
         } else if self.input.key_just_pressed(KeyCode::Digit2) {
-            self.selected_block = 2; // grass
-            tracing::info!("selected block: grass");
+            Some(1)
         } else if self.input.key_just_pressed(KeyCode::Digit3) {
-            self.selected_block = 3; // dirt
-            tracing::info!("selected block: dirt");
+            Some(2)
         } else if self.input.key_just_pressed(KeyCode::Digit4) {
-            self.selected_block = 4; // sand
-            tracing::info!("selected block: sand");
+            Some(3)
         } else if self.input.key_just_pressed(KeyCode::Digit5) {
-            self.selected_block = 5; // wood
-            tracing::info!("selected block: wood");
+            Some(4)
         } else if self.input.key_just_pressed(KeyCode::Digit6) {
-            self.selected_block = 6; // leaves
-            tracing::info!("selected block: leaves");
+            Some(5)
         } else if self.input.key_just_pressed(KeyCode::Digit7) {
-            self.selected_block = 7; // snow
-            tracing::info!("selected block: snow");
+            Some(6)
+        } else if self.input.key_just_pressed(KeyCode::Digit8) {
+            Some(7)
+        } else if self.input.key_just_pressed(KeyCode::Digit9) {
+            Some(8)
+        } else {
+            None
+        };
+
+        if let Some(slot) = new_slot {
+            self.inventory.set_selected_slot(slot);
+            let item_name = self.inventory.selected_item()
+                .map(|s| format!("{} ({})", s.item_id, s.count))
+                .unwrap_or_else(|| "empty".to_string());
+            tracing::info!("selected hotbar slot {}: {}", slot + 1, item_name);
         }
     }
 
@@ -460,6 +512,94 @@ impl App {
                 });
             });
         new_state
+    }
+
+    /// Render hotbar at bottom of screen
+    fn render_hotbar(ctx: &egui::Context, inventory: &Inventory) {
+        egui::TopBottomPanel::bottom("hotbar")
+            .frame(egui::Frame::none())
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(10.0);
+
+                    ui.horizontal(|ui| {
+                        let slot_size = 50.0;
+                        let spacing = 4.0;
+                        let selected = inventory.selected_slot();
+
+                        // Block colors matching shader
+                        let block_colors = [
+                            egui::Color32::from_rgb(128, 128, 128), // 1: stone (gray)
+                            egui::Color32::from_rgb(34, 139, 34),   // 2: grass (green)
+                            egui::Color32::from_rgb(139, 69, 19),   // 3: dirt (brown)
+                            egui::Color32::from_rgb(238, 214, 175), // 4: sand (yellow)
+                            egui::Color32::from_rgb(101, 67, 33),   // 5: wood (brown)
+                            egui::Color32::from_rgb(0, 128, 0),     // 6: leaves (green)
+                            egui::Color32::from_rgb(255, 250, 250), // 7: snow (white)
+                        ];
+
+                        for (i, slot) in inventory.hotbar_slots().iter().enumerate() {
+                            let is_selected = i == selected;
+
+                            // Draw slot background
+                            let rect_size = egui::vec2(slot_size, slot_size);
+                            let (rect, response) = ui.allocate_exact_size(
+                                rect_size,
+                                egui::Sense::click()
+                            );
+
+                            // Background color
+                            let bg_color = if is_selected {
+                                egui::Color32::from_rgba_premultiplied(255, 255, 255, 100)
+                            } else {
+                                egui::Color32::from_rgba_premultiplied(0, 0, 0, 100)
+                            };
+
+                            ui.painter().rect_filled(rect, 2.0, bg_color);
+
+                            // Border
+                            let border_color = if is_selected {
+                                egui::Color32::WHITE
+                            } else {
+                                egui::Color32::DARK_GRAY
+                            };
+                            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, border_color));
+
+                            // Draw item if slot is not empty
+                            if let Some(stack) = slot {
+                                // Draw colored block representation
+                                if stack.item_id > 0 && stack.item_id <= 7 {
+                                    let block_color = block_colors[(stack.item_id - 1) as usize];
+                                    let inner_rect = rect.shrink(8.0);
+                                    ui.painter().rect_filled(inner_rect, 1.0, block_color);
+                                }
+
+                                // Draw count
+                                let count_text = if stack.count > 1 {
+                                    format!("{}", stack.count)
+                                } else {
+                                    String::new()
+                                };
+
+                                if !count_text.is_empty() {
+                                    let text_pos = rect.right_bottom() + egui::vec2(-4.0, -4.0);
+                                    ui.painter().text(
+                                        text_pos,
+                                        egui::Align2::RIGHT_BOTTOM,
+                                        count_text,
+                                        egui::FontId::proportional(14.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                }
+                            }
+
+                            ui.add_space(spacing);
+                        }
+                    });
+
+                    ui.add_space(10.0);
+                });
+            });
     }
 
     /// Render pause menu UI (returns new state if changed)
@@ -543,6 +683,9 @@ impl App {
                         current_speed,
                         render_stats,
                     );
+
+                    // Render hotbar at bottom of screen
+                    Self::render_hotbar(ctx, &self.inventory);
                 }
                 GameState::Paused => {
                     if let Some(new_state) = Self::render_pause_menu(ctx) {
