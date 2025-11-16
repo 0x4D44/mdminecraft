@@ -10,3 +10,4 @@ path = "src/lib.rs"
 
 [dependencies]
 glam = { workspace = true }
+mdminecraft-math4d = { path = "../math4d" }
