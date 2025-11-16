@@ -151,6 +151,7 @@ impl Camera {
 /// View frustum for visibility culling.
 #[derive(Debug, Clone)]
 pub struct Frustum {
+    #[allow(dead_code)]
     view_projection: Mat4,
 }
 

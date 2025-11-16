@@ -22,7 +22,7 @@ struct App {
     camera: Camera,
     input: InputState,
     last_frame: Instant,
-    registry: BlockRegistry,
+    _registry: BlockRegistry,
 
     // UI state
     ui_state: UiState,
@@ -84,7 +84,7 @@ impl App {
             camera,
             input: InputState::new(),
             last_frame: Instant::now(),
-            registry,
+            _registry: registry,
             ui_state: UiState::new(),
             egui_ctx,
             egui_state,
@@ -313,7 +313,7 @@ fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize) {
 
     // Tree dimensions
     let trunk_height = 4;
-    let leaf_radius = 2;
+    let max_leaf_radius = 2;
 
     // Place trunk (wood blocks)
     for dy in 0..trunk_height {
@@ -340,7 +340,7 @@ fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize) {
             break;
         }
 
-        let radius = if dy == 0 || dy == 3 { 1 } else { 2 };
+        let radius = if dy == 0 || dy == 3 { 1 } else { max_leaf_radius };
 
         for dx in -(radius as i32)..=(radius as i32) {
             for dz in -(radius as i32)..=(radius as i32) {
