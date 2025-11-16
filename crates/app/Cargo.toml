@@ -22,5 +22,6 @@ mdminecraft-ui = { path = "../ui" }
 mdminecraft-render = { path = "../render" }
 mdminecraft-world = { path = "../world" }
 mdminecraft-assets = { path = "../assets" }
+mdminecraft-physics = { path = "../physics" }
 egui = { workspace = true }
 egui-winit = "0.28"

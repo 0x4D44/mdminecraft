@@ -1781,6 +1781,7 @@ dependencies = [
  "mdminecraft-assets",
  "mdminecraft-camera",
  "mdminecraft-input",
+ "mdminecraft-physics",
  "mdminecraft-render",
  "mdminecraft-ui",
  "mdminecraft-world",
