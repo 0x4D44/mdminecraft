@@ -50,13 +50,21 @@ impl UiState {
     }
 
     /// Render the UI.
-    pub fn render(&self, ctx: &Context, camera_pos: [f32; 3], camera_yaw: f32, camera_pitch: f32) {
+    pub fn render(
+        &self,
+        ctx: &Context,
+        camera_pos: [f32; 3],
+        camera_yaw: f32,
+        camera_pitch: f32,
+        camera_speed: f32,
+        render_stats: (u32, u32, usize),
+    ) {
         // Always render crosshair
         self.render_crosshair(ctx);
 
         // Render debug panel if visible
         if self.debug_visible {
-            self.render_debug_panel(ctx, camera_pos, camera_yaw, camera_pitch);
+            self.render_debug_panel(ctx, camera_pos, camera_yaw, camera_pitch, camera_speed, render_stats);
         }
     }
 
@@ -101,6 +109,8 @@ impl UiState {
         camera_pos: [f32; 3],
         camera_yaw: f32,
         camera_pitch: f32,
+        camera_speed: f32,
+        render_stats: (u32, u32, usize),
     ) {
         egui::Window::new("Debug Info")
             .fixed_pos(Pos2::new(10.0, 10.0))
@@ -142,11 +152,20 @@ impl UiState {
                     camera_pos[0], camera_pos[1], camera_pos[2]));
                 ui.label(format!("Yaw: {:.2}°  Pitch: {:.2}°",
                     camera_yaw.to_degrees(), camera_pitch.to_degrees()));
+                ui.label(format!("Speed: {:.0} blocks/sec", camera_speed));
+
+                ui.separator();
+
+                // Render stats
+                let (total_indices, total_triangles, chunk_count) = render_stats;
+                ui.label(format!("Chunks rendered: {}", chunk_count));
+                ui.label(format!("Triangles: {}", total_triangles));
+                ui.label(format!("Indices: {}", total_indices));
 
                 ui.separator();
 
                 // World info
-                ui.label("Chunks loaded: 49 (7×7 grid)");
+                ui.label("World size: 7×7 chunks (112×112 blocks)");
                 ui.label("Render distance: 128 blocks");
 
                 ui.separator();
@@ -154,7 +173,9 @@ impl UiState {
                 // Controls
                 ui.label("Controls:");
                 ui.label("  WASD - Move");
-                ui.label("  Space/Shift - Up/Down");
+                ui.label("  Space - Up, Ctrl - Down");
+                ui.label("  Shift - Sprint (4x speed)");
+                ui.label("  Ctrl - Slow (0.25x speed)");
                 ui.label("  Mouse - Look");
                 ui.label("  F3 - Toggle debug");
                 ui.label("  ESC - Exit");

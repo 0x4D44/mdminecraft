@@ -357,4 +357,12 @@ impl Renderer {
             self.depth_texture = Some(Self::create_depth_texture(&self.device, width, height));
         }
     }
+
+    /// Get render statistics (total indices, total triangles, chunk count).
+    pub fn get_render_stats(&self) -> (u32, u32, usize) {
+        let total_indices: u32 = self.chunk_meshes.values().map(|m| m.index_count).sum();
+        let total_triangles = total_indices / 3;
+        let chunk_count = self.chunk_meshes.len();
+        (total_indices, total_triangles, chunk_count)
+    }
 }

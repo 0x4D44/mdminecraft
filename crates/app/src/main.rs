@@ -33,6 +33,9 @@ struct App {
     frame_count: u32,
     fps_timer: Instant,
     last_fps: f32,
+
+    // Camera speed
+    current_speed: f32,
 }
 
 impl App {
@@ -88,6 +91,7 @@ impl App {
             frame_count: 0,
             fps_timer: Instant::now(),
             last_fps: 0.0,
+            current_speed: 20.0,
         })
     }
 
@@ -96,9 +100,25 @@ impl App {
         let dt = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
 
-        // Movement speed
-        let move_speed = 20.0 * dt; // blocks per second
+        // Base movement speed (blocks per second)
+        let base_speed = 20.0;
+
+        // Apply speed modifiers
+        let speed_multiplier = if self.input.key_pressed(winit::keyboard::KeyCode::ShiftLeft) ||
+                                   self.input.key_pressed(winit::keyboard::KeyCode::ShiftRight) {
+            4.0 // Sprint mode (80 blocks/sec)
+        } else if self.input.key_pressed(winit::keyboard::KeyCode::ControlLeft) ||
+                  self.input.key_pressed(winit::keyboard::KeyCode::ControlRight) {
+            0.25 // Slow mode (5 blocks/sec)
+        } else {
+            1.0 // Normal speed (20 blocks/sec)
+        };
+
+        let move_speed = base_speed * speed_multiplier * dt;
         let look_speed = 0.002; // radians per pixel
+
+        // Track current speed for display
+        self.current_speed = base_speed * speed_multiplier;
 
         // Handle mouse look
         let (mouse_dx, mouse_dy) = self.input.mouse_delta;
@@ -138,6 +158,9 @@ impl App {
     }
 
     fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
+        // Get render statistics
+        let render_stats = self.renderer.get_render_stats();
+
         // Run egui
         let raw_input = self.egui_state.take_egui_input(window);
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
@@ -146,6 +169,8 @@ impl App {
                 self.camera.position.to_array(),
                 self.camera.yaw,
                 self.camera.pitch,
+                self.current_speed,
+                render_stats,
             );
         });
 
@@ -266,6 +291,84 @@ fn terrain_height(world_x: i32, world_z: i32) -> usize {
     height.max(60.0).min(80.0) as usize
 }
 
+/// Simple hash function for deterministic random placement.
+fn simple_hash(x: i32, z: i32) -> u32 {
+    let mut h = (x as u32).wrapping_mul(374761393);
+    h = h.wrapping_add((z as u32).wrapping_mul(668265263));
+    h ^= h >> 13;
+    h = h.wrapping_mul(1274126177);
+    h ^= h >> 16;
+    h
+}
+
+/// Check if a tree should spawn at this location (deterministic).
+fn should_spawn_tree(world_x: i32, world_z: i32) -> bool {
+    let hash = simple_hash(world_x, world_z);
+    (hash % 100) < 3 // ~3% tree spawn rate
+}
+
+/// Place a simple tree at the given world coordinates in the chunk.
+fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize) {
+    use mdminecraft_world::Voxel;
+
+    // Tree dimensions
+    let trunk_height = 4;
+    let leaf_radius = 2;
+
+    // Place trunk (wood blocks)
+    for dy in 0..trunk_height {
+        if y + dy < 256 {
+            chunk.set_voxel(
+                x,
+                y + dy,
+                z,
+                Voxel {
+                    id: 5, // wood
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                },
+            );
+        }
+    }
+
+    // Place leaves (simple sphere-ish shape)
+    let leaf_start = y + trunk_height - 1;
+    for dy in 0..=3 {
+        let y_pos = leaf_start + dy;
+        if y_pos >= 256 {
+            break;
+        }
+
+        let radius = if dy == 0 || dy == 3 { 1 } else { 2 };
+
+        for dx in -(radius as i32)..=(radius as i32) {
+            for dz in -(radius as i32)..=(radius as i32) {
+                let nx = x as i32 + dx;
+                let nz = z as i32 + dz;
+
+                // Check if within chunk bounds
+                if nx >= 0 && nx < 16 && nz >= 0 && nz < 16 {
+                    // Skip center column where trunk is (except top)
+                    if !(dx == 0 && dz == 0 && dy < 3) {
+                        chunk.set_voxel(
+                            nx as usize,
+                            y_pos,
+                            nz as usize,
+                            Voxel {
+                                id: 6, // leaves
+                                state: 0,
+                                light_sky: 15,
+                                light_block: 0,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
     use mdminecraft_world::Voxel;
 
@@ -306,6 +409,15 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                             },
                         );
                     }
+
+                    // Spawn trees on surface
+                    if should_spawn_tree(world_x, world_z) {
+                        // Place tree on top of terrain
+                        if height < 250 {
+                            // Ensure we have room for the tree
+                            place_tree(&mut chunk, x, height, z);
+                        }
+                    }
                 }
             }
 
@@ -315,7 +427,7 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
         }
     }
 
-    tracing::info!("created test world with 49 chunks (7×7 grid)");
+    tracing::info!("created test world with 49 chunks (7×7 grid) + trees");
 }
 
 fn main() -> Result<()> {
