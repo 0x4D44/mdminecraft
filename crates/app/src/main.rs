@@ -11,6 +11,7 @@ use winit::{
 
 use mdminecraft_camera::Camera;
 use mdminecraft_input::InputState;
+use mdminecraft_ui::UiState;
 use mdminecraft_render::{mesh_chunk, Renderer, RendererConfig};
 use mdminecraft_world::{Chunk, ChunkPos};
 use mdminecraft_assets::BlockRegistry;
@@ -22,6 +23,11 @@ struct App {
     input: InputState,
     last_frame: Instant,
     registry: BlockRegistry,
+
+    // UI state
+    ui_state: UiState,
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
 
     // Performance tracking
     frame_count: u32,
@@ -60,12 +66,25 @@ impl App {
             camera.yaw, camera.pitch
         );
 
+        // Initialize egui
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &window,
+            Some(window.scale_factor() as f32),
+            None,
+        );
+
         Ok(Self {
             renderer,
             camera,
             input: InputState::new(),
             last_frame: Instant::now(),
             registry,
+            ui_state: UiState::new(),
+            egui_ctx,
+            egui_state,
             frame_count: 0,
             fps_timer: Instant::now(),
             last_fps: 0.0,
@@ -118,8 +137,23 @@ impl App {
         }
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        self.renderer.render(&self.camera)
+    fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
+        // Run egui
+        let raw_input = self.egui_state.take_egui_input(window);
+        let full_output = self.egui_ctx.run(raw_input, |ctx| {
+            self.ui_state.render(
+                ctx,
+                self.camera.position.to_array(),
+                self.camera.yaw,
+                self.camera.pitch,
+            );
+        });
+
+        // Handle egui output
+        self.egui_state.handle_platform_output(window, full_output.platform_output.clone());
+
+        // Render 3D scene + UI
+        self.renderer.render_with_ui(&self.camera, Some((self.egui_ctx.clone(), full_output)))
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -127,8 +161,26 @@ impl App {
         self.camera.set_aspect(width, height);
     }
 
-    fn handle_event(&mut self, event: &WindowEvent) {
+    fn handle_event(&mut self, event: &WindowEvent, window: &winit::window::Window) -> bool {
+        // Let egui handle the event first
+        let response = self.egui_state.on_window_event(window, event);
+
+        // If egui consumed the event, don't pass to input
+        if response.consumed {
+            return true;
+        }
+
+        // Handle our input
         self.input.handle_event(event);
+
+        // Check for F3 toggle
+        if let WindowEvent::KeyboardInput { .. } = event {
+            if self.input.key_just_pressed(winit::keyboard::KeyCode::F3) {
+                self.ui_state.toggle_debug();
+            }
+        }
+
+        false
     }
 
     fn handle_device_event(&mut self, event: &winit::event::DeviceEvent) {
@@ -136,7 +188,7 @@ impl App {
     }
 
     /// Update FPS counter and return current FPS.
-    fn update_fps(&mut self) -> f32 {
+    fn update_fps(&mut self, frame_time_ms: f32) -> f32 {
         self.frame_count += 1;
 
         let elapsed = self.fps_timer.elapsed();
@@ -145,6 +197,9 @@ impl App {
             self.frame_count = 0;
             self.fps_timer = Instant::now();
         }
+
+        // Update UI state with FPS and frame time
+        self.ui_state.update_fps(self.last_fps, frame_time_ms);
 
         self.last_fps
     }
@@ -275,7 +330,7 @@ fn main() -> Result<()> {
 
         match event {
             Event::WindowEvent { event, .. } => {
-                app.handle_event(&event);
+                app.handle_event(&event, &window);
 
                 match event {
                     WindowEvent::CloseRequested => {
@@ -293,16 +348,21 @@ fn main() -> Result<()> {
                         }
                     }
                     WindowEvent::RedrawRequested => {
+                        let frame_start = Instant::now();
+
                         app.input.begin_frame();
                         app.update();
 
+                        // Calculate frame time
+                        let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+
                         // Update FPS counter
-                        app.update_fps();
+                        app.update_fps(frame_time_ms);
 
                         // Update window title with debug info
                         window.set_title(&format!("mdminecraft | {}", app.debug_info()));
 
-                        match app.render() {
+                        match app.render(&window) {
                             Ok(_) => {}
                             Err(wgpu::SurfaceError::Lost) => app.resize(1280, 720),
                             Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),

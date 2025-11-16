@@ -9,6 +9,11 @@ struct ChunkUniforms {
     offset: vec3<f32>,
 }
 
+// Fog parameters
+const FOG_START: f32 = 48.0;
+const FOG_END: f32 = 96.0;
+const FOG_COLOR: vec3<f32> = vec3<f32>(0.53, 0.81, 0.92); // Sky blue
+
 @group(0) @binding(0)
 var<uniform> camera: CameraUniforms;
 
@@ -74,7 +79,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = 0.3;
     let lighting = ambient + diffuse * 0.5 + in.light * 0.2;
 
-    let final_color = base_color * lighting;
+    let lit_color = base_color * lighting;
+
+    // Calculate distance-based fog
+    let distance = length(in.world_pos - camera.camera_pos);
+    let fog_factor = clamp((distance - FOG_START) / (FOG_END - FOG_START), 0.0, 1.0);
+
+    // Mix lit color with fog color based on distance
+    let final_color = mix(lit_color, FOG_COLOR, fog_factor);
 
     return vec4<f32>(final_color, 1.0);
 }
