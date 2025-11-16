@@ -18,6 +18,9 @@ glam = { workspace = true }
 wgpu = { workspace = true }
 mdminecraft-camera = { path = "../camera" }
 mdminecraft-input = { path = "../input" }
+mdminecraft-ui = { path = "../ui" }
 mdminecraft-render = { path = "../render" }
 mdminecraft-world = { path = "../world" }
 mdminecraft-assets = { path = "../assets" }
+egui = { workspace = true }
+egui-winit = "0.28"

@@ -15,6 +15,7 @@ pub use gpu_mesh::GpuMesh;
 use std::collections::HashMap;
 use mdminecraft_world::ChunkPos;
 use mdminecraft_camera::Camera;
+use egui_wgpu::ScreenDescriptor;
 
 /// Renderer configuration for headless + onscreen paths.
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ pub struct Renderer {
     pipeline: pipeline::ChunkPipeline,
     chunk_meshes: HashMap<ChunkPos, GpuMesh>,
     depth_texture: Option<wgpu::TextureView>,
+    egui_renderer: Option<egui_wgpu::Renderer>,
 }
 
 impl Renderer {
@@ -128,6 +130,9 @@ impl Renderer {
         // Create depth texture
         let depth_texture = Self::create_depth_texture(&device, config.width, config.height);
 
+        // Initialize egui renderer
+        let egui_renderer = egui_wgpu::Renderer::new(&device, surface_format, None, 1);
+
         tracing::info!("wgpu renderer initialized successfully");
 
         Self {
@@ -139,6 +144,7 @@ impl Renderer {
             pipeline,
             chunk_meshes: HashMap::new(),
             depth_texture: Some(depth_texture),
+            egui_renderer: Some(egui_renderer),
         }
     }
 
@@ -182,6 +188,7 @@ impl Renderer {
             pipeline,
             chunk_meshes: HashMap::new(),
             depth_texture: None,
+            egui_renderer: None,
         }
     }
 
@@ -209,8 +216,12 @@ impl Renderer {
         self.chunk_meshes.remove(&pos);
     }
 
-    /// Render a frame with the given camera.
-    pub fn render(&mut self, camera: &Camera) -> Result<(), wgpu::SurfaceError> {
+    /// Render a frame with the given camera and optional egui primitives.
+    pub fn render_with_ui(
+        &mut self,
+        camera: &Camera,
+        egui_primitives: Option<(egui::Context, egui::FullOutput)>,
+    ) -> Result<(), wgpu::SurfaceError> {
         let surface = match &self.surface {
             Some(s) => s,
             None => {
@@ -278,10 +289,56 @@ impl Renderer {
             }
         }
 
+        // Render egui if provided
+        if let (Some((ctx, full_output)), Some(egui_renderer)) = (egui_primitives, &mut self.egui_renderer) {
+            let screen_descriptor = ScreenDescriptor {
+                size_in_pixels: [self.config.width, self.config.height],
+                pixels_per_point: ctx.pixels_per_point(),
+            };
+
+            // Upload egui textures
+            for (id, image_delta) in &full_output.textures_delta.set {
+                egui_renderer.update_texture(&self.device, &self.queue, *id, image_delta);
+            }
+
+            // Record egui render commands
+            let primitives = ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+            egui_renderer.update_buffers(&self.device, &self.queue, &mut encoder, &primitives, &screen_descriptor);
+
+            {
+                let mut egui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                egui_renderer.render(&mut egui_pass, &primitives, &screen_descriptor);
+            }
+
+            // Cleanup egui textures
+            for id in &full_output.textures_delta.free {
+                egui_renderer.free_texture(id);
+            }
+        }
+
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
+    }
+
+    /// Render a frame with the given camera (no UI).
+    pub fn render(&mut self, camera: &Camera) -> Result<(), wgpu::SurfaceError> {
+        self.render_with_ui(camera, None)
     }
 
     /// Resize the renderer's surface.
