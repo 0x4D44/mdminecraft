@@ -5,8 +5,15 @@ struct CameraUniforms {
     camera_pos: vec3<f32>,
 }
 
+struct ChunkUniforms {
+    offset: vec3<f32>,
+}
+
 @group(0) @binding(0)
 var<uniform> camera: CameraUniforms;
+
+@group(1) @binding(0)
+var<uniform> chunk: ChunkUniforms;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -27,9 +34,12 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
+    // Apply chunk offset to position
+    let world_pos = in.position + chunk.offset;
+
     // Transform position to clip space
-    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
-    out.world_pos = in.position;
+    out.clip_position = camera.view_proj * vec4<f32>(world_pos, 1.0);
+    out.world_pos = world_pos;
     out.normal = in.normal;
     out.block_id = in.block_id;
 
