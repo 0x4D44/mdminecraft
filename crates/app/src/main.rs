@@ -207,7 +207,7 @@ impl App {
     /// Get debug info string for display.
     fn debug_info(&self) -> String {
         format!(
-            "FPS: {:.0} | Pos: ({:.1}, {:.1}, {:.1}) | Chunks: 9",
+            "FPS: {:.0} | Pos: ({:.1}, {:.1}, {:.1}) | Chunks: 49",
             self.last_fps,
             self.camera.position.x,
             self.camera.position.y,
@@ -251,20 +251,39 @@ fn create_test_registry() -> BlockRegistry {
     ])
 }
 
+/// Simple 2D noise function for terrain generation.
+/// Uses a combination of sine waves for smooth, rolling hills.
+fn terrain_height(world_x: i32, world_z: i32) -> usize {
+    let x = world_x as f32;
+    let z = world_z as f32;
+
+    // Multiple octaves of sine waves for more natural terrain
+    let octave1 = ((x * 0.05).sin() + (z * 0.05).sin()) * 8.0;
+    let octave2 = ((x * 0.1).sin() + (z * 0.1).cos()) * 4.0;
+    let octave3 = ((x * 0.2 + z * 0.1).sin()) * 2.0;
+
+    let height = 68.0 + octave1 + octave2 + octave3;
+    height.max(60.0).min(80.0) as usize
+}
+
 fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
     use mdminecraft_world::Voxel;
 
-    // Create a simple 3x3 grid of chunks with some terrain
-    for cx in -1..=1 {
-        for cz in -1..=1 {
+    // Create a 7x7 grid of chunks with smooth terrain
+    for cx in -3..=3 {
+        for cz in -3..=3 {
             let pos = ChunkPos::new(cx, cz);
             let mut chunk = Chunk::new(pos);
 
             // Fill bottom layers with blocks
             for x in 0usize..16 {
                 for z in 0usize..16 {
-                    // Create a simple height map
-                    let height = (64 + ((x as i32 + cx * 16) % 8) + ((z as i32 + cz * 16) % 8)) as usize;
+                    // Calculate world coordinates
+                    let world_x = x as i32 + cx * 16;
+                    let world_z = z as i32 + cz * 16;
+
+                    // Get terrain height from noise function
+                    let height = terrain_height(world_x, world_z);
 
                     for y in 0usize..height {
                         let block_id = if y == height - 1 {
@@ -296,7 +315,7 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
         }
     }
 
-    tracing::info!("created test world with 9 chunks");
+    tracing::info!("created test world with 49 chunks (7×7 grid)");
 }
 
 fn main() -> Result<()> {
