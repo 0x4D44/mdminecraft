@@ -162,15 +162,16 @@ impl UiState {
 
                 // Render stats
                 let (total_indices, total_triangles, chunk_count) = render_stats;
-                ui.label(format!("Chunks rendered: {}", chunk_count));
+                ui.label(format!("Chunks rendered (W={}): {}", camera_w.floor() as i32, chunk_count));
                 ui.label(format!("Triangles: {}", total_triangles));
                 ui.label(format!("Indices: {}", total_indices));
 
                 ui.separator();
 
                 // World info
-                ui.label("World size: 7×7 chunks (112×112 blocks)");
-                ui.label("Render distance: 128 blocks");
+                ui.label("World size: 7×7×5 chunks (245 total)");
+                ui.label("  112×112 blocks per W slice");
+                ui.label("  W slices: -2 to +2");
 
                 ui.separator();
 
