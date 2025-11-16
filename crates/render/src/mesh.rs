@@ -22,6 +22,7 @@ pub struct MeshBuffers {
 pub struct MeshHash(pub [u8; 32]);
 
 /// Packed vertex layout produced by the mesher.
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MeshVertex {
     /// Position in chunk-local coordinates.
@@ -32,6 +33,8 @@ pub struct MeshVertex {
     pub block_id: BlockId,
     /// Combined light level (max of skylight and blocklight), range 0-15.
     pub light: u8,
+    /// Padding for alignment (GPU requires 4-byte alignment).
+    pub _padding: [u8; 3],
 }
 
 impl MeshBuffers {
@@ -74,6 +77,7 @@ impl MeshBuilder {
                 normal,
                 block_id,
                 light,
+                _padding: [0; 3],
             });
         }
         let indices = if normal_positive {

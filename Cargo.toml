@@ -11,7 +11,11 @@ members = [
     "crates/assets",
     "crates/scripting",
     "crates/testkit",
-    "crates/cli"
+    "crates/cli",
+    "crates/camera",
+    "crates/input",
+    "crates/ui",
+    "crates/app"
 ]
 resolver = "2"
 
@@ -45,3 +49,9 @@ zstd = "0.13"
 crc32fast = "1.4"
 proptest = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
+winit = "0.29"
+glam = "0.28"
+egui = "0.28"
+egui-wgpu = "0.28"
+pollster = "0.3"
+env_logger = "0.11"
