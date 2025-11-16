@@ -3,16 +3,20 @@
 
 mod cache;
 mod camera;
+mod chunk_manager;
 mod driver;
 mod mesh;
 mod pipeline;
+mod ui;
 mod window;
 
 pub use cache::ChunkMeshCache;
 pub use camera::{Camera, CameraUniform};
+pub use chunk_manager::{ChunkManager, ChunkRenderData, Frustum};
 pub use driver::{ChunkMeshDriver, ChunkMeshStat};
 pub use mesh::{mesh_chunk, MeshBuffers, MeshHash, MeshVertex};
 pub use pipeline::{ChunkMeshBuffer, RenderContext, VoxelPipeline};
+pub use ui::{DebugHud, UiManager};
 pub use window::{InputState, WindowConfig, WindowManager};
 
 /// Renderer configuration for headless + onscreen paths.
@@ -42,6 +46,7 @@ pub struct Renderer {
     context: Option<RenderContext>,
     pipeline: Option<VoxelPipeline>,
     camera: Camera,
+    ui: Option<UiManager>,
 }
 
 impl Renderer {
@@ -55,20 +60,35 @@ impl Renderer {
             context: None,
             pipeline: None,
             camera,
+            ui: None,
         }
     }
 
     /// Initialize GPU resources with a window (async).
     pub async fn initialize_gpu(&mut self, window: std::sync::Arc<winit::window::Window>) -> anyhow::Result<()> {
-        let context = RenderContext::new(window).await?;
+        let context = RenderContext::new(window.clone()).await?;
         let pipeline = VoxelPipeline::new(&context)?;
+
+        // Initialize UI
+        let ui = UiManager::new(&context.device, context.config.format, &window);
 
         self.camera.set_aspect(context.aspect_ratio());
 
         self.context = Some(context);
         self.pipeline = Some(pipeline);
+        self.ui = Some(ui);
 
         Ok(())
+    }
+
+    /// Get mutable reference to UI manager.
+    pub fn ui_mut(&mut self) -> Option<&mut UiManager> {
+        self.ui.as_mut()
+    }
+
+    /// Get reference to UI manager.
+    pub fn ui(&self) -> Option<&UiManager> {
+        self.ui.as_ref()
     }
 
     /// Get mutable reference to the camera.

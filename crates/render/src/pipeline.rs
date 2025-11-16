@@ -99,11 +99,38 @@ impl RenderContext {
     }
 }
 
+/// Chunk uniform data sent to GPU.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ChunkUniform {
+    /// Chunk offset in world coordinates
+    pub chunk_offset: [f32; 3],
+    /// Padding for alignment
+    pub _padding: f32,
+}
+
+impl ChunkUniform {
+    /// Create chunk uniform from chunk position.
+    pub fn from_chunk_pos(chunk_pos: mdminecraft_world::ChunkPos) -> Self {
+        // Convert chunk coordinates to world coordinates
+        // Each chunk is 16×256×16 voxels
+        let x = (chunk_pos.x * 16) as f32;
+        let z = (chunk_pos.z * 16) as f32;
+
+        Self {
+            chunk_offset: [x, 0.0, z],
+            _padding: 0.0,
+        }
+    }
+}
+
 /// Voxel rendering pipeline.
 pub struct VoxelPipeline {
     render_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    chunk_buffer: wgpu::Buffer,
+    chunk_bind_group_layout: wgpu::BindGroupLayout,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
 }
@@ -146,6 +173,30 @@ impl VoxelPipeline {
             }],
         });
 
+        // Create chunk buffer
+        let chunk_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Chunk Buffer"),
+            size: std::mem::size_of::<ChunkUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create chunk bind group layout
+        let chunk_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Chunk Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         // Load shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Voxel Shader"),
@@ -155,7 +206,7 @@ impl VoxelPipeline {
         // Create render pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Voxel Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout, &chunk_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -246,6 +297,8 @@ impl VoxelPipeline {
             render_pipeline,
             camera_buffer,
             camera_bind_group,
+            chunk_buffer,
+            chunk_bind_group_layout,
             depth_texture,
             depth_view,
         })
@@ -255,6 +308,29 @@ impl VoxelPipeline {
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera) {
         let uniform = CameraUniform::from_camera(camera);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    /// Create a chunk bind group for a specific chunk position.
+    pub fn create_chunk_bind_group(
+        &self,
+        device: &wgpu::Device,
+        chunk_pos: mdminecraft_world::ChunkPos,
+    ) -> wgpu::BindGroup {
+        let chunk_uniform = ChunkUniform::from_chunk_pos(chunk_pos);
+        let chunk_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Chunk Uniform Buffer"),
+            contents: bytemuck::cast_slice(&[chunk_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Chunk Bind Group"),
+            layout: &self.chunk_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: chunk_buffer.as_entire_binding(),
+            }],
+        })
     }
 
     /// Resize depth texture.
