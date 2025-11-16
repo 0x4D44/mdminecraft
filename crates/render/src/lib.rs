@@ -263,9 +263,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.53,
-                            g: 0.81,
-                            b: 0.92,
+                            r: 0.7,  // Sky horizon color (matches shader)
+                            g: 0.85,
+                            b: 0.95,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

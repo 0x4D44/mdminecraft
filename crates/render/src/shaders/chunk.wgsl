@@ -12,7 +12,17 @@ struct ChunkUniforms {
 // Fog parameters
 const FOG_START: f32 = 64.0;
 const FOG_END: f32 = 128.0;
-const FOG_COLOR: vec3<f32> = vec3<f32>(0.53, 0.81, 0.92); // Sky blue
+
+// Sky gradient colors
+const SKY_HORIZON: vec3<f32> = vec3<f32>(0.7, 0.85, 0.95); // Light blue/white at horizon
+const SKY_ZENITH: vec3<f32> = vec3<f32>(0.3, 0.5, 0.85);   // Deeper blue at zenith
+
+// Calculate sky color based on view direction
+fn sky_color(view_dir: vec3<f32>) -> vec3<f32> {
+    // Normalize y component to [0, 1] where 0 = horizontal, 1 = straight up
+    let t = clamp(view_dir.y * 0.5 + 0.5, 0.0, 1.0);
+    return mix(SKY_HORIZON, SKY_ZENITH, t);
+}
 
 @group(0) @binding(0)
 var<uniform> camera: CameraUniforms;
@@ -59,15 +69,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Simple block coloring based on block_id (placeholder until texture atlas)
     var base_color: vec3<f32>;
 
-    // Color palette for different block types
+    // Color palette for different block types (improved colors)
     switch in.block_id {
         case 0u: { base_color = vec3<f32>(0.0, 0.0, 0.0); } // Air (shouldn't be rendered)
-        case 1u: { base_color = vec3<f32>(0.5, 0.5, 0.5); } // Stone
-        case 2u: { base_color = vec3<f32>(0.4, 0.8, 0.3); } // Grass
-        case 3u: { base_color = vec3<f32>(0.6, 0.4, 0.2); } // Dirt
-        case 4u: { base_color = vec3<f32>(0.8, 0.7, 0.5); } // Sand
-        case 5u: { base_color = vec3<f32>(0.3, 0.2, 0.1); } // Wood
-        case 6u: { base_color = vec3<f32>(0.2, 0.6, 0.2); } // Leaves
+        case 1u: { base_color = vec3<f32>(0.55, 0.55, 0.55); } // Stone - slightly lighter gray
+        case 2u: { base_color = vec3<f32>(0.45, 0.75, 0.35); } // Grass - vibrant green
+        case 3u: { base_color = vec3<f32>(0.55, 0.35, 0.20); } // Dirt - warm brown
+        case 4u: { base_color = vec3<f32>(0.85, 0.75, 0.55); } // Sand - warm beige
+        case 5u: { base_color = vec3<f32>(0.45, 0.30, 0.15); } // Wood - rich brown bark
+        case 6u: { base_color = vec3<f32>(0.25, 0.65, 0.25); } // Leaves - forest green
         default: { base_color = vec3<f32>(0.9, 0.2, 0.9); } // Magenta for unknown blocks
     }
 
@@ -85,8 +95,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let distance = length(in.world_pos - camera.camera_pos);
     let fog_factor = clamp((distance - FOG_START) / (FOG_END - FOG_START), 0.0, 1.0);
 
+    // Calculate sky color based on view direction (creates gradient)
+    let view_dir = normalize(in.world_pos - camera.camera_pos);
+    let fog_color = sky_color(view_dir);
+
     // Mix lit color with fog color based on distance
-    let final_color = mix(lit_color, FOG_COLOR, fog_factor);
+    let final_color = mix(lit_color, fog_color, fog_factor);
 
     return vec4<f32>(final_color, 1.0);
 }
