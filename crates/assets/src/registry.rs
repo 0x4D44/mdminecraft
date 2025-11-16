@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use mdminecraft_world::BlockOpacityProvider;
 use serde::Deserialize;
 
 /// Block metadata loaded from packs.
@@ -39,5 +40,11 @@ impl BlockRegistry {
     /// Resolve a block id by its name.
     pub fn id_by_name(&self, name: &str) -> Option<u16> {
         self.name_to_id.get(name).copied()
+    }
+}
+
+impl BlockOpacityProvider for BlockRegistry {
+    fn is_opaque(&self, block_id: u16) -> bool {
+        self.descriptor(block_id).map(|d| d.opaque).unwrap_or(false)
     }
 }

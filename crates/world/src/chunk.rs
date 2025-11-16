@@ -18,7 +18,7 @@ pub type BlockState = u16;
 pub const BLOCK_AIR: BlockId = 0;
 
 /// Chunk-local position (X, Y, Z).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {
     pub x: usize,
     pub y: usize,
@@ -36,7 +36,7 @@ impl LocalPos {
 }
 
 /// Chunk coordinate (X,Z) in chunk space.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
@@ -55,7 +55,7 @@ impl fmt::Display for ChunkPos {
 }
 
 /// Per-voxel data stored in the SoA arrays.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Voxel {
     pub id: BlockId,
     pub state: BlockState,

@@ -12,3 +12,7 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 tracing = { workspace = true }
 mdminecraft-server = { path = "../server" }
+mdminecraft-net = { path = "../net" }
+mdminecraft-core = { path = "../core" }
+tokio = { workspace = true }
+quinn = { workspace = true }
