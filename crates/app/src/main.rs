@@ -1,9 +1,11 @@
 //! Main application entry point with 3D rendering.
 
 mod inventory;
+mod world_save;
 
 use anyhow::Result;
 use inventory::Inventory;
+use world_save::WorldMetadata;
 use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,6 +45,7 @@ struct App {
 
     // World data
     chunks: HashMap<ChunkPos, Chunk>,
+    world_metadata: WorldMetadata,
 
     // Block interaction
     targeted_block: Option<([i32; 3], [i32; 3])>, // (block_pos, normal)
@@ -116,6 +119,12 @@ impl App {
         inventory.add_item(6, 64); // 64 leaves
         inventory.add_item(7, 64); // 64 snow
 
+        // Create world metadata
+        let world_metadata = WorldMetadata {
+            name: "Default World".to_string(),
+            ..Default::default()
+        };
+
         Ok(Self {
             renderer,
             camera,
@@ -124,6 +133,7 @@ impl App {
             registry,
             state: GameState::MainMenu,  // Start in main menu
             chunks,
+            world_metadata,
             targeted_block: None,
             inventory,
             last_mouse_left: false,
@@ -409,6 +419,13 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Save the current world to disk.
+    fn save_world(&self) -> Result<()> {
+        world_save::save_world(&self.world_metadata.name, &self.world_metadata, &self.chunks)?;
+        tracing::info!("world saved successfully");
+        Ok(())
     }
 
     /// Handle hotbar selection input (number keys 1-9).
@@ -742,6 +759,16 @@ impl App {
                     // F3 toggle debug panel
                     if self.input.key_just_pressed(winit::keyboard::KeyCode::F3) {
                         self.ui_state.toggle_debug();
+                    }
+                    // Ctrl+S to save world
+                    if (self.input.key_pressed(winit::keyboard::KeyCode::ControlLeft) ||
+                        self.input.key_pressed(winit::keyboard::KeyCode::ControlRight)) &&
+                        self.input.key_just_pressed(winit::keyboard::KeyCode::KeyS) {
+                        if let Err(e) = self.save_world() {
+                            tracing::error!("failed to save world: {}", e);
+                        } else {
+                            tracing::info!("world saved (Ctrl+S)");
+                        }
                     }
                     // ESC to pause
                     if self.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
@@ -1226,7 +1253,11 @@ fn main() -> Result<()> {
 
                 match event {
                     WindowEvent::CloseRequested => {
-                        tracing::info!("close requested, shutting down");
+                        tracing::info!("close requested, saving world...");
+                        if let Err(e) = app.save_world() {
+                            tracing::error!("failed to save world: {}", e);
+                        }
+                        tracing::info!("shutting down");
                         target.exit();
                     }
                     WindowEvent::Resized(size) => {

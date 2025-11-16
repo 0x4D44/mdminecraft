@@ -116,9 +116,12 @@ impl Default for DirtyFlags {
 }
 
 /// Chunk storing voxel data in SoA form plus dirty flags.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Chunk {
     position: ChunkPos,
     voxels: Vec<Voxel>,
+    #[serde(skip)]
+    #[serde(default = "DirtyFlags::all")]
     dirty: DirtyFlags,
 }
 
