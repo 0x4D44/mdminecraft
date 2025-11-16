@@ -1,0 +1,23 @@
+[package]
+name = "mdminecraft-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "mdminecraft"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+env_logger = { workspace = true }
+tracing = { workspace = true }
+winit = { workspace = true }
+glam = { workspace = true }
+wgpu = { workspace = true }
+mdminecraft-camera = { path = "../camera" }
+mdminecraft-input = { path = "../input" }
+mdminecraft-render = { path = "../render" }
+mdminecraft-world = { path = "../world" }
+mdminecraft-assets = { path = "../assets" }
