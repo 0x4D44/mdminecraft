@@ -307,12 +307,38 @@ fn should_spawn_tree(world_x: i32, world_z: i32) -> bool {
     (hash % 100) < 3 // ~3% tree spawn rate
 }
 
-/// Place a simple tree at the given world coordinates in the chunk.
-fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize) {
+/// Determine tree type based on position hash
+fn tree_type(world_x: i32, world_z: i32) -> TreeType {
+    let hash = simple_hash(world_x, world_z);
+    if (hash % 100) < 40 {
+        TreeType::Pine  // 40% pine
+    } else {
+        TreeType::Oak   // 60% oak
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TreeType {
+    Oak,
+    Pine,
+}
+
+/// Place a tree at the given world coordinates in the chunk.
+fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize, world_x: i32, world_z: i32) {
+    let tree_type = tree_type(world_x, world_z);
+    match tree_type {
+        TreeType::Oak => place_oak_tree(chunk, x, y, z, world_x, world_z),
+        TreeType::Pine => place_pine_tree(chunk, x, y, z, world_x, world_z),
+    }
+}
+
+/// Place an oak tree (broad, round canopy)
+fn place_oak_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize, world_x: i32, world_z: i32) {
     use mdminecraft_world::Voxel;
 
-    // Tree dimensions
-    let trunk_height = 4;
+    // Vary trunk height based on position
+    let hash = simple_hash(world_x, world_z);
+    let trunk_height = 4 + (hash % 3) as usize; // 4-6 blocks tall
     let max_leaf_radius = 2;
 
     // Place trunk (wood blocks)
@@ -332,7 +358,7 @@ fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize) {
         }
     }
 
-    // Place leaves (simple sphere-ish shape)
+    // Place leaves (sphere-ish shape)
     let leaf_start = y + trunk_height - 1;
     for dy in 0..=3 {
         let y_pos = leaf_start + dy;
@@ -351,6 +377,75 @@ fn place_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize) {
                 if nx >= 0 && nx < 16 && nz >= 0 && nz < 16 {
                     // Skip center column where trunk is (except top)
                     if !(dx == 0 && dz == 0 && dy < 3) {
+                        chunk.set_voxel(
+                            nx as usize,
+                            y_pos,
+                            nz as usize,
+                            Voxel {
+                                id: 6, // leaves
+                                state: 0,
+                                light_sky: 15,
+                                light_block: 0,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Place a pine tree (tall, narrow, conical shape)
+fn place_pine_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize, world_x: i32, world_z: i32) {
+    use mdminecraft_world::Voxel;
+
+    // Pine trees are taller than oak
+    let hash = simple_hash(world_x, world_z);
+    let trunk_height = 6 + (hash % 4) as usize; // 6-9 blocks tall
+
+    // Place trunk (wood blocks)
+    for dy in 0..trunk_height {
+        if y + dy < 256 {
+            chunk.set_voxel(
+                x,
+                y + dy,
+                z,
+                Voxel {
+                    id: 5, // wood
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                },
+            );
+        }
+    }
+
+    // Place conical leaves (narrow, triangular profile)
+    let leaf_layers = 5;
+    for dy in 0..leaf_layers {
+        let y_pos = y + trunk_height - leaf_layers + dy;
+        if y_pos >= 256 {
+            break;
+        }
+
+        // Radius decreases as we go up (conical shape)
+        let radius = if dy == 0 {
+            2  // Bottom layer widest
+        } else if dy < leaf_layers - 1 {
+            1  // Middle layers
+        } else {
+            0  // Top is just center
+        };
+
+        for dx in -(radius as i32)..=(radius as i32) {
+            for dz in -(radius as i32)..=(radius as i32) {
+                let nx = x as i32 + dx;
+                let nz = z as i32 + dz;
+
+                // Check if within chunk bounds
+                if nx >= 0 && nx < 16 && nz >= 0 && nz < 16 {
+                    // Pine trees have leaves closer to trunk
+                    if dx.abs() + dz.abs() <= radius {
                         chunk.set_voxel(
                             nx as usize,
                             y_pos,
@@ -415,7 +510,7 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                         // Place tree on top of terrain
                         if height < 250 {
                             // Ensure we have room for the tree
-                            place_tree(&mut chunk, x, height, z);
+                            place_tree(&mut chunk, x, height, z, world_x, world_z);
                         }
                     }
                 }
