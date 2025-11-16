@@ -8,7 +8,11 @@ use glam::Mat4;
 struct CameraUniforms {
     view_proj: [[f32; 4]; 4],
     camera_pos: [f32; 3],
-    _padding: f32,
+    _padding1: f32,
+    sky_horizon: [f32; 3],  // Sky color at horizon
+    _padding2: f32,
+    sky_zenith: [f32; 3],   // Sky color at zenith
+    _padding3: f32,
 }
 
 unsafe impl bytemuck::Pod for CameraUniforms {}
@@ -49,7 +53,11 @@ impl ChunkPipeline {
             contents: bytemuck::cast_slice(&[CameraUniforms {
                 view_proj: Mat4::IDENTITY.to_cols_array_2d(),
                 camera_pos: [0.0; 3],
-                _padding: 0.0,
+                _padding1: 0.0,
+                sky_horizon: [0.70, 0.85, 0.95],  // Default: Forest biome
+                _padding2: 0.0,
+                sky_zenith: [0.30, 0.50, 0.85],   // Default: Forest biome
+                _padding3: 0.0,
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -186,11 +194,15 @@ impl ChunkPipeline {
     }
 
     /// Update the camera uniform buffer.
-    pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera) {
+    pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera, sky_horizon: [f32; 3], sky_zenith: [f32; 3]) {
         let uniforms = CameraUniforms {
             view_proj: camera.view_projection_matrix().to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
-            _padding: 0.0,
+            _padding1: 0.0,
+            sky_horizon,
+            _padding2: 0.0,
+            sky_zenith,
+            _padding3: 0.0,
         };
 
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniforms]));
