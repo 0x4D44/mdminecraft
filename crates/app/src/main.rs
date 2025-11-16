@@ -14,8 +14,10 @@ use mdminecraft_camera::Camera;
 use mdminecraft_input::InputState;
 use mdminecraft_ui::UiState;
 use mdminecraft_render::{mesh_chunk, Renderer, RendererConfig};
-use mdminecraft_world::{Chunk, ChunkPos};
+use mdminecraft_world::{Chunk, ChunkPos, Voxel, BLOCK_AIR};
 use mdminecraft_assets::BlockRegistry;
+use mdminecraft_physics::raycast_voxel;
+use std::collections::HashMap;
 
 /// Game state machine
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,10 +33,16 @@ struct App {
     camera: Camera,
     input: InputState,
     last_frame: Instant,
-    _registry: BlockRegistry,
+    registry: BlockRegistry,
 
     // Game state
     state: GameState,
+
+    // World data
+    chunks: HashMap<ChunkPos, Chunk>,
+
+    // Block interaction
+    targeted_block: Option<([i32; 3], [i32; 3])>, // (block_pos, normal)
 
     // UI state
     ui_state: UiState,
@@ -64,7 +72,7 @@ impl App {
 
         // Create a simple test world with a few chunks
         let registry = create_test_registry();
-        create_test_world(&mut renderer, &registry);
+        let chunks = create_test_world(&mut renderer, &registry);
 
         // Position camera at ground level for first-person view
         // Terrain height is ~64-72, so place camera at y=72 (on top of terrain)
@@ -96,8 +104,10 @@ impl App {
             camera,
             input: InputState::new(),
             last_frame: Instant::now(),
-            _registry: registry,
+            registry,
             state: GameState::MainMenu,  // Start in main menu
+            chunks,
+            targeted_block: None,
             ui_state: UiState::new(),
             egui_ctx,
             egui_state,
@@ -181,6 +191,90 @@ impl App {
         }
         if self.input.key_pressed(winit::keyboard::KeyCode::KeyE) {
             self.camera.move_w_forward(move_speed);
+        }
+
+        // Perform raycast to find targeted block
+        self.perform_raycast();
+
+        // Handle block breaking (left mouse button)
+        if self.input.mouse_button_pressed(winit::event::MouseButton::Left) {
+            self.break_block();
+        }
+    }
+
+    /// Query if a block at world coordinates (x, y, z) is solid.
+    /// Uses camera's current W slice for the query.
+    fn is_block_solid(&self, x: i32, y: i32, z: i32) -> bool {
+        // Convert world coordinates to chunk position and local position
+        let chunk_x = x.div_euclid(16);
+        let chunk_z = z.div_euclid(16);
+        let chunk_w = self.camera.w_slice();
+
+        let local_x = x.rem_euclid(16) as usize;
+        let local_y = y as usize;
+        let local_z = z.rem_euclid(16) as usize;
+
+        // Check bounds
+        if local_y >= 256 {
+            return false;
+        }
+
+        // Get the chunk
+        let chunk_pos = ChunkPos::new_4d(chunk_x, chunk_z, chunk_w);
+        if let Some(chunk) = self.chunks.get(&chunk_pos) {
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+            voxel.is_opaque()
+        } else {
+            false
+        }
+    }
+
+    /// Perform raycast from camera to find targeted block.
+    fn perform_raycast(&mut self) {
+        let origin = self.camera.position;
+        let direction = self.camera.forward();
+        let max_distance = 10.0; // Reach distance
+
+        self.targeted_block = raycast_voxel(
+            origin,
+            direction,
+            max_distance,
+            |x, y, z| self.is_block_solid(x, y, z),
+        ).map(|hit| (hit.block_pos, hit.normal));
+    }
+
+    /// Break the currently targeted block.
+    fn break_block(&mut self) {
+        if let Some((block_pos, _normal)) = self.targeted_block {
+            let [x, y, z] = block_pos;
+
+            // Convert to chunk position and local position
+            let chunk_x = x.div_euclid(16);
+            let chunk_z = z.div_euclid(16);
+            let chunk_w = self.camera.w_slice();
+
+            let local_x = x.rem_euclid(16) as usize;
+            let local_y = y as usize;
+            let local_z = z.rem_euclid(16) as usize;
+
+            let chunk_pos = ChunkPos::new_4d(chunk_x, chunk_z, chunk_w);
+
+            // Modify the chunk
+            if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                // Set block to air
+                chunk.set_voxel(local_x, local_y, local_z, Voxel {
+                    id: BLOCK_AIR,
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                });
+
+                // Regenerate mesh
+                let mesh = mesh_chunk(chunk, &self.registry);
+                self.renderer.upload_chunk_mesh(chunk_pos, &mesh);
+
+                tracing::info!("broke block at ({}, {}, {}) in chunk {}", x, y, z, chunk_pos);
+            }
         }
     }
 
@@ -763,8 +857,10 @@ fn place_pine_tree(chunk: &mut Chunk, x: usize, y: usize, z: usize, world_x: i32
     }
 }
 
-fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
+fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) -> HashMap<ChunkPos, Chunk> {
     use mdminecraft_world::Voxel;
+
+    let mut chunks = HashMap::new();
 
     // Create a 7x7 grid of chunks across multiple W slices
     // W slices from -2 to +2 (5 total slices)
@@ -824,11 +920,15 @@ fn create_test_world(renderer: &mut Renderer, registry: &BlockRegistry) {
                 // Generate and upload mesh
                 let mesh = mesh_chunk(&chunk, registry);
                 renderer.upload_chunk_mesh(pos, &mesh);
+
+                // Store chunk in HashMap
+                chunks.insert(pos, chunk);
             }
         }
     }
 
     tracing::info!("created test world with 245 chunks (7×7 grid × 5 W slices) + trees");
+    chunks
 }
 
 fn main() -> Result<()> {
