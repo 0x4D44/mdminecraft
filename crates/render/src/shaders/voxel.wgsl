@@ -18,11 +18,19 @@ struct ChunkUniform {
 @group(1) @binding(0)
 var<uniform> chunk: ChunkUniform;
 
+// Texture atlas binding
+@group(2) @binding(0)
+var atlas_texture: texture_2d<f32>;
+
+@group(2) @binding(1)
+var atlas_sampler: sampler;
+
 // Vertex input from mesh generation
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) packed_data: u32,  // block_id (u16) and light (u8) packed
+    @location(2) uv: vec2<f32>,
+    @location(3) packed_data: u32,  // block_id (u16) and light (u8) packed
 }
 
 // Vertex output / Fragment input
@@ -30,8 +38,9 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) block_id: u32,
-    @location(3) light: f32,
+    @location(2) uv: vec2<f32>,
+    @location(3) block_id: u32,
+    @location(4) light: f32,
 }
 
 // Vertex shader
@@ -46,6 +55,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.clip_position = camera.view_proj * vec4<f32>(world_pos, 1.0);
     out.world_pos = world_pos;
     out.normal = in.normal;
+    out.uv = in.uv;
 
     // Unpack block_id and light from packed u32
     // Layout: [block_id: u16][light: u8][padding: u8]
@@ -80,8 +90,8 @@ fn get_block_color(block_id: u32) -> vec3<f32> {
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Get base color from block ID
-    var base_color = get_block_color(in.block_id);
+    // Sample texture atlas at UV coordinates
+    var base_color = textureSample(atlas_texture, atlas_sampler, in.uv).rgb;
 
     // Simple diffuse lighting using normal
     let sun_dir = normalize(vec3<f32>(0.5, 1.0, 0.3));

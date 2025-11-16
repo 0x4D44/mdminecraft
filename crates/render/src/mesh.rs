@@ -29,6 +29,8 @@ pub struct MeshVertex {
     pub position: [f32; 3],
     /// Face normal (unit length).
     pub normal: [f32; 3],
+    /// Texture coordinates for atlas sampling.
+    pub uv: [f32; 2],
     /// Block identifier baked into the face for material lookup.
     pub block_id: u16,
     /// Combined light level (max of skylight and blocklight), range 0-15.
@@ -71,10 +73,27 @@ impl MeshBuilder {
         light: u8,
     ) {
         let base = self.vertices.len() as u32;
-        for &corner in &corners {
+
+        // Generate UV coordinates for the quad
+        // For now, use a simple mapping based on block_id
+        // This maps to a 16×16 texture atlas
+        let atlas_x = (block_id % 16) as f32;
+        let atlas_y = (block_id / 16) as f32;
+        let atlas_size = 16.0;
+
+        // UV coordinates for the four corners of the quad
+        let uvs = [
+            [atlas_x / atlas_size, atlas_y / atlas_size],                                 // Bottom-left
+            [(atlas_x + 1.0) / atlas_size, atlas_y / atlas_size],                         // Bottom-right
+            [(atlas_x + 1.0) / atlas_size, (atlas_y + 1.0) / atlas_size],                 // Top-right
+            [atlas_x / atlas_size, (atlas_y + 1.0) / atlas_size],                         // Top-left
+        ];
+
+        for (i, &corner) in corners.iter().enumerate() {
             self.vertices.push(MeshVertex {
                 position: corner,
                 normal,
+                uv: uvs[i],
                 block_id,
                 light,
                 _padding: 0,

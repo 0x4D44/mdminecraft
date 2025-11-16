@@ -124,6 +124,38 @@ impl ChunkUniform {
     }
 }
 
+/// Create a procedural debug texture atlas (16×16 grid).
+///
+/// Each cell in the grid gets a unique color based on its position.
+fn create_debug_texture_atlas() -> Vec<u8> {
+    const ATLAS_SIZE: u32 = 256; // 16×16 grid of 16×16 textures
+    const TILE_SIZE: u32 = 16;
+    const GRID_SIZE: u32 = 16;
+
+    let mut data = vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize];
+
+    for y in 0..ATLAS_SIZE {
+        for x in 0..ATLAS_SIZE {
+            let tile_x = x / TILE_SIZE;
+            let tile_y = y / TILE_SIZE;
+            let tile_id = tile_y * GRID_SIZE + tile_x;
+
+            // Generate color based on tile_id
+            let r = ((tile_id * 37) % 256) as u8;
+            let g = ((tile_id * 73) % 256) as u8;
+            let b = ((tile_id * 109) % 256) as u8;
+
+            let idx = ((y * ATLAS_SIZE + x) * 4) as usize;
+            data[idx] = r;
+            data[idx + 1] = g;
+            data[idx + 2] = b;
+            data[idx + 3] = 255; // Alpha
+        }
+    }
+
+    data
+}
+
 /// Voxel rendering pipeline.
 pub struct VoxelPipeline {
     render_pipeline: wgpu::RenderPipeline,
@@ -131,6 +163,7 @@ pub struct VoxelPipeline {
     camera_bind_group: wgpu::BindGroup,
     chunk_buffer: wgpu::Buffer,
     chunk_bind_group_layout: wgpu::BindGroupLayout,
+    texture_bind_group: wgpu::BindGroup,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
 }
@@ -197,6 +230,95 @@ impl VoxelPipeline {
                 }],
             });
 
+        // Create texture atlas
+        let atlas_data = create_debug_texture_atlas();
+        let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Texture Atlas"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 256,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        ctx.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &atlas_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &atlas_data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(256 * 4),
+                rows_per_image: Some(256),
+            },
+            wgpu::Extent3d {
+                width: 256,
+                height: 256,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Texture Atlas Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest, // Pixel-perfect rendering
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Create texture bind group layout
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Texture Bind Group"),
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+            ],
+        });
+
         // Load shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Voxel Shader"),
@@ -206,7 +328,7 @@ impl VoxelPipeline {
         // Create render pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Voxel Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout, &chunk_bind_group_layout],
+            bind_group_layouts: &[&camera_bind_group_layout, &chunk_bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -251,10 +373,16 @@ impl VoxelPipeline {
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x3,
                         },
-                        // block_id (u16) and light (u8) packed as u32
+                        // uv
                         wgpu::VertexAttribute {
                             offset: 24,
                             shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        // block_id (u16) and light (u8) packed as u32
+                        wgpu::VertexAttribute {
+                            offset: 32,
+                            shader_location: 3,
                             format: wgpu::VertexFormat::Uint32,
                         },
                     ],
@@ -299,9 +427,15 @@ impl VoxelPipeline {
             camera_bind_group,
             chunk_buffer,
             chunk_bind_group_layout,
+            texture_bind_group,
             depth_texture,
             depth_view,
         })
+    }
+
+    /// Get the texture bind group for rendering.
+    pub fn texture_bind_group(&self) -> &wgpu::BindGroup {
+        &self.texture_bind_group
     }
 
     /// Update camera uniform buffer.
