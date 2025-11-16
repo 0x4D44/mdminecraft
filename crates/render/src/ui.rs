@@ -128,6 +128,8 @@ pub struct DebugHud {
     pub camera_rot: [f32; 2],
     /// Number of chunks loaded
     pub chunks_loaded: usize,
+    /// Number of chunks visible (after frustum culling)
+    pub chunks_visible: usize,
     /// Total vertices
     pub total_vertices: usize,
     /// Total triangles
@@ -145,6 +147,7 @@ impl DebugHud {
             camera_pos: [0.0; 3],
             camera_rot: [0.0; 2],
             chunks_loaded: 0,
+            chunks_visible: 0,
             total_vertices: 0,
             total_triangles: 0,
         }
@@ -209,6 +212,14 @@ impl DebugHud {
                 ui.separator();
 
                 ui.label(format!("Chunks Loaded: {}", self.chunks_loaded));
+                ui.label(format!("Chunks Visible: {} ({:.1}%)",
+                    self.chunks_visible,
+                    if self.chunks_loaded > 0 {
+                        (self.chunks_visible as f32 / self.chunks_loaded as f32) * 100.0
+                    } else {
+                        0.0
+                    }
+                ));
                 ui.label(format!("Total Vertices: {}", self.total_vertices));
                 ui.label(format!("Total Triangles: {}", self.total_triangles));
 

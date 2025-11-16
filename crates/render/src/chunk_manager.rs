@@ -102,22 +102,112 @@ impl Default for ChunkManager {
     }
 }
 
-/// Frustum culling helper.
+/// Frustum culling helper using 6 planes extracted from view-projection matrix.
 pub struct Frustum {
-    // Placeholder for now - will implement proper frustum planes later
-    _dummy: (),
+    /// Six frustum planes: [left, right, bottom, top, near, far]
+    /// Each plane is a Vec4 where xyz is the normal and w is the distance
+    planes: [glam::Vec4; 6],
 }
 
 impl Frustum {
     /// Create frustum from view-projection matrix.
-    pub fn from_matrix(_vp_matrix: &glam::Mat4) -> Self {
-        // TODO: Extract frustum planes from matrix
-        Self { _dummy: () }
+    ///
+    /// Extracts the 6 frustum planes using the Gribb-Hartmann method.
+    pub fn from_matrix(vp_matrix: &glam::Mat4) -> Self {
+        let m = vp_matrix.to_cols_array();
+
+        // Extract planes from matrix rows
+        // Each plane equation is: Ax + By + Cz + D = 0
+        // Represented as Vec4(A, B, C, D) where (A,B,C) is normal
+
+        let left = glam::Vec4::new(
+            m[3] + m[0],
+            m[7] + m[4],
+            m[11] + m[8],
+            m[15] + m[12],
+        ).normalize();
+
+        let right = glam::Vec4::new(
+            m[3] - m[0],
+            m[7] - m[4],
+            m[11] - m[8],
+            m[15] - m[12],
+        ).normalize();
+
+        let bottom = glam::Vec4::new(
+            m[3] + m[1],
+            m[7] + m[5],
+            m[11] + m[9],
+            m[15] + m[13],
+        ).normalize();
+
+        let top = glam::Vec4::new(
+            m[3] - m[1],
+            m[7] - m[5],
+            m[11] - m[9],
+            m[15] - m[13],
+        ).normalize();
+
+        let near = glam::Vec4::new(
+            m[3] + m[2],
+            m[7] + m[6],
+            m[11] + m[10],
+            m[15] + m[14],
+        ).normalize();
+
+        let far = glam::Vec4::new(
+            m[3] - m[2],
+            m[7] - m[6],
+            m[11] - m[10],
+            m[15] - m[14],
+        ).normalize();
+
+        Self {
+            planes: [left, right, bottom, top, near, far],
+        }
     }
 
-    /// Check if a chunk is visible (placeholder - always returns true for now).
-    pub fn is_chunk_visible(&self, _chunk_pos: ChunkPos) -> bool {
-        // TODO: Implement proper AABB vs frustum test
+    /// Check if a chunk is visible using AABB vs frustum test.
+    ///
+    /// Returns true if the chunk's bounding box intersects or is inside the frustum.
+    pub fn is_chunk_visible(&self, chunk_pos: ChunkPos) -> bool {
+        // Define chunk AABB (axis-aligned bounding box)
+        // Chunks are 16x256x16 blocks in world coordinates
+        const CHUNK_SIZE_XZ: f32 = 16.0;
+        const CHUNK_SIZE_Y: f32 = 256.0;
+
+        let min = glam::Vec3::new(
+            (chunk_pos.x * 16) as f32,
+            0.0,
+            (chunk_pos.z * 16) as f32,
+        );
+
+        let max = glam::Vec3::new(
+            min.x + CHUNK_SIZE_XZ,
+            min.y + CHUNK_SIZE_Y,
+            min.z + CHUNK_SIZE_XZ,
+        );
+
+        // Test AABB against each frustum plane
+        for plane in &self.planes {
+            let normal = plane.truncate();
+            let d = plane.w;
+
+            // Find the positive vertex (p-vertex) - the vertex of the AABB
+            // most aligned with the plane normal
+            let p = glam::Vec3::new(
+                if normal.x >= 0.0 { max.x } else { min.x },
+                if normal.y >= 0.0 { max.y } else { min.y },
+                if normal.z >= 0.0 { max.z } else { min.z },
+            );
+
+            // If the p-vertex is outside this plane, the entire AABB is outside
+            if normal.dot(p) + d < 0.0 {
+                return false;
+            }
+        }
+
+        // AABB intersects or is inside frustum
         true
     }
 }
