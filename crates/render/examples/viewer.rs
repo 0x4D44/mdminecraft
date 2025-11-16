@@ -102,7 +102,7 @@ fn main() -> Result<()> {
     window_manager.run(move |event, window| {
         // Let UI handle events first
         if let Event::WindowEvent { ref event, .. } = event {
-            if let Some(ui) = renderer.ui_mut() {
+            if let Some(mut ui) = renderer.ui_mut() {
                 ui.handle_event(window, event);
             }
             input.handle_event(event);
@@ -190,7 +190,25 @@ fn main() -> Result<()> {
                                 }
                             }
 
-                            // TODO: Render UI overlay (requires API restructuring to avoid borrow conflicts)
+                            // Render UI overlay
+                            if let Some(mut ui) = renderer.ui_mut() {
+                                let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                                    size_in_pixels: [1280, 720],
+                                    pixels_per_point: 1.0,
+                                };
+
+                                ui.render(
+                                    resources.device,
+                                    resources.queue,
+                                    &mut encoder,
+                                    &frame.view,
+                                    screen_descriptor,
+                                    window,
+                                    |ctx| {
+                                        debug_hud.render(ctx);
+                                    },
+                                );
+                            }
 
                             resources.queue.submit(std::iter::once(encoder.finish()));
                             frame.present();
