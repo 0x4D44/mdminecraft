@@ -186,6 +186,11 @@ fn main() -> Result<()> {
                                     resources.pipeline.camera_bind_group(),
                                     &[],
                                 );
+                                render_pass.set_bind_group(
+                                    2,
+                                    resources.pipeline.texture_bind_group(),
+                                    &[],
+                                );
 
                                 // Render only visible chunks
                                 for chunk_data in chunk_manager.chunks() {

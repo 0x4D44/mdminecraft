@@ -281,10 +281,10 @@ cargo run --example viewer --package mdminecraft-render
 
 ## Current Limitations
 
-1. **Single Chunk Rendering:** Demo only renders one chunk
-2. **No Texture Atlas:** Uses procedural colors
-3. **No Entity Rendering:** Only voxel terrain
-4. **No UI Overlay:** egui integration pending
+1. **No Texture Atlas:** Uses procedural colors
+2. **No Entity Rendering:** Only voxel terrain
+3. **Static Chunk Grid:** No dynamic loading/unloading
+4. **Basic Lighting:** No shadows or ambient occlusion
 
 ## Roadmap
 
@@ -295,23 +295,29 @@ cargo run --example viewer --package mdminecraft-render
 - [x] Basic shaders
 - [x] Single chunk rendering
 
-### Phase 2: Multi-Chunk (Next)
-- [ ] Frustum culling
-- [ ] Chunk streaming
+### Phase 2: Multi-Chunk ✅
+- [x] Multi-chunk rendering (5×5 grid)
+- [x] Chunk manager system
+- [x] Per-chunk uniforms
+- [x] Frustum culling
+- [ ] Dynamic chunk streaming
 - [ ] View distance configuration
-- [ ] Mesh cache integration
+- [ ] Mesh cache GPU integration
 
-### Phase 3: Visuals
-- [ ] Texture atlas system
-- [ ] Block texture mapping
-- [ ] Improved lighting (shadows, AO)
-- [ ] Skybox rendering
-
-### Phase 4: UI & Polish
-- [ ] egui integration
-- [ ] Debug HUD (FPS, position, chunk stats)
+### Phase 3: UI & Debug ✅
+- [x] egui integration (RefCell API)
+- [x] Debug HUD (FPS, position, chunk stats)
+- [x] Performance metrics display
+- [x] Frustum culling visualization
 - [ ] Settings menu
 - [ ] Performance profiling overlay
+
+### Phase 4: Visuals (Current)
+- [ ] Texture atlas system
+- [ ] Block texture mapping
+- [ ] UV coordinate generation
+- [ ] Improved lighting (shadows, AO)
+- [ ] Skybox rendering
 
 ### Phase 5: Advanced Features
 - [ ] Entity rendering (mobs, items)
