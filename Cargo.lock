@@ -1892,6 +1892,7 @@ name = "mdminecraft-physics"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "glam",
  "mdminecraft-core",
 ]
 

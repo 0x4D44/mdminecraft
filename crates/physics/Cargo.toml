@@ -10,4 +10,5 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+glam = { workspace = true }
 mdminecraft-core = { path = "../core" }
