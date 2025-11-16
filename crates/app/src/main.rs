@@ -1,6 +1,7 @@
 //! Main application entry point with 3D rendering.
 
 use anyhow::Result;
+use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::{
@@ -16,6 +17,14 @@ use mdminecraft_render::{mesh_chunk, Renderer, RendererConfig};
 use mdminecraft_world::{Chunk, ChunkPos};
 use mdminecraft_assets::BlockRegistry;
 
+/// Game state machine
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameState {
+    MainMenu,
+    InGame,
+    Paused,
+}
+
 /// Main application state.
 struct App {
     renderer: Renderer,
@@ -23,6 +32,9 @@ struct App {
     input: InputState,
     last_frame: Instant,
     _registry: BlockRegistry,
+
+    // Game state
+    state: GameState,
 
     // UI state
     ui_state: UiState,
@@ -85,6 +97,7 @@ impl App {
             input: InputState::new(),
             last_frame: Instant::now(),
             _registry: registry,
+            state: GameState::MainMenu,  // Start in main menu
             ui_state: UiState::new(),
             egui_ctx,
             egui_state,
@@ -99,6 +112,11 @@ impl App {
         let now = Instant::now();
         let dt = (now - self.last_frame).as_secs_f32();
         self.last_frame = now;
+
+        // Only update game logic when in-game
+        if self.state != GameState::InGame {
+            return;
+        }
 
         // Base movement speed (blocks per second)
         let base_speed = 20.0;
@@ -157,28 +175,174 @@ impl App {
         }
     }
 
-    fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
-        // Get render statistics
-        let render_stats = self.renderer.get_render_stats();
+    /// Track previous state to detect transitions
+    fn check_state_transition(&mut self, window: &winit::window::Window, prev_state: GameState) {
+        if prev_state != self.state {
+            match self.state {
+                GameState::InGame => {
+                    // Entering game - lock cursor
+                    window.set_cursor_visible(false);
+                    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+                    self.input.cursor_locked = true;
+                }
+                GameState::MainMenu | GameState::Paused => {
+                    // Entering menu - unlock cursor
+                    window.set_cursor_visible(true);
+                    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+                    self.input.cursor_locked = false;
+                }
+            }
+        }
+    }
 
-        // Run egui
+    /// Render main menu UI (returns new state if changed)
+    fn render_main_menu(ctx: &egui::Context) -> Option<GameState> {
+        let mut new_state = None;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200)))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+
+                    // Title
+                    ui.heading(egui::RichText::new("mdminecraft").size(64.0).color(egui::Color32::WHITE));
+                    ui.label(egui::RichText::new("4D Voxel Engine").size(24.0).color(egui::Color32::LIGHT_GRAY));
+
+                    ui.add_space(80.0);
+
+                    // Menu buttons
+                    if ui.add_sized([200.0, 50.0], egui::Button::new(
+                        egui::RichText::new("New Game").size(20.0)
+                    )).clicked() {
+                        new_state = Some(GameState::InGame);
+                    }
+
+                    ui.add_space(10.0);
+
+                    if ui.add_sized([200.0, 50.0], egui::Button::new(
+                        egui::RichText::new("Settings").size(20.0)
+                    )).clicked() {
+                        // TODO: Settings menu
+                    }
+
+                    ui.add_space(10.0);
+
+                    if ui.add_sized([200.0, 50.0], egui::Button::new(
+                        egui::RichText::new("Quit").size(20.0)
+                    )).clicked() {
+                        std::process::exit(0);
+                    }
+
+                    ui.add_space(40.0);
+
+                    // Footer info
+                    ui.label(egui::RichText::new("Press ESC in-game to pause").size(14.0).color(egui::Color32::GRAY));
+                });
+            });
+        new_state
+    }
+
+    /// Render pause menu UI (returns new state if changed)
+    fn render_pause_menu(ctx: &egui::Context) -> Option<GameState> {
+        let mut new_state = None;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 150)))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(150.0);
+
+                    // Title
+                    ui.heading(egui::RichText::new("Paused").size(48.0).color(egui::Color32::WHITE));
+
+                    ui.add_space(60.0);
+
+                    // Menu buttons
+                    if ui.add_sized([200.0, 50.0], egui::Button::new(
+                        egui::RichText::new("Resume").size(20.0)
+                    )).clicked() {
+                        new_state = Some(GameState::InGame);
+                    }
+
+                    ui.add_space(10.0);
+
+                    if ui.add_sized([200.0, 50.0], egui::Button::new(
+                        egui::RichText::new("Settings").size(20.0)
+                    )).clicked() {
+                        // TODO: Settings menu
+                    }
+
+                    ui.add_space(10.0);
+
+                    if ui.add_sized([200.0, 50.0], egui::Button::new(
+                        egui::RichText::new("Main Menu").size(20.0)
+                    )).clicked() {
+                        new_state = Some(GameState::MainMenu);
+                    }
+                });
+            });
+        new_state
+    }
+
+    fn render(&mut self, window: &winit::window::Window) -> Result<(), wgpu::SurfaceError> {
+        // Collect data needed for UI rendering
+        let render_stats = self.renderer.get_render_stats();
+        let camera_pos = self.camera.position.to_array();
+        let camera_yaw = self.camera.yaw;
+        let camera_pitch = self.camera.pitch;
+        let current_speed = self.current_speed;
+
+        // Use Cell to capture state changes from within egui closure
+        let requested_state = Cell::new(None);
+
+        // Run egui based on game state
         let raw_input = self.egui_state.take_egui_input(window);
+        let ui_state_ref = &mut self.ui_state;  // Borrow ui_state separately
+        let current_state = self.state;
+
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            self.ui_state.render(
-                ctx,
-                self.camera.position.to_array(),
-                self.camera.yaw,
-                self.camera.pitch,
-                self.current_speed,
-                render_stats,
-            );
+            match current_state {
+                GameState::MainMenu => {
+                    if let Some(new_state) = Self::render_main_menu(ctx) {
+                        requested_state.set(Some(new_state));
+                    }
+                }
+                GameState::InGame => {
+                    ui_state_ref.render(
+                        ctx,
+                        camera_pos,
+                        camera_yaw,
+                        camera_pitch,
+                        current_speed,
+                        render_stats,
+                    );
+                }
+                GameState::Paused => {
+                    if let Some(new_state) = Self::render_pause_menu(ctx) {
+                        requested_state.set(Some(new_state));
+                    }
+                }
+            }
         });
+
+        // Apply state change if menu requested it
+        if let Some(new_state) = requested_state.get() {
+            self.state = new_state;
+        }
 
         // Handle egui output
         self.egui_state.handle_platform_output(window, full_output.platform_output.clone());
 
-        // Render 3D scene + UI
-        self.renderer.render_with_ui(&self.camera, Some((self.egui_ctx.clone(), full_output)))
+        // Render 3D scene + UI (or just UI for menu)
+        match self.state {
+            GameState::MainMenu | GameState::Paused => {
+                // Render just the UI for menus
+                self.renderer.render_with_ui(&self.camera, Some((self.egui_ctx.clone(), full_output)))
+            }
+            GameState::InGame => {
+                // Render full 3D scene + UI
+                self.renderer.render_with_ui(&self.camera, Some((self.egui_ctx.clone(), full_output)))
+            }
+        }
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -195,13 +359,36 @@ impl App {
             return true;
         }
 
-        // Handle our input
-        self.input.handle_event(event);
+        // Handle our input (only when in-game)
+        if self.state == GameState::InGame {
+            self.input.handle_event(event);
+        }
 
-        // Check for F3 toggle
+        // Handle keyboard events based on state
         if let WindowEvent::KeyboardInput { .. } = event {
-            if self.input.key_just_pressed(winit::keyboard::KeyCode::F3) {
-                self.ui_state.toggle_debug();
+            match self.state {
+                GameState::InGame => {
+                    // F3 toggle debug panel
+                    if self.input.key_just_pressed(winit::keyboard::KeyCode::F3) {
+                        self.ui_state.toggle_debug();
+                    }
+                    // ESC to pause
+                    if self.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
+                        self.state = GameState::Paused;
+                    }
+                }
+                GameState::Paused => {
+                    // ESC to resume
+                    if self.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
+                        self.state = GameState::InGame;
+                    }
+                }
+                GameState::MainMenu => {
+                    // ESC to quit from main menu
+                    if self.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
+                        std::process::exit(0);
+                    }
+                }
             }
         }
 
@@ -209,7 +396,10 @@ impl App {
     }
 
     fn handle_device_event(&mut self, event: &winit::event::DeviceEvent) {
-        self.input.handle_device_event(event);
+        // Only handle device events (mouse movement) when in-game
+        if self.state == GameState::InGame {
+            self.input.handle_device_event(event);
+        }
     }
 
     /// Update FPS counter and return current FPS.
@@ -540,13 +730,13 @@ fn main() -> Result<()> {
             .build(&event_loop)?,
     );
 
-    // Lock cursor for first-person camera
-    window.set_cursor_visible(false);
-    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+    // Start with cursor visible (we're in main menu)
+    window.set_cursor_visible(true);
+    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
 
     // Create app
     let mut app = App::new(window.clone())?;
-    app.input.cursor_locked = true;
+    app.input.cursor_locked = false;
 
     tracing::info!("initialization complete, entering event loop");
 
@@ -567,14 +757,13 @@ fn main() -> Result<()> {
                         app.resize(size.width, size.height);
                     }
                     WindowEvent::KeyboardInput { .. } => {
-                        // Check for ESC to exit
-                        if app.input.key_just_pressed(winit::keyboard::KeyCode::Escape) {
-                            tracing::info!("escape pressed, shutting down");
-                            target.exit();
-                        }
+                        // State transitions are handled in handle_event()
                     }
                     WindowEvent::RedrawRequested => {
                         let frame_start = Instant::now();
+
+                        // Track state for transition detection
+                        let prev_state = app.state;
 
                         app.input.begin_frame();
                         app.update();
@@ -594,6 +783,9 @@ fn main() -> Result<()> {
                             Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
                             Err(e) => tracing::error!("render error: {:?}", e),
                         }
+
+                        // Check for state transitions and update cursor accordingly
+                        app.check_state_transition(&window, prev_state);
                     }
                     _ => {}
                 }
