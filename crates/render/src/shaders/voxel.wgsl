@@ -9,6 +9,15 @@ struct CameraUniform {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
+// Chunk offset (passed via push constants or uniform)
+struct ChunkUniform {
+    chunk_offset: vec3<f32>,
+    _padding: f32,
+}
+
+@group(1) @binding(0)
+var<uniform> chunk: ChunkUniform;
+
 // Vertex input from mesh generation
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -30,9 +39,12 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
+    // Apply chunk offset to position
+    let world_pos = in.position + chunk.chunk_offset;
+
     // Transform position to clip space
-    out.clip_position = camera.view_proj * vec4<f32>(in.position, 1.0);
-    out.world_pos = in.position;
+    out.clip_position = camera.view_proj * vec4<f32>(world_pos, 1.0);
+    out.world_pos = world_pos;
     out.normal = in.normal;
 
     // Unpack block_id and light from packed u32
