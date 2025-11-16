@@ -17,7 +17,7 @@ pub use camera::{Camera, CameraUniform};
 pub use chunk_manager::{ChunkManager, ChunkRenderData, Frustum};
 pub use driver::{ChunkMeshDriver, ChunkMeshStat};
 pub use mesh::{mesh_chunk, MeshBuffers, MeshHash, MeshVertex};
-pub use pipeline::{ChunkMeshBuffer, RenderContext, VoxelPipeline};
+pub use pipeline::{ChunkMeshBuffer, RenderContext, SkyboxPipeline, VoxelPipeline};
 pub use ui::{DebugHud, UiManager};
 pub use window::{InputState, WindowConfig, WindowManager};
 
@@ -47,6 +47,7 @@ pub struct Renderer {
     config: RendererConfig,
     context: Option<RenderContext>,
     pipeline: Option<VoxelPipeline>,
+    skybox_pipeline: Option<SkyboxPipeline>,
     camera: Camera,
     ui: Option<RefCell<UiManager>>,
 }
@@ -61,6 +62,7 @@ impl Renderer {
             config,
             context: None,
             pipeline: None,
+            skybox_pipeline: None,
             camera,
             ui: None,
         }
@@ -70,6 +72,7 @@ impl Renderer {
     pub async fn initialize_gpu(&mut self, window: std::sync::Arc<winit::window::Window>) -> anyhow::Result<()> {
         let context = RenderContext::new(window.clone()).await?;
         let pipeline = VoxelPipeline::new(&context)?;
+        let skybox_pipeline = SkyboxPipeline::new(&context)?;
 
         // Initialize UI (wrapped in RefCell for interior mutability)
         let ui = UiManager::new(&context.device, context.config.format, &window);
@@ -78,6 +81,7 @@ impl Renderer {
 
         self.context = Some(context);
         self.pipeline = Some(pipeline);
+        self.skybox_pipeline = Some(skybox_pipeline);
         self.ui = Some(RefCell::new(ui));
 
         Ok(())
@@ -138,11 +142,13 @@ impl Renderer {
     pub fn render_resources(&self) -> Option<RenderResources> {
         let context = self.context.as_ref()?;
         let pipeline = self.pipeline.as_ref()?;
+        let skybox_pipeline = self.skybox_pipeline.as_ref()?;
 
         Some(RenderResources {
             device: &context.device,
             queue: &context.queue,
             pipeline,
+            skybox_pipeline,
         })
     }
 }
@@ -169,4 +175,6 @@ pub struct RenderResources<'a> {
     pub queue: &'a wgpu::Queue,
     /// Voxel rendering pipeline.
     pub pipeline: &'a VoxelPipeline,
+    /// Skybox rendering pipeline.
+    pub skybox_pipeline: &'a SkyboxPipeline,
 }

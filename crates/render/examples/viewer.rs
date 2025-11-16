@@ -169,6 +169,14 @@ fn main() -> Result<()> {
                                 },
                             );
 
+                            // Render skybox (background)
+                            {
+                                let mut render_pass =
+                                    resources.skybox_pipeline.begin_render_pass(&mut encoder, &frame.view);
+                                render_pass.set_pipeline(resources.skybox_pipeline.pipeline());
+                                render_pass.draw(0..3, 0..1);  // Full-screen triangle
+                            }
+
                             // Create frustum for culling
                             let camera = renderer.camera();
                             let view_proj = camera.projection_matrix() * camera.view_matrix();

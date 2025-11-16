@@ -501,12 +501,8 @@ impl VoxelPipeline {
                 view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.5,
-                        g: 0.7,
-                        b: 1.0,
-                        a: 1.0,
-                    }),
+                    // Load existing content (skybox already rendered)
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -530,6 +526,95 @@ impl VoxelPipeline {
     /// Get the camera bind group.
     pub fn camera_bind_group(&self) -> &wgpu::BindGroup {
         &self.camera_bind_group
+    }
+}
+
+/// Skybox rendering pipeline.
+pub struct SkyboxPipeline {
+    render_pipeline: wgpu::RenderPipeline,
+}
+
+impl SkyboxPipeline {
+    /// Create a new skybox rendering pipeline.
+    pub fn new(ctx: &RenderContext) -> Result<Self> {
+        let device = &ctx.device;
+
+        // Load skybox shader
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Skybox Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/skybox.wgsl").into()),
+        });
+
+        // Create render pipeline layout (no bind groups needed)
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Skybox Pipeline Layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+        // Create render pipeline
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Skybox Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],  // No vertex buffers (generated in shader)
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ctx.config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,  // No culling for skybox
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,  // No depth testing for skybox
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+
+        Ok(Self { render_pipeline })
+    }
+
+    /// Begin a skybox render pass.
+    pub fn begin_render_pass<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Skybox Render Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        })
+    }
+
+    /// Get the render pipeline.
+    pub fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.render_pipeline
     }
 }
 
