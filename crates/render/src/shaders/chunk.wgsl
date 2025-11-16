@@ -81,13 +81,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         default: { base_color = vec3<f32>(0.9, 0.2, 0.9); } // Magenta for unknown blocks
     }
 
-    // Simple diffuse lighting based on normal
+    // Directional lighting from sun (coming from upper-right)
     let light_dir = normalize(vec3<f32>(0.5, 1.0, 0.3));
     let diffuse = max(dot(in.normal, light_dir), 0.0);
 
-    // Combine ambient, diffuse, and voxel lighting
-    let ambient = 0.3;
-    let lighting = ambient + diffuse * 0.5 + in.light * 0.2;
+    // Face-based ambient occlusion (faces pointing down are darker)
+    // This creates depth and makes corners/crevices more visible
+    let ao_factor = 0.5 + in.normal.y * 0.3; // Range: [0.2 to 0.8] based on vertical orientation
+
+    // Combine ambient, diffuse, voxel lighting, and ambient occlusion
+    let ambient = 0.25;  // Slightly reduced for more contrast
+    let lighting = (ambient + diffuse * 0.6 + in.light * 0.15) * ao_factor;
 
     let lit_color = base_color * lighting;
 
