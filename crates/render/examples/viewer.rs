@@ -1,14 +1,16 @@
 //! Simple 3D voxel viewer demo.
 
 use anyhow::Result;
+use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_render::{
-    mesh_chunk, ChunkManager, DebugHud, Frustum, InputState, Renderer, RendererConfig, TimeOfDay,
-    WindowConfig, WindowManager,
+    mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
+    RendererConfig, TimeOfDay, WindowConfig, WindowManager,
 };
-use mdminecraft_world::{ChunkPos, TerrainGenerator};
+use mdminecraft_world::{Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
+use std::collections::HashMap;
 use std::time::Instant;
-use winit::event::{Event, WindowEvent};
+use winit::event::{Event, MouseButton, WindowEvent};
 use winit::keyboard::KeyCode;
 
 fn main() -> Result<()> {
@@ -42,6 +44,7 @@ fn main() -> Result<()> {
     let generator = TerrainGenerator::new(world_seed);
 
     let mut chunk_manager = ChunkManager::new();
+    let mut chunks = HashMap::new(); // Store chunks mutably for modification
     let chunk_radius = 2; // 5×5 grid of chunks
     let mut total_vertices = 0;
     let mut total_indices = 0;
@@ -72,6 +75,9 @@ fn main() -> Result<()> {
                     chunk_pos,
                     chunk_bind_group,
                 );
+
+                // Store chunk data for modification
+                chunks.insert(chunk_pos, chunk);
             }
         }
     }
@@ -103,6 +109,9 @@ fn main() -> Result<()> {
 
     // Time-of-day system
     let mut time_of_day = TimeOfDay::new();
+
+    // Block selection tracking
+    let mut selected_block: Option<RaycastHit> = None;
 
     // Run event loop
     window_manager.run(move |event, window| {
@@ -185,6 +194,124 @@ fn main() -> Result<()> {
                         // Update camera from input
                         update_camera(&mut renderer, &input, dt);
 
+                        // Raycast for block selection (only when cursor is grabbed)
+                        if input.cursor_grabbed {
+                            let camera = renderer.camera();
+                            let ray_origin = camera.position;
+                            let ray_dir = camera.forward();
+
+                            selected_block = raycast(ray_origin, ray_dir, 8.0, |block_pos| {
+                                // Convert world position to chunk+local coordinates
+                                let chunk_x = block_pos.x.div_euclid(16);
+                                let chunk_z = block_pos.z.div_euclid(16);
+                                let local_x = block_pos.x.rem_euclid(16) as usize;
+                                let local_y = block_pos.y as usize;
+                                let local_z = block_pos.z.rem_euclid(16) as usize;
+
+                                // Check bounds
+                                if local_y >= 256 {
+                                    return false;
+                                }
+
+                                // Get chunk and check block
+                                if let Some(chunk) = chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
+                                    let voxel = chunk.voxel(local_x, local_y, local_z);
+                                    voxel.id != BLOCK_AIR
+                                } else {
+                                    false
+                                }
+                            });
+
+                            // Handle block breaking/placing
+                            if let Some(hit) = selected_block {
+                                // Left click: break block
+                                if input.is_mouse_clicked(MouseButton::Left) {
+                                    let chunk_x = hit.block_pos.x.div_euclid(16);
+                                    let chunk_z = hit.block_pos.z.div_euclid(16);
+                                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+                                    if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+                                        let local_x = hit.block_pos.x.rem_euclid(16) as usize;
+                                        let local_y = hit.block_pos.y as usize;
+                                        let local_z = hit.block_pos.z.rem_euclid(16) as usize;
+
+                                        // Set block to air
+                                        chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+
+                                        // Regenerate mesh
+                                        let mesh = mesh_chunk(chunk, &registry);
+                                        if let Some(resources) = renderer.render_resources() {
+                                            let chunk_bind_group = resources.pipeline.create_chunk_bind_group(
+                                                resources.device,
+                                                chunk_pos,
+                                            );
+                                            chunk_manager.add_chunk(
+                                                resources.device,
+                                                &mesh,
+                                                chunk_pos,
+                                                chunk_bind_group,
+                                            );
+                                        }
+                                        tracing::info!("Broke block at {:?}", hit.block_pos);
+                                    }
+                                }
+
+                                // Right click: place block
+                                if input.is_mouse_clicked(MouseButton::Right) {
+                                    // Place block adjacent to hit face
+                                    let place_pos = IVec3::new(
+                                        hit.block_pos.x + hit.face_normal.x,
+                                        hit.block_pos.y + hit.face_normal.y,
+                                        hit.block_pos.z + hit.face_normal.z,
+                                    );
+
+                                    let chunk_x = place_pos.x.div_euclid(16);
+                                    let chunk_z = place_pos.z.div_euclid(16);
+                                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+                                    if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+                                        let local_x = place_pos.x.rem_euclid(16) as usize;
+                                        let local_y = place_pos.y as usize;
+                                        let local_z = place_pos.z.rem_euclid(16) as usize;
+
+                                        // Only place if within bounds and target is air
+                                        if local_y < 256 {
+                                            let current = chunk.voxel(local_x, local_y, local_z);
+                                            if current.id == BLOCK_AIR {
+                                                // Place stone block (id = 1)
+                                                let new_voxel = Voxel {
+                                                    id: 1,
+                                                    state: 0,
+                                                    light_sky: 0,
+                                                    light_block: 0,
+                                                };
+                                                chunk.set_voxel(local_x, local_y, local_z, new_voxel);
+
+                                                // Regenerate mesh
+                                                let mesh = mesh_chunk(chunk, &registry);
+                                                if let Some(resources) = renderer.render_resources() {
+                                                    let chunk_bind_group = resources.pipeline.create_chunk_bind_group(
+                                                        resources.device,
+                                                        chunk_pos,
+                                                    );
+                                                    chunk_manager.add_chunk(
+                                                        resources.device,
+                                                        &mesh,
+                                                        chunk_pos,
+                                                        chunk_bind_group,
+                                                    );
+                                                }
+                                                tracing::info!("Placed block at {:?}", place_pos);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Clear selection when cursor not grabbed
+                            selected_block = None;
+                        }
+
                         // Render
                         if let Some(frame) = renderer.begin_frame() {
                             let resources = renderer.render_resources().unwrap();
@@ -248,6 +375,47 @@ fn main() -> Result<()> {
                                     );
                                     render_pass.draw_indexed(0..chunk_data.index_count, 0, 0..1);
                                 }
+                            }
+
+                            // Render wireframe highlight (if block selected)
+                            if let Some(hit) = selected_block {
+                                // Update wireframe position and color
+                                let highlight_pos = [
+                                    hit.block_pos.x as f32,
+                                    hit.block_pos.y as f32,
+                                    hit.block_pos.z as f32,
+                                ];
+                                let highlight_color = [0.0, 0.0, 0.0, 0.8]; // Black with transparency
+                                resources.wireframe_pipeline.update_highlight(
+                                    resources.queue,
+                                    highlight_pos,
+                                    highlight_color,
+                                );
+
+                                // Render wireframe
+                                let depth_view = resources.pipeline.depth_view();
+                                let mut render_pass = resources.wireframe_pipeline.begin_render_pass(
+                                    &mut encoder,
+                                    &frame.view,
+                                    depth_view,
+                                );
+
+                                render_pass.set_pipeline(resources.wireframe_pipeline.pipeline());
+                                render_pass.set_bind_group(
+                                    0,
+                                    resources.pipeline.camera_bind_group(),
+                                    &[],
+                                );
+                                render_pass.set_bind_group(
+                                    1,
+                                    resources.wireframe_pipeline.highlight_bind_group(),
+                                    &[],
+                                );
+                                render_pass.set_vertex_buffer(
+                                    0,
+                                    resources.wireframe_pipeline.vertex_buffer().slice(..),
+                                );
+                                render_pass.draw(0..24, 0..1); // 24 vertices for cube wireframe
                             }
 
                             // Render UI overlay

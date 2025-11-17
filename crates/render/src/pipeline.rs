@@ -561,6 +561,11 @@ impl VoxelPipeline {
     pub fn camera_bind_group(&self) -> &wgpu::BindGroup {
         &self.camera_bind_group
     }
+
+    /// Get the depth texture view.
+    pub fn depth_view(&self) -> &wgpu::TextureView {
+        &self.depth_view
+    }
 }
 
 /// Skybox rendering pipeline.
