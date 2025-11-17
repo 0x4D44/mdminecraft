@@ -3,11 +3,12 @@
 use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
+use mdminecraft_core::{ItemStack, ItemType, ToolMaterial, ToolType};
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
     RendererConfig, TimeOfDay, WindowConfig, WindowManager,
 };
-use mdminecraft_world::{BlockId, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
+use mdminecraft_world::{BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -26,17 +27,27 @@ pub enum GameAction {
     Quit,
 }
 
-/// Hotbar for block selection
+/// Hotbar for item selection
 struct Hotbar {
-    slots: [BlockId; 9],
+    slots: [Option<ItemStack>; 9],
     selected: usize,
 }
 
 impl Hotbar {
     fn new() -> Self {
         Self {
-            slots: [2, 1, 3, 4, 5, 6, 7, 8, 9],
-            selected: 1,
+            slots: [
+                Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1)),
+                Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone), 1)),
+                Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1)),
+                Some(ItemStack::new(ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood), 1)),
+                Some(ItemStack::new(ItemType::Block(2), 64)), // Dirt
+                Some(ItemStack::new(ItemType::Block(3), 64)), // Wood
+                Some(ItemStack::new(ItemType::Block(1), 64)), // Stone
+                Some(ItemStack::new(ItemType::Block(6), 64)), // Cobblestone
+                Some(ItemStack::new(ItemType::Block(7), 64)), // Planks
+            ],
+            selected: 0,
         }
     }
 
@@ -46,8 +57,51 @@ impl Hotbar {
         }
     }
 
-    fn selected_block(&self) -> BlockId {
-        self.slots[self.selected]
+    fn selected_item(&self) -> Option<&ItemStack> {
+        self.slots[self.selected].as_ref()
+    }
+
+    fn selected_item_mut(&mut self) -> Option<&mut ItemStack> {
+        self.slots[self.selected].as_mut()
+    }
+
+    /// Get the tool being held (if any)
+    fn selected_tool(&self) -> Option<(ToolType, ToolMaterial)> {
+        if let Some(item) = self.selected_item() {
+            match item.item_type {
+                ItemType::Tool(tool_type, material) => Some((tool_type, material)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Get the block to place (if selected item is a block)
+    fn selected_block(&self) -> Option<BlockId> {
+        if let Some(item) = self.selected_item() {
+            match item.item_type {
+                ItemType::Block(block_id) => Some(block_id),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn item_name(&self, item_stack: Option<&ItemStack>) -> String {
+        if let Some(stack) = item_stack {
+            match stack.item_type {
+                ItemType::Tool(tool_type, material) => {
+                    format!("{:?} {:?}", material, tool_type)
+                }
+                ItemType::Block(block_id) => self.block_name(block_id).to_string(),
+                ItemType::Food(food_type) => format!("{:?}", food_type),
+                ItemType::Item(_) => "Item".to_string(),
+            }
+        } else {
+            "Empty".to_string()
+        }
     }
 
     fn block_name(&self, block_id: BlockId) -> &'static str {
@@ -109,6 +163,16 @@ struct PlayerPhysics {
     physics_enabled: bool,
 }
 
+/// Mining progress tracking
+struct MiningProgress {
+    /// Block position being mined
+    block_pos: IVec3,
+    /// Time spent mining this block
+    time_mining: f32,
+    /// Total time required to mine this block
+    time_required: f32,
+}
+
 impl PlayerPhysics {
     fn new() -> Self {
         Self {
@@ -145,6 +209,7 @@ pub struct GameWorld {
     chunk_manager: ChunkManager,
     chunks: HashMap<ChunkPos, Chunk>,
     registry: BlockRegistry,
+    block_properties: BlockPropertiesRegistry,
     input: InputState,
     last_frame: Instant,
     debug_hud: DebugHud,
@@ -153,6 +218,7 @@ pub struct GameWorld {
     hotbar: Hotbar,
     player_physics: PlayerPhysics,
     chunks_visible: usize,
+    mining_progress: Option<MiningProgress>,
 }
 
 impl GameWorld {
@@ -238,6 +304,7 @@ impl GameWorld {
             chunk_manager,
             chunks,
             registry,
+            block_properties: BlockPropertiesRegistry::new(),
             input: InputState::new(),
             last_frame: Instant::now(),
             debug_hud,
@@ -246,6 +313,7 @@ impl GameWorld {
             hotbar: Hotbar::new(),
             player_physics: PlayerPhysics::new(),
             chunks_visible: 0,
+            mining_progress: None,
         })
     }
 
@@ -349,8 +417,8 @@ impl GameWorld {
                 };
                 if let Some(slot) = slot {
                     self.hotbar.select_slot(slot);
-                    let block_name = self.hotbar.block_name(self.hotbar.selected_block());
-                    tracing::info!("Selected slot {}: {}", slot + 1, block_name);
+                    let item_name = self.hotbar.item_name(self.hotbar.selected_item());
+                    tracing::info!("Selected slot {}: {}", slot + 1, item_name);
                 }
             }
             _ => {}
@@ -503,18 +571,118 @@ impl GameWorld {
 
     fn handle_block_interaction(&mut self) {
         if let Some(hit) = self.selected_block {
-            // Left click: break block
-            if self.input.is_mouse_clicked(MouseButton::Left) {
-                let chunk_x = hit.block_pos.x.div_euclid(16);
-                let chunk_z = hit.block_pos.z.div_euclid(16);
-                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+            // Left click/hold: mine block
+            if self.input.is_mouse_pressed(MouseButton::Left) {
+                self.handle_mining(hit);
+            } else {
+                // Reset mining progress if not holding left click
+                self.mining_progress = None;
+            }
 
+            // Right click: place block
+            if self.input.is_mouse_clicked(MouseButton::Right) {
+                self.handle_block_placement(hit);
+            }
+        } else {
+            // No block selected, reset mining progress
+            self.mining_progress = None;
+        }
+    }
+
+    fn handle_mining(&mut self, hit: RaycastHit) {
+        let chunk_x = hit.block_pos.x.div_euclid(16);
+        let chunk_z = hit.block_pos.z.div_euclid(16);
+        let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+        // Get the block we're trying to mine
+        let block_id = if let Some(chunk) = self.chunks.get(&chunk_pos) {
+            let local_x = hit.block_pos.x.rem_euclid(16) as usize;
+            let local_y = hit.block_pos.y as usize;
+            let local_z = hit.block_pos.z.rem_euclid(16) as usize;
+
+            if local_y >= 256 {
+                return;
+            }
+
+            chunk.voxel(local_x, local_y, local_z).id
+        } else {
+            return;
+        };
+
+        // Get block properties
+        let block_props = self.block_properties.get(block_id);
+
+        // Check if we're starting to mine a new block
+        let mining_new_block = self.mining_progress.as_ref()
+            .map(|p| p.block_pos != hit.block_pos)
+            .unwrap_or(true);
+
+        if mining_new_block {
+            // Calculate mining time based on tool and block properties
+            let tool = self.hotbar.selected_tool();
+            let mining_time = block_props.calculate_mining_time(tool, false);
+
+            self.mining_progress = Some(MiningProgress {
+                block_pos: hit.block_pos,
+                time_mining: 0.0,
+                time_required: mining_time,
+            });
+
+            tracing::debug!(
+                "Started mining block {} at {:?} (requires {:.2}s)",
+                block_id,
+                hit.block_pos,
+                mining_time
+            );
+        }
+
+        // Update mining progress
+        if let Some(progress) = &mut self.mining_progress {
+            let dt = (Instant::now() - self.last_frame).as_secs_f32();
+            progress.time_mining += dt;
+
+            let percent = (progress.time_mining / progress.time_required * 100.0).min(100.0);
+            self.debug_hud.mining_progress = Some(percent);
+
+            // Check if mining is complete
+            if progress.time_mining >= progress.time_required {
+                // Mine the block!
                 if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
                     let local_y = hit.block_pos.y as usize;
                     let local_z = hit.block_pos.z.rem_euclid(16) as usize;
 
+                    // Check if tool can harvest this block
+                    let tool = self.hotbar.selected_tool();
+                    let can_harvest = block_props.can_harvest(tool);
+
+                    if can_harvest {
+                        tracing::info!(
+                            "Successfully mined block {} at {:?}",
+                            block_id,
+                            hit.block_pos
+                        );
+                    } else {
+                        tracing::warn!(
+                            "Mined block {} but cannot harvest (wrong tool tier)",
+                            block_id
+                        );
+                    }
+
+                    // Remove the block
                     chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+
+                    // Damage tool durability
+                    if let Some(item) = self.hotbar.selected_item_mut() {
+                        if matches!(item.item_type, ItemType::Tool(_, _)) {
+                            item.damage_durability(1);
+                            if item.is_broken() {
+                                tracing::info!("Tool broke!");
+                                // Remove the broken tool
+                                self.hotbar.slots[self.hotbar.selected] = None;
+                            }
+                        }
+                    }
 
                     // Regenerate mesh
                     let mesh = mesh_chunk(chunk, &self.registry);
@@ -525,45 +693,61 @@ impl GameWorld {
                             .add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
                     }
                 }
+
+                // Reset mining progress
+                self.mining_progress = None;
+                self.debug_hud.mining_progress = None;
             }
+        }
+    }
 
-            // Right click: place block
-            if self.input.is_mouse_clicked(MouseButton::Right) {
-                let place_pos = IVec3::new(
-                    hit.block_pos.x + hit.face_normal.x,
-                    hit.block_pos.y + hit.face_normal.y,
-                    hit.block_pos.z + hit.face_normal.z,
-                );
+    fn handle_block_placement(&mut self, hit: RaycastHit) {
+        // Only place if we have a block selected
+        if let Some(block_id) = self.hotbar.selected_block() {
+            let place_pos = IVec3::new(
+                hit.block_pos.x + hit.face_normal.x,
+                hit.block_pos.y + hit.face_normal.y,
+                hit.block_pos.z + hit.face_normal.z,
+            );
 
-                let chunk_x = place_pos.x.div_euclid(16);
-                let chunk_z = place_pos.z.div_euclid(16);
-                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+            let chunk_x = place_pos.x.div_euclid(16);
+            let chunk_z = place_pos.z.div_euclid(16);
+            let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
 
-                if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
-                    let local_x = place_pos.x.rem_euclid(16) as usize;
-                    let local_y = place_pos.y as usize;
-                    let local_z = place_pos.z.rem_euclid(16) as usize;
+            if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                let local_x = place_pos.x.rem_euclid(16) as usize;
+                let local_y = place_pos.y as usize;
+                let local_z = place_pos.z.rem_euclid(16) as usize;
 
-                    if local_y < 256 {
-                        let current = chunk.voxel(local_x, local_y, local_z);
-                        if current.id == BLOCK_AIR {
-                            let new_voxel = Voxel {
-                                id: self.hotbar.selected_block(),
-                                state: 0,
-                                light_sky: 0,
-                                light_block: 0,
-                            };
-                            chunk.set_voxel(local_x, local_y, local_z, new_voxel);
+                if local_y < 256 {
+                    let current = chunk.voxel(local_x, local_y, local_z);
+                    if current.id == BLOCK_AIR {
+                        let new_voxel = Voxel {
+                            id: block_id,
+                            state: 0,
+                            light_sky: 0,
+                            light_block: 0,
+                        };
+                        chunk.set_voxel(local_x, local_y, local_z, new_voxel);
 
-                            // Regenerate mesh
-                            let mesh = mesh_chunk(chunk, &self.registry);
-                            if let Some(resources) = self.renderer.render_resources() {
-                                let chunk_bind_group = resources
-                                    .pipeline
-                                    .create_chunk_bind_group(resources.device, chunk_pos);
-                                self.chunk_manager
-                                    .add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
+                        // Decrease block count
+                        if let Some(item) = self.hotbar.selected_item_mut() {
+                            if item.count > 0 {
+                                item.count -= 1;
+                                if item.count == 0 {
+                                    self.hotbar.slots[self.hotbar.selected] = None;
+                                }
                             }
+                        }
+
+                        // Regenerate mesh
+                        let mesh = mesh_chunk(chunk, &self.registry);
+                        if let Some(resources) = self.renderer.render_resources() {
+                            let chunk_bind_group = resources
+                                .pipeline
+                                .create_chunk_bind_group(resources.device, chunk_pos);
+                            self.chunk_manager
+                                .add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
                         }
                     }
                 }
@@ -696,8 +880,8 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
             ui.horizontal(|ui| {
                 for i in 0..9 {
                     let is_selected = i == hotbar.selected;
-                    let block_id = hotbar.slots[i];
-                    let block_name = hotbar.block_name(block_id);
+                    let item_stack = hotbar.slots[i].as_ref();
+                    let item_name = hotbar.item_name(item_stack);
 
                     let frame = if is_selected {
                         egui::Frame::none()
@@ -712,7 +896,7 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                     };
 
                     frame.show(ui, |ui| {
-                        ui.set_min_size(egui::vec2(50.0, 50.0));
+                        ui.set_min_size(egui::vec2(60.0, 60.0));
                         ui.vertical_centered(|ui| {
                             ui.label(
                                 egui::RichText::new(format!("{}", i + 1))
@@ -724,14 +908,47 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                                     }),
                             );
                             ui.label(
-                                egui::RichText::new(block_name)
-                                    .size(9.0)
+                                egui::RichText::new(&item_name)
+                                    .size(8.0)
                                     .color(if is_selected {
                                         egui::Color32::WHITE
                                     } else {
                                         egui::Color32::LIGHT_GRAY
                                     }),
                             );
+
+                            // Show count or durability
+                            if let Some(stack) = item_stack {
+                                match stack.item_type {
+                                    ItemType::Tool(_, _) => {
+                                        if let Some(durability) = stack.durability {
+                                            let max_durability = stack.max_durability().unwrap_or(1);
+                                            let durability_percent = (durability as f32 / max_durability as f32 * 100.0) as u32;
+                                            let color = if durability_percent < 20 {
+                                                egui::Color32::RED
+                                            } else if durability_percent < 50 {
+                                                egui::Color32::YELLOW
+                                            } else {
+                                                egui::Color32::GREEN
+                                            };
+                                            ui.label(
+                                                egui::RichText::new(format!("{}%", durability_percent))
+                                                    .size(7.0)
+                                                    .color(color),
+                                            );
+                                        }
+                                    }
+                                    ItemType::Block(_) | ItemType::Item(_) | ItemType::Food(_) => {
+                                        if stack.count > 1 {
+                                            ui.label(
+                                                egui::RichText::new(format!("x{}", stack.count))
+                                                    .size(9.0)
+                                                    .color(egui::Color32::WHITE),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         });
                     });
                 }
