@@ -5,6 +5,7 @@ members = [
     "crates/world",
     "crates/physics",
     "crates/render",
+    "crates/ui3d",
     "crates/net",
     "crates/server",
     "crates/client",
