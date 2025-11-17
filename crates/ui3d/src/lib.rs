@@ -34,10 +34,12 @@ pub mod components;
 pub mod render;
 pub mod interaction;
 pub mod layout;
+pub mod manager;
 
 // Re-export commonly used types
 pub use components::{Label3D, Text3D};
-pub use render::{FontAtlas, TextRenderer};
+pub use render::{FontAtlas, FontAtlasBuilder, TextRenderer, TextVertex};
+pub use manager::{UI3DManager, UIElementHandle};
 
 use anyhow::Result;
 

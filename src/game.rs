@@ -8,6 +8,7 @@ use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
     RendererConfig, TimeOfDay, WindowConfig, WindowManager,
 };
+use mdminecraft_ui3d::{Text3D, UI3DManager, UIElementHandle};
 use mdminecraft_world::{BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,6 +17,8 @@ use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
 use winit::window::Window;
+
+use crate::font_utils::find_system_font;
 
 /// Game action to communicate with main state machine
 pub enum GameAction {
@@ -294,6 +297,10 @@ pub struct GameWorld {
     chunks_visible: usize,
     mining_progress: Option<MiningProgress>,
     spawn_point: glam::Vec3,
+    // 3D UI system
+    ui_manager: Option<UI3DManager>,
+    ui_position_label: Option<UIElementHandle>,
+    ui_block_label: Option<UIElementHandle>,
 }
 
 impl GameWorld {
@@ -375,6 +382,42 @@ impl GameWorld {
 
         let spawn_point = glam::Vec3::new(0.0, 100.0, 0.0);
 
+        // Initialize 3D UI system
+        let ui_manager = {
+            let resources = renderer.render_resources().expect("GPU not initialized");
+
+            match find_system_font() {
+                Ok(font_path) => {
+                    tracing::info!("Loading font from: {}", font_path);
+
+                    // Get the camera bind group layout from the voxel pipeline
+                    let camera_layout = resources.pipeline.camera_bind_group_layout();
+
+                    match UI3DManager::with_system_font(
+                        resources.device,
+                        resources.queue,
+                        wgpu::TextureFormat::Bgra8UnormSrgb,
+                        camera_layout,
+                        &font_path,
+                        48.0,
+                    ) {
+                        Ok(manager) => {
+                            tracing::info!("3D UI system initialized");
+                            Some(manager)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to initialize 3D UI: {}. Continuing without 3D UI.", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Could not find system font: {}. 3D UI disabled.", e);
+                    None
+                }
+            }
+        };
+
         Ok(Self {
             window,
             renderer,
@@ -393,6 +436,9 @@ impl GameWorld {
             chunks_visible: 0,
             mining_progress: None,
             spawn_point,
+            ui_manager,
+            ui_position_label: None,
+            ui_block_label: None,
         })
     }
 
@@ -560,6 +606,9 @@ impl GameWorld {
         } else {
             self.selected_block = None;
         }
+
+        // Update 3D UI labels
+        self.update_ui_labels();
 
         // Render
         self.render();
@@ -922,6 +971,34 @@ impl GameWorld {
                 }
             }
 
+            // Render 3D UI elements (after voxels, before wireframe)
+            if let Some(ui_manager) = &self.ui_manager {
+                let depth_view = resources.pipeline.depth_view();
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("3D UI Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                ui_manager.render(&mut render_pass, resources.pipeline.camera_bind_group());
+            }
+
             // Render wireframe highlight (if block selected)
             if let Some(hit) = self.selected_block {
                 let highlight_pos = [
@@ -988,6 +1065,72 @@ impl GameWorld {
             let damage = (fall_distance - 3.0) * 1.0; // 1 damage per block fallen
             self.player_health.damage(damage);
             tracing::info!("Fell {:.1} blocks, took {:.1} fall damage", fall_distance, damage);
+        }
+    }
+
+    /// Update 3D UI labels
+    fn update_ui_labels(&mut self) {
+        if let Some(ui_manager) = &mut self.ui_manager {
+            let resources = self.renderer.render_resources().expect("GPU not initialized");
+            let camera = self.renderer.camera();
+
+            // Position label - floating above player
+            let label_pos = camera.position + glam::Vec3::new(0.0, 3.0, 0.0);
+            let position_text = format!(
+                "X: {:.1}  Y: {:.1}  Z: {:.1}",
+                camera.position.x, camera.position.y, camera.position.z
+            );
+
+            if let Some(handle) = self.ui_position_label {
+                ui_manager.set_text_content(resources.device, handle, position_text);
+                ui_manager.set_text_position(resources.device, handle, label_pos);
+            } else {
+                let text = Text3D::new(label_pos, position_text)
+                    .with_font_size(0.3)
+                    .with_color([1.0, 1.0, 0.0, 1.0])
+                    .with_billboard(true);
+                self.ui_position_label = Some(ui_manager.add_text(resources.device, text));
+            }
+
+            // Block info label - show when looking at a block
+            if let Some(hit) = self.selected_block {
+                let block_pos = hit.block_pos;
+                let block_label_pos = glam::Vec3::new(
+                    block_pos.x as f32 + 0.5,
+                    block_pos.y as f32 + 1.5,
+                    block_pos.z as f32 + 0.5,
+                );
+
+                // Get block info
+                let chunk_x = block_pos.x.div_euclid(16);
+                let chunk_z = block_pos.z.div_euclid(16);
+                let local_x = block_pos.x.rem_euclid(16) as usize;
+                let local_y = block_pos.y as usize;
+                let local_z = block_pos.z.rem_euclid(16) as usize;
+
+                if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
+                    if local_y < 256 {
+                        let voxel = chunk.voxel(local_x, local_y, local_z);
+                        let block_name = self.hotbar.block_name(voxel.id);
+                        let block_text = format!("{}\n({}, {}, {})", block_name, block_pos.x, block_pos.y, block_pos.z);
+
+                        if let Some(handle) = self.ui_block_label {
+                            ui_manager.set_text_content(resources.device, handle, block_text);
+                            ui_manager.set_text_position(resources.device, handle, block_label_pos);
+                        } else {
+                            let text = Text3D::new(block_label_pos, block_text)
+                                .with_font_size(0.25)
+                                .with_color([0.5, 1.0, 1.0, 1.0])
+                                .with_billboard(true);
+                            self.ui_block_label = Some(ui_manager.add_text(resources.device, text));
+                        }
+                    }
+                }
+            } else if let Some(handle) = self.ui_block_label {
+                // Hide block label when not looking at a block
+                ui_manager.remove_text(handle);
+                self.ui_block_label = None;
+            }
         }
     }
 

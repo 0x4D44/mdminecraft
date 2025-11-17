@@ -4,6 +4,7 @@
 
 mod menu;
 mod game;
+mod font_utils;
 
 use anyhow::Result;
 use menu::MenuState;
