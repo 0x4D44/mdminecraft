@@ -308,6 +308,7 @@ pub struct GameWorld {
     mob_spawner: MobSpawner,
     mob_labels: Vec<Option<UIElementHandle>>,
     current_tick: u64,
+    targeted_mob: Option<usize>,  // Index of mob being looked at
     // Inventory UI
     inventory_open: bool,
     inventory_slots: Vec<Option<UIElementHandle>>,
@@ -470,6 +471,7 @@ impl GameWorld {
             mob_spawner,
             mob_labels: Vec::new(),
             current_tick: 0,
+            targeted_mob: None,
             inventory_open: false,
             inventory_slots: Vec::new(),
             crafting_open: false,
@@ -514,8 +516,38 @@ impl GameWorld {
     fn update_mobs(&mut self) {
         self.current_tick += 1;
 
+        // Update mob AI
         for mob in &mut self.mobs {
             mob.update(self.current_tick);
+        }
+
+        // Remove dead mobs
+        let mut i = 0;
+        while i < self.mobs.len() {
+            if self.mobs[i].is_dead() {
+                tracing::info!("Removing dead {:?}", self.mobs[i].mob_type);
+                self.mobs.remove(i);
+
+                // Remove corresponding label
+                if i < self.mob_labels.len() {
+                    if let Some(handle) = self.mob_labels.remove(i) {
+                        if let Some(ui_manager) = &mut self.ui_manager {
+                            ui_manager.remove_text(handle);
+                        }
+                    }
+                }
+
+                // Update targeted mob index if needed
+                if let Some(targeted) = self.targeted_mob {
+                    if targeted == i {
+                        self.targeted_mob = None;
+                    } else if targeted > i {
+                        self.targeted_mob = Some(targeted - 1);
+                    }
+                }
+            } else {
+                i += 1;
+            }
         }
     }
 
@@ -691,8 +723,15 @@ impl GameWorld {
 
             // Handle block breaking/placing
             self.handle_block_interaction();
+
+            // Raycast for mob targeting
+            self.targeted_mob = self.raycast_mobs(ray_origin, ray_dir);
+
+            // Handle mob attacking
+            self.handle_mob_attack();
         } else {
             self.selected_block = None;
+            self.targeted_mob = None;
         }
 
         // Update 3D UI labels
@@ -1260,6 +1299,9 @@ impl GameWorld {
 
     /// Update 3D labels above mobs
     fn update_mob_labels(&mut self) {
+        // Read targeted_mob before borrowing ui_manager
+        let targeted_mob = self.targeted_mob;
+
         if let Some(ui_manager) = &mut self.ui_manager {
             let resources = self.renderer.render_resources().expect("GPU not initialized");
 
@@ -1270,7 +1312,7 @@ impl GameWorld {
 
             // Remove excess labels if we have fewer mobs
             while self.mob_labels.len() > self.mobs.len() {
-                if let Some(Some(handle)) = self.mob_labels.pop() {
+                if let Some(handle) = self.mob_labels.pop().flatten() {
                     ui_manager.remove_text(handle);
                 }
             }
@@ -1278,17 +1320,37 @@ impl GameWorld {
             // Update each mob's label
             for (i, mob) in self.mobs.iter().enumerate() {
                 let mob_pos = glam::Vec3::new(mob.x as f32, mob.y as f32 + 1.0, mob.z as f32);
-                let mob_name = format!("{:?}", mob.mob_type);
 
-                if let Some(Some(handle)) = self.mob_labels.get(i) {
+                // Show name, health, and targeting indicator
+                let health_bar = create_health_bar(mob.health_percent(), 10);
+                let targeted = if targeted_mob == Some(i) { " <--" } else { "" };
+                let mob_text = format!("{:?}\n{} {:.0}/{:.0}{}",
+                    mob.mob_type,
+                    health_bar,
+                    mob.health,
+                    mob.max_health,
+                    targeted
+                );
+
+                // Color based on health
+                let color = if mob.health_percent() > 0.66 {
+                    [0.0, 1.0, 0.0, 1.0] // Green
+                } else if mob.health_percent() > 0.33 {
+                    [1.0, 1.0, 0.0, 1.0] // Yellow
+                } else {
+                    [1.0, 0.0, 0.0, 1.0] // Red
+                };
+
+                if let Some(handle) = self.mob_labels.get(i).and_then(|h| *h) {
                     // Update existing label
-                    ui_manager.set_text_content(resources.device, *handle, &mob_name);
-                    ui_manager.set_text_position(resources.device, *handle, mob_pos);
+                    ui_manager.set_text_content(resources.device, handle, &mob_text);
+                    ui_manager.set_text_position(resources.device, handle, mob_pos);
+                    // Note: Can't update color on existing text, would need to recreate
                 } else {
                     // Create new label
-                    let text = Text3D::new(mob_pos, mob_name)
-                        .with_font_size(0.2)
-                        .with_color([1.0, 0.8, 0.4, 1.0])
+                    let text = Text3D::new(mob_pos, mob_text)
+                        .with_font_size(0.18)
+                        .with_color(color)
                         .with_billboard(true);
                     let handle = ui_manager.add_text(resources.device, text);
                     self.mob_labels[i] = Some(handle);
@@ -1634,6 +1696,95 @@ impl GameWorld {
 
         // TODO: Drop inventory items, show death screen, etc.
     }
+
+    /// Raycast to find which mob the player is looking at
+    fn raycast_mobs(&self, ray_origin: glam::Vec3, ray_dir: glam::Vec3) -> Option<usize> {
+        let max_distance = 8.0;
+        let mut closest_distance = max_distance;
+        let mut closest_mob_idx = None;
+
+        for (idx, mob) in self.mobs.iter().enumerate() {
+            let mob_pos = glam::Vec3::new(mob.x as f32, mob.y as f32 + 0.5, mob.z as f32);
+            let mob_size = mob.mob_type.size();
+
+            // Simple sphere collision check
+            let to_mob = mob_pos - ray_origin;
+            let distance_along_ray = to_mob.dot(ray_dir);
+
+            if distance_along_ray < 0.0 || distance_along_ray > max_distance {
+                continue;
+            }
+
+            let closest_point = ray_origin + ray_dir * distance_along_ray;
+            let distance_to_mob = closest_point.distance(mob_pos);
+
+            if distance_to_mob <= mob_size && distance_along_ray < closest_distance {
+                closest_distance = distance_along_ray;
+                closest_mob_idx = Some(idx);
+            }
+        }
+
+        closest_mob_idx
+    }
+
+    /// Handle attacking mobs
+    fn handle_mob_attack(&mut self) {
+        if !self.input.is_mouse_pressed(MouseButton::Left) {
+            return;
+        }
+
+        if let Some(mob_idx) = self.targeted_mob {
+            if mob_idx < self.mobs.len() {
+                // Get weapon damage
+                let damage = if let Some((tool_type, material)) = self.hotbar.selected_tool() {
+                    // Tool damage varies by type and material
+                    match tool_type {
+                        mdminecraft_core::ToolType::Pickaxe => match material {
+                            mdminecraft_core::ToolMaterial::Wood => 2.0,
+                            mdminecraft_core::ToolMaterial::Stone => 3.0,
+                            mdminecraft_core::ToolMaterial::Iron => 4.0,
+                            _ => 2.0,
+                        },
+                        mdminecraft_core::ToolType::Axe => match material {
+                            mdminecraft_core::ToolMaterial::Wood => 3.0,
+                            mdminecraft_core::ToolMaterial::Stone => 4.0,
+                            mdminecraft_core::ToolMaterial::Iron => 5.0,
+                            _ => 3.0,
+                        },
+                        mdminecraft_core::ToolType::Sword => match material {
+                            mdminecraft_core::ToolMaterial::Wood => 4.0,
+                            mdminecraft_core::ToolMaterial::Stone => 5.0,
+                            mdminecraft_core::ToolMaterial::Iron => 6.0,
+                            _ => 4.0,
+                        },
+                        _ => 1.0, // Other tools do minimal damage
+                    }
+                } else {
+                    1.0 // Bare hands
+                };
+
+                let died = self.mobs[mob_idx].damage(damage);
+                tracing::info!(
+                    "Hit {:?} for {:.1} damage! Health: {:.1}/{:.1}",
+                    self.mobs[mob_idx].mob_type,
+                    damage,
+                    self.mobs[mob_idx].health,
+                    self.mobs[mob_idx].max_health
+                );
+
+                if died {
+                    tracing::info!("{:?} died!", self.mobs[mob_idx].mob_type);
+                }
+            }
+        }
+    }
+}
+
+/// Create a simple ASCII health bar
+fn create_health_bar(health_percent: f32, length: usize) -> String {
+    let filled = (health_percent * length as f32).round() as usize;
+    let empty = length.saturating_sub(filled);
+    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
 }
 
 fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {

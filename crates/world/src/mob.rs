@@ -70,6 +70,16 @@ impl MobType {
             MobType::Chicken => 0.3,
         }
     }
+
+    /// Get the mob's maximum health.
+    pub fn max_health(&self) -> f32 {
+        match self {
+            MobType::Pig => 10.0,
+            MobType::Cow => 10.0,
+            MobType::Sheep => 8.0,
+            MobType::Chicken => 4.0,
+        }
+    }
 }
 
 /// A passive mob instance in the world.
@@ -93,6 +103,10 @@ pub struct Mob {
     pub ai_timer: u32,
     /// Current AI state
     pub state: MobState,
+    /// Current health
+    pub health: f32,
+    /// Maximum health
+    pub max_health: f32,
 }
 
 /// AI state for mob behavior.
@@ -107,6 +121,7 @@ pub enum MobState {
 impl Mob {
     /// Create a new mob at the given position.
     pub fn new(x: f64, y: f64, z: f64, mob_type: MobType) -> Self {
+        let max_health = mob_type.max_health();
         Self {
             x,
             y,
@@ -117,7 +132,25 @@ impl Mob {
             mob_type,
             ai_timer: 0,
             state: MobState::Idle,
+            health: max_health,
+            max_health,
         }
+    }
+
+    /// Take damage and return true if mob died.
+    pub fn damage(&mut self, amount: f32) -> bool {
+        self.health = (self.health - amount).max(0.0);
+        self.health <= 0.0
+    }
+
+    /// Check if mob is dead.
+    pub fn is_dead(&self) -> bool {
+        self.health <= 0.0
+    }
+
+    /// Get health percentage (0.0 to 1.0).
+    pub fn health_percent(&self) -> f32 {
+        self.health / self.max_health
     }
 
     /// Update the mob's AI and position based on deterministic simulation.
