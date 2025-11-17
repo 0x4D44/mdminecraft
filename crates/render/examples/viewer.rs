@@ -7,11 +7,63 @@ use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
     RendererConfig, TimeOfDay, WindowConfig, WindowManager,
 };
-use mdminecraft_world::{Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
+use mdminecraft_world::{BlockId, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
 use std::collections::HashMap;
 use std::time::Instant;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::keyboard::KeyCode;
+
+/// Hotbar for block selection
+struct Hotbar {
+    slots: [BlockId; 9],
+    selected: usize,
+}
+
+impl Hotbar {
+    fn new() -> Self {
+        Self {
+            // Default blocks in hotbar slots
+            slots: [
+                2, // Dirt
+                1, // Stone
+                3, // Wood
+                4, // Sand
+                5, // Grass
+                6, // Cobblestone
+                7, // Planks
+                8, // Bricks
+                9, // Glass
+            ],
+            selected: 1, // Start with stone selected
+        }
+    }
+
+    fn select_slot(&mut self, slot: usize) {
+        if slot < 9 {
+            self.selected = slot;
+        }
+    }
+
+    fn selected_block(&self) -> BlockId {
+        self.slots[self.selected]
+    }
+
+    fn block_name(&self, block_id: BlockId) -> &'static str {
+        match block_id {
+            0 => "Air",
+            1 => "Stone",
+            2 => "Dirt",
+            3 => "Wood",
+            4 => "Sand",
+            5 => "Grass",
+            6 => "Cobblestone",
+            7 => "Planks",
+            8 => "Bricks",
+            9 => "Glass",
+            _ => "Unknown",
+        }
+    }
+}
 
 fn main() -> Result<()> {
     // Initialize tracing
@@ -113,6 +165,9 @@ fn main() -> Result<()> {
     // Block selection tracking
     let mut selected_block: Option<RaycastHit> = None;
 
+    // Hotbar for block selection
+    let mut hotbar = Hotbar::new();
+
     // Run event loop
     window_manager.run(move |event, window| {
         // Let UI handle events first
@@ -164,6 +219,27 @@ fn main() -> Result<()> {
                             if event.state.is_pressed() {
                                 time_of_day.increase_speed();
                                 tracing::info!("Time speed increased");
+                            }
+                        }
+
+                        // Hotbar selection (1-9 keys)
+                        if event.state.is_pressed() {
+                            let slot = match event.physical_key {
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit1) => Some(0),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit2) => Some(1),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit3) => Some(2),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit4) => Some(3),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit5) => Some(4),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit6) => Some(5),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit7) => Some(6),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit8) => Some(7),
+                                winit::keyboard::PhysicalKey::Code(KeyCode::Digit9) => Some(8),
+                                _ => None,
+                            };
+                            if let Some(slot) = slot {
+                                hotbar.select_slot(slot);
+                                let block_name = hotbar.block_name(hotbar.selected_block());
+                                tracing::info!("Selected slot {}: {}", slot + 1, block_name);
                             }
                         }
                     }
@@ -278,9 +354,9 @@ fn main() -> Result<()> {
                                         if local_y < 256 {
                                             let current = chunk.voxel(local_x, local_y, local_z);
                                             if current.id == BLOCK_AIR {
-                                                // Place stone block (id = 1)
+                                                // Place selected block from hotbar
                                                 let new_voxel = Voxel {
-                                                    id: 1,
+                                                    id: hotbar.selected_block(),
                                                     state: 0,
                                                     light_sky: 0,
                                                     light_block: 0,
@@ -434,6 +510,7 @@ fn main() -> Result<()> {
                                     window,
                                     |ctx| {
                                         debug_hud.render(ctx);
+                                        render_hotbar(ctx, &hotbar);
                                     },
                                 );
                             }
@@ -504,4 +581,56 @@ fn update_camera(renderer: &mut Renderer, input: &InputState, dt: f32) {
     if movement.length() > 0.0 {
         camera.translate(movement.normalize() * speed);
     }
+}
+
+fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
+    egui::Area::new(egui::Id::new("hotbar"))
+        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -20.0])
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                for i in 0..9 {
+                    let is_selected = i == hotbar.selected;
+                    let block_id = hotbar.slots[i];
+                    let block_name = hotbar.block_name(block_id);
+
+                    let frame = if is_selected {
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgba_unmultiplied(80, 80, 80, 200))
+                            .stroke(egui::Stroke::new(3.0, egui::Color32::WHITE))
+                            .inner_margin(8.0)
+                    } else {
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+                            .inner_margin(8.0)
+                    };
+
+                    frame.show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(50.0, 50.0));
+                        ui.vertical_centered(|ui| {
+                            // Show slot number at top
+                            ui.label(
+                                egui::RichText::new(format!("{}", i + 1))
+                                    .size(10.0)
+                                    .color(if is_selected {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        egui::Color32::GRAY
+                                    }),
+                            );
+                            // Show block name at bottom
+                            ui.label(
+                                egui::RichText::new(block_name)
+                                    .size(9.0)
+                                    .color(if is_selected {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        egui::Color32::LIGHT_GRAY
+                                    }),
+                            );
+                        });
+                    });
+                }
+            });
+        });
 }
