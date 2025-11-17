@@ -1688,6 +1688,7 @@ dependencies = [
  "mdminecraft-core",
  "mdminecraft-physics",
  "mdminecraft-render",
+ "mdminecraft-ui3d",
  "mdminecraft-world",
  "pollster",
  "tracing",
