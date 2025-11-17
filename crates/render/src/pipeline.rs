@@ -162,6 +162,7 @@ pub struct VoxelPipeline {
     camera_buffer: wgpu::Buffer,
     time_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
     chunk_buffer: wgpu::Buffer,
     chunk_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group: wgpu::BindGroup,
@@ -453,12 +454,18 @@ impl VoxelPipeline {
             camera_buffer,
             time_buffer,
             camera_bind_group,
+            camera_bind_group_layout,
             chunk_buffer,
             chunk_bind_group_layout,
             texture_bind_group,
             depth_texture,
             depth_view,
         })
+    }
+
+    /// Get the camera bind group layout
+    pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.camera_bind_group_layout
     }
 
     /// Get the texture bind group for rendering.
