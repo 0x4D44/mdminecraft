@@ -1444,6 +1444,22 @@ impl GameWorld {
 
                     tracing::info!("Created crafting UI with {} grid slots", self.crafting_grid.len());
                 }
+
+                // Update result preview based on available items
+                if let Some(result_handle) = self.crafting_result {
+                    // Check if wood is available in inventory (slot 5)
+                    let result_text = if let Some(wood_stack) = &self.hotbar.slots[5] {
+                        if matches!(wood_stack.item_type, mdminecraft_core::ItemType::Block(3)) {
+                            "Result:\nPlanks x4\n(Click CRAFT)"
+                        } else {
+                            "Result:\n???"
+                        }
+                    } else {
+                        "Result:\n???"
+                    };
+
+                    ui_manager.set_text_content(resources.device, result_handle, result_text.to_string());
+                }
             } else {
                 // Crafting closed - remove UI elements
                 if !self.crafting_grid.is_empty() {
@@ -1516,6 +1532,17 @@ impl GameWorld {
                             1 => {
                                 tracing::info!("Demo button was clicked!");
                             }
+                            100..=108 => {
+                                let slot_idx = (callback_id - 100) as usize;
+                                self.handle_inventory_slot_click(slot_idx);
+                            }
+                            200..=208 => {
+                                let grid_idx = (callback_id - 200) as usize;
+                                self.handle_crafting_slot_click(grid_idx);
+                            }
+                            999 => {
+                                self.handle_craft_button_click();
+                            }
                             _ => {}
                         }
                     }
@@ -1527,6 +1554,65 @@ impl GameWorld {
                     self.ui_hovered_button = None;
                 }
             }
+        }
+    }
+
+    /// Handle clicking on an inventory slot
+    fn handle_inventory_slot_click(&mut self, slot_idx: usize) {
+        tracing::info!("Inventory slot {} clicked", slot_idx);
+        if let Some(stack) = &self.hotbar.slots[slot_idx] {
+            tracing::info!("  Contains: {} x{}", self.hotbar.item_name(Some(stack)), stack.count);
+        } else {
+            tracing::info!("  Empty slot");
+        }
+    }
+
+    /// Handle clicking on a crafting grid slot
+    fn handle_crafting_slot_click(&mut self, grid_idx: usize) {
+        tracing::info!("Crafting grid slot {} clicked", grid_idx);
+        // TODO: Implement item placement in crafting grid
+    }
+
+    /// Handle clicking the craft button
+    fn handle_craft_button_click(&mut self) {
+        tracing::info!("CRAFT button clicked!");
+
+        // Simple demo: Create planks from wood
+        // Check if we have wood in slot 5 (index 5 = position [1,1] in 3x3 grid)
+        if let Some(wood_stack) = &self.hotbar.slots[5] {
+            // Check if it's wood (block ID 3)
+            if let mdminecraft_core::ItemType::Block(3) = wood_stack.item_type {
+                tracing::info!("Crafting planks from wood!");
+
+                // Simple craft: 1 wood -> 4 planks
+                // Find empty slot or planks slot
+                for slot_idx in 0..9 {
+                    if self.hotbar.slots[slot_idx].is_none() {
+                        // Create planks in empty slot
+                        self.hotbar.slots[slot_idx] = Some(
+                            mdminecraft_core::ItemStack::new(
+                                mdminecraft_core::ItemType::Block(7), // Planks
+                                4
+                            )
+                        );
+                        tracing::info!("Created 4 planks in slot {}", slot_idx);
+
+                        // Consume 1 wood
+                        if let Some(stack) = &mut self.hotbar.slots[5] {
+                            if stack.count > 1 {
+                                stack.count -= 1;
+                            } else {
+                                self.hotbar.slots[5] = None;
+                            }
+                        }
+                        break;
+                    }
+                }
+            } else {
+                tracing::info!("Wood required for planks recipe!");
+            }
+        } else {
+            tracing::info!("No items in crafting grid!");
         }
     }
 
