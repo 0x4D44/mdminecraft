@@ -308,6 +308,9 @@ pub struct GameWorld {
     mob_spawner: MobSpawner,
     mob_labels: Vec<Option<UIElementHandle>>,
     current_tick: u64,
+    // Inventory UI
+    inventory_open: bool,
+    inventory_slots: Vec<Option<UIElementHandle>>,
 }
 
 impl GameWorld {
@@ -462,6 +465,8 @@ impl GameWorld {
             mob_spawner,
             mob_labels: Vec::new(),
             current_tick: 0,
+            inventory_open: false,
+            inventory_slots: Vec::new(),
         })
     }
 
