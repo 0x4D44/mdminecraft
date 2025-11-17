@@ -1,0 +1,391 @@
+# mdminecraft - Crafting Recipes Guide
+
+## 🔨 Complete Recipe Reference
+
+This guide documents all available crafting recipes in mdminecraft's 3D crafting system.
+
+---
+
+## 📋 How Crafting Works
+
+### Crafting Grid
+- Press `C` to open the 3D Crafting Table
+- Your **hotbar becomes the crafting grid** (9 slots arranged as 3×3)
+- Slots are mapped as:
+  ```
+  [1] [2] [3]    (hotbar slots 0, 1, 2)
+  [4] [5] [6]    (hotbar slots 3, 4, 5)
+  [7] [8] [9]    (hotbar slots 6, 7, 8)
+  ```
+
+### Pattern Matching
+- **Shapeless Positioning**: Recipes can be placed anywhere in the grid
+- The system automatically detects valid patterns
+- Unused items remain in your hotbar after crafting
+- Required items are consumed automatically
+
+### Crafting Process
+1. Open crafting table (`C` key)
+2. Arrange items in your hotbar to match a recipe pattern
+3. Result preview appears on the right showing what you can craft
+4. Aim at the **CRAFT** button and click
+5. Crafted item appears in your hotbar
+6. Required materials are consumed
+
+---
+
+## 🪵 Basic Resources
+
+### Recipe #1: Planks from Wood
+**Input:** 1 Wood
+**Output:** 4 Planks
+**Pattern:** Shapeless (place wood anywhere)
+
+```
+Wood anywhere in grid → 4 Planks
+```
+
+**Example:**
+```
+[ ] [ ] [ ]
+[ ] [W] [ ]  →  4 Planks
+[ ] [ ] [ ]
+```
+
+**Usage:**
+- Most fundamental recipe
+- Wood logs obtained by breaking trees
+- Planks used for tools, sticks, and crafting table
+
+---
+
+### Recipe #2: Sticks from Planks
+**Input:** 2 Planks (vertical)
+**Output:** 4 Sticks
+**Pattern:** 2 planks vertically adjacent
+
+```
+[P]           OR    [ ] [P] [ ]    OR    [ ] [ ] [P]
+[P]                 [ ] [P] [ ]          [ ] [ ] [P]
+[ ]                 [ ] [ ] [ ]          [ ] [ ] [ ]
+```
+
+**Examples:**
+```
+Slots 1-4:        Slots 2-5:        Slots 3-6:
+[P] [ ] [ ]       [ ] [P] [ ]       [ ] [ ] [P]
+[P] [ ] [ ]  OR   [ ] [P] [ ]  OR   [ ] [ ] [P]
+[ ] [ ] [ ]       [ ] [ ] [ ]       [ ] [ ] [ ]
+```
+
+**Usage:**
+- Essential crafting component
+- Used for all tools
+- 2 planks make 4 sticks (2:1 efficiency)
+
+---
+
+## ⛏️ Tools
+
+### Recipe #3: Wood Pickaxe
+**Input:** 3 Planks + 2 Sticks
+**Output:** 1 Wood Pickaxe
+**Pattern:** T-shape (3 planks on top, 2 sticks vertical below)
+
+```
+[P] [P] [P]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Exact Pattern (can be placed anywhere):**
+```
+[Plank] [Plank] [Plank]
+[     ] [Stick] [     ]
+[     ] [Stick] [     ]
+```
+
+**Usage:**
+- Basic mining tool
+- Mines stone blocks
+- Damage: 2 HP (in combat)
+- Required to obtain cobblestone
+
+---
+
+### Recipe #4: Stone Pickaxe
+**Input:** 3 Cobblestone + 2 Sticks
+**Output:** 1 Stone Pickaxe
+**Pattern:** T-shape (3 cobblestone on top, 2 sticks vertical below)
+
+```
+[C] [C] [C]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Exact Pattern (can be placed anywhere):**
+```
+[Cobble] [Cobble] [Cobble]
+[      ] [Stick ] [      ]
+[      ] [Stick ] [      ]
+```
+
+**Usage:**
+- Upgraded mining tool
+- Faster than wood pickaxe
+- Damage: 3 HP (in combat)
+- More durable than wood tools
+
+---
+
+## 🛠️ Utility Blocks
+
+### Recipe #5: Crafting Table
+**Input:** 4 Planks
+**Output:** 1 Crafting Table block
+**Pattern:** 2×2 square of planks
+
+```
+[P] [P] [ ]
+[P] [P] [ ]
+[ ] [ ] [ ]
+```
+
+**Alternative Placements:**
+```
+Top-left:         Top-right:        Bottom-left:
+[P] [P] [ ]       [ ] [P] [P]       [ ] [ ] [ ]
+[P] [P] [ ]  OR   [ ] [P] [P]  OR   [P] [P] [ ]
+[ ] [ ] [ ]       [ ] [ ] [ ]       [P] [P] [ ]
+
+Bottom-right:     Center:
+[ ] [ ] [ ]       [ ] [ ] [ ]
+[ ] [P] [P]  OR   [ ] [P] [P]
+[ ] [P] [P]       [ ] [P] [P]
+```
+
+**Usage:**
+- Placeable decorative block
+- Block ID: 58
+- Can be placed in world like any block
+- Currently cosmetic (not functional as workstation)
+
+---
+
+## 📊 Recipe Summary Table
+
+| Recipe | Inputs | Output | Ratio | Pattern Type |
+|--------|--------|--------|-------|--------------|
+| Planks | 1 Wood | 4 Planks | 1:4 | Shapeless |
+| Sticks | 2 Planks | 4 Sticks | 2:4 | Vertical line |
+| Wood Pickaxe | 3 Planks, 2 Sticks | 1 Tool | 5:1 | T-shape |
+| Stone Pickaxe | 3 Cobble, 2 Sticks | 1 Tool | 5:1 | T-shape |
+| Crafting Table | 4 Planks | 1 Block | 4:1 | 2×2 square |
+
+---
+
+## 🎯 Crafting Progression
+
+### Starting Out (Initial Hotbar)
+You start with:
+- Wood Pickaxe ×1
+- Stone Pickaxe ×1
+- Iron Pickaxe ×1
+- Wood Shovel ×1
+- Dirt ×64
+- **Wood ×64** ⭐ (slot 5)
+- Stone ×64
+- Cobblestone ×64
+- **Planks ×64** ⭐ (slot 8)
+
+### Quick Start Crafting Chain
+
+**Option 1: Make Sticks**
+1. Already have Planks (slot 8)
+2. Move 2 planks to adjacent vertical slots (e.g., slots 0 and 3)
+3. Open crafting (`C`)
+4. Craft → Get 4 Sticks
+
+**Option 2: Get More Planks**
+1. Use Wood from slot 5
+2. Open crafting (`C`)
+3. Craft → Get 4 more Planks per Wood
+
+**Option 3: Craft a Tool**
+1. Craft Sticks first (2 planks → 4 sticks)
+2. Arrange 3 planks in top row (slots 0-2)
+3. Place 2 sticks in middle and bottom center (slots 4 and 7)
+4. Craft → Get Wood Pickaxe
+
+**Option 4: Make Crafting Table**
+1. Arrange 4 planks in 2×2 pattern
+2. Craft → Get Crafting Table block
+3. Select it in hotbar
+4. Right-click to place in world
+
+---
+
+## 💡 Crafting Tips
+
+### Pattern Recognition
+- The system finds the **smallest bounding box** around your pattern
+- Pattern can be shifted anywhere within the 3×3 grid
+- Empty slots outside the pattern don't matter
+- All non-pattern slots must be empty
+
+### Efficiency Tips
+1. **Keep materials organized**: Planks in one slot, sticks in another
+2. **Craft in bulk**: Each Wood makes 4 Planks
+3. **Progression path**: Wood → Planks → Sticks → Tools
+4. **Combat use**: Stone Pickaxe (3 damage) > Wood Pickaxe (2 damage)
+
+### Common Mistakes
+❌ **Pattern too spread out** - Keep pattern components adjacent
+❌ **Extra items in grid** - Only required items should be present
+❌ **Wrong orientation** - Vertical sticks pattern must be vertical, not horizontal
+✅ **Shapeless positioning works** - Pattern can be anywhere in grid
+✅ **Stack multiple** - Extra materials stay in hotbar for multiple crafts
+
+---
+
+## 🔍 Testing Recipes
+
+### How to Test Each Recipe
+
+**Test 1: Wood → Planks**
+```
+1. Open inventory (E) - verify Wood in slot 5
+2. Open crafting (C)
+3. Should see "Result: Planks x4 (Click CRAFT)"
+4. Click CRAFT button
+5. Verify: 4 planks appear, 1 wood consumed
+```
+
+**Test 2: Planks → Sticks**
+```
+1. Clear slots 0-1 (move items if needed)
+2. Put 2 planks in slots 0 and 3 (vertical)
+3. Open crafting (C)
+4. Should see "Result: Sticks x4 (Click CRAFT)"
+5. Click CRAFT
+6. Verify: 4 sticks appear, 2 planks consumed
+```
+
+**Test 3: Wood Pickaxe**
+```
+1. Ensure you have 3 planks and 2 sticks
+2. Arrange: [P][P][P] in slots 0-2
+3. Arrange: [S] in slots 4 and 7 (T-shape)
+4. Open crafting (C)
+5. Should see "Result: Wood Pickaxe x1 (Click CRAFT)"
+6. Click CRAFT
+7. Verify: 1 Wood Pickaxe appears, materials consumed
+```
+
+**Test 4: Stone Pickaxe**
+```
+1. Have 3 cobblestone and 2 sticks
+2. Arrange: [C][C][C] in slots 0-2
+3. Arrange: [S] in slots 4 and 7
+4. Open crafting (C)
+5. Should see "Result: Stone Pickaxe x1 (Click CRAFT)"
+6. Click CRAFT
+```
+
+**Test 5: Crafting Table**
+```
+1. Have 4 planks available
+2. Arrange 2×2: [P][P] in slots 0-1, [P][P] in slots 3-4
+3. Open crafting (C)
+4. Should see "Result: Crafting Table x1 (Click CRAFT)"
+5. Click CRAFT
+6. Verify: Crafting Table block appears
+7. Select it and right-click to place in world
+```
+
+---
+
+## 🚀 Advanced Usage
+
+### Hotbar as Crafting Grid
+The innovative design uses your hotbar directly as the crafting input:
+- No separate inventory management needed
+- Visual feedback in inventory UI (press `E`)
+- Real-time recipe detection as you arrange items
+- Immediate crafting from your active hotbar
+
+### Pattern Matching Algorithm
+- **Bounding box calculation**: Finds minimal rectangle containing pattern
+- **Offset testing**: Tries all 9 possible positions for pattern placement
+- **Validation**: Ensures no extra items outside pattern area
+- **Shapeless support**: Pattern can be anywhere, not just top-left
+
+---
+
+## 📝 Future Recipe Ideas
+
+### Planned for Future Updates
+- **Stone Tools**: Stone Axe, Shovel, Sword, Hoe
+- **Iron Tools**: All tool types with iron
+- **Advanced Blocks**: Furnace, Chest, Door
+- **Utility Items**: Torches, Ladders, Fences
+- **Decorative**: Colored blocks, stairs, slabs
+
+### Recipe Book UI (Concept)
+Future enhancement could include:
+- Visual recipe catalog
+- Unlock system based on collected materials
+- Recipe hints and patterns
+- Ingredient highlighting
+
+---
+
+## 🎮 Integration with Gameplay
+
+### Combat
+- Crafted pickaxes can be used as weapons
+- Stone Pickaxe: 3 damage (better than Wood: 2 damage)
+- Axes deal even more damage when implemented
+
+### Building
+- Crafting Table blocks can be placed decoratively
+- Planks can be placed as building blocks
+- Sticks cannot be placed (tool component only)
+
+### Resource Loop
+```
+Mine Trees → Wood
+↓
+Craft Planks (1:4)
+↓
+Craft Sticks (2:4) + Keep Planks
+↓
+Craft Tools (3P + 2S)
+↓
+Better Mining → More Resources
+```
+
+---
+
+## 🐛 Known Limitations
+
+### Current Implementation
+- Crafting grid is hotbar (all 9 slots)
+- No separate crafting inventory
+- Pattern must fit within available items
+- Can't craft if hotbar is full (no output space)
+
+### Workarounds
+- Clear hotbar slots before complex recipes
+- Craft basic items first to free up space
+- Use inventory UI (`E`) to see current arrangement
+
+---
+
+**For more information, see:**
+- `DEMO_GUIDE.md` - Complete game guide
+- `COMBAT_GUIDE.md` - Combat mechanics
+- `PROJECT_SUMMARY.md` - Technical details
+
+**Happy Crafting!** 🎉
