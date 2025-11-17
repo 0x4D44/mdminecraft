@@ -29,8 +29,39 @@ cargo run --release
 | Key | Action |
 |-----|--------|
 | **1-9** | Select hotbar slot |
-| **Left Click** | Break block |
+| **Left Click** | Break block / Attack mob |
 | **Right Click** | Place block |
+
+## ⚔️ Combat System
+
+### Fighting Mobs
+1. Find a mob in the world
+2. Aim at it with your crosshair
+3. Look for the `<--` arrow in the health bar
+4. **Left-click** to attack
+5. Watch health bar decrease with color changes
+
+### Mob Health
+- **Chicken**: 4 HP (Green → Yellow → Red as health drops)
+- **Sheep**: 8 HP
+- **Pig**: 10 HP
+- **Cow**: 10 HP
+
+### Weapon Damage
+- **Bare Hands**: 1 damage
+- **Wood Pickaxe**: 2 damage
+- **Stone Pickaxe**: 3 damage
+- **Iron Pickaxe**: 4 damage
+- **Axes**: 3-5 damage (even more effective)
+
+### Health Bars
+- Format: `Pig\n[██████████] 10/10 <--`
+- **Green**: >66% health (healthy)
+- **Yellow**: 33-66% health (wounded)
+- **Red**: <33% health (critical)
+- Arrow `<--` shows which mob you're targeting
+
+**See COMBAT_GUIDE.md for detailed combat mechanics!**
 
 ## 🎯 3D UI Features
 
@@ -38,8 +69,9 @@ cargo run --release
 
 **Mob Labels:**
 - Automatically appear above all spawned mobs
-- Show mob type (Pig, Cow, Sheep, Chicken)
-- Orange/gold color for visibility
+- Show mob type, health bar, and HP numbers
+- Color-coded by health: Green/Yellow/Red
+- Shows targeting arrow `<--` when aimed at
 - Always face the camera (billboard rendering)
 
 **Player Info:**
@@ -98,16 +130,40 @@ cargo run --release
 
 **How to Use:**
 1. Press `C` to open crafting table
-2. Result preview automatically shows if you have wood
-3. Aim at the **CRAFT** button (it highlights)
-4. Click to craft planks from wood
-5. Planks appear in your inventory
-6. Wood count decreases
+2. Your hotbar items become the crafting grid (slots 1-9)
+3. Result preview shows what can be crafted
+4. Aim at the **CRAFT** button (it highlights)
+5. Click to craft the item
+6. Crafted item appears in your hotbar
+7. Required materials are consumed
 
-**Current Recipe:**
-- **Wood → Planks** (1:4 ratio)
-- Requires: 1 Wood (in hotbar slot 5)
-- Creates: 4 Planks (in first empty slot)
+**Available Recipes:**
+1. **Wood → Planks** (1:4 ratio)
+   - Place 1 Wood anywhere in hotbar
+   - Creates: 4 Planks
+
+2. **Planks → Sticks** (2 planks → 4 sticks)
+   - Place 2 Planks vertically (any two adjacent slots)
+   - Creates: 4 Sticks
+
+3. **Wood Pickaxe** (3 planks + 2 sticks)
+   - Top row: 3 Planks
+   - Middle & bottom center: 2 Sticks (T-shape)
+   - Creates: 1 Wood Pickaxe
+
+4. **Stone Pickaxe** (3 cobblestone + 2 sticks)
+   - Top row: 3 Cobblestone
+   - Middle & bottom center: 2 Sticks (T-shape)
+   - Creates: 1 Stone Pickaxe
+
+5. **Crafting Table** (4 planks in 2×2)
+   - 2×2 square of Planks anywhere
+   - Creates: 1 Crafting Table block
+
+**Recipe Tips:**
+- Patterns can be placed anywhere in the grid (shapeless positioning)
+- The system detects patterns automatically
+- All unused items stay in your hotbar
 
 ### 4. Demo Button
 
