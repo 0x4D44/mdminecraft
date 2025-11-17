@@ -37,9 +37,13 @@ pub mod layout;
 pub mod manager;
 
 // Re-export commonly used types
-pub use components::{Label3D, Text3D};
+pub use components::{
+    Button3D, ButtonColors, ButtonState, Label3D, Panel3D, PanelBorder, PanelVertex, Text3D,
+    TextAlignment,
+};
 pub use render::{FontAtlas, FontAtlasBuilder, TextRenderer, TextVertex};
 pub use manager::{UI3DManager, UIElementHandle};
+pub use interaction::{raycast_billboard_quad, screen_to_ray, UIRaycastHit, UIAABB};
 
 use anyhow::Result;
 

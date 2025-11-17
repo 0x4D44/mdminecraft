@@ -5,10 +5,14 @@
 pub mod text3d;
 pub mod label;
 pub mod billboard;
+pub mod button;
+pub mod panel;
 
-pub use text3d::Text3D;
+pub use text3d::{Text3D, TextAlignment};
 pub use label::Label3D;
 pub use billboard::Billboard;
+pub use button::{Button3D, ButtonColors, ButtonState};
+pub use panel::{Panel3D, PanelBorder, PanelVertex};
 
 use glam::Vec3;
 
