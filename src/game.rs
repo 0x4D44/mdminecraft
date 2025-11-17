@@ -161,6 +161,8 @@ struct PlayerPhysics {
     player_height: f32,
     player_width: f32,
     physics_enabled: bool,
+    /// Previous Y position for fall damage calculation
+    last_ground_y: f32,
 }
 
 /// Mining progress tracking
@@ -171,6 +173,76 @@ struct MiningProgress {
     time_mining: f32,
     /// Total time required to mine this block
     time_required: f32,
+}
+
+/// Player health and survival stats
+struct PlayerHealth {
+    /// Current health (0-20, measured in half-hearts)
+    current: f32,
+    /// Maximum health
+    max: f32,
+    /// Health regeneration rate (hearts per second when full hunger)
+    regeneration_rate: f32,
+    /// Time since last damage (for regeneration delay)
+    time_since_damage: f32,
+    /// Invulnerability time after taking damage
+    invulnerability_time: f32,
+}
+
+impl PlayerHealth {
+    fn new() -> Self {
+        Self {
+            current: 20.0,
+            max: 20.0,
+            regeneration_rate: 0.0, // Disabled for now, could be 1.0 per second
+            time_since_damage: 0.0,
+            invulnerability_time: 0.0,
+        }
+    }
+
+    /// Take damage
+    fn damage(&mut self, amount: f32) {
+        if self.invulnerability_time > 0.0 {
+            return; // Still invulnerable
+        }
+
+        self.current = (self.current - amount).max(0.0);
+        self.time_since_damage = 0.0;
+        self.invulnerability_time = 0.5; // 0.5 second invulnerability
+
+        tracing::info!("Took {:.1} damage, health now {:.1}/20", amount, self.current);
+    }
+
+    /// Heal health
+    fn heal(&mut self, amount: f32) {
+        self.current = (self.current + amount).min(self.max);
+    }
+
+    /// Check if player is dead
+    fn is_dead(&self) -> bool {
+        self.current <= 0.0
+    }
+
+    /// Update health (regeneration, timers)
+    fn update(&mut self, dt: f32) {
+        self.time_since_damage += dt;
+
+        if self.invulnerability_time > 0.0 {
+            self.invulnerability_time -= dt;
+        }
+
+        // Regenerate health if enabled and enough time has passed
+        if self.regeneration_rate > 0.0 && self.time_since_damage > 3.0 && self.current < self.max {
+            self.heal(self.regeneration_rate * dt);
+        }
+    }
+
+    /// Reset health to full (for respawn)
+    fn reset(&mut self) {
+        self.current = self.max;
+        self.time_since_damage = 0.0;
+        self.invulnerability_time = 0.0;
+    }
 }
 
 impl PlayerPhysics {
@@ -184,6 +256,7 @@ impl PlayerPhysics {
             player_height: 1.8,
             player_width: 0.6,
             physics_enabled: true,
+            last_ground_y: 100.0, // Initial spawn height
         }
     }
 
@@ -217,8 +290,10 @@ pub struct GameWorld {
     selected_block: Option<RaycastHit>,
     hotbar: Hotbar,
     player_physics: PlayerPhysics,
+    player_health: PlayerHealth,
     chunks_visible: usize,
     mining_progress: Option<MiningProgress>,
+    spawn_point: glam::Vec3,
 }
 
 impl GameWorld {
@@ -298,6 +373,8 @@ impl GameWorld {
         debug_hud.total_vertices = total_vertices;
         debug_hud.total_triangles = total_indices / 3;
 
+        let spawn_point = glam::Vec3::new(0.0, 100.0, 0.0);
+
         Ok(Self {
             window,
             renderer,
@@ -312,8 +389,10 @@ impl GameWorld {
             selected_block: None,
             hotbar: Hotbar::new(),
             player_physics: PlayerPhysics::new(),
+            player_health: PlayerHealth::new(),
             chunks_visible: 0,
             mining_progress: None,
+            spawn_point,
         })
     }
 
@@ -433,6 +512,14 @@ impl GameWorld {
         // Update time-of-day
         self.time_of_day.update(dt);
 
+        // Update player health
+        self.player_health.update(dt);
+
+        // Check for death
+        if self.player_health.is_dead() {
+            self.handle_death();
+        }
+
         // Update debug HUD
         self.debug_hud.update_fps(dt);
         let camera = self.renderer.camera();
@@ -528,10 +615,30 @@ impl GameWorld {
             }
 
             // Simplified ground check - just stop falling at y=50
-            if camera.position.y < 50.0 {
+            let was_on_ground = self.player_physics.on_ground;
+            let current_y = camera.position.y;
+            let was_falling = self.player_physics.velocity.y < 0.0;
+
+            if current_y < 50.0 {
                 camera.position.y = 50.0;
+
+                // Calculate fall damage if landing
+                if !was_on_ground && was_falling {
+                    let fall_distance = self.player_physics.last_ground_y - 50.0;
+                    let _ = camera; // Release borrow before calling calculate_fall_damage
+                    self.calculate_fall_damage(fall_distance);
+                }
+
                 self.player_physics.velocity.y = 0.0;
                 self.player_physics.on_ground = true;
+                self.player_physics.last_ground_y = 50.0;
+            } else {
+                // In air
+                if self.player_physics.on_ground {
+                    // Just left the ground, remember this position
+                    self.player_physics.last_ground_y = current_y;
+                }
+                self.player_physics.on_ground = false;
             }
 
             // Jump
@@ -861,6 +968,7 @@ impl GameWorld {
                     |ctx| {
                         self.debug_hud.render(ctx);
                         render_hotbar(ctx, &self.hotbar);
+                        render_health_bar(ctx, &self.player_health);
                     },
                 );
             }
@@ -870,6 +978,36 @@ impl GameWorld {
         }
 
         self.input.reset_frame();
+    }
+
+    /// Calculate and apply fall damage
+    fn calculate_fall_damage(&mut self, fall_distance: f32) {
+        // Minecraft formula: damage = fall_distance - 3.0
+        // Player takes damage for falls > 3 blocks
+        if fall_distance > 3.0 {
+            let damage = (fall_distance - 3.0) * 1.0; // 1 damage per block fallen
+            self.player_health.damage(damage);
+            tracing::info!("Fell {:.1} blocks, took {:.1} fall damage", fall_distance, damage);
+        }
+    }
+
+    /// Handle player death
+    fn handle_death(&mut self) {
+        tracing::info!("Player died! Respawning at spawn point...");
+
+        // Respawn player at spawn point
+        let camera = self.renderer.camera_mut();
+        camera.position = self.spawn_point;
+
+        // Reset health
+        self.player_health.reset();
+
+        // Reset physics
+        self.player_physics.velocity = glam::Vec3::ZERO;
+        self.player_physics.on_ground = false;
+        self.player_physics.last_ground_y = self.spawn_point.y;
+
+        // TODO: Drop inventory items, show death screen, etc.
     }
 }
 
@@ -952,6 +1090,43 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                         });
                     });
                 }
+            });
+        });
+}
+
+fn render_health_bar(ctx: &egui::Context, health: &PlayerHealth) {
+    egui::Area::new(egui::Id::new("health_bar"))
+        .anchor(egui::Align2::LEFT_BOTTOM, [10.0, -70.0])
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // Draw hearts
+                let max_hearts = (health.max / 2.0) as i32; // 20 health = 10 hearts
+                let current_hearts = health.current / 2.0;
+
+                for i in 0..max_hearts {
+                    let heart_value = current_hearts - i as f32;
+                    let (symbol, color) = if heart_value >= 1.0 {
+                        ("♥", egui::Color32::from_rgb(255, 0, 0)) // Full heart - red
+                    } else if heart_value >= 0.5 {
+                        ("♥", egui::Color32::from_rgb(200, 0, 0)) // Half heart - darker red
+                    } else {
+                        ("♡", egui::Color32::from_rgb(100, 100, 100)) // Empty heart - gray
+                    };
+
+                    ui.label(egui::RichText::new(symbol).size(20.0).color(color));
+                }
+
+                // Show numerical health
+                ui.add_space(10.0);
+                let health_text = format!("{:.1}/{:.0}", health.current, health.max);
+                let text_color = if health.current < 6.0 {
+                    egui::Color32::RED
+                } else if health.current < 10.0 {
+                    egui::Color32::YELLOW
+                } else {
+                    egui::Color32::WHITE
+                };
+                ui.label(egui::RichText::new(health_text).size(14.0).color(text_color));
             });
         });
 }
