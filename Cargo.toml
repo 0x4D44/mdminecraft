@@ -28,6 +28,7 @@ mdminecraft-world = { path = "crates/world" }
 mdminecraft-render = { path = "crates/render" }
 mdminecraft-assets = { path = "crates/assets" }
 mdminecraft-physics = { path = "crates/physics" }
+mdminecraft-ui3d = { path = "crates/ui3d" }
 
 [workspace]
 members = [
