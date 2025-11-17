@@ -9,6 +9,7 @@ mod chunk_manager;
 mod driver;
 mod mesh;
 mod pipeline;
+mod time;
 mod ui;
 mod window;
 
@@ -18,6 +19,7 @@ pub use chunk_manager::{ChunkManager, ChunkRenderData, Frustum};
 pub use driver::{ChunkMeshDriver, ChunkMeshStat};
 pub use mesh::{mesh_chunk, MeshBuffers, MeshHash, MeshVertex};
 pub use pipeline::{ChunkMeshBuffer, RenderContext, SkyboxPipeline, VoxelPipeline};
+pub use time::{TimeOfDay, TimeUniform};
 pub use ui::{DebugHud, UiManager};
 pub use window::{InputState, WindowConfig, WindowManager};
 
