@@ -9,7 +9,7 @@ use mdminecraft_render::{
     RendererConfig, TimeOfDay, WindowConfig, WindowManager,
 };
 use mdminecraft_ui3d::{Button3D, ButtonState, Text3D, UI3DManager, UIElementHandle, screen_to_ray};
-use mdminecraft_world::{BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
+use mdminecraft_world::{BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR, Mob, MobSpawner};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -303,6 +303,11 @@ pub struct GameWorld {
     ui_block_label: Option<UIElementHandle>,
     ui_demo_button: Option<UIElementHandle>,
     ui_hovered_button: Option<UIElementHandle>,
+    // Mob system
+    mobs: Vec<Mob>,
+    mob_spawner: MobSpawner,
+    mob_labels: Vec<Option<UIElementHandle>>,
+    current_tick: u64,
 }
 
 impl GameWorld {
@@ -343,6 +348,10 @@ impl GameWorld {
         let mut total_vertices = 0;
         let mut total_indices = 0;
 
+        // Mob spawning
+        let mob_spawner = MobSpawner::new(world_seed);
+        let mut mobs = Vec::new();
+
         {
             let resources = renderer.render_resources().expect("GPU not initialized");
 
@@ -359,6 +368,11 @@ impl GameWorld {
                         resources.pipeline.create_chunk_bind_group(resources.device, chunk_pos);
 
                     chunk_manager.add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
+
+                    // Spawn mobs for this chunk
+                    let chunk_mobs = Self::spawn_mobs_for_chunk(&mob_spawner, &chunk, world_seed);
+                    mobs.extend(chunk_mobs);
+
                     chunks.insert(chunk_pos, chunk);
                 }
             }
@@ -370,6 +384,7 @@ impl GameWorld {
             total_vertices,
             total_indices
         );
+        tracing::info!("Spawned {} mobs", mobs.len());
 
         // Setup camera
         renderer.camera_mut().position = glam::Vec3::new(0.0, 100.0, 0.0);
@@ -443,7 +458,51 @@ impl GameWorld {
             ui_block_label: None,
             ui_demo_button: None,
             ui_hovered_button: None,
+            mobs,
+            mob_spawner,
+            mob_labels: Vec::new(),
+            current_tick: 0,
         })
+    }
+
+    /// Spawn mobs for a chunk based on its terrain
+    fn spawn_mobs_for_chunk(spawner: &MobSpawner, chunk: &Chunk, world_seed: u64) -> Vec<Mob> {
+        use mdminecraft_world::{BiomeAssigner, CHUNK_SIZE_X, CHUNK_SIZE_Z};
+
+        // Extract surface heights from chunk
+        let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
+
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                // Find the highest non-air block
+                let mut height = 0;
+                for y in (0..256).rev() {
+                    if chunk.voxel(x, y, z).id != BLOCK_AIR {
+                        height = y as i32;
+                        break;
+                    }
+                }
+                surface_heights[z][x] = height;
+            }
+        }
+
+        // Determine chunk biome (use center of chunk)
+        let biome_assigner = BiomeAssigner::new(world_seed);
+        let chunk_pos = chunk.position();
+        let center_x = chunk_pos.x * CHUNK_SIZE_X as i32 + (CHUNK_SIZE_X as i32 / 2);
+        let center_z = chunk_pos.z * CHUNK_SIZE_Z as i32 + (CHUNK_SIZE_Z as i32 / 2);
+        let biome = biome_assigner.get_biome(center_x, center_z);
+
+        spawner.generate_spawns(chunk_pos.x, chunk_pos.z, biome, &surface_heights)
+    }
+
+    /// Update all mobs in the world
+    fn update_mobs(&mut self) {
+        self.current_tick += 1;
+
+        for mob in &mut self.mobs {
+            mob.update(self.current_tick);
+        }
     }
 
     /// Handle an event
@@ -570,6 +629,9 @@ impl GameWorld {
             self.handle_death();
         }
 
+        // Update mobs
+        self.update_mobs();
+
         // Update debug HUD
         self.debug_hud.update_fps(dt);
         let camera = self.renderer.camera();
@@ -616,6 +678,9 @@ impl GameWorld {
 
         // Update demo button
         self.update_demo_button();
+
+        // Update mob labels
+        self.update_mob_labels();
 
         // Handle UI interactions
         self.handle_ui_interaction();
@@ -1161,6 +1226,45 @@ impl GameWorld {
 
                 self.ui_demo_button = Some(ui_manager.add_button(resources.device, button));
                 tracing::info!("Created demo 3D button");
+            }
+        }
+    }
+
+    /// Update 3D labels above mobs
+    fn update_mob_labels(&mut self) {
+        if let Some(ui_manager) = &mut self.ui_manager {
+            let resources = self.renderer.render_resources().expect("GPU not initialized");
+
+            // Ensure mob_labels has the same length as mobs
+            while self.mob_labels.len() < self.mobs.len() {
+                self.mob_labels.push(None);
+            }
+
+            // Remove excess labels if we have fewer mobs
+            while self.mob_labels.len() > self.mobs.len() {
+                if let Some(Some(handle)) = self.mob_labels.pop() {
+                    ui_manager.remove_text(handle);
+                }
+            }
+
+            // Update each mob's label
+            for (i, mob) in self.mobs.iter().enumerate() {
+                let mob_pos = glam::Vec3::new(mob.x as f32, mob.y as f32 + 1.0, mob.z as f32);
+                let mob_name = format!("{:?}", mob.mob_type);
+
+                if let Some(Some(handle)) = self.mob_labels.get(i) {
+                    // Update existing label
+                    ui_manager.set_text_content(resources.device, *handle, &mob_name);
+                    ui_manager.set_text_position(resources.device, *handle, mob_pos);
+                } else {
+                    // Create new label
+                    let text = Text3D::new(mob_pos, mob_name)
+                        .with_font_size(0.2)
+                        .with_color([1.0, 0.8, 0.4, 1.0])
+                        .with_billboard(true);
+                    let handle = ui_manager.add_text(resources.device, text);
+                    self.mob_labels[i] = Some(handle);
+                }
             }
         }
     }
