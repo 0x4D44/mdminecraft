@@ -8,7 +8,7 @@ use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
     RendererConfig, TimeOfDay, WindowConfig, WindowManager,
 };
-use mdminecraft_ui3d::{Text3D, UI3DManager, UIElementHandle};
+use mdminecraft_ui3d::{Button3D, ButtonState, Text3D, UI3DManager, UIElementHandle, screen_to_ray};
 use mdminecraft_world::{BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -301,6 +301,8 @@ pub struct GameWorld {
     ui_manager: Option<UI3DManager>,
     ui_position_label: Option<UIElementHandle>,
     ui_block_label: Option<UIElementHandle>,
+    ui_demo_button: Option<UIElementHandle>,
+    ui_hovered_button: Option<UIElementHandle>,
 }
 
 impl GameWorld {
@@ -439,6 +441,8 @@ impl GameWorld {
             ui_manager,
             ui_position_label: None,
             ui_block_label: None,
+            ui_demo_button: None,
+            ui_hovered_button: None,
         })
     }
 
@@ -609,6 +613,12 @@ impl GameWorld {
 
         // Update 3D UI labels
         self.update_ui_labels();
+
+        // Update demo button
+        self.update_demo_button();
+
+        // Handle UI interactions
+        self.handle_ui_interaction();
 
         // Render
         self.render();
@@ -1130,6 +1140,87 @@ impl GameWorld {
                 // Hide block label when not looking at a block
                 ui_manager.remove_text(handle);
                 self.ui_block_label = None;
+            }
+        }
+    }
+
+    /// Create and manage 3D UI demo button
+    fn update_demo_button(&mut self) {
+        if let Some(ui_manager) = &mut self.ui_manager {
+            let resources = self.renderer.render_resources().expect("GPU not initialized");
+            let camera = self.renderer.camera();
+
+            // Create demo button if it doesn't exist
+            if self.ui_demo_button.is_none() {
+                let button_pos = camera.position + camera.forward() * 5.0;
+                let button = Button3D::new(button_pos, "Click Me!")
+                    .with_size(2.0, 0.6)
+                    .with_font_size(0.35)
+                    .with_callback(1) // ID 1 for this button
+                    .with_billboard(true);
+
+                self.ui_demo_button = Some(ui_manager.add_button(resources.device, button));
+                tracing::info!("Created demo 3D button");
+            }
+        }
+    }
+
+    /// Handle UI interactions (hover, click)
+    fn handle_ui_interaction(&mut self) {
+        if let Some(ui_manager) = &mut self.ui_manager {
+            let resources = self.renderer.render_resources().expect("GPU not initialized");
+            let camera = self.renderer.camera();
+
+            // Get mouse position (center of screen for now since cursor is grabbed)
+            let screen_size = (1280, 720);
+            let mouse_pos = if self.input.cursor_grabbed {
+                // Center of screen when cursor is grabbed
+                (screen_size.0 as f32 / 2.0, screen_size.1 as f32 / 2.0)
+            } else {
+                // TODO: Get actual mouse position when cursor is not grabbed
+                (screen_size.0 as f32 / 2.0, screen_size.1 as f32 / 2.0)
+            };
+
+            // Convert screen position to ray
+            let view_matrix = camera.view_matrix();
+            let proj_matrix = camera.projection_matrix();
+            let (ray_origin, ray_dir) = screen_to_ray(mouse_pos, screen_size, &view_matrix, &proj_matrix);
+
+            // Raycast against buttons
+            if let Some((handle, _hit)) = ui_manager.raycast_buttons(ray_origin, ray_dir, camera.position) {
+                // Set hover state
+                if self.ui_hovered_button != Some(handle) {
+                    // Reset previous hovered button
+                    if let Some(prev_handle) = self.ui_hovered_button {
+                        ui_manager.set_button_state(resources.device, prev_handle, ButtonState::Normal);
+                    }
+
+                    // Set new hovered button
+                    ui_manager.set_button_state(resources.device, handle, ButtonState::Hover);
+                    self.ui_hovered_button = Some(handle);
+                    tracing::debug!("Hovering button {}", handle);
+                }
+
+                // Handle click
+                if self.input.is_mouse_pressed(MouseButton::Left) {
+                    ui_manager.set_button_state(resources.device, handle, ButtonState::Pressed);
+                    if let Some(callback_id) = ui_manager.get_button_callback(handle) {
+                        tracing::info!("Button {} clicked! Callback ID: {}", handle, callback_id);
+                        // Handle button action based on callback_id
+                        match callback_id {
+                            1 => {
+                                tracing::info!("Demo button was clicked!");
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            } else {
+                // No button hovered, reset hover state
+                if let Some(prev_handle) = self.ui_hovered_button {
+                    ui_manager.set_button_state(resources.device, prev_handle, ButtonState::Normal);
+                    self.ui_hovered_button = None;
+                }
             }
         }
     }

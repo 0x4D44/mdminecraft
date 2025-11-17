@@ -1,9 +1,10 @@
 //! UI3D Manager - Manages all 3D UI elements in the game
 
-use crate::components::{Text3D, UIComponent};
+use crate::components::{Button3D, ButtonState, Text3D, UIComponent};
+use crate::interaction::{raycast_billboard_quad, UIRaycastHit};
 use crate::render::{FontAtlas, FontAtlasBuilder, TextRenderer};
 use anyhow::Result;
-use glam::Vec3;
+use glam::{Vec3, Mat4};
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
@@ -19,10 +20,19 @@ struct UIElement {
     needs_update: bool,
 }
 
+/// A managed button element
+struct ButtonElement {
+    button: Button3D,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
 /// Manages all 3D UI elements in the game
 pub struct UI3DManager {
     text_renderer: TextRenderer,
     elements: HashMap<UIElementHandle, UIElement>,
+    buttons: HashMap<UIElementHandle, ButtonElement>,
     next_handle: u64,
 }
 
@@ -46,6 +56,7 @@ impl UI3DManager {
         Ok(Self {
             text_renderer,
             elements: HashMap::new(),
+            buttons: HashMap::new(),
             next_handle: 1,
         })
     }
@@ -155,6 +166,7 @@ impl UI3DManager {
 
     /// Render all UI elements
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, camera_bind_group: &'a wgpu::BindGroup) {
+        // Render text elements
         for element in self.elements.values() {
             if !element.text.is_visible() {
                 continue;
@@ -168,11 +180,119 @@ impl UI3DManager {
             render_pass.set_index_buffer(element.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..element.index_count, 0, 0..1);
         }
+
+        // Render buttons
+        self.render_buttons(render_pass, camera_bind_group);
     }
 
     /// Get the number of active UI elements
     pub fn element_count(&self) -> usize {
-        self.elements.len()
+        self.elements.len() + self.buttons.len()
+    }
+
+    // === Button Management ===
+
+    /// Add a new button to the UI
+    pub fn add_button(&mut self, device: &wgpu::Device, button: Button3D) -> UIElementHandle {
+        let handle = self.next_handle;
+        self.next_handle += 1;
+
+        let text = button.to_text3d();
+        let (vertex_buffer, index_buffer, index_count) = self.create_text_buffers(device, &text);
+
+        self.buttons.insert(
+            handle,
+            ButtonElement {
+                button,
+                vertex_buffer,
+                index_buffer,
+                index_count,
+            },
+        );
+
+        handle
+    }
+
+    /// Update a button's state (hover, pressed, etc.)
+    pub fn set_button_state(&mut self, device: &wgpu::Device, handle: UIElementHandle, state: ButtonState) {
+        // Create buffers first
+        let buffers = if let Some(element) = self.buttons.get(&handle) {
+            let mut temp_button = element.button.clone();
+            temp_button.set_state(state);
+            let text = temp_button.to_text3d();
+            Some((self.create_text_buffers(device, &text), temp_button))
+        } else {
+            None
+        };
+
+        // Now update the element
+        if let Some(((vertex_buffer, index_buffer, index_count), button)) = buffers {
+            if let Some(element) = self.buttons.get_mut(&handle) {
+                element.button = button;
+                element.vertex_buffer = vertex_buffer;
+                element.index_buffer = index_buffer;
+                element.index_count = index_count;
+            }
+        }
+    }
+
+    /// Get a button's current state
+    pub fn get_button_state(&self, handle: UIElementHandle) -> Option<ButtonState> {
+        self.buttons.get(&handle).map(|e| e.button.state)
+    }
+
+    /// Remove a button
+    pub fn remove_button(&mut self, handle: UIElementHandle) {
+        self.buttons.remove(&handle);
+    }
+
+    /// Raycast against all buttons to find which one was clicked
+    /// Returns (handle, hit) if a button was hit
+    pub fn raycast_buttons(
+        &self,
+        ray_origin: Vec3,
+        ray_dir: Vec3,
+        camera_pos: Vec3,
+    ) -> Option<(UIElementHandle, UIRaycastHit)> {
+        let mut closest_hit: Option<(UIElementHandle, UIRaycastHit)> = None;
+        let mut closest_distance = f32::MAX;
+
+        for (handle, element) in &self.buttons {
+            if !element.button.is_interactable() {
+                continue;
+            }
+
+            let (pos, size) = element.button.bounds();
+            if let Some(hit) = raycast_billboard_quad(ray_origin, ray_dir, pos, size, camera_pos) {
+                if hit.distance < closest_distance {
+                    closest_distance = hit.distance;
+                    closest_hit = Some((*handle, hit));
+                }
+            }
+        }
+
+        closest_hit
+    }
+
+    /// Get button callback ID if it exists
+    pub fn get_button_callback(&self, handle: UIElementHandle) -> Option<u32> {
+        self.buttons.get(&handle).and_then(|e| e.button.callback_id)
+    }
+
+    /// Render buttons (called during render pass)
+    fn render_buttons<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, camera_bind_group: &'a wgpu::BindGroup) {
+        for element in self.buttons.values() {
+            if !element.button.visible {
+                continue;
+            }
+
+            render_pass.set_pipeline(self.text_renderer.pipeline(element.button.billboard));
+            render_pass.set_bind_group(0, camera_bind_group, &[]);
+            render_pass.set_bind_group(1, self.text_renderer.font_bind_group(), &[]);
+            render_pass.set_vertex_buffer(0, element.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(element.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..element.index_count, 0, 0..1);
+        }
     }
 
     /// Helper to create GPU buffers for a text element
