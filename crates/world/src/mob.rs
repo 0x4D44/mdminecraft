@@ -7,9 +7,10 @@ use crate::chunk::CHUNK_SIZE_X;
 use crate::chunk::CHUNK_SIZE_Z;
 use serde::{Deserialize, Serialize};
 
-/// Types of passive mobs that can spawn in the world.
+/// Types of mobs that can spawn in the world.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MobType {
+    // Passive mobs
     /// Pig - spawns in plains, forests
     Pig,
     /// Cow - spawns in plains, forests
@@ -18,6 +19,12 @@ pub enum MobType {
     Sheep,
     /// Chicken - spawns in plains, forests
     Chicken,
+
+    // Hostile mobs
+    /// Zombie - hostile, melee attack
+    Zombie,
+    /// Skeleton - hostile, ranged attack (future)
+    Skeleton,
 }
 
 impl MobType {
@@ -32,23 +39,33 @@ impl MobType {
                 (MobType::Cow, 8.0),
                 (MobType::Sheep, 12.0),
                 (MobType::Chicken, 10.0),
+                (MobType::Zombie, 3.0),  // Hostile spawns
             ],
             BiomeId::Forest | BiomeId::BirchForest => vec![
                 (MobType::Pig, 8.0),
                 (MobType::Cow, 4.0),
                 (MobType::Chicken, 10.0),
+                (MobType::Zombie, 5.0),
+                (MobType::Skeleton, 4.0),
             ],
             BiomeId::Hills => vec![
                 (MobType::Sheep, 15.0),
                 (MobType::Cow, 5.0),
+                (MobType::Skeleton, 3.0),
             ],
             BiomeId::Savanna => vec![
                 (MobType::Cow, 6.0),
                 (MobType::Chicken, 8.0),
+                (MobType::Zombie, 2.0),
             ],
             // No mobs in cold, ocean, or extreme biomes
             _ => vec![],
         }
+    }
+
+    /// Check if this mob type is hostile.
+    pub fn is_hostile(&self) -> bool {
+        matches!(self, MobType::Zombie | MobType::Skeleton)
     }
 
     /// Get the mob's movement speed in blocks per tick.
@@ -58,6 +75,8 @@ impl MobType {
             MobType::Cow => 0.2,
             MobType::Sheep => 0.23,
             MobType::Chicken => 0.4,
+            MobType::Zombie => 0.15,    // Slow but relentless
+            MobType::Skeleton => 0.25,  // Faster, ranged attacker
         }
     }
 
@@ -68,6 +87,8 @@ impl MobType {
             MobType::Cow => 0.7,
             MobType::Sheep => 0.45,
             MobType::Chicken => 0.3,
+            MobType::Zombie => 0.6,     // Human-sized
+            MobType::Skeleton => 0.5,   // Slightly smaller
         }
     }
 
@@ -78,6 +99,68 @@ impl MobType {
             MobType::Cow => 10.0,
             MobType::Sheep => 8.0,
             MobType::Chicken => 4.0,
+            MobType::Zombie => 20.0,    // Tanky hostile
+            MobType::Skeleton => 15.0,  // Medium health
+        }
+    }
+
+    /// Get the mob's attack damage (for hostile mobs).
+    pub fn attack_damage(&self) -> f32 {
+        match self {
+            MobType::Zombie => 3.0,     // Melee damage
+            MobType::Skeleton => 2.0,   // Arrow damage (future)
+            _ => 0.0,                   // Passive mobs don't attack
+        }
+    }
+
+    /// Get the mob's detection range (how far they can see the player).
+    pub fn detection_range(&self) -> f32 {
+        match self {
+            MobType::Zombie => 16.0,    // Medium range
+            MobType::Skeleton => 20.0,  // Longer range for ranged
+            _ => 0.0,                   // Passive mobs don't chase
+        }
+    }
+
+    /// Get the mob's attack range (how close they need to be to attack).
+    pub fn attack_range(&self) -> f32 {
+        match self {
+            MobType::Zombie => 2.0,     // Melee range
+            MobType::Skeleton => 12.0,  // Ranged attack (future)
+            _ => 0.0,
+        }
+    }
+
+    /// Get loot drops for this mob type.
+    /// Returns a vector of (item_type, min_count, max_count) tuples.
+    /// ItemType is represented as:
+    /// - 0: Block ID
+    /// - 1000+: Item ID (subtract 1000 to get actual item ID)
+    /// - 2000+: Food ID
+    pub fn get_loot_drops(&self) -> Vec<(u16, u32, u32)> {
+        match self {
+            // Passive mobs drop food
+            MobType::Pig => vec![
+                (2001, 1, 3),  // Raw meat (1-3 pieces)
+            ],
+            MobType::Cow => vec![
+                (2001, 1, 3),  // Raw meat (1-3 pieces)
+            ],
+            MobType::Sheep => vec![
+                (1001, 1, 2),  // Wool item (1-2 blocks)
+            ],
+            MobType::Chicken => vec![
+                (2001, 0, 2),  // Raw meat (0-2 pieces)
+            ],
+            // Hostile mobs drop combat-related items
+            MobType::Zombie => vec![
+                (2002, 0, 2),  // Rotten flesh (0-2 pieces)
+                (1001, 0, 1),  // Rare stick drop (0-1)
+            ],
+            MobType::Skeleton => vec![
+                (1002, 0, 2),  // Bone (0-2)
+                (1003, 0, 2),  // Arrow (0-2)
+            ],
         }
     }
 }
@@ -116,6 +199,10 @@ pub enum MobState {
     Idle,
     /// Wandering in a direction
     Wandering,
+    /// Chasing a target (hostile only)
+    Chasing,
+    /// Attacking a target (hostile only)
+    Attacking,
 }
 
 impl Mob {
@@ -190,6 +277,7 @@ impl Mob {
                     self.vel_z = 0.0;
                 }
             }
+            _ => {} // Chasing and Attacking handled in update_hostile
         }
 
         // Apply velocity to position
@@ -202,6 +290,106 @@ impl Mob {
             self.vel_y -= 0.08; // Gravity acceleration
             self.vel_y *= 0.98; // Air resistance
         }
+    }
+
+    /// Update hostile mob AI with player tracking.
+    ///
+    /// Hostile mobs will:
+    /// - Detect player within detection range
+    /// - Chase player when detected
+    /// - Attack when in range
+    /// - Return to wandering when player is out of range
+    ///
+    /// # Arguments
+    /// * `tick` - Current simulation tick
+    /// * `player_pos` - Player position (x, y, z)
+    ///
+    /// # Returns
+    /// * `Option<f32>` - Attack damage if mob attacked this tick, None otherwise
+    pub fn update_hostile(&mut self, tick: u64, player_pos: (f64, f64, f64)) -> Option<f32> {
+        if !self.mob_type.is_hostile() {
+            return None;
+        }
+
+        // Calculate distance to player
+        let dx = player_pos.0 - self.x;
+        let dy = player_pos.1 - self.y;
+        let dz = player_pos.2 - self.z;
+        let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+
+        let detection_range = self.mob_type.detection_range() as f64;
+        let attack_range = self.mob_type.attack_range() as f64;
+
+        self.ai_timer += 1;
+
+        let mut attacked = None;
+
+        match self.state {
+            MobState::Idle | MobState::Wandering => {
+                // Check if player is in detection range
+                if distance <= detection_range {
+                    self.state = MobState::Chasing;
+                    self.ai_timer = 0;
+                } else {
+                    // Continue passive behavior
+                    self.update(tick);
+                    return None;
+                }
+            }
+            MobState::Chasing => {
+                if distance > detection_range * 1.5 {
+                    // Lost sight of player, return to wandering
+                    self.state = MobState::Wandering;
+                    self.ai_timer = 0;
+                    self.vel_x = 0.0;
+                    self.vel_z = 0.0;
+                } else if distance <= attack_range {
+                    // In attack range, start attacking
+                    self.state = MobState::Attacking;
+                    self.ai_timer = 0;
+                } else {
+                    // Chase the player
+                    let horizontal_dist = (dx * dx + dz * dz).sqrt();
+                    if horizontal_dist > 0.1 {
+                        let speed = self.mob_type.movement_speed() as f64;
+                        self.vel_x = (dx / horizontal_dist) * speed;
+                        self.vel_z = (dz / horizontal_dist) * speed;
+                    }
+                }
+            }
+            MobState::Attacking => {
+                if distance > attack_range * 1.2 {
+                    // Player moved away, chase again
+                    self.state = MobState::Chasing;
+                    self.ai_timer = 0;
+                } else {
+                    // Attack every 20 ticks (1 second at 20 TPS)
+                    if self.ai_timer >= 20 {
+                        attacked = Some(self.mob_type.attack_damage());
+                        self.ai_timer = 0;
+                    }
+                    // Move slowly toward player while attacking
+                    let horizontal_dist = (dx * dx + dz * dz).sqrt();
+                    if horizontal_dist > 0.1 {
+                        let speed = self.mob_type.movement_speed() as f64 * 0.5; // Half speed while attacking
+                        self.vel_x = (dx / horizontal_dist) * speed;
+                        self.vel_z = (dz / horizontal_dist) * speed;
+                    }
+                }
+            }
+        }
+
+        // Apply physics (gravity, position update)
+        self.x += self.vel_x;
+        self.z += self.vel_z;
+
+        if self.vel_y.abs() > 0.01 {
+            self.y += self.vel_y;
+            self.vel_y -= 0.08;
+            self.vel_y *= 0.98;
+        }
+
+        attacked
     }
 
     /// Get the mob's current chunk position.

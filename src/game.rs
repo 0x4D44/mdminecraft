@@ -4,6 +4,7 @@ use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_core::{ItemStack, ItemType, ToolMaterial, ToolType};
+use mdminecraft_core::item::FoodType;
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
     RendererConfig, TimeOfDay, WindowConfig, WindowManager,
@@ -723,16 +724,43 @@ impl GameWorld {
     fn update_mobs(&mut self) {
         self.current_tick += 1;
 
-        // Update mob AI
+        // Get player position for hostile AI
+        let player_pos = {
+            let camera = self.renderer.camera();
+            (camera.position.x as f64, camera.position.y as f64, camera.position.z as f64)
+        };
+
+        // Update mob AI and collect attacks
+        let mut total_damage = 0.0;
         for mob in &mut self.mobs {
-            mob.update(self.current_tick);
+            if mob.mob_type.is_hostile() {
+                // Hostile mobs track and attack player
+                if let Some(damage) = mob.update_hostile(self.current_tick, player_pos) {
+                    total_damage += damage;
+                    tracing::info!("{:?} attacked player for {:.1} damage!", mob.mob_type, damage);
+                }
+            } else {
+                // Passive mobs wander
+                mob.update(self.current_tick);
+            }
         }
 
-        // Remove dead mobs
+        // Apply damage to player
+        if total_damage > 0.0 {
+            self.player_health.damage(total_damage);
+            tracing::info!("Player health: {:.1}/{:.1}", self.player_health.current, self.player_health.max);
+        }
+
+        // Remove dead mobs and generate loot
         let mut i = 0;
         while i < self.mobs.len() {
             if self.mobs[i].is_dead() {
-                tracing::info!("Removing dead {:?}", self.mobs[i].mob_type);
+                let mob_type = self.mobs[i].mob_type;
+                tracing::info!("Removing dead {:?}", mob_type);
+
+                // Generate loot drops
+                self.generate_mob_loot(mob_type);
+
                 self.mobs.remove(i);
 
                 // Remove corresponding label
@@ -756,6 +784,84 @@ impl GameWorld {
                 i += 1;
             }
         }
+    }
+
+    /// Generate loot from a killed mob and add to player inventory
+    fn generate_mob_loot(&mut self, mob_type: mdminecraft_world::MobType) {
+        let loot_table = mob_type.get_loot_drops();
+
+        // Use current tick for deterministic "randomness"
+        let seed = self.current_tick;
+
+        for (idx, (item_code, min_count, max_count)) in loot_table.iter().enumerate() {
+            if *max_count == 0 && *min_count == 0 {
+                continue;
+            }
+
+            // Deterministic "random" count based on tick + item index
+            let count = if *max_count > *min_count {
+                let range = max_count - min_count + 1;
+                let pseudo_random = ((seed + idx as u64) * 48271) % range as u64;
+                min_count + pseudo_random as u32
+            } else {
+                *min_count
+            };
+
+            if count == 0 {
+                continue; // No drop this time
+            }
+
+            // Decode item type
+            let item_type = if *item_code >= 2000 {
+                // Food item
+                let food_id = item_code - 2000;
+                match food_id {
+                    1 => ItemType::Food(FoodType::RawMeat),
+                    2 => ItemType::Food(FoodType::RawMeat), // Rotten flesh -> raw meat for now
+                    _ => ItemType::Item(food_id),
+                }
+            } else if *item_code >= 1000 {
+                // Generic item
+                ItemType::Item(item_code - 1000)
+            } else {
+                // Block
+                ItemType::Block(*item_code)
+            };
+
+            // Try to add to hotbar
+            let stack = ItemStack::new(item_type, count);
+            if self.try_add_to_hotbar(stack.clone()) {
+                tracing::info!("Looted: {} x{} from {:?}",
+                    self.hotbar.item_name(Some(&stack)), count, mob_type);
+            } else {
+                tracing::warn!("Hotbar full! Lost loot: {} x{}",
+                    self.hotbar.item_name(Some(&stack)), count);
+            }
+        }
+    }
+
+    /// Try to add an item stack to the hotbar
+    /// Returns true if successful, false if hotbar is full
+    fn try_add_to_hotbar(&mut self, stack: ItemStack) -> bool {
+        // First try to merge with existing stack
+        for slot in &mut self.hotbar.slots {
+            if let Some(existing) = slot {
+                if existing.item_type == stack.item_type && existing.can_add(stack.count) {
+                    existing.count += stack.count;
+                    return true;
+                }
+            }
+        }
+
+        // Try to find empty slot
+        for slot in &mut self.hotbar.slots {
+            if slot.is_none() {
+                *slot = Some(stack);
+                return true;
+            }
+        }
+
+        false // Hotbar is full
     }
 
     /// Handle an event
@@ -1531,21 +1637,25 @@ impl GameWorld {
                 // Show name, health, and targeting indicator
                 let health_bar = create_health_bar(mob.health_percent(), 10);
                 let targeted = if targeted_mob == Some(i) { " <--" } else { "" };
-                let mob_text = format!("{:?}\n{} {:.0}/{:.0}{}",
+                let hostile_tag = if mob.mob_type.is_hostile() { " [HOSTILE]" } else { "" };
+                let mob_text = format!("{:?}{}\n{} {:.0}/{:.0}{}",
                     mob.mob_type,
+                    hostile_tag,
                     health_bar,
                     mob.health,
                     mob.max_health,
                     targeted
                 );
 
-                // Color based on health
-                let color = if mob.health_percent() > 0.66 {
-                    [0.0, 1.0, 0.0, 1.0] // Green
+                // Color: Red for hostile mobs, health-based for passive
+                let color = if mob.mob_type.is_hostile() {
+                    [1.0, 0.2, 0.2, 1.0] // Bright red for hostiles
+                } else if mob.health_percent() > 0.66 {
+                    [0.0, 1.0, 0.0, 1.0] // Green for healthy passive
                 } else if mob.health_percent() > 0.33 {
-                    [1.0, 1.0, 0.0, 1.0] // Yellow
+                    [1.0, 1.0, 0.0, 1.0] // Yellow for damaged passive
                 } else {
-                    [1.0, 0.0, 0.0, 1.0] // Red
+                    [1.0, 0.0, 0.0, 1.0] // Red for critical passive
                 };
 
                 if let Some(handle) = self.mob_labels.get(i).and_then(|h| *h) {
