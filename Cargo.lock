@@ -1676,6 +1676,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdminecraft"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "glam",
+ "mdminecraft-assets",
+ "mdminecraft-core",
+ "mdminecraft-physics",
+ "mdminecraft-render",
+ "mdminecraft-world",
+ "pollster",
+ "tracing",
+ "tracing-subscriber",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "mdminecraft-assets"
 version = "0.1.0"
 dependencies = [

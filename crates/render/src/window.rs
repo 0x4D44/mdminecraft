@@ -53,6 +53,24 @@ impl WindowManager {
         })
     }
 
+    /// Create a new window with an existing event loop.
+    pub fn new_with_event_loop(config: WindowConfig, event_loop: &winit::event_loop::EventLoopWindowTarget<()>) -> Result<Self> {
+        let window = WindowBuilder::new()
+            .with_title(config.title)
+            .with_inner_size(winit::dpi::PhysicalSize::new(config.width, config.height))
+            .build(event_loop)?;
+
+        Ok(Self {
+            window: std::sync::Arc::new(window),
+            event_loop: None,
+        })
+    }
+
+    /// Convert into just the window (consuming self).
+    pub fn into_window(self) -> std::sync::Arc<Window> {
+        self.window
+    }
+
     /// Get Arc reference to the window.
     pub fn window(&self) -> std::sync::Arc<Window> {
         self.window.clone()

@@ -1,4 +1,35 @@
-﻿[workspace]
+﻿[package]
+name = "mdminecraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors = ["mdminecraft contributors"]
+description = "A deterministic voxel sandbox engine built in Rust"
+
+[[bin]]
+name = "mdminecraft"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+glam = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+egui-winit = { workspace = true }
+pollster = { workspace = true }
+
+# Internal dependencies
+mdminecraft-core = { path = "crates/core" }
+mdminecraft-world = { path = "crates/world" }
+mdminecraft-render = { path = "crates/render" }
+mdminecraft-assets = { path = "crates/assets" }
+mdminecraft-physics = { path = "crates/physics" }
+
+[workspace]
 members = [
     "crates/core",
     "crates/ecs",
