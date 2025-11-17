@@ -99,6 +99,8 @@ pub struct InputState {
     pub mouse_delta: (f64, f64),
     /// Mouse buttons pressed
     pub mouse_buttons: std::collections::HashSet<winit::event::MouseButton>,
+    /// Mouse buttons clicked this frame
+    pub mouse_clicks: std::collections::HashSet<winit::event::MouseButton>,
     /// Whether cursor is grabbed
     pub cursor_grabbed: bool,
 }
@@ -119,9 +121,15 @@ impl InputState {
         self.mouse_buttons.contains(&button)
     }
 
-    /// Reset per-frame state (like mouse delta).
+    /// Check if a mouse button was clicked this frame.
+    pub fn is_mouse_clicked(&self, button: winit::event::MouseButton) -> bool {
+        self.mouse_clicks.contains(&button)
+    }
+
+    /// Reset per-frame state (like mouse delta and clicks).
     pub fn reset_frame(&mut self) {
         self.mouse_delta = (0.0, 0.0);
+        self.mouse_clicks.clear();
     }
 
     /// Handle a window event and update state.
@@ -146,6 +154,7 @@ impl InputState {
                 match state {
                     ElementState::Pressed => {
                         self.mouse_buttons.insert(*button);
+                        self.mouse_clicks.insert(*button);
                     }
                     ElementState::Released => {
                         self.mouse_buttons.remove(button);
