@@ -241,6 +241,29 @@ impl UI3DManager {
         self.buttons.get(&handle).map(|e| e.button.state)
     }
 
+    /// Update a button's text content
+    pub fn set_button_text(&mut self, device: &wgpu::Device, handle: UIElementHandle, new_text: String) {
+        // Create buffers first
+        let buffers = if let Some(element) = self.buttons.get(&handle) {
+            let mut temp_button = element.button.clone();
+            temp_button.text = new_text;
+            let text = temp_button.to_text3d();
+            Some((self.create_text_buffers(device, &text), temp_button))
+        } else {
+            None
+        };
+
+        // Now update the element
+        if let Some(((vertex_buffer, index_buffer, index_count), button)) = buffers {
+            if let Some(element) = self.buttons.get_mut(&handle) {
+                element.button = button;
+                element.vertex_buffer = vertex_buffer;
+                element.index_buffer = index_buffer;
+                element.index_count = index_count;
+            }
+        }
+    }
+
     /// Remove a button
     pub fn remove_button(&mut self, handle: UIElementHandle) {
         self.buttons.remove(&handle);
