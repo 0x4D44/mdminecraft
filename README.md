@@ -17,6 +17,7 @@ mdminecraft is a production-ready voxel sandbox engine featuring deterministic w
 
 ### Key Features
 
+- 🎨 **Modern 3D Rendering** - GPU-accelerated voxel rendering with wgpu (Vulkan/DirectX 12/Metal)
 - 🌍 **Deterministic World Generation** - Same seed produces identical worlds every time
 - 🌐 **QUIC-Based Multiplayer** - Low-latency networking with client prediction and reconciliation
 - 🔄 **Complete Replay System** - Record and replay gameplay deterministically
@@ -57,7 +58,18 @@ cargo run --bin mdminecraft-server --release
 
 # Start a client (in another terminal)
 cargo run --bin mdminecraft-client --release
+
+# Run the 3D viewer demo (new!)
+cargo run --example viewer --package mdminecraft-render
 ```
+
+**3D Viewer Controls:**
+- **WASD** - Move camera
+- **Mouse** - Look around (Tab to grab cursor)
+- **Space/Shift** - Move up/down
+- **Escape** - Exit
+
+See [docs/3D_UI_DESIGN.md](docs/3D_UI_DESIGN.md) for full 3D rendering architecture details.
 
 ---
 
