@@ -160,6 +160,7 @@ fn create_debug_texture_atlas() -> Vec<u8> {
 pub struct VoxelPipeline {
     render_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
+    time_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     chunk_buffer: wgpu::Buffer,
     chunk_bind_group_layout: wgpu::BindGroupLayout,
@@ -181,29 +182,55 @@ impl VoxelPipeline {
             mapped_at_creation: false,
         });
 
-        // Create camera bind group layout
+        // Create time buffer
+        let time_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Time Buffer (Voxel)"),
+            size: std::mem::size_of::<crate::time::TimeUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create camera bind group layout (includes time)
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Camera Bind Group Layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
             });
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Camera Bind Group"),
             layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: time_buffer.as_entire_binding(),
+                },
+            ],
         });
 
         // Create chunk buffer
@@ -424,6 +451,7 @@ impl VoxelPipeline {
         Ok(Self {
             render_pipeline,
             camera_buffer,
+            time_buffer,
             camera_bind_group,
             chunk_buffer,
             chunk_bind_group_layout,
@@ -442,6 +470,12 @@ impl VoxelPipeline {
     pub fn update_camera(&self, queue: &wgpu::Queue, camera: &Camera) {
         let uniform = CameraUniform::from_camera(camera);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    /// Update time uniform buffer.
+    pub fn update_time(&self, queue: &wgpu::Queue, time: &crate::time::TimeOfDay) {
+        let uniform = crate::time::TimeUniform::from_time_of_day(time);
+        queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
     /// Create a chunk bind group for a specific chunk position.
@@ -532,6 +566,8 @@ impl VoxelPipeline {
 /// Skybox rendering pipeline.
 pub struct SkyboxPipeline {
     render_pipeline: wgpu::RenderPipeline,
+    time_buffer: wgpu::Buffer,
+    time_bind_group: wgpu::BindGroup,
 }
 
 impl SkyboxPipeline {
@@ -539,16 +575,49 @@ impl SkyboxPipeline {
     pub fn new(ctx: &RenderContext) -> Result<Self> {
         let device = &ctx.device;
 
+        // Create time buffer
+        let time_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Time Buffer"),
+            size: std::mem::size_of::<crate::time::TimeUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create time bind group layout
+        let time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Time Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Time Bind Group"),
+            layout: &time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: time_buffer.as_entire_binding(),
+            }],
+        });
+
         // Load skybox shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Skybox Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/skybox.wgsl").into()),
         });
 
-        // Create render pipeline layout (no bind groups needed)
+        // Create render pipeline layout with time bind group
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Skybox Pipeline Layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&time_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -588,7 +657,22 @@ impl SkyboxPipeline {
             multiview: None,
         });
 
-        Ok(Self { render_pipeline })
+        Ok(Self {
+            render_pipeline,
+            time_buffer,
+            time_bind_group,
+        })
+    }
+
+    /// Update time uniform buffer.
+    pub fn update_time(&self, queue: &wgpu::Queue, time: &crate::time::TimeOfDay) {
+        let uniform = crate::time::TimeUniform::from_time_of_day(time);
+        queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    /// Get the time bind group.
+    pub fn time_bind_group(&self) -> &wgpu::BindGroup {
+        &self.time_bind_group
     }
 
     /// Begin a skybox render pass.

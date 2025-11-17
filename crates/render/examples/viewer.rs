@@ -3,8 +3,8 @@
 use anyhow::Result;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_render::{
-    mesh_chunk, ChunkManager, DebugHud, Frustum, InputState, Renderer, RendererConfig, WindowConfig,
-    WindowManager,
+    mesh_chunk, ChunkManager, DebugHud, Frustum, InputState, Renderer, RendererConfig, TimeOfDay,
+    WindowConfig, WindowManager,
 };
 use mdminecraft_world::{ChunkPos, TerrainGenerator};
 use std::time::Instant;
@@ -101,6 +101,9 @@ fn main() -> Result<()> {
     // Frustum culling stats
     let mut chunks_visible = 0;
 
+    // Time-of-day system
+    let mut time_of_day = TimeOfDay::new();
+
     // Run event loop
     window_manager.run(move |event, window| {
         // Let UI handle events first
@@ -134,6 +137,26 @@ fn main() -> Result<()> {
                                 debug_hud.toggle();
                             }
                         }
+
+                        // Time controls
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::KeyP) = event.physical_key {
+                            if event.state.is_pressed() {
+                                time_of_day.toggle_pause();
+                                tracing::info!("Time paused: {}", !time_of_day.is_daytime());
+                            }
+                        }
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::BracketLeft) = event.physical_key {
+                            if event.state.is_pressed() {
+                                time_of_day.decrease_speed();
+                                tracing::info!("Time speed decreased");
+                            }
+                        }
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::BracketRight) = event.physical_key {
+                            if event.state.is_pressed() {
+                                time_of_day.increase_speed();
+                                tracing::info!("Time speed increased");
+                            }
+                        }
                     }
 
                     WindowEvent::Resized(new_size) => {
@@ -144,6 +167,9 @@ fn main() -> Result<()> {
                         let now = Instant::now();
                         let dt = (now - last_frame).as_secs_f32();
                         last_frame = now;
+
+                        // Update time-of-day
+                        time_of_day.update(dt);
 
                         // Update debug HUD
                         debug_hud.update_fps(dt);
@@ -162,6 +188,10 @@ fn main() -> Result<()> {
                         // Render
                         if let Some(frame) = renderer.begin_frame() {
                             let resources = renderer.render_resources().unwrap();
+
+                            // Update time uniforms for both pipelines
+                            resources.skybox_pipeline.update_time(resources.queue, &time_of_day);
+                            resources.pipeline.update_time(resources.queue, &time_of_day);
 
                             let mut encoder = resources.device.create_command_encoder(
                                 &wgpu::CommandEncoderDescriptor {

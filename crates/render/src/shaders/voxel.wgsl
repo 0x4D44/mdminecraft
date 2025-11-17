@@ -9,6 +9,15 @@ struct CameraUniform {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
+// Time uniform for dynamic lighting
+struct TimeUniform {
+    time: f32,
+    sun_dir: vec3<f32>,
+}
+
+@group(0) @binding(1)
+var<uniform> time_uniform: TimeUniform;
+
 // Chunk offset (passed via push constants or uniform)
 struct ChunkUniform {
     chunk_offset: vec3<f32>,
@@ -93,12 +102,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample texture atlas at UV coordinates
     var base_color = textureSample(atlas_texture, atlas_sampler, in.uv).rgb;
 
-    // Simple diffuse lighting using normal
-    let sun_dir = normalize(vec3<f32>(0.5, 1.0, 0.3));
+    // Dynamic sun direction from time-of-day
+    let sun_dir = normalize(time_uniform.sun_dir);
     let diffuse = max(dot(in.normal, sun_dir), 0.0);
 
-    // Ambient + diffuse + voxel light
-    let ambient = 0.3;
+    // Adjust ambient based on time of day
+    // Night: lower ambient, Day: higher ambient
+    let time_factor = smoothstep(0.0, 0.3, time_uniform.time) * (1.0 - smoothstep(0.7, 1.0, time_uniform.time));
+    let ambient = mix(0.1, 0.3, time_factor);  // Darker at night
+
+    // Apply lighting
     let lighting = ambient + diffuse * 0.5 + in.light * 0.4;
 
     // Apply lighting to base color
