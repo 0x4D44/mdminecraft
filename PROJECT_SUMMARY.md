@@ -98,7 +98,45 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 - ✅ Memory management
 - ✅ Index updates
 
-### 4. 3D Inventory UI
+### 4. Hostile Mobs & Advanced Combat
+
+**Hostile Mob Types:**
+- ✅ Zombie: Slow, tanky melee (20 HP, 3 damage, 16 block range)
+- ✅ Skeleton: Fast, medium health (15 HP, 2 damage, 20 block range)
+- ✅ Biome-specific spawning with appropriate weights
+- ✅ Visual distinction with [HOSTILE] tag and red labels
+
+**Combat AI:**
+- ✅ State machine: Idle → Wandering → Chasing → Attacking
+- ✅ Player detection within range (16-20 blocks)
+- ✅ Smart pathfinding toward player
+- ✅ Attack cooldown (20 ticks / 1 second)
+- ✅ De-aggro when player escapes (1.5× detection range)
+- ✅ Half-speed movement while attacking
+
+**Player Damage:**
+- ✅ Automatic attacks from hostile mobs
+- ✅ Damage respects invulnerability frames (0.5s)
+- ✅ Health tracking and console logging
+- ✅ Integration with PlayerHealth system
+
+**Loot Drop System:**
+- ✅ Passive mobs drop food (1-3 Raw Meat)
+- ✅ Hostile mobs drop combat items:
+  - Zombie: Rotten Flesh (0-2), Sticks (0-1 rare)
+  - Skeleton: Bones (0-2), Arrows (0-2)
+- ✅ Deterministic pseudo-random drop counts
+- ✅ Auto-collect to player hotbar
+- ✅ Stack merging with existing items
+- ✅ Full inventory warnings
+
+**Spawn Distribution:**
+- Forest: 5 Zombies, 4 Skeletons (highest hostile density)
+- Plains: 3 Zombies
+- Hills: 3 Skeletons
+- Savanna: 2 Zombies
+
+### 5. 3D Inventory UI
 
 **Interface:**
 - ✅ Toggle with `E` key
@@ -122,7 +160,7 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 [Stone x64]        [Cobblestone x64]   [Planks x64]
 ```
 
-### 5. 3D Crafting System
+### 6. 3D Crafting System
 
 **Interface:**
 - ✅ Toggle with `C` key
