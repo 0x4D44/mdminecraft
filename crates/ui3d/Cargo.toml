@@ -1,0 +1,37 @@
+[package]
+name = "mdminecraft-ui3d"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+wgpu = { workspace = true }
+tracing = { workspace = true }
+glam = { workspace = true }
+bytemuck = { workspace = true }
+
+# Font rendering
+fontdue = "0.9"
+
+# Internal dependencies
+mdminecraft-world = { path = "../world" }
+mdminecraft-assets = { path = "../assets" }
+mdminecraft-render = { path = "../render" }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+pollster = { workspace = true }
+winit = { workspace = true }
+
+[[example]]
+name = "text_demo"
+path = "examples/text_demo.rs"
+
+[[example]]
+name = "billboard_demo"
+path = "examples/billboard_demo.rs"
