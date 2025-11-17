@@ -100,7 +100,8 @@ impl Hotbar {
                 }
                 ItemType::Block(block_id) => self.block_name(block_id).to_string(),
                 ItemType::Food(food_type) => format!("{:?}", food_type),
-                ItemType::Item(_) => "Item".to_string(),
+                ItemType::Item(1) => "Stick".to_string(),
+                ItemType::Item(item_id) => format!("Item {}", item_id),
             }
         } else {
             "Empty".to_string()
@@ -119,8 +120,209 @@ impl Hotbar {
             7 => "Planks",
             8 => "Bricks",
             9 => "Glass",
+            58 => "Crafting Table",
             _ => "Unknown",
         }
+    }
+}
+
+/// Crafting recipe pattern - represents one crafting recipe
+#[derive(Debug, Clone)]
+struct CraftingRecipe {
+    /// Name of the recipe (for display)
+    name: String,
+    /// 3x3 pattern where None = any/empty, Some = required item type
+    pattern: [Option<ItemType>; 9],
+    /// Output item
+    output: ItemType,
+    /// Output count
+    output_count: u32,
+    /// Whether the pattern needs to match exactly (true) or can be shifted (false)
+    exact_position: bool,
+}
+
+impl CraftingRecipe {
+    /// Check if the given grid matches this recipe pattern
+    fn matches(&self, grid: &[Option<ItemType>; 9]) -> bool {
+        if self.exact_position {
+            // Exact position matching
+            self.pattern.iter().zip(grid.iter()).all(|(pattern_slot, grid_slot)| {
+                match (pattern_slot, grid_slot) {
+                    (None, _) => true, // Pattern doesn't care what's here
+                    (Some(required), Some(actual)) => required == actual,
+                    (Some(_), None) => false, // Pattern requires something but grid is empty
+                }
+            })
+        } else {
+            // Allow pattern to be shifted within the grid
+            // Try all possible offsets
+            for offset_y in 0..=2 {
+                for offset_x in 0..=2 {
+                    if self.matches_at_offset(grid, offset_x, offset_y) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+    }
+
+    fn matches_at_offset(&self, grid: &[Option<ItemType>; 9], offset_x: usize, offset_y: usize) -> bool {
+        // Extract the bounding box of the pattern
+        let pattern_bounds = self.get_pattern_bounds();
+        if pattern_bounds.is_none() {
+            return false; // Empty pattern
+        }
+        let (min_x, min_y, max_x, max_y) = pattern_bounds.unwrap();
+        let pattern_width = max_x - min_x + 1;
+        let pattern_height = max_y - min_y + 1;
+
+        // Check if pattern fits at this offset
+        if offset_x + pattern_width > 3 || offset_y + pattern_height > 3 {
+            return false;
+        }
+
+        // Check if all other grid positions are empty
+        for y in 0..3 {
+            for x in 0..3 {
+                let grid_idx = y * 3 + x;
+                let is_in_pattern_area = x >= offset_x && x < offset_x + pattern_width
+                    && y >= offset_y && y < offset_y + pattern_height;
+
+                if is_in_pattern_area {
+                    // Check if pattern matches here
+                    let pattern_x = x - offset_x + min_x;
+                    let pattern_y = y - offset_y + min_y;
+                    let pattern_idx = pattern_y * 3 + pattern_x;
+
+                    match (&self.pattern[pattern_idx], &grid[grid_idx]) {
+                        (None, _) => continue,
+                        (Some(required), Some(actual)) if required == actual => continue,
+                        (Some(_), Some(_)) => return false, // Mismatch
+                        (Some(_), None) => return false, // Required but empty
+                        (None, _) => continue,
+                    }
+                } else {
+                    // Outside pattern area - must be empty
+                    if grid[grid_idx].is_some() {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn get_pattern_bounds(&self) -> Option<(usize, usize, usize, usize)> {
+        let mut min_x = 3;
+        let mut min_y = 3;
+        let mut max_x = 0;
+        let mut max_y = 0;
+        let mut found_any = false;
+
+        for y in 0..3 {
+            for x in 0..3 {
+                let idx = y * 3 + x;
+                if self.pattern[idx].is_some() {
+                    found_any = true;
+                    min_x = min_x.min(x);
+                    min_y = min_y.min(y);
+                    max_x = max_x.max(x);
+                    max_y = max_y.max(y);
+                }
+            }
+        }
+
+        if found_any {
+            Some((min_x, min_y, max_x, max_y))
+        } else {
+            None
+        }
+    }
+}
+
+/// Recipe book containing all available crafting recipes
+struct RecipeBook {
+    recipes: Vec<CraftingRecipe>,
+}
+
+impl RecipeBook {
+    fn new() -> Self {
+        let mut book = Self { recipes: Vec::new() };
+        book.register_default_recipes();
+        book
+    }
+
+    fn register_default_recipes(&mut self) {
+        // Recipe 1: Wood -> Planks (1:4 ratio)
+        self.recipes.push(CraftingRecipe {
+            name: "Planks".to_string(),
+            pattern: [
+                None, None, None,
+                None, Some(ItemType::Block(3)), None, // Wood in center
+                None, None, None,
+            ],
+            output: ItemType::Block(7), // Planks
+            output_count: 4,
+            exact_position: false,
+        });
+
+        // Recipe 2: Planks -> Sticks (2 planks vertical -> 4 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Sticks".to_string(),
+            pattern: [
+                None, Some(ItemType::Block(7)), None, // Planks
+                None, Some(ItemType::Block(7)), None, // Planks
+                None, None, None,
+            ],
+            output: ItemType::Item(1), // Stick item ID
+            output_count: 4,
+            exact_position: false,
+        });
+
+        // Recipe 3: Sticks + Planks -> Wood Pickaxe (T pattern)
+        self.recipes.push(CraftingRecipe {
+            name: "Wood Pickaxe".to_string(),
+            pattern: [
+                Some(ItemType::Block(7)), Some(ItemType::Block(7)), Some(ItemType::Block(7)), // 3 planks
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 4: Sticks + Cobblestone -> Stone Pickaxe (T pattern)
+        self.recipes.push(CraftingRecipe {
+            name: "Stone Pickaxe".to_string(),
+            pattern: [
+                Some(ItemType::Block(6)), Some(ItemType::Block(6)), Some(ItemType::Block(6)), // 3 cobblestone
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 5: 4 Planks in 2x2 -> Crafting Table
+        self.recipes.push(CraftingRecipe {
+            name: "Crafting Table".to_string(),
+            pattern: [
+                Some(ItemType::Block(7)), Some(ItemType::Block(7)), None, // 2 planks
+                Some(ItemType::Block(7)), Some(ItemType::Block(7)), None, // 2 planks
+                None, None, None,
+            ],
+            output: ItemType::Block(58), // Crafting table block
+            output_count: 1,
+            exact_position: false,
+        });
+    }
+
+    /// Find the first recipe that matches the given grid
+    fn find_matching_recipe(&self, grid: &[Option<ItemType>; 9]) -> Option<&CraftingRecipe> {
+        self.recipes.iter().find(|recipe| recipe.matches(grid))
     }
 }
 
@@ -314,9 +516,12 @@ pub struct GameWorld {
     inventory_slots: Vec<Option<UIElementHandle>>,
     // Crafting UI
     crafting_open: bool,
-    crafting_grid: Vec<Option<UIElementHandle>>,  // 3x3 grid
+    crafting_grid: Vec<Option<UIElementHandle>>,  // 3x3 grid UI handles
     crafting_result: Option<UIElementHandle>,
     craft_button: Option<UIElementHandle>,
+    // Crafting system
+    recipe_book: RecipeBook,
+    crafting_grid_items: [Option<ItemType>; 9],  // What's currently in the crafting grid
 }
 
 impl GameWorld {
@@ -478,6 +683,8 @@ impl GameWorld {
             crafting_grid: Vec::new(),
             crafting_result: None,
             craft_button: None,
+            recipe_book: RecipeBook::new(),
+            crafting_grid_items: [None; 9],
         })
     }
 
@@ -1507,17 +1714,17 @@ impl GameWorld {
                     tracing::info!("Created crafting UI with {} grid slots", self.crafting_grid.len());
                 }
 
-                // Update result preview based on available items
+                // Update crafting grid items to match hotbar (for simplicity, hotbar IS the crafting grid)
+                for i in 0..9 {
+                    self.crafting_grid_items[i] = self.hotbar.slots[i].as_ref().map(|s| s.item_type);
+                }
+
+                // Update result preview based on recipe matching
                 if let Some(result_handle) = self.crafting_result {
-                    // Check if wood is available in inventory (slot 5)
-                    let result_text = if let Some(wood_stack) = &self.hotbar.slots[5] {
-                        if matches!(wood_stack.item_type, mdminecraft_core::ItemType::Block(3)) {
-                            "Result:\nPlanks x4\n(Click CRAFT)"
-                        } else {
-                            "Result:\n???"
-                        }
+                    let result_text = if let Some(recipe) = self.recipe_book.find_matching_recipe(&self.crafting_grid_items) {
+                        format!("Result:\n{} x{}\n(Click CRAFT)", recipe.name, recipe.output_count)
                     } else {
-                        "Result:\n???"
+                        "Result:\n???\n(No recipe)".to_string()
                     };
 
                     ui_manager.set_text_content(resources.device, result_handle, result_text.to_string());
@@ -1639,42 +1846,91 @@ impl GameWorld {
     fn handle_craft_button_click(&mut self) {
         tracing::info!("CRAFT button clicked!");
 
-        // Simple demo: Create planks from wood
-        // Check if we have wood in slot 5 (index 5 = position [1,1] in 3x3 grid)
-        if let Some(wood_stack) = &self.hotbar.slots[5] {
-            // Check if it's wood (block ID 3)
-            if let mdminecraft_core::ItemType::Block(3) = wood_stack.item_type {
-                tracing::info!("Crafting planks from wood!");
+        // Find matching recipe
+        let recipe = self.recipe_book.find_matching_recipe(&self.crafting_grid_items);
+        if recipe.is_none() {
+            tracing::info!("No matching recipe found!");
+            return;
+        }
+        let recipe = recipe.unwrap();
 
-                // Simple craft: 1 wood -> 4 planks
-                // Find empty slot or planks slot
-                for slot_idx in 0..9 {
-                    if self.hotbar.slots[slot_idx].is_none() {
-                        // Create planks in empty slot
-                        self.hotbar.slots[slot_idx] = Some(
-                            mdminecraft_core::ItemStack::new(
-                                mdminecraft_core::ItemType::Block(7), // Planks
-                                4
-                            )
-                        );
-                        tracing::info!("Created 4 planks in slot {}", slot_idx);
+        tracing::info!("Crafting: {} x{}", recipe.name, recipe.output_count);
 
-                        // Consume 1 wood
-                        if let Some(stack) = &mut self.hotbar.slots[5] {
-                            if stack.count > 1 {
-                                stack.count -= 1;
-                            } else {
-                                self.hotbar.slots[5] = None;
-                            }
+        // Count required items for consumption
+        let mut required_items: std::collections::HashMap<ItemType, u32> = std::collections::HashMap::new();
+        for slot_item in &recipe.pattern {
+            if let Some(item_type) = slot_item {
+                *required_items.entry(*item_type).or_insert(0) += 1;
+            }
+        }
+
+        // Check if we have enough items (should always pass since recipe matched, but be safe)
+        for (item_type, count) in &required_items {
+            let available: u32 = self.hotbar.slots
+                .iter()
+                .filter_map(|slot| slot.as_ref())
+                .filter(|stack| stack.item_type == *item_type)
+                .map(|stack| stack.count)
+                .sum();
+
+            if available < *count {
+                tracing::warn!("Not enough {:?}: need {}, have {}", item_type, count, available);
+                return;
+            }
+        }
+
+        // Consume required items from hotbar
+        for (item_type, mut count_to_remove) in required_items {
+            for slot in &mut self.hotbar.slots {
+                if count_to_remove == 0 {
+                    break;
+                }
+
+                if let Some(stack) = slot {
+                    if stack.item_type == item_type {
+                        let removed = count_to_remove.min(stack.count);
+                        stack.count -= removed;
+                        count_to_remove -= removed;
+
+                        // Remove empty stacks
+                        if stack.count == 0 {
+                            *slot = None;
                         }
-                        break;
                     }
                 }
-            } else {
-                tracing::info!("Wood required for planks recipe!");
             }
-        } else {
-            tracing::info!("No items in crafting grid!");
+        }
+
+        // Create output item
+        let output_stack = ItemStack::new(recipe.output, recipe.output_count);
+
+        // Try to add to existing stack of same type
+        let mut added = false;
+        for slot in &mut self.hotbar.slots {
+            if let Some(stack) = slot {
+                if stack.item_type == output_stack.item_type && stack.can_add(output_stack.count) {
+                    stack.count += output_stack.count;
+                    tracing::info!("Added {} to existing stack in hotbar", recipe.name);
+                    added = true;
+                    break;
+                }
+            }
+        }
+
+        // If not added to existing stack, find empty slot
+        if !added {
+            for slot in &mut self.hotbar.slots {
+                if slot.is_none() {
+                    *slot = Some(output_stack.clone());
+                    tracing::info!("Created {} x{} in new hotbar slot", recipe.name, output_stack.count);
+                    added = true;
+                    break;
+                }
+            }
+        }
+
+        if !added {
+            tracing::warn!("No space in hotbar for crafted item!");
         }
     }
 
