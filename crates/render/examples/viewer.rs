@@ -65,6 +65,77 @@ impl Hotbar {
     }
 }
 
+/// Axis-Aligned Bounding Box for collision detection
+#[derive(Debug, Clone, Copy)]
+struct AABB {
+    min: glam::Vec3,
+    max: glam::Vec3,
+}
+
+impl AABB {
+    fn new(min: glam::Vec3, max: glam::Vec3) -> Self {
+        Self { min, max }
+    }
+
+    fn from_center_size(center: glam::Vec3, size: glam::Vec3) -> Self {
+        let half_size = size * 0.5;
+        Self {
+            min: center - half_size,
+            max: center + half_size,
+        }
+    }
+
+    fn intersects(&self, other: &AABB) -> bool {
+        self.min.x < other.max.x
+            && self.max.x > other.min.x
+            && self.min.y < other.max.y
+            && self.max.y > other.min.y
+            && self.min.z < other.max.z
+            && self.max.z > other.min.z
+    }
+}
+
+/// Player physics state
+struct PlayerPhysics {
+    velocity: glam::Vec3,
+    on_ground: bool,
+    gravity: f32,
+    jump_strength: f32,
+    terminal_velocity: f32,
+    player_height: f32,
+    player_width: f32,
+    physics_enabled: bool,
+}
+
+impl PlayerPhysics {
+    fn new() -> Self {
+        Self {
+            velocity: glam::Vec3::ZERO,
+            on_ground: false,
+            gravity: -20.0,           // m/s²
+            jump_strength: 8.0,       // m/s
+            terminal_velocity: -50.0, // m/s
+            player_height: 1.8,       // blocks
+            player_width: 0.6,        // blocks
+            physics_enabled: true,
+        }
+    }
+
+    fn toggle_physics(&mut self) {
+        self.physics_enabled = !self.physics_enabled;
+        if !self.physics_enabled {
+            self.velocity = glam::Vec3::ZERO;
+            self.on_ground = false;
+        }
+    }
+
+    fn get_aabb(&self, position: glam::Vec3) -> AABB {
+        let size = glam::Vec3::new(self.player_width, self.player_height, self.player_width);
+        let center = position + glam::Vec3::new(0.0, self.player_height * 0.5, 0.0);
+        AABB::from_center_size(center, size)
+    }
+}
+
 fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
@@ -168,6 +239,9 @@ fn main() -> Result<()> {
     // Hotbar for block selection
     let mut hotbar = Hotbar::new();
 
+    // Player physics
+    let mut player_physics = PlayerPhysics::new();
+
     // Run event loop
     window_manager.run(move |event, window| {
         // Let UI handle events first
@@ -199,6 +273,21 @@ fn main() -> Result<()> {
                         if let winit::keyboard::PhysicalKey::Code(KeyCode::F3) = event.physical_key {
                             if event.state.is_pressed() {
                                 debug_hud.toggle();
+                            }
+                        }
+
+                        // Toggle physics with F
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::KeyF) = event.physical_key {
+                            if event.state.is_pressed() {
+                                player_physics.toggle_physics();
+                                tracing::info!(
+                                    "Physics mode: {}",
+                                    if player_physics.physics_enabled {
+                                        "ENABLED (gravity/collision)"
+                                    } else {
+                                        "DISABLED (fly mode)"
+                                    }
+                                );
                             }
                         }
 
@@ -268,7 +357,7 @@ fn main() -> Result<()> {
                         debug_hud.chunks_visible = chunks_visible;
 
                         // Update camera from input
-                        update_camera(&mut renderer, &input, dt);
+                        update_camera(&mut renderer, &input, &mut player_physics, &chunks, dt);
 
                         // Raycast for block selection (only when cursor is grabbed)
                         if input.cursor_grabbed {
@@ -540,7 +629,13 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn update_camera(renderer: &mut Renderer, input: &InputState, dt: f32) {
+fn update_camera(
+    renderer: &mut Renderer,
+    input: &InputState,
+    physics: &mut PlayerPhysics,
+    chunks: &HashMap<ChunkPos, Chunk>,
+    dt: f32,
+) {
     use winit::keyboard::KeyCode;
 
     let camera = renderer.camera_mut();
@@ -555,32 +650,173 @@ fn update_camera(renderer: &mut Renderer, input: &InputState, dt: f32) {
         );
     }
 
-    // WASD movement
-    let speed = 10.0 * dt;
-    let mut movement = glam::Vec3::ZERO;
+    if physics.physics_enabled {
+        // Physics-based movement
+        update_camera_with_physics(camera, input, physics, chunks, dt);
+    } else {
+        // Free fly mode (original behavior)
+        let speed = 10.0 * dt;
+        let mut movement = glam::Vec3::ZERO;
+
+        if input.is_key_pressed(KeyCode::KeyW) {
+            movement += camera.forward();
+        }
+        if input.is_key_pressed(KeyCode::KeyS) {
+            movement -= camera.forward();
+        }
+        if input.is_key_pressed(KeyCode::KeyA) {
+            movement -= camera.right();
+        }
+        if input.is_key_pressed(KeyCode::KeyD) {
+            movement += camera.right();
+        }
+        if input.is_key_pressed(KeyCode::Space) {
+            movement += glam::Vec3::Y;
+        }
+        if input.is_key_pressed(KeyCode::ShiftLeft) {
+            movement -= glam::Vec3::Y;
+        }
+
+        if movement.length() > 0.0 {
+            camera.translate(movement.normalize() * speed);
+        }
+    }
+}
+
+fn update_camera_with_physics(
+    camera: &mut mdminecraft_render::Camera,
+    input: &InputState,
+    physics: &mut PlayerPhysics,
+    chunks: &HashMap<ChunkPos, Chunk>,
+    dt: f32,
+) {
+    use winit::keyboard::KeyCode;
+
+    // Apply gravity
+    physics.velocity.y += physics.gravity * dt;
+    if physics.velocity.y < physics.terminal_velocity {
+        physics.velocity.y = physics.terminal_velocity;
+    }
+
+    // Horizontal movement (WASD)
+    let move_speed = 4.3; // blocks per second
+    let mut horizontal_input = glam::Vec2::ZERO;
 
     if input.is_key_pressed(KeyCode::KeyW) {
-        movement += camera.forward();
+        horizontal_input.y += 1.0;
     }
     if input.is_key_pressed(KeyCode::KeyS) {
-        movement -= camera.forward();
+        horizontal_input.y -= 1.0;
     }
     if input.is_key_pressed(KeyCode::KeyA) {
-        movement -= camera.right();
+        horizontal_input.x -= 1.0;
     }
     if input.is_key_pressed(KeyCode::KeyD) {
-        movement += camera.right();
-    }
-    if input.is_key_pressed(KeyCode::Space) {
-        movement += glam::Vec3::Y;
-    }
-    if input.is_key_pressed(KeyCode::ShiftLeft) {
-        movement -= glam::Vec3::Y;
+        horizontal_input.x += 1.0;
     }
 
-    if movement.length() > 0.0 {
-        camera.translate(movement.normalize() * speed);
+    if horizontal_input.length() > 0.0 {
+        horizontal_input = horizontal_input.normalize();
+        let forward = camera.forward();
+        let right = camera.right();
+
+        // Project to horizontal plane
+        let forward_h = glam::Vec3::new(forward.x, 0.0, forward.z).normalize();
+        let right_h = glam::Vec3::new(right.x, 0.0, right.z).normalize();
+
+        let move_dir = forward_h * horizontal_input.y + right_h * horizontal_input.x;
+        physics.velocity.x = move_dir.x * move_speed;
+        physics.velocity.z = move_dir.z * move_speed;
+    } else {
+        // Friction
+        physics.velocity.x *= 0.5;
+        physics.velocity.z *= 0.5;
     }
+
+    // Jumping
+    if input.is_key_pressed(KeyCode::Space) && physics.on_ground {
+        physics.velocity.y = physics.jump_strength;
+        physics.on_ground = false;
+    }
+
+    // Apply velocity and resolve collisions
+    let mut new_position = camera.position + physics.velocity * dt;
+    physics.on_ground = false;
+
+    // Y-axis collision (gravity/jumping)
+    let player_aabb = physics.get_aabb(new_position);
+    if check_collision(&player_aabb, chunks) {
+        // Resolve Y collision
+        if physics.velocity.y < 0.0 {
+            // Falling - land on ground
+            new_position.y = camera.position.y;
+            physics.velocity.y = 0.0;
+            physics.on_ground = true;
+        } else {
+            // Hit ceiling
+            new_position.y = camera.position.y;
+            physics.velocity.y = 0.0;
+        }
+    }
+
+    // X-axis collision
+    let test_pos = glam::Vec3::new(new_position.x, camera.position.y, camera.position.z);
+    let test_aabb = physics.get_aabb(test_pos);
+    if check_collision(&test_aabb, chunks) {
+        new_position.x = camera.position.x;
+        physics.velocity.x = 0.0;
+    }
+
+    // Z-axis collision
+    let test_pos = glam::Vec3::new(camera.position.x, camera.position.y, new_position.z);
+    let test_aabb = physics.get_aabb(test_pos);
+    if check_collision(&test_aabb, chunks) {
+        new_position.z = camera.position.z;
+        physics.velocity.z = 0.0;
+    }
+
+    camera.position = new_position;
+}
+
+fn check_collision(player_aabb: &AABB, chunks: &HashMap<ChunkPos, Chunk>) -> bool {
+    // Get range of blocks to check
+    let min_block = player_aabb.min.floor().as_ivec3();
+    let max_block = player_aabb.max.ceil().as_ivec3();
+
+    for y in min_block.y..=max_block.y {
+        for z in min_block.z..=max_block.z {
+            for x in min_block.x..=max_block.x {
+                // Convert world coords to chunk coords
+                let chunk_x = x.div_euclid(16);
+                let chunk_z = z.div_euclid(16);
+                let local_x = x.rem_euclid(16) as usize;
+                let local_y = y as usize;
+                let local_z = z.rem_euclid(16) as usize;
+
+                // Check bounds
+                if local_y >= 256 || y < 0 {
+                    continue;
+                }
+
+                // Get chunk and check block
+                if let Some(chunk) = chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
+                    let voxel = chunk.voxel(local_x, local_y, local_z);
+                    if voxel.id != BLOCK_AIR {
+                        // Block is solid, check AABB intersection
+                        let block_aabb = AABB::new(
+                            glam::Vec3::new(x as f32, y as f32, z as f32),
+                            glam::Vec3::new(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0),
+                        );
+                        if player_aabb.intersects(&block_aabb) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
