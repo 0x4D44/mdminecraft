@@ -311,6 +311,11 @@ pub struct GameWorld {
     // Inventory UI
     inventory_open: bool,
     inventory_slots: Vec<Option<UIElementHandle>>,
+    // Crafting UI
+    crafting_open: bool,
+    crafting_grid: Vec<Option<UIElementHandle>>,  // 3x3 grid
+    crafting_result: Option<UIElementHandle>,
+    craft_button: Option<UIElementHandle>,
 }
 
 impl GameWorld {
@@ -467,6 +472,10 @@ impl GameWorld {
             current_tick: 0,
             inventory_open: false,
             inventory_slots: Vec::new(),
+            crafting_open: false,
+            crafting_grid: Vec::new(),
+            crafting_result: None,
+            craft_button: None,
         })
     }
 
@@ -592,6 +601,10 @@ impl GameWorld {
                 self.inventory_open = !self.inventory_open;
                 tracing::info!("Inventory: {}", if self.inventory_open { "OPEN" } else { "CLOSED" });
             }
+            PhysicalKey::Code(KeyCode::KeyC) => {
+                self.crafting_open = !self.crafting_open;
+                tracing::info!("Crafting: {}", if self.crafting_open { "OPEN" } else { "CLOSED" });
+            }
             PhysicalKey::Code(KeyCode::BracketLeft) => {
                 self.time_of_day.decrease_speed();
             }
@@ -693,6 +706,9 @@ impl GameWorld {
 
         // Update inventory UI
         self.update_inventory_ui();
+
+        // Update crafting UI
+        self.update_crafting_ui();
 
         // Handle UI interactions
         self.handle_ui_interaction();
@@ -1353,6 +1369,101 @@ impl GameWorld {
                         if let Some(handle) = slot_handle {
                             ui_manager.remove_button(handle);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Update 3D crafting table UI
+    fn update_crafting_ui(&mut self) {
+        if let Some(ui_manager) = &mut self.ui_manager {
+            let resources = self.renderer.render_resources().expect("GPU not initialized");
+            let camera = self.renderer.camera();
+
+            if self.crafting_open {
+                // Create crafting UI if it doesn't exist
+                if self.crafting_grid.is_empty() {
+                    tracing::info!("Creating 3D crafting UI");
+
+                    // Position crafting table to the right of player
+                    let right = camera.right();
+                    let panel_pos = camera.position + camera.forward() * 2.5 + right * 2.0;
+
+                    // Create 3x3 crafting grid
+                    let slot_size = 0.35;
+                    let slot_spacing = 0.45;
+                    let grid_start_x = -slot_spacing;
+                    let grid_start_y = slot_spacing;
+
+                    // Grid slots (9 slots for input)
+                    for row in 0..3 {
+                        for col in 0..3 {
+                            let slot_idx = row * 3 + col;
+                            let slot_pos = glam::Vec3::new(
+                                panel_pos.x + grid_start_x + (col as f32 * slot_spacing),
+                                panel_pos.y + grid_start_y - (row as f32 * slot_spacing),
+                                panel_pos.z,
+                            );
+
+                            let button = Button3D::new(slot_pos, format!("[{}]", slot_idx + 1))
+                                .with_size(slot_size, slot_size)
+                                .with_font_size(0.12)
+                                .with_billboard(true)
+                                .with_callback((200 + slot_idx) as u32); // IDs 200-208 for crafting grid
+
+                            let handle = ui_manager.add_button(resources.device, button);
+                            self.crafting_grid.push(Some(handle));
+                        }
+                    }
+
+                    // Result slot (to the right of the grid)
+                    let result_pos = panel_pos + glam::Vec3::new(slot_spacing * 2.5, 0.0, 0.0);
+                    let result_text = Text3D::new(result_pos, "Result:\n???")
+                        .with_font_size(0.2)
+                        .with_color([0.0, 1.0, 0.5, 1.0])
+                        .with_billboard(true);
+                    self.crafting_result = Some(ui_manager.add_text(resources.device, result_text));
+
+                    // Craft button (below result)
+                    let craft_pos = result_pos - glam::Vec3::new(0.0, 0.8, 0.0);
+                    let craft_button = Button3D::new(craft_pos, "CRAFT")
+                        .with_size(0.6, 0.3)
+                        .with_font_size(0.18)
+                        .with_billboard(true)
+                        .with_callback(999); // ID 999 for craft button
+                    self.craft_button = Some(ui_manager.add_button(resources.device, craft_button));
+
+                    // Title text
+                    let title_pos = panel_pos + glam::Vec3::new(0.0, slot_spacing * 2.0, 0.0);
+                    let title = Text3D::new(title_pos, "Crafting Table")
+                        .with_font_size(0.25)
+                        .with_color([1.0, 1.0, 0.2, 1.0])
+                        .with_billboard(true);
+                    ui_manager.add_text(resources.device, title);
+
+                    tracing::info!("Created crafting UI with {} grid slots", self.crafting_grid.len());
+                }
+            } else {
+                // Crafting closed - remove UI elements
+                if !self.crafting_grid.is_empty() {
+                    tracing::info!("Closing 3D crafting UI");
+
+                    // Remove grid buttons
+                    for grid_handle in self.crafting_grid.drain(..) {
+                        if let Some(handle) = grid_handle {
+                            ui_manager.remove_button(handle);
+                        }
+                    }
+
+                    // Remove result label
+                    if let Some(handle) = self.crafting_result.take() {
+                        ui_manager.remove_text(handle);
+                    }
+
+                    // Remove craft button
+                    if let Some(handle) = self.craft_button.take() {
+                        ui_manager.remove_button(handle);
                     }
                 }
             }
