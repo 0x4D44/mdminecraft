@@ -9,6 +9,7 @@ mod chunk_manager;
 mod driver;
 mod mesh;
 mod pipeline;
+mod raycast;
 mod time;
 mod ui;
 mod window;
@@ -18,7 +19,8 @@ pub use camera::{Camera, CameraUniform};
 pub use chunk_manager::{ChunkManager, ChunkRenderData, Frustum};
 pub use driver::{ChunkMeshDriver, ChunkMeshStat};
 pub use mesh::{mesh_chunk, MeshBuffers, MeshHash, MeshVertex};
-pub use pipeline::{ChunkMeshBuffer, RenderContext, SkyboxPipeline, VoxelPipeline};
+pub use pipeline::{ChunkMeshBuffer, HighlightUniform, RenderContext, SkyboxPipeline, WireframePipeline, VoxelPipeline};
+pub use raycast::{raycast, RaycastHit};
 pub use time::{TimeOfDay, TimeUniform};
 pub use ui::{DebugHud, UiManager};
 pub use window::{InputState, WindowConfig, WindowManager};
@@ -50,6 +52,7 @@ pub struct Renderer {
     context: Option<RenderContext>,
     pipeline: Option<VoxelPipeline>,
     skybox_pipeline: Option<SkyboxPipeline>,
+    wireframe_pipeline: Option<WireframePipeline>,
     camera: Camera,
     ui: Option<RefCell<UiManager>>,
 }
@@ -65,6 +68,7 @@ impl Renderer {
             context: None,
             pipeline: None,
             skybox_pipeline: None,
+            wireframe_pipeline: None,
             camera,
             ui: None,
         }
@@ -75,6 +79,7 @@ impl Renderer {
         let context = RenderContext::new(window.clone()).await?;
         let pipeline = VoxelPipeline::new(&context)?;
         let skybox_pipeline = SkyboxPipeline::new(&context)?;
+        let wireframe_pipeline = WireframePipeline::new(&context)?;
 
         // Initialize UI (wrapped in RefCell for interior mutability)
         let ui = UiManager::new(&context.device, context.config.format, &window);
@@ -84,6 +89,7 @@ impl Renderer {
         self.context = Some(context);
         self.pipeline = Some(pipeline);
         self.skybox_pipeline = Some(skybox_pipeline);
+        self.wireframe_pipeline = Some(wireframe_pipeline);
         self.ui = Some(RefCell::new(ui));
 
         Ok(())
@@ -145,12 +151,14 @@ impl Renderer {
         let context = self.context.as_ref()?;
         let pipeline = self.pipeline.as_ref()?;
         let skybox_pipeline = self.skybox_pipeline.as_ref()?;
+        let wireframe_pipeline = self.wireframe_pipeline.as_ref()?;
 
         Some(RenderResources {
             device: &context.device,
             queue: &context.queue,
             pipeline,
             skybox_pipeline,
+            wireframe_pipeline,
         })
     }
 }
@@ -179,4 +187,6 @@ pub struct RenderResources<'a> {
     pub pipeline: &'a VoxelPipeline,
     /// Skybox rendering pipeline.
     pub skybox_pipeline: &'a SkyboxPipeline,
+    /// Wireframe rendering pipeline.
+    pub wireframe_pipeline: &'a WireframePipeline,
 }

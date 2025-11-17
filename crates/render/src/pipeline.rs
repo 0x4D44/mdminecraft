@@ -735,3 +735,267 @@ impl ChunkMeshBuffer {
         }
     }
 }
+
+/// Highlight uniform data for wireframe rendering.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HighlightUniform {
+    /// Position of the highlighted block
+    pub position: [f32; 3],
+    /// Padding for alignment
+    pub padding: f32,
+    /// Color of the highlight
+    pub color: [f32; 4],
+}
+
+/// Wireframe rendering pipeline for block selection highlight.
+pub struct WireframePipeline {
+    render_pipeline: wgpu::RenderPipeline,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
+    highlight_buffer: wgpu::Buffer,
+    highlight_bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    depth_view: wgpu::TextureView,
+}
+
+impl WireframePipeline {
+    /// Create a new wireframe rendering pipeline.
+    pub fn new(ctx: &RenderContext) -> Result<Self> {
+        let device = &ctx.device;
+
+        // Create camera bind group layout (shared with voxel pipeline)
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera Bind Group Layout (Wireframe)"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // Create highlight buffer
+        let highlight_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Highlight Buffer"),
+            size: std::mem::size_of::<HighlightUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create highlight bind group layout
+        let highlight_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Highlight Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let highlight_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Highlight Bind Group"),
+            layout: &highlight_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: highlight_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Create cube wireframe vertices (12 edges, 2 vertices per edge = 24 vertices)
+        let cube_vertices: Vec<[f32; 3]> = vec![
+            // Bottom face edges
+            [-0.501, -0.001, -0.501], [0.501, -0.001, -0.501],  // Front
+            [0.501, -0.001, -0.501],  [0.501, -0.001, 0.501],   // Right
+            [0.501, -0.001, 0.501],   [-0.501, -0.001, 0.501],  // Back
+            [-0.501, -0.001, 0.501],  [-0.501, -0.001, -0.501], // Left
+            // Top face edges
+            [-0.501, 0.999, -0.501], [0.501, 0.999, -0.501],    // Front
+            [0.501, 0.999, -0.501],  [0.501, 0.999, 0.501],     // Right
+            [0.501, 0.999, 0.501],   [-0.501, 0.999, 0.501],    // Back
+            [-0.501, 0.999, 0.501],  [-0.501, 0.999, -0.501],   // Left
+            // Vertical edges
+            [-0.501, -0.001, -0.501], [-0.501, 0.999, -0.501],  // Front-left
+            [0.501, -0.001, -0.501],  [0.501, 0.999, -0.501],   // Front-right
+            [0.501, -0.001, 0.501],   [0.501, 0.999, 0.501],    // Back-right
+            [-0.501, -0.001, 0.501],  [-0.501, 0.999, 0.501],   // Back-left
+        ];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Wireframe Vertex Buffer"),
+            contents: bytemuck::cast_slice(&cube_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // Load wireframe shader
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Wireframe Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/wireframe.wgsl").into()),
+        });
+
+        // Create pipeline layout
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Wireframe Pipeline Layout"),
+            bind_group_layouts: &[&camera_bind_group_layout, &highlight_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        // Vertex buffer layout
+        let vertex_buffer_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<[f32; 3]>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x3,
+            }],
+        };
+
+        // Create depth texture for wireframe
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Wireframe Depth Texture"),
+            size: wgpu::Extent3d {
+                width: ctx.size.0,
+                height: ctx.size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create render pipeline
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Wireframe Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[vertex_buffer_layout],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ctx.config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false, // Don't write depth for wireframe
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: -1,  // Slight offset to avoid z-fighting
+                    slope_scale: -1.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+
+        Ok(Self {
+            render_pipeline,
+            camera_bind_group_layout,
+            highlight_buffer,
+            highlight_bind_group,
+            vertex_buffer,
+            depth_view,
+        })
+    }
+
+    /// Update highlight uniform (position and color).
+    pub fn update_highlight(
+        &self,
+        queue: &wgpu::Queue,
+        position: [f32; 3],
+        color: [f32; 4],
+    ) {
+        let uniform = HighlightUniform {
+            position,
+            padding: 0.0,
+            color,
+        };
+        queue.write_buffer(&self.highlight_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    /// Begin a wireframe render pass (uses existing depth from voxel pass).
+    pub fn begin_render_pass<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &'a wgpu::TextureView,
+        depth_view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Wireframe Render Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load, // Load existing content
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load, // Load existing depth
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Get the render pipeline.
+    pub fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.render_pipeline
+    }
+
+    /// Get the vertex buffer.
+    pub fn vertex_buffer(&self) -> &wgpu::Buffer {
+        &self.vertex_buffer
+    }
+
+    /// Get the highlight bind group.
+    pub fn highlight_bind_group(&self) -> &wgpu::BindGroup {
+        &self.highlight_bind_group
+    }
+
+    /// Get the camera bind group layout.
+    pub fn camera_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.camera_bind_group_layout
+    }
+}
