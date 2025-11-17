@@ -3,6 +3,7 @@
 //! Generates chunk terrain by placing blocks based on height and biome.
 
 use crate::biome::{BiomeAssigner, BiomeData, BiomeId};
+use crate::caves::CaveGenerator;
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
 use crate::heightmap::Heightmap;
 use crate::trees::{generate_tree_positions, Tree, TreeType};
@@ -29,6 +30,7 @@ pub mod blocks {
 pub struct TerrainGenerator {
     world_seed: u64,
     biome_assigner: BiomeAssigner,
+    cave_generator: CaveGenerator,
 }
 
 impl TerrainGenerator {
@@ -37,6 +39,7 @@ impl TerrainGenerator {
         Self {
             world_seed,
             biome_assigner: BiomeAssigner::new(world_seed),
+            cave_generator: CaveGenerator::new(world_seed),
         }
     }
 
@@ -76,12 +79,17 @@ impl TerrainGenerator {
                     &mut chunk,
                     local_x,
                     local_z,
+                    world_x,
+                    world_z,
                     final_height as usize,
                     biome,
                     &biome_data,
                 );
             }
         }
+
+        // Cave pass: Carve caves through the terrain
+        self.carve_caves(&mut chunk, chunk_origin_x, chunk_origin_z);
 
         // Population pass: Add trees
         self.populate_trees(&mut chunk, &heightmap, chunk_origin_x, chunk_origin_z);
@@ -96,6 +104,8 @@ impl TerrainGenerator {
         chunk: &mut Chunk,
         x: usize,
         z: usize,
+        _world_x: i32,
+        _world_z: i32,
         height: usize,
         biome: BiomeId,
         biome_data: &BiomeData,
@@ -258,6 +268,50 @@ impl TerrainGenerator {
                 // Create and place tree
                 let tree = Tree::new(world_x, world_y, world_z, tree_type);
                 tree.generate_into_chunk(chunk, chunk_origin_x, chunk_origin_z);
+            }
+        }
+    }
+
+    /// Carve caves through generated terrain
+    fn carve_caves(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32) {
+        // Iterate through all blocks in chunk
+        for local_y in 0..CHUNK_SIZE_Y {
+            for local_z in 0..CHUNK_SIZE_Z {
+                for local_x in 0..CHUNK_SIZE_X {
+                    // Calculate world coordinates
+                    let world_x = chunk_origin_x + local_x as i32;
+                    let world_y = local_y as i32;
+                    let world_z = chunk_origin_z + local_z as i32;
+
+                    // Check if this position should be carved as cave
+                    if self.cave_generator.is_cave(world_x, world_y, world_z) {
+                        let current_voxel = chunk.voxel(local_x, local_y, local_z);
+
+                        // Only carve through solid blocks (don't carve air or water)
+                        if current_voxel.id != blocks::AIR && current_voxel.id != blocks::WATER {
+                            // Check if we should fill with water (underground lakes)
+                            if self.cave_generator.should_have_water(world_y) {
+                                chunk.set_voxel(
+                                    local_x,
+                                    local_y,
+                                    local_z,
+                                    Voxel {
+                                        id: blocks::WATER,
+                                        ..Default::default()
+                                    },
+                                );
+                            } else {
+                                // Carve as air
+                                chunk.set_voxel(
+                                    local_x,
+                                    local_y,
+                                    local_z,
+                                    Voxel::default(), // Air
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }

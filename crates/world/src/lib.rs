@@ -1,4 +1,6 @@
 mod biome;
+mod block_properties;
+mod caves;
 mod chunk;
 mod crafting;
 mod drop_item;
@@ -15,6 +17,8 @@ mod trees;
 mod weather;
 
 pub use biome::*;
+pub use block_properties::*;
+pub use caves::*;
 pub use chunk::*;
 pub use crafting::*;
 pub use drop_item::*;

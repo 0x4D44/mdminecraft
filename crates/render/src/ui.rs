@@ -134,6 +134,8 @@ pub struct DebugHud {
     pub total_vertices: usize,
     /// Total triangles
     pub total_triangles: usize,
+    /// Mining progress (0-100%)
+    pub mining_progress: Option<f32>,
 }
 
 impl DebugHud {
@@ -150,6 +152,7 @@ impl DebugHud {
             chunks_visible: 0,
             total_vertices: 0,
             total_triangles: 0,
+            mining_progress: None,
         }
     }
 
@@ -222,6 +225,15 @@ impl DebugHud {
                 ));
                 ui.label(format!("Total Vertices: {}", self.total_vertices));
                 ui.label(format!("Total Triangles: {}", self.total_triangles));
+
+                // Mining progress
+                if let Some(progress) = self.mining_progress {
+                    ui.add_space(10.0);
+                    ui.heading("Mining");
+                    ui.separator();
+                    ui.label(format!("Progress: {:.1}%", progress));
+                    ui.add(egui::ProgressBar::new(progress / 100.0).show_percentage());
+                }
 
                 ui.add_space(10.0);
                 ui.label("Press F3 to toggle this HUD");
