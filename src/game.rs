@@ -588,6 +588,10 @@ impl GameWorld {
             PhysicalKey::Code(KeyCode::KeyP) => {
                 self.time_of_day.toggle_pause();
             }
+            PhysicalKey::Code(KeyCode::KeyE) => {
+                self.inventory_open = !self.inventory_open;
+                tracing::info!("Inventory: {}", if self.inventory_open { "OPEN" } else { "CLOSED" });
+            }
             PhysicalKey::Code(KeyCode::BracketLeft) => {
                 self.time_of_day.decrease_speed();
             }
@@ -686,6 +690,9 @@ impl GameWorld {
 
         // Update mob labels
         self.update_mob_labels();
+
+        // Update inventory UI
+        self.update_inventory_ui();
 
         // Handle UI interactions
         self.handle_ui_interaction();
@@ -1269,6 +1276,84 @@ impl GameWorld {
                         .with_billboard(true);
                     let handle = ui_manager.add_text(resources.device, text);
                     self.mob_labels[i] = Some(handle);
+                }
+            }
+        }
+    }
+
+    /// Update 3D inventory UI
+    fn update_inventory_ui(&mut self) {
+        if let Some(ui_manager) = &mut self.ui_manager {
+            let resources = self.renderer.render_resources().expect("GPU not initialized");
+            let camera = self.renderer.camera();
+
+            if self.inventory_open {
+                // Create inventory UI if it doesn't exist
+                if self.inventory_slots.is_empty() {
+                    tracing::info!("Creating 3D inventory UI");
+
+                    // Position inventory panel in front of player
+                    let panel_pos = camera.position + camera.forward() * 3.0;
+
+                    // Create 3x3 grid for hotbar (9 slots)
+                    let slot_size = 0.4;
+                    let slot_spacing = 0.5;
+                    let start_x = -slot_spacing;
+                    let start_y = slot_spacing;
+
+                    for slot_idx in 0..9 {
+                        let row = slot_idx / 3;
+                        let col = slot_idx % 3;
+
+                        let slot_pos = glam::Vec3::new(
+                            panel_pos.x + start_x + (col as f32 * slot_spacing),
+                            panel_pos.y + start_y - (row as f32 * slot_spacing),
+                            panel_pos.z,
+                        );
+
+                        // Get item in this slot
+                        let item_text = if let Some(stack) = self.hotbar.slots[slot_idx].as_ref() {
+                            format!("{}\nx{}", self.hotbar.item_name(Some(stack)), stack.count)
+                        } else {
+                            format!("Slot {}", slot_idx + 1)
+                        };
+
+                        // Create button for this slot
+                        let button = Button3D::new(slot_pos, item_text)
+                            .with_size(slot_size, slot_size)
+                            .with_font_size(0.15)
+                            .with_billboard(true)
+                            .with_callback((100 + slot_idx) as u32); // IDs 100-108 for inventory
+
+                        let handle = ui_manager.add_button(resources.device, button);
+                        self.inventory_slots.push(Some(handle));
+                    }
+
+                    tracing::info!("Created {} inventory slot buttons", self.inventory_slots.len());
+                }
+
+                // Update slot contents if items have changed
+                for (slot_idx, slot_handle) in self.inventory_slots.iter().enumerate() {
+                    if let Some(handle) = slot_handle {
+                        let item_text = if let Some(stack) = self.hotbar.slots[slot_idx].as_ref() {
+                            format!("{}\nx{}", self.hotbar.item_name(Some(stack)), stack.count)
+                        } else {
+                            format!("Slot {}", slot_idx + 1)
+                        };
+
+                        // Update button text
+                        ui_manager.set_button_text(resources.device, *handle, item_text);
+                    }
+                }
+            } else {
+                // Inventory closed - remove UI elements
+                if !self.inventory_slots.is_empty() {
+                    tracing::info!("Closing 3D inventory UI");
+                    for slot_handle in self.inventory_slots.drain(..) {
+                        if let Some(handle) = slot_handle {
+                            ui_manager.remove_button(handle);
+                        }
+                    }
                 }
             }
         }
