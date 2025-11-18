@@ -419,6 +419,116 @@ Bottom-right:     Center:
 
 ---
 
+## 💎 Diamond Tier Tools
+
+### Recipe #17: Diamond Pickaxe
+**Input:** 3 Diamonds + 2 Sticks
+**Output:** 1 Diamond Pickaxe
+**Pattern:** T-shape (3 diamonds top, 2 sticks center column)
+
+```
+[D] [D] [D]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Damage**: 5.0 (vs Iron: 4.0, Stone: 3.0, Wood: 2.0)
+- **Mining Speed**: 8.0× multiplier (vs Iron: 6.0×, Stone: 4.0×, Wood: 2.0×)
+- **Durability**: 1561 uses (vs Iron: 250, Stone: 131, Wood: 59)
+- **Mining Tier**: Can mine all blocks in the game
+
+**Usage:**
+- **Highest tier mining tool**
+- Extremely fast mining speed (8× multiplier)
+- Exceptional durability (1561 uses)
+- Required for obsidian and other hardest materials (future)
+- Best all-around pickaxe
+
+**Obtaining Diamonds:**
+- Mine Diamond Ore (Y 0-16, very rare 0.5% spawn rate)
+- Requires iron pickaxe or better to harvest
+- Found deep underground near bedrock layer
+
+---
+
+### Recipe #18: Diamond Axe
+**Input:** 3 Diamonds + 2 Sticks
+**Output:** 1 Diamond Axe
+**Pattern:** L-shape (diamonds in L-formation, sticks vertical)
+
+```
+[D] [D] [ ]
+[D] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Damage**: 7.0-9.0 (highest damage in game!)
+- **Mining Speed**: 8.0× for wood blocks
+- **Durability**: 1561 uses
+- **Specialty**: Wood chopping & combat
+
+**Usage:**
+- **Most powerful weapon in game** (7-9 damage)
+- Fastest wood harvesting tool
+- Extremely durable for extended use
+- Best weapon for mob fighting
+- Recommended for boss fights (future)
+
+---
+
+### Recipe #19: Diamond Sword
+**Input:** 2 Diamonds + 1 Stick
+**Output:** 1 Diamond Sword
+**Pattern:** Vertical line (2 diamonds, 1 stick)
+
+```
+[ ] [D] [ ]
+[ ] [D] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Damage**: 6.0-7.0
+- **Durability**: 1562 uses (sword durability formula)
+- **Attack Speed**: Faster than axes
+- **Combat Role**: Primary weapon
+
+**Usage:**
+- High-tier dedicated combat weapon
+- Faster attack speed than diamond axe
+- Less resource cost than axe (2 diamonds vs 3)
+- Best for PvP and fast combat (future)
+- Excellent durability
+
+---
+
+### Recipe #20: Diamond Shovel
+**Input:** 1 Diamond + 2 Sticks
+**Output:** 1 Diamond Shovel
+**Pattern:** Vertical line (1 diamond, 2 sticks)
+
+```
+[ ] [D] [ ]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Mining Speed**: 8.0× for dirt, sand, gravel
+- **Durability**: 1561 uses
+- **Efficiency**: Best digging tool
+
+**Usage:**
+- Fastest dirt/sand/gravel excavation in game
+- Essential for large-scale terraforming
+- Extremely durable for extended use
+- **Cheapest diamond tool (only 1 diamond)**
+- Recommended first diamond tool to craft
+
+---
+
 ## 📊 Recipe Summary Table
 
 | Recipe | Inputs | Output | Ratio | Pattern Type |
@@ -439,8 +549,12 @@ Bottom-right:     Center:
 | **Iron Axe** | **3 Iron Ingots, 2 Sticks** | **1 Tool** | **5:1** | **L-shape** |
 | **Iron Sword** | **2 Iron Ingots, 1 Stick** | **1 Tool** | **3:1** | **Vertical line** |
 | **Iron Shovel** | **1 Iron Ingot, 2 Sticks** | **1 Tool** | **3:1** | **Vertical line** |
+| **💎 Diamond Pickaxe** | **3 Diamonds, 2 Sticks** | **1 Tool** | **5:1** | **T-shape** |
+| **💎 Diamond Axe** | **3 Diamonds, 2 Sticks** | **1 Tool** | **5:1** | **L-shape** |
+| **💎 Diamond Sword** | **2 Diamonds, 1 Stick** | **1 Tool** | **3:1** | **Vertical line** |
+| **💎 Diamond Shovel** | **1 Diamond, 2 Sticks** | **1 Tool** | **3:1** | **Vertical line** |
 
-**Total Recipes**: 16 (11 basic + 5 advanced)
+**Total Recipes**: 20 (11 basic + 5 iron + 4 diamond)
 
 ---
 
@@ -450,7 +564,7 @@ Bottom-right:     Center:
 You start with:
 - Wood Pickaxe ×1
 - Stone Pickaxe ×1
-- **Iron Ingot ×16** ⭐ (slot 2) - For testing iron tool crafting
+- **💎 Diamond ×16** ⭐ (slot 2) - For testing diamond tool crafting
 - Wood Shovel ×1
 - Dirt ×64
 - **Wood ×64** ⭐ (slot 5)
