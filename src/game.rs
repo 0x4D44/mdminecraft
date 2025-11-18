@@ -319,6 +319,84 @@ impl RecipeBook {
             output_count: 1,
             exact_position: false,
         });
+
+        // Recipe 6: Wood Axe (3 planks + 2 sticks, L-shape)
+        self.recipes.push(CraftingRecipe {
+            name: "Wood Axe".to_string(),
+            pattern: [
+                Some(ItemType::Block(7)), Some(ItemType::Block(7)), None, // 2 planks
+                Some(ItemType::Block(7)), Some(ItemType::Item(1)), None, // Plank + stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Axe, ToolMaterial::Wood),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 7: Stone Axe (3 cobblestone + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Stone Axe".to_string(),
+            pattern: [
+                Some(ItemType::Block(6)), Some(ItemType::Block(6)), None, // 2 cobblestone
+                Some(ItemType::Block(6)), Some(ItemType::Item(1)), None, // Cobblestone + stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Axe, ToolMaterial::Stone),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 8: Stone Sword (2 cobblestone + 1 stick, vertical)
+        self.recipes.push(CraftingRecipe {
+            name: "Stone Sword".to_string(),
+            pattern: [
+                None, Some(ItemType::Block(6)), None, // Cobblestone
+                None, Some(ItemType::Block(6)), None, // Cobblestone
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Sword, ToolMaterial::Stone),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 9: Wood Sword (2 planks + 1 stick)
+        self.recipes.push(CraftingRecipe {
+            name: "Wood Sword".to_string(),
+            pattern: [
+                None, Some(ItemType::Block(7)), None, // Plank
+                None, Some(ItemType::Block(7)), None, // Plank
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Sword, ToolMaterial::Wood),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 10: Wood Shovel (1 plank + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Wood Shovel".to_string(),
+            pattern: [
+                None, Some(ItemType::Block(7)), None, // Plank
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 11: Stone Shovel (1 cobblestone + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Stone Shovel".to_string(),
+            pattern: [
+                None, Some(ItemType::Block(6)), None, // Cobblestone
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Shovel, ToolMaterial::Stone),
+            output_count: 1,
+            exact_position: false,
+        });
     }
 
     /// Find the first recipe that matches the given grid
@@ -381,6 +459,73 @@ struct MiningProgress {
     time_required: f32,
 }
 
+/// Player hunger tracking
+struct PlayerHunger {
+    /// Current hunger (0-20, like health)
+    current: f32,
+    /// Maximum hunger
+    max: f32,
+    /// Hunger drain rate (per second)
+    drain_rate: f32,
+    /// Saturation (extra food buffer)
+    saturation: f32,
+}
+
+impl PlayerHunger {
+    fn new() -> Self {
+        Self {
+            current: 20.0,
+            max: 20.0,
+            drain_rate: 0.1, // Lose 0.1 hunger per second (2 minutes to empty)
+            saturation: 5.0,
+        }
+    }
+
+    /// Update hunger over time
+    fn update(&mut self, dt: f32) {
+        // Drain saturation first, then hunger
+        if self.saturation > 0.0 {
+            self.saturation -= self.drain_rate * dt;
+            if self.saturation < 0.0 {
+                // Overflow into hunger
+                self.current += self.saturation;
+                self.saturation = 0.0;
+            }
+        } else {
+            self.current -= self.drain_rate * dt;
+            self.current = self.current.max(0.0);
+        }
+    }
+
+    /// Eat food to restore hunger
+    fn eat(&mut self, hunger_restored: f32, saturation_restored: f32) {
+        self.current = (self.current + hunger_restored).min(self.max);
+        self.saturation = (self.saturation + saturation_restored).min(20.0);
+        tracing::info!("Ate food: +{:.1} hunger, +{:.1} saturation. Now: {:.1}/20 hunger, {:.1} saturation",
+            hunger_restored, saturation_restored, self.current, self.saturation);
+    }
+
+    /// Check if hunger is full (> 18)
+    fn is_full(&self) -> bool {
+        self.current >= 18.0
+    }
+
+    /// Check if hungry (< 6)
+    fn is_hungry(&self) -> bool {
+        self.current < 6.0
+    }
+
+    /// Check if starving (0 hunger)
+    fn is_starving(&self) -> bool {
+        self.current <= 0.0
+    }
+
+    /// Get hunger percentage for UI
+    fn hunger_percent(&self) -> f32 {
+        self.current / self.max
+    }
+}
+
 /// Player health and survival stats
 struct PlayerHealth {
     /// Current health (0-20, measured in half-hearts)
@@ -430,16 +575,31 @@ impl PlayerHealth {
     }
 
     /// Update health (regeneration, timers)
-    fn update(&mut self, dt: f32) {
+    /// Requires hunger level to enable regeneration
+    fn update(&mut self, dt: f32, hunger: &PlayerHunger) {
         self.time_since_damage += dt;
 
         if self.invulnerability_time > 0.0 {
             self.invulnerability_time -= dt;
         }
 
-        // Regenerate health if enabled and enough time has passed
-        if self.regeneration_rate > 0.0 && self.time_since_damage > 3.0 && self.current < self.max {
-            self.heal(self.regeneration_rate * dt);
+        // Regenerate health based on hunger level
+        if self.current < self.max && self.time_since_damage > 3.0 {
+            if hunger.is_full() {
+                // Fast regeneration when hunger is full (>18)
+                self.heal(1.0 * dt); // 1 HP per second
+            } else if hunger.current > 6.0 {
+                // Slow regeneration when hunger is decent
+                self.heal(0.3 * dt); // 0.3 HP per second
+            }
+            // No regeneration if hungry (<= 6 hunger)
+        }
+
+        // Starvation damage when hunger is 0
+        if hunger.is_starving() && self.time_since_damage > 1.0 {
+            self.damage(0.5); // 0.5 damage, overrides invuln for starvation
+            self.invulnerability_time = 0.0; // Reset invuln for next starve tick
+            self.time_since_damage = 0.0;
         }
     }
 
@@ -497,6 +657,7 @@ pub struct GameWorld {
     hotbar: Hotbar,
     player_physics: PlayerPhysics,
     player_health: PlayerHealth,
+    player_hunger: PlayerHunger,
     chunks_visible: usize,
     mining_progress: Option<MiningProgress>,
     spawn_point: glam::Vec3,
@@ -665,6 +826,7 @@ impl GameWorld {
             hotbar: Hotbar::new(),
             player_physics: PlayerPhysics::new(),
             player_health: PlayerHealth::new(),
+            player_hunger: PlayerHunger::new(),
             chunks_visible: 0,
             mining_progress: None,
             spawn_point,
@@ -864,6 +1026,40 @@ impl GameWorld {
         false // Hotbar is full
     }
 
+    /// Try to eat food from selected hotbar slot
+    fn try_eat_food(&mut self) {
+        let selected_slot = self.hotbar.selected;
+
+        if let Some(item_stack) = &self.hotbar.slots[selected_slot] {
+            // Check if the item is food
+            if let ItemType::Food(food_type) = item_stack.item_type {
+                // Get food values based on type
+                let (hunger_restored, saturation_restored) = match food_type {
+                    FoodType::Apple => (4.0, 2.4),
+                    FoodType::Bread => (5.0, 6.0),
+                    FoodType::RawMeat => (3.0, 1.8),
+                    FoodType::CookedMeat => (8.0, 12.8),
+                };
+
+                // Eat the food
+                self.player_hunger.eat(hunger_restored, saturation_restored);
+
+                // Consume one from stack
+                if item_stack.count > 1 {
+                    self.hotbar.slots[selected_slot].as_mut().unwrap().count -= 1;
+                } else {
+                    self.hotbar.slots[selected_slot] = None;
+                }
+
+                tracing::info!("Ate {:?}!", food_type);
+            } else {
+                tracing::info!("Selected item is not food!");
+            }
+        } else {
+            tracing::info!("No item selected to eat!");
+        }
+    }
+
     /// Handle an event
     pub fn handle_event(
         &mut self,
@@ -950,6 +1146,9 @@ impl GameWorld {
                 self.crafting_open = !self.crafting_open;
                 tracing::info!("Crafting: {}", if self.crafting_open { "OPEN" } else { "CLOSED" });
             }
+            PhysicalKey::Code(KeyCode::KeyR) => {
+                self.try_eat_food();
+            }
             PhysicalKey::Code(KeyCode::BracketLeft) => {
                 self.time_of_day.decrease_speed();
             }
@@ -988,8 +1187,11 @@ impl GameWorld {
         // Update time-of-day
         self.time_of_day.update(dt);
 
-        // Update player health
-        self.player_health.update(dt);
+        // Update player hunger
+        self.player_hunger.update(dt);
+
+        // Update player health (requires hunger for regeneration)
+        self.player_health.update(dt, &self.player_hunger);
 
         // Check for death
         if self.player_health.is_dead() {
