@@ -297,8 +297,20 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 **Furnace Block:**
 - ✅ Craftable: 8 cobblestone (hollow square)
 - ✅ Placeable in world (Block ID 59)
-- ✅ Right-click to toggle UI
+- ✅ Right-click to open 3D UI
 - ✅ V key for testing/development
+
+**3D Furnace UI:**
+- ✅ Interactive [Input] slot (top-left)
+- ✅ Interactive [Fuel] slot (bottom-left)
+- ✅ Interactive [Output] slot (right)
+- ✅ Real-time progress bar (0-100%)
+- ✅ Fuel timer display (e.g., "🔥 42.5s")
+- ✅ Item names and quantities shown
+- ✅ 🔥 icon when burning
+- ✅ Click-to-transfer from hotbar (1 item)
+- ✅ Click-to-collect output
+- ✅ Billboard rendering (camera-facing)
 
 **Smelting Recipes:**
 - ✅ Raw Iron → Iron Ingot (10 seconds)
