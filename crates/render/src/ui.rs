@@ -136,6 +136,14 @@ pub struct DebugHud {
     pub total_triangles: usize,
     /// Mining progress (0-100%)
     pub mining_progress: Option<f32>,
+    /// Player health (0-20)
+    pub player_health: f32,
+    /// Player max health
+    pub player_max_health: f32,
+    /// Player hunger (0-20)
+    pub player_hunger: f32,
+    /// Player max hunger
+    pub player_max_hunger: f32,
 }
 
 impl DebugHud {
@@ -153,6 +161,10 @@ impl DebugHud {
             total_vertices: 0,
             total_triangles: 0,
             mining_progress: None,
+            player_health: 20.0,
+            player_max_health: 20.0,
+            player_hunger: 20.0,
+            player_max_hunger: 20.0,
         }
     }
 
@@ -237,6 +249,137 @@ impl DebugHud {
 
                 ui.add_space(10.0);
                 ui.label("Press F3 to toggle this HUD");
+            });
+
+        // Always render health and hunger bars
+        self.render_player_status(ctx);
+    }
+
+    /// Render player health and hunger bars (always visible).
+    fn render_player_status(&self, ctx: &egui::Context) {
+        // Position at bottom center of screen
+        egui::Area::new("player_status")
+            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -20.0])
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    // Health bar
+                    ui.horizontal(|ui| {
+                        ui.label("❤");
+
+                        let health_percent = self.player_health / self.player_max_health;
+                        let health_color = if health_percent > 0.66 {
+                            egui::Color32::from_rgb(0, 255, 0) // Green
+                        } else if health_percent > 0.33 {
+                            egui::Color32::from_rgb(255, 255, 0) // Yellow
+                        } else {
+                            egui::Color32::from_rgb(255, 0, 0) // Red
+                        };
+
+                        // Background bar
+                        let bar_width = 200.0;
+                        let bar_height = 20.0;
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(bar_width, bar_height),
+                            egui::Sense::hover()
+                        );
+
+                        // Draw background (dark gray)
+                        ui.painter().rect_filled(
+                            rect,
+                            2.0,
+                            egui::Color32::from_rgb(40, 40, 40)
+                        );
+
+                        // Draw health bar
+                        let health_width = bar_width * health_percent;
+                        let health_rect = egui::Rect::from_min_size(
+                            rect.min,
+                            egui::vec2(health_width, bar_height)
+                        );
+                        ui.painter().rect_filled(
+                            health_rect,
+                            2.0,
+                            health_color
+                        );
+
+                        // Draw border
+                        ui.painter().rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(1.0, egui::Color32::WHITE)
+                        );
+
+                        // Draw text
+                        let text = format!("{:.0}/{:.0}", self.player_health, self.player_max_health);
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            text,
+                            egui::FontId::proportional(14.0),
+                            egui::Color32::WHITE
+                        );
+                    });
+
+                    ui.add_space(5.0);
+
+                    // Hunger bar
+                    ui.horizontal(|ui| {
+                        ui.label("🍖");
+
+                        let hunger_percent = self.player_hunger / self.player_max_hunger;
+                        let hunger_color = if hunger_percent > 0.66 {
+                            egui::Color32::from_rgb(255, 200, 100) // Orange
+                        } else if hunger_percent > 0.33 {
+                            egui::Color32::from_rgb(255, 150, 0) // Dark orange
+                        } else {
+                            egui::Color32::from_rgb(200, 0, 0) // Dark red
+                        };
+
+                        // Background bar
+                        let bar_width = 200.0;
+                        let bar_height = 20.0;
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(bar_width, bar_height),
+                            egui::Sense::hover()
+                        );
+
+                        // Draw background (dark gray)
+                        ui.painter().rect_filled(
+                            rect,
+                            2.0,
+                            egui::Color32::from_rgb(40, 40, 40)
+                        );
+
+                        // Draw hunger bar
+                        let hunger_width = bar_width * hunger_percent;
+                        let hunger_rect = egui::Rect::from_min_size(
+                            rect.min,
+                            egui::vec2(hunger_width, bar_height)
+                        );
+                        ui.painter().rect_filled(
+                            hunger_rect,
+                            2.0,
+                            hunger_color
+                        );
+
+                        // Draw border
+                        ui.painter().rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(1.0, egui::Color32::WHITE)
+                        );
+
+                        // Draw text
+                        let text = format!("{:.0}/{:.0}", self.player_hunger, self.player_max_hunger);
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            text,
+                            egui::FontId::proportional(14.0),
+                            egui::Color32::WHITE
+                        );
+                    });
+                });
             });
     }
 }
