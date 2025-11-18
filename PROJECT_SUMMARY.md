@@ -174,15 +174,17 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 - ✅ Pattern-based recipe matching
 - ✅ Shapeless positioning (patterns can be anywhere)
 - ✅ Real-time preview updates
-- ✅ 5 working recipes:
-  - Wood → Planks (1:4)
-  - Planks → Sticks (2:4)
-  - Wood Pickaxe (3 planks + 2 sticks)
-  - Stone Pickaxe (3 cobblestone + 2 sticks)
-  - Crafting Table (4 planks in 2×2)
+- ✅ 20 working recipes:
+  - Basic: Planks (1:4), Sticks (2:4), Crafting Table (4:1)
+  - Wood Tools: Pickaxe, Axe, Sword, Shovel
+  - Stone Tools: Pickaxe, Axe, Sword, Shovel
+  - Advanced: Furnace (8 cobblestone)
+  - Iron Tools: Pickaxe, Axe, Sword, Shovel
+  - **Diamond Tools: Pickaxe, Axe, Sword, Shovel** 💎
 - ✅ Smart item consumption
 - ✅ Automatic stack merging
 - ✅ Full inventory management
+- ✅ **Complete tool progression: Wood → Stone → Iron → Diamond**
 
 **Visual Feedback:**
 - ✅ Result shows "Planks x4 (Click CRAFT)"
@@ -244,6 +246,14 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 - ✅ Found throughout underground
 - ✅ Black/dark gray speckles in stone
 
+**Diamond Ore (Block ID 19):**
+- ✅ Spawn range: Y 1-16 (very deep)
+- ✅ Spawn chance: 0.5% per stone block (very rare!)
+- ✅ Distribution: ~1 block per chunk
+- ✅ Best mining level: Y 5-12
+- ✅ Cyan/light blue diamond crystals in stone
+- ✅ Requires iron pickaxe or better to harvest
+
 **Generation Algorithm:**
 - ✅ Hash-based deterministic noise
 - ✅ Position-based consistent placement
@@ -261,8 +271,9 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 
 **Automatic Ore Drops:**
 - ✅ Iron Ore → Raw Iron (Item 4) - Needs smelting
-- ✅ Coal Ore → Coal (Item 3) - Ready to use
-- ✅ Requires stone pickaxe or better
+- ✅ Coal Ore → Coal (Item 3) - Ready to use as fuel
+- ✅ Diamond Ore → Diamond (Item 5) - Ready for crafting!
+- ✅ Requires appropriate pickaxe tier
 - ✅ Instant collection to hotbar
 - ✅ Stack merging with existing items
 - ✅ Full inventory warning
@@ -422,15 +433,16 @@ Get Iron Ingot → Craft Iron Tools
    - Left-click to mine blocks
    - Collect wood from trees
    - Mine stone for cobblestone
-   - **Mine iron ore (Y 10-64) → Get Raw Iron**
    - **Mine coal ore (Y 0-128) → Get Coal**
+   - **Mine iron ore (Y 10-64) → Get Raw Iron**
+   - **Mine diamond ore (Y 1-16) → Get Diamonds! 💎**
    - Resources auto-collect to hotbar
 
 4. **Craft Tools**
    - Press `C` for crafting table
    - Craft planks from wood
    - Craft sticks from planks
-   - Craft pickaxes (wood → stone → iron)
+   - Craft pickaxes (wood → stone → iron → **diamond** 💎)
    - **Craft furnace (8 cobblestone)**
    - Items appear in hotbar
 
