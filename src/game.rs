@@ -43,7 +43,7 @@ impl Hotbar {
             slots: [
                 Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1)),
                 Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone), 1)),
-                Some(ItemStack::new(ItemType::Item(2), 16)), // Iron Ingot (for testing crafting)
+                Some(ItemStack::new(ItemType::Item(5), 16)), // Diamond (for testing crafting)
                 Some(ItemStack::new(ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood), 1)),
                 Some(ItemStack::new(ItemType::Block(2), 64)), // Dirt
                 Some(ItemStack::new(ItemType::Block(3), 64)), // Wood
@@ -105,6 +105,7 @@ impl Hotbar {
                 ItemType::Item(2) => "Iron Ingot".to_string(),
                 ItemType::Item(3) => "Coal".to_string(),
                 ItemType::Item(4) => "Raw Iron".to_string(),
+                ItemType::Item(5) => "Diamond".to_string(),
                 ItemType::Item(item_id) => format!("Item {}", item_id),
             }
         } else {
@@ -133,6 +134,7 @@ impl Hotbar {
             16 => "Pine Leaves",
             17 => "Iron Ore",
             18 => "Coal Ore",
+            19 => "Diamond Ore",
             58 => "Crafting Table",
             59 => "Furnace",
             _ => "Unknown",
@@ -472,6 +474,58 @@ impl RecipeBook {
                 None, Some(ItemType::Item(1)), None, // Stick
             ],
             output: ItemType::Tool(ToolType::Shovel, ToolMaterial::Iron),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 17: Diamond Pickaxe (3 diamonds + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Diamond Pickaxe".to_string(),
+            pattern: [
+                Some(ItemType::Item(5)), Some(ItemType::Item(5)), Some(ItemType::Item(5)), // Diamonds
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 18: Diamond Axe (3 diamonds + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Diamond Axe".to_string(),
+            pattern: [
+                Some(ItemType::Item(5)), Some(ItemType::Item(5)), None, // Diamonds
+                Some(ItemType::Item(5)), Some(ItemType::Item(1)), None, // Diamond + Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Axe, ToolMaterial::Diamond),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 19: Diamond Sword (2 diamonds + 1 stick)
+        self.recipes.push(CraftingRecipe {
+            name: "Diamond Sword".to_string(),
+            pattern: [
+                None, Some(ItemType::Item(5)), None, // Diamond
+                None, Some(ItemType::Item(5)), None, // Diamond
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 20: Diamond Shovel (1 diamond + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Diamond Shovel".to_string(),
+            pattern: [
+                None, Some(ItemType::Item(5)), None, // Diamond
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Shovel, ToolMaterial::Diamond),
             output_count: 1,
             exact_position: false,
         });
@@ -1339,6 +1393,7 @@ impl GameWorld {
             // Ores drop items (not blocks)
             17 => Some(ItemStack::new(ItemType::Item(4), 1)), // Iron Ore -> Raw Iron (needs smelting)
             18 => Some(ItemStack::new(ItemType::Item(3), 1)), // Coal Ore -> Coal
+            19 => Some(ItemStack::new(ItemType::Item(5), 1)), // Diamond Ore -> Diamond
 
             // Most blocks drop themselves
             1 => Some(ItemStack::new(ItemType::Block(1), 1)),  // Stone -> Stone

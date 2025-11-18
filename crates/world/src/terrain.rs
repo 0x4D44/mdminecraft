@@ -26,6 +26,7 @@ pub mod blocks {
     pub const BEDROCK: BlockId = 10;
     pub const IRON_ORE: BlockId = 17;
     pub const COAL_ORE: BlockId = 18;
+    pub const DIAMOND_ORE: BlockId = 19;
 }
 
 /// Terrain generator that fills chunks with blocks.
@@ -322,6 +323,24 @@ impl TerrainGenerator {
                                 local_z,
                                 Voxel {
                                     id: blocks::IRON_ORE,
+                                    ..Default::default()
+                                },
+                            );
+                            continue;
+                        }
+                    }
+
+                    // Generate diamond ore (very rare, deep underground only)
+                    if world_y > 0 && world_y <= 16 {
+                        let diamond_chance = self.ore_noise(world_x, world_y, world_z, 3000);
+                        if diamond_chance < 0.005 {
+                            // 0.5% chance (very rare!)
+                            chunk.set_voxel(
+                                local_x,
+                                local_y,
+                                local_z,
+                                Voxel {
+                                    id: blocks::DIAMOND_ORE,
                                     ..Default::default()
                                 },
                             );
