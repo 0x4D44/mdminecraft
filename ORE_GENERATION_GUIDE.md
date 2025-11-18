@@ -35,11 +35,36 @@ This guide documents the ore generation mechanics in mdminecraft's voxel world.
 - **Best Mining Levels**: Y 10-50 (peak around Y 32)
 
 **Uses:**
-- Smelts into Iron Ingots
+- Drops Raw Iron when mined
+- Smelts into Iron Ingots in furnace
 - Crafts iron-tier tools (pickaxe, axe, sword, shovel)
 - Essential mid-game progression material
 - Requires stone pickaxe or better to mine
-- Currently drops as iron ore block (future: raw iron)
+
+---
+
+### Diamond Ore (Block ID: 19)
+**Appearance:** Cyan/light blue diamond crystals in stone
+**Generation:**
+- **Spawn Range**: Y levels 1-16 (very deep underground, near bedrock)
+- **Spawn Chance**: 0.5% per stone block (very rare!)
+- **Distribution**: Extremely rare, only in deepest layers
+- **Typical Veins**: Individual blocks, widely scattered
+- **Best Mining Levels**: Y 5-12 (safest above bedrock, below lava)
+
+**Uses:**
+- Drops Diamonds when mined (no smelting required!)
+- Crafts diamond-tier tools (pickaxe, axe, sword, shovel)
+- **Highest tier tools in game** (8× speed, 1561 durability, 7-9 damage)
+- End-game progression material
+- **Requires iron pickaxe or better to mine**
+- Cannot be mined with stone tools (ore breaks, no drop)
+
+**Rarity:**
+- Approximately **1 diamond ore per chunk** in Y 1-16 range
+- Much rarer than iron or coal
+- Valuable and precious resource
+- Strip mining at Y 11 recommended for optimal discovery
 
 ---
 
@@ -73,7 +98,7 @@ fn ore_noise(x: i32, y: i32, z: i32, salt: u64) -> f32 {
 **Key Features:**
 - **Deterministic**: Same world seed produces identical ore distribution
 - **Position-based**: Each block coordinate has consistent ore chance
-- **Salt-separated**: Coal (salt=1000) and Iron (salt=2000) use different RNG streams
+- **Salt-separated**: Coal (salt=1000), Iron (salt=2000), and Diamond (salt=3000) use different RNG streams
 - **Fast**: Simple hash calculation, no expensive 3D Perlin noise
 
 **Replacement Logic:**
@@ -100,6 +125,12 @@ fn ore_noise(x: i32, y: i32, z: i32, salt: u64) -> f32 {
 - Expected iron ore: 10,000 × 0.015 = **~150 iron ore blocks**
 - Actual visible (after caves): ~100-120 blocks
 
+**Diamond Ore (Y 1-16):**
+- Stone blocks in range: ~2,500 (varies by terrain)
+- Expected diamond ore: 2,500 × 0.005 = **~12-13 diamond ore blocks**
+- Actual visible (after caves): ~8-10 blocks
+- **Very rare**: Only ~1 diamond per chunk on average
+
 **Note:** Caves remove ~30-40% of underground blocks, making remaining ores easier to find.
 
 ---
@@ -123,6 +154,23 @@ Strategy: Strip mining at Y 32 for maximum efficiency
 Pattern: 2-block tall tunnels, 3 blocks apart
 Tool Required: Stone pickaxe or better
 ```
+
+**For Diamond:**
+```
+Depth: Y 5-12 (optimal around Y 11)
+Strategy: Strip mining at Y 11 (safest level above lava)
+Pattern: 2-block tall tunnels, 3 blocks apart (same as iron)
+Tool Required: Iron pickaxe or better (REQUIRED!)
+Caution: Deep underground, near bedrock and lava lakes
+```
+
+**Diamond Mining Tips:**
+- **Y 11 is safest**: Above most lava lakes but still in diamond range
+- **Bring iron pickaxe**: Stone tools cannot harvest diamond ore!
+- **Watch for lava**: Keep water bucket for emergencies
+- **Be patient**: Diamonds are very rare (~1 per chunk)
+- **Mark found diamonds**: Note coordinates for future reference
+- **Strip mine systematically**: Cover large areas methodically
 
 ### Strip Mining Layout
 ```
@@ -149,23 +197,32 @@ Height: 2 blocks (can see floor and ceiling ores)
 ### Starting Out
 
 1. **Craft a Pickaxe**
-   - Wood Pickaxe: Can mine stone and coal
+   - Wood Pickaxe: Can mine stone and coal ore
    - Stone Pickaxe: Required for iron ore
+   - Iron Pickaxe: Required for diamond ore
 
 2. **Find a Cave**
    - Caves naturally expose ore veins
-   - Look for brown (iron) or black (coal) speckles in stone walls
-   - Explore different Y levels to find iron below Y=64
+   - Look for speckles in stone walls:
+     * Black/dark gray = Coal Ore
+     * Brown/rust = Iron Ore
+     * Cyan/light blue = Diamond Ore (very rare!)
+   - Explore different Y levels to find specific ores
 
 3. **Start Mining**
    - Break ore blocks with appropriate pickaxe
-   - Currently: Ores drop as ore blocks (can be placed)
-   - Future: Will drop ore items for furnace smelting
+   - Ores automatically drop items:
+     * Coal Ore → Coal (Item 3)
+     * Iron Ore → Raw Iron (Item 4) - needs smelting
+     * Diamond Ore → Diamond (Item 5) - ready to use!
+   - Items automatically added to hotbar
 
 4. **Check Your Depth**
    - Press F3 to show debug HUD
    - Your Y coordinate is displayed
-   - Iron only spawns below Y=64
+   - Coal: Y 0-128 (anywhere underground)
+   - Iron: Y 0-64 (mid-depth)
+   - Diamond: Y 1-16 (very deep, near bedrock!)
 
 ---
 
@@ -178,6 +235,7 @@ Height: 2 blocks (can see floor and ceiling ores)
 | Stone | 1 | Terrain generation |
 | Coal Ore | 18 | Ore generation |
 | Iron Ore | 17 | Ore generation |
+| Diamond Ore | 19 | Ore generation |
 | Bedrock | 10 | Bottom layer (Y 0-5) |
 
 ### Generation Performance
@@ -185,7 +243,7 @@ Height: 2 blocks (can see floor and ceiling ores)
 **Per-Chunk Cost:**
 - Ore evaluation: ~65,536 checks
 - Stone blocks only: ~30,000 checks (typical)
-- Ore placements: ~550 replacements (typical)
+- Ore placements: ~560 replacements (coal + iron + diamond)
 - **Time:** <1ms per chunk (negligible)
 
 **World Generation Order:**
@@ -207,17 +265,12 @@ Height: 2 blocks (can see floor and ceiling ores)
 - Better visual mining experience
 
 **2. Additional Ore Types**
-- Diamond Ore (Y 0-16, 0.5% chance, very rare)
 - Gold Ore (Y 0-32, 1.0% chance)
 - Redstone Ore (Y 0-16, 1.5% chance)
 - Lapis Ore (Y 0-32, 0.8% chance)
+- Emerald Ore (Y 0-32, 0.3% chance, mountain biomes only)
 
-**3. Ore Item Drops**
-- Mining ore blocks drops ore items (not blocks)
-- Stack in inventory up to 64
-- Must be smelted in furnace to create ingots
-
-**4. Fortune Enchantment**
+**3. Fortune Enchantment**
 - Higher chance for multiple drops
 - Especially valuable for diamond and coal
 
@@ -237,19 +290,14 @@ Height: 2 blocks (can see floor and ceiling ores)
 - No natural vein formations
 - Can feel scattered rather than clustered
 
-**2. No Item Drops**
-- Breaking ore block removes it completely
-- No items added to inventory
-- Must be fixed for full progression
-
-**3. Fixed Spawn Rates**
-- 2% coal, 1.5% iron are hardcoded
+**2. Fixed Spawn Rates**
+- 2% coal, 1.5% iron, 0.5% diamond are hardcoded
 - No configuration options
 - Can't adjust for difficulty
 
-**4. Limited Variety**
-- Only coal and iron ores
-- No rare ores (diamond, gold, emerald)
+**3. Limited Variety**
+- Only coal, iron, and diamond ores
+- No other rare ores (gold, emerald)
 - No decorative ores (lapis, redstone)
 
 ---
@@ -262,4 +310,4 @@ Height: 2 blocks (can see floor and ceiling ores)
 
 ---
 
-**Ore generation is now live! Explore caves and dig deep to find iron and coal ores throughout the underground world.**
+**Ore generation is now live! Explore caves and dig deep to find coal, iron, and diamond ores throughout the underground world. Complete tool progression: Wood → Stone → Iron → Diamond!**
