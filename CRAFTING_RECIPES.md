@@ -291,6 +291,134 @@ Bottom-right:     Center:
 
 ---
 
+## 🏭 Advanced Crafting
+
+### Recipe #12: Furnace
+**Input:** 8 Cobblestone
+**Output:** 1 Furnace Block
+**Pattern:** Hollow 3×3 square (empty center)
+
+```
+[C] [C] [C]
+[C] [ ] [C]
+[C] [C] [C]
+```
+
+**Usage:**
+- Essential for smelting ores into ingots
+- Cooks raw meat into cooked meat
+- Requires fuel (wood, planks, coal, sticks)
+- Place with right-click in world
+- Interactive block for future smelting UI
+
+**Crafting Notes:**
+- Requires 8 cobblestone blocks
+- Center slot must be empty
+- Pattern can be placed anywhere in grid (shapeless positioning)
+
+---
+
+## ⚒️ Iron Tier Tools
+
+### Recipe #13: Iron Pickaxe
+**Input:** 3 Iron Ingots + 2 Sticks
+**Output:** 1 Iron Pickaxe
+**Pattern:** T-shape (3 ingots top, 2 sticks center column)
+
+```
+[I] [I] [I]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Damage**: 4.0 (vs Stone: 3.0, Wood: 2.0)
+- **Mining Speed**: 6.0× multiplier (vs Stone: 4.0×, Wood: 2.0×)
+- **Durability**: 250 uses (vs Stone: 131, Wood: 59)
+- **Mining Tier**: Can mine diamond-level blocks
+
+**Usage:**
+- Superior mining tool for stone, ores, and hard materials
+- Much faster than stone tier
+- Required for advanced ore mining
+- Excellent combat weapon (4 damage)
+
+---
+
+### Recipe #14: Iron Axe
+**Input:** 3 Iron Ingots + 2 Sticks
+**Output:** 1 Iron Axe
+**Pattern:** L-shape (ingots in L-formation, sticks vertical)
+
+```
+[I] [I] [ ]
+[I] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Damage**: 5.0-6.0 (highest damage tool)
+- **Mining Speed**: 6.0× for wood blocks
+- **Durability**: 250 uses
+- **Specialty**: Wood chopping
+
+**Usage:**
+- Best weapon for combat (highest damage)
+- Extremely fast wood harvesting
+- Durable and efficient
+- Recommended for mob fighting
+
+---
+
+### Recipe #15: Iron Sword
+**Input:** 2 Iron Ingots + 1 Stick
+**Output:** 1 Iron Sword
+**Pattern:** Vertical line (2 ingots, 1 stick)
+
+```
+[ ] [I] [ ]
+[ ] [I] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Damage**: 4.5-5.0
+- **Durability**: 251 uses (sword durability formula)
+- **Attack Speed**: Faster than axes
+- **Combat Role**: Primary weapon
+
+**Usage:**
+- Dedicated combat weapon
+- Higher attack speed than axes
+- Less resource cost than axe (2 ingots vs 3)
+- Efficient for mob fighting
+
+---
+
+### Recipe #16: Iron Shovel
+**Input:** 1 Iron Ingot + 2 Sticks
+**Output:** 1 Iron Shovel
+**Pattern:** Vertical line (1 ingot, 2 sticks)
+
+```
+[ ] [I] [ ]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Stats:**
+- **Mining Speed**: 6.0× for dirt, sand, gravel
+- **Durability**: 250 uses
+- **Efficiency**: Best digging tool
+
+**Usage:**
+- Fastest dirt/sand/gravel excavation
+- Essential for large-scale terraforming
+- Very durable for extended use
+- Cheapest iron tool (only 1 ingot)
+
+---
+
 ## 📊 Recipe Summary Table
 
 | Recipe | Inputs | Output | Ratio | Pattern Type |
@@ -306,6 +434,13 @@ Bottom-right:     Center:
 | Stone Sword | 2 Cobble, 1 Stick | 1 Tool | 3:1 | Vertical line |
 | Wood Shovel | 1 Plank, 2 Sticks | 1 Tool | 3:1 | Vertical line |
 | Stone Shovel | 1 Cobble, 2 Sticks | 1 Tool | 3:1 | Vertical line |
+| **Furnace** | **8 Cobblestone** | **1 Block** | **8:1** | **Hollow square** |
+| **Iron Pickaxe** | **3 Iron Ingots, 2 Sticks** | **1 Tool** | **5:1** | **T-shape** |
+| **Iron Axe** | **3 Iron Ingots, 2 Sticks** | **1 Tool** | **5:1** | **L-shape** |
+| **Iron Sword** | **2 Iron Ingots, 1 Stick** | **1 Tool** | **3:1** | **Vertical line** |
+| **Iron Shovel** | **1 Iron Ingot, 2 Sticks** | **1 Tool** | **3:1** | **Vertical line** |
+
+**Total Recipes**: 16 (11 basic + 5 advanced)
 
 ---
 
@@ -315,7 +450,7 @@ Bottom-right:     Center:
 You start with:
 - Wood Pickaxe ×1
 - Stone Pickaxe ×1
-- Iron Pickaxe ×1
+- **Iron Ingot ×16** ⭐ (slot 2) - For testing iron tool crafting
 - Wood Shovel ×1
 - Dirt ×64
 - **Wood ×64** ⭐ (slot 5)
@@ -450,11 +585,13 @@ The innovative design uses your hotbar directly as the crafting input:
 ## 📝 Future Recipe Ideas
 
 ### Planned for Future Updates
-- **Stone Tools**: Stone Axe, Shovel, Sword, Hoe
-- **Iron Tools**: All tool types with iron
-- **Advanced Blocks**: Furnace, Chest, Door
-- **Utility Items**: Torches, Ladders, Fences
-- **Decorative**: Colored blocks, stairs, slabs
+- **Smelting System**: Active furnace UI for ore → ingot conversion
+- **Diamond Tools**: All tool types with diamond (requires diamond ore)
+- **Armor**: Helmets, chestplates, leggings, boots (leather, iron, diamond)
+- **Advanced Blocks**: Chest, Door, Trapdoor, Fence
+- **Utility Items**: Torches (lighting), Ladders (climbing), Beds (sleeping)
+- **Food Recipes**: Bread from wheat, cake, cookies
+- **Decorative**: Colored wool, stained glass, stairs, slabs
 
 ### Recipe Book UI (Concept)
 Future enhancement could include:

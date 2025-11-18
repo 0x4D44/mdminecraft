@@ -43,7 +43,7 @@ impl Hotbar {
             slots: [
                 Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1)),
                 Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone), 1)),
-                Some(ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1)),
+                Some(ItemStack::new(ItemType::Item(2), 16)), // Iron Ingot (for testing crafting)
                 Some(ItemStack::new(ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood), 1)),
                 Some(ItemStack::new(ItemType::Block(2), 64)), // Dirt
                 Some(ItemStack::new(ItemType::Block(3), 64)), // Wood
@@ -102,6 +102,8 @@ impl Hotbar {
                 ItemType::Block(block_id) => self.block_name(block_id).to_string(),
                 ItemType::Food(food_type) => format!("{:?}", food_type),
                 ItemType::Item(1) => "Stick".to_string(),
+                ItemType::Item(2) => "Iron Ingot".to_string(),
+                ItemType::Item(3) => "Coal".to_string(),
                 ItemType::Item(item_id) => format!("Item {}", item_id),
             }
         } else {
@@ -121,7 +123,10 @@ impl Hotbar {
             7 => "Planks",
             8 => "Bricks",
             9 => "Glass",
+            10 => "Iron Ore",
+            11 => "Coal Ore",
             58 => "Crafting Table",
+            59 => "Furnace",
             _ => "Unknown",
         }
     }
@@ -394,6 +399,71 @@ impl RecipeBook {
                 None, Some(ItemType::Item(1)), None, // Stick
             ],
             output: ItemType::Tool(ToolType::Shovel, ToolMaterial::Stone),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 12: Furnace (8 cobblestone in hollow square)
+        self.recipes.push(CraftingRecipe {
+            name: "Furnace".to_string(),
+            pattern: [
+                Some(ItemType::Block(6)), Some(ItemType::Block(6)), Some(ItemType::Block(6)), // 3 cobblestone
+                Some(ItemType::Block(6)), None, Some(ItemType::Block(6)), // 2 cobblestone with center empty
+                Some(ItemType::Block(6)), Some(ItemType::Block(6)), Some(ItemType::Block(6)), // 3 cobblestone
+            ],
+            output: ItemType::Block(59), // Furnace block
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 13: Iron Pickaxe (3 iron ingots + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Iron Pickaxe".to_string(),
+            pattern: [
+                Some(ItemType::Item(2)), Some(ItemType::Item(2)), Some(ItemType::Item(2)), // 3 iron ingots
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 14: Iron Axe (3 iron ingots + 2 sticks, L-shape)
+        self.recipes.push(CraftingRecipe {
+            name: "Iron Axe".to_string(),
+            pattern: [
+                Some(ItemType::Item(2)), Some(ItemType::Item(2)), None, // 2 iron ingots
+                Some(ItemType::Item(2)), Some(ItemType::Item(1)), None, // Iron ingot + stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Axe, ToolMaterial::Iron),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 15: Iron Sword (2 iron ingots + 1 stick, vertical)
+        self.recipes.push(CraftingRecipe {
+            name: "Iron Sword".to_string(),
+            pattern: [
+                None, Some(ItemType::Item(2)), None, // Iron ingot
+                None, Some(ItemType::Item(2)), None, // Iron ingot
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Sword, ToolMaterial::Iron),
+            output_count: 1,
+            exact_position: false,
+        });
+
+        // Recipe 16: Iron Shovel (1 iron ingot + 2 sticks)
+        self.recipes.push(CraftingRecipe {
+            name: "Iron Shovel".to_string(),
+            pattern: [
+                None, Some(ItemType::Item(2)), None, // Iron ingot
+                None, Some(ItemType::Item(1)), None, // Stick
+                None, Some(ItemType::Item(1)), None, // Stick
+            ],
+            output: ItemType::Tool(ToolType::Shovel, ToolMaterial::Iron),
             output_count: 1,
             exact_position: false,
         });
