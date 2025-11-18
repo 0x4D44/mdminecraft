@@ -173,6 +173,124 @@ Bottom-right:     Center:
 
 ---
 
+## ⚔️ Combat Tools
+
+### Recipe #6: Wood Axe
+**Input:** 3 Planks + 2 Sticks
+**Output:** 1 Wood Axe
+**Pattern:** L-shape (3 planks, 2 sticks)
+
+```
+[P] [P] [ ]
+[P] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Usage:**
+- Combat weapon: 3 HP damage
+- Better than wood pickaxe (2 HP)
+- Fast attack speed
+- Can also chop wood blocks faster
+
+---
+
+### Recipe #7: Stone Axe
+**Input:** 3 Cobblestone + 2 Sticks
+**Output:** 1 Stone Axe
+**Pattern:** L-shape (3 cobblestone, 2 sticks)
+
+```
+[C] [C] [ ]
+[C] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Usage:**
+- Combat weapon: 4 HP damage
+- Strong mid-game weapon
+- More durable than wood axe
+- Recommended for combat before swords
+
+---
+
+### Recipe #8: Wood Sword
+**Input:** 2 Planks + 1 Stick
+**Output:** 1 Wood Sword
+**Pattern:** Vertical line (2 planks, 1 stick)
+
+```
+[ ] [P] [ ]
+[ ] [P] [ ]
+[ ] [S] [ ]
+```
+
+**Usage:**
+- Dedicated combat weapon: 4 HP damage
+- Same damage as stone axe
+- Cheaper than axe (only 2 planks vs 3)
+- Best early-game weapon for damage-per-cost
+
+---
+
+### Recipe #9: Stone Sword
+**Input:** 2 Cobblestone + 1 Stick
+**Output:** 1 Stone Sword
+**Pattern:** Vertical line (2 cobblestone, 1 stick)
+
+```
+[ ] [C] [ ]
+[ ] [C] [ ]
+[ ] [S] [ ]
+```
+
+**Usage:**
+- Strong combat weapon: 5 HP damage
+- Second-best weapon (iron sword is 6 HP)
+- Very durable
+- Recommended for fighting zombies (20 HP)
+
+---
+
+## ⛏️ Utility Tools
+
+### Recipe #10: Wood Shovel
+**Input:** 1 Plank + 2 Sticks
+**Output:** 1 Wood Shovel
+**Pattern:** Vertical line (1 plank, 2 sticks)
+
+```
+[ ] [P] [ ]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Usage:**
+- Digging tool for dirt, sand, gravel
+- Cheaper than pickaxe (only 1 plank)
+- Faster dirt/sand breaking speed
+- Basic utility tool
+
+---
+
+### Recipe #11: Stone Shovel
+**Input:** 1 Cobblestone + 2 Sticks
+**Output:** 1 Stone Shovel
+**Pattern:** Vertical line (1 cobblestone, 2 sticks)
+
+```
+[ ] [C] [ ]
+[ ] [S] [ ]
+[ ] [S] [ ]
+```
+
+**Usage:**
+- Upgraded digging tool
+- Faster and more durable than wood
+- Efficient for terraforming
+- Recommended for large excavation projects
+
+---
+
 ## 📊 Recipe Summary Table
 
 | Recipe | Inputs | Output | Ratio | Pattern Type |
@@ -182,6 +300,12 @@ Bottom-right:     Center:
 | Wood Pickaxe | 3 Planks, 2 Sticks | 1 Tool | 5:1 | T-shape |
 | Stone Pickaxe | 3 Cobble, 2 Sticks | 1 Tool | 5:1 | T-shape |
 | Crafting Table | 4 Planks | 1 Block | 4:1 | 2×2 square |
+| Wood Axe | 3 Planks, 2 Sticks | 1 Tool | 5:1 | L-shape |
+| Stone Axe | 3 Cobble, 2 Sticks | 1 Tool | 5:1 | L-shape |
+| Wood Sword | 2 Planks, 1 Stick | 1 Tool | 3:1 | Vertical line |
+| Stone Sword | 2 Cobble, 1 Stick | 1 Tool | 3:1 | Vertical line |
+| Wood Shovel | 1 Plank, 2 Sticks | 1 Tool | 3:1 | Vertical line |
+| Stone Shovel | 1 Cobble, 2 Sticks | 1 Tool | 3:1 | Vertical line |
 
 ---
 
