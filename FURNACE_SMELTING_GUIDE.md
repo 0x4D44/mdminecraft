@@ -54,17 +54,56 @@ The furnace is a functional block that converts raw materials into refined produ
 2. Right-click on ground or surface
 3. Furnace block is placed in world
 
-### Opening the Furnace (Current System)
+### Opening the Furnace
 
 **Right-click on placed furnace block:**
-- Toggles furnace UI open/closed
-- Logs message: "Furnace: OPEN" or "Furnace: CLOSED"
+- Opens 3D furnace UI to your right
+- Toggles UI open/closed with subsequent clicks
+- UI displays current furnace state in real-time
 
-**Testing Interface (Press V key):**
-- **First press:** Adds 10 Raw Iron + 5 Coal to furnace automatically
+**3D Furnace UI Elements:**
+- **[Input]** slot (top-left): Place items to smelt
+- **[Fuel]** slot (bottom-left): Place fuel items
+- **→ Progress** (center): Shows smelting progress (0-100%)
+- **[Output]** slot (right): Collect smelted results
+- **Title:** "Furnace" displayed at top
+
+### Using the Furnace UI
+
+**Adding Items to Slots:**
+1. Select item in hotbar (use number keys 1-9)
+2. Aim at furnace slot button (crosshair in center of screen)
+3. Click the slot to transfer 1 item from hotbar
+
+**Input Slot:**
+- Only accepts smeltable items (Raw Iron, ore blocks)
+- Shows item name and quantity (e.g., "Raw Iron x10")
+- Click again to return ALL items to hotbar
+
+**Fuel Slot:**
+- Only accepts fuel items (Coal, wood, sticks, planks)
+- Shows 🔥 icon when furnace is actively burning
+- Click again to return ALL fuel to hotbar
+
+**Output Slot:**
+- Displays smelted results (e.g., "Iron Ingot x5")
+- Click to collect ALL items to hotbar
+- If hotbar is full, items remain in furnace
+
+**Progress Indicator:**
+- Shows percentage complete (e.g., "→ 35%")
+- Shows fuel timer when burning (e.g., "🔥 42.5s")
+- Updates in real-time every frame
+
+### Testing Interface (V Key - Optional)
+
+For quick testing, press **V** while furnace is open:
+- **First press:** Automatically adds 10 Raw Iron + 5 Coal
 - **Watch:** Furnace begins smelting automatically
-- **Subsequent presses:** Collects Iron Ingots from output to hotbar
-- **Status logs:** Shows current slots, progress, fuel time
+- **Subsequent presses:** Collects all output to hotbar
+- Shows status logs in console
+
+*Note: The V key is a debug feature and not required for normal gameplay.*
 
 ---
 
@@ -408,11 +447,16 @@ Furnace output blocked!  ← Output slot full
 
 **Step 3: Smelt Iron**
 ```
-1. Right-click furnace block
-2. Press V to add materials (or wait for UI)
-3. Wait for smelting (10s per ingot)
-4. Press V to collect Iron Ingots
+1. Right-click furnace block to open 3D UI
+2. Select Raw Iron in hotbar (number keys 1-9)
+3. Click [Input] slot to add Raw Iron
+4. Select Coal in hotbar
+5. Click [Fuel] slot to add Coal
+6. Watch progress bar: "→ 0%" → "→ 100%"
+7. Click [Output] slot to collect Iron Ingots
 ```
+
+*Alternative: Press V for quick test (adds 10 Raw Iron + 5 Coal automatically)*
 
 **Step 4: Craft Iron Tools**
 ```
@@ -438,49 +482,46 @@ Iron tools provide:
 
 ### Current System
 
-**1. No Visual UI**
-- Furnace slots are internal only
-- Must use V key for testing
-- Can't manually add/remove items yet
-- Future: 3D UI with slot visualization
-
-**2. Single Furnace Instance**
+**1. Single Furnace Instance**
 - Only one global furnace state
 - All furnace blocks share same state
 - Can't have multiple furnaces running
 - Future: Per-block furnace states
 
-**3. No Persistent Storage**
+**2. No Persistent Storage**
 - Furnace state resets on game restart
 - Items in furnace are lost
 - Future: Save/load furnace contents
 
-**4. No Progress Indicator**
-- Can't see smelting progress in-game
-- Must check console logs
-- Future: Progress bar in UI
+**3. Manual Item Transfer**
+- Must click slots individually to add items (1 at a time)
+- No shift-click for bulk transfer
+- Future: Batch transfer options
 
-**5. Limited Interaction**
-- Right-click only toggles state variable
-- Doesn't open actual UI yet
-- V key is workaround for testing
+### Tips for Efficient Use
 
-### Workarounds
-
-**Testing Smelting:**
-1. Press V to add test items
-2. Wait 10-100 seconds
-3. Press V again to collect
+**Quick Item Transfer:**
+1. Select item stack in hotbar
+2. Click furnace slot multiple times
+3. Each click transfers 1 item
+4. Watch slot quantity update
 
 **Monitoring Progress:**
-- Check console output for logs
-- Look for "Smelting complete!" messages
-- Count time elapsed (10s per item)
+- Progress bar shows percentage (0-100%)
+- Fuel timer shows remaining burn time
+- 🔥 icon appears when actively burning
+- Real-time updates every frame
 
-**Getting Materials:**
-- Use V key for initial iron
-- Or mine actual iron ore underground
-- Collect coal from coal ore veins
+**Bulk Smelting:**
+- Click Input slot repeatedly to add multiple items
+- Add enough fuel for all items
+- Leave furnace open to watch progress
+- Or close UI and come back later
+
+**Quick Testing (V Key):**
+- Use V for instant 10 Raw Iron + 5 Coal setup
+- Great for testing or quick iron needs
+- Press V again to collect all output
 
 ---
 
@@ -488,17 +529,15 @@ Iron tools provide:
 
 ### Planned Features
 
-**1. Full 3D Furnace UI**
-- Input slot (top): Drag items to smelt
-- Fuel slot (bottom): Drag fuel items
-- Output slot (right): Click to collect results
-- Progress bar: Visual smelting progress
-- Flame icon: Shows if furnace is burning
-
-**2. Multiple Furnaces**
+**1. Per-Block Furnace States** ✨ PRIORITY
 - Each furnace block has unique state
 - Run multiple furnaces simultaneously
 - Distributed smelting for efficiency
+
+**2. Batch Item Transfer**
+- Shift-click to transfer entire stacks
+- Drag-and-drop item movement
+- Faster bulk smelting setup
 
 **3. Visual Furnace States**
 - Lit texture when burning fuel
@@ -572,4 +611,4 @@ Iron tools provide:
 
 ---
 
-**The furnace smelting system is now fully functional! Use the V key to test it, and watch as Raw Iron becomes Iron Ingots automatically.**
+**The furnace smelting system is now fully functional with a complete 3D UI! Right-click placed furnaces to open the interface, add items by clicking slots, and watch the real-time progress bar as Raw Iron becomes Iron Ingots automatically.**
