@@ -104,6 +104,7 @@ impl Hotbar {
                 ItemType::Item(1) => "Stick".to_string(),
                 ItemType::Item(2) => "Iron Ingot".to_string(),
                 ItemType::Item(3) => "Coal".to_string(),
+                ItemType::Item(4) => "Raw Iron".to_string(),
                 ItemType::Item(item_id) => format!("Item {}", item_id),
             }
         } else {
@@ -1137,6 +1138,48 @@ impl GameWorld {
         }
     }
 
+    /// Try to add mined block to inventory
+    /// Determines what item should drop based on block type
+    fn try_add_mined_block(&mut self, block_id: BlockId) {
+        // Determine what item drops from this block
+        let drop = match block_id {
+            // Ores drop items (not blocks)
+            17 => Some(ItemStack::new(ItemType::Item(4), 1)), // Iron Ore -> Raw Iron (needs smelting)
+            18 => Some(ItemStack::new(ItemType::Item(3), 1)), // Coal Ore -> Coal
+
+            // Most blocks drop themselves
+            1 => Some(ItemStack::new(ItemType::Block(1), 1)),  // Stone -> Stone
+            2 => Some(ItemStack::new(ItemType::Block(2), 1)),  // Dirt -> Dirt
+            3 => Some(ItemStack::new(ItemType::Block(3), 1)),  // Grass -> Grass block
+            4 => Some(ItemStack::new(ItemType::Block(4), 1)),  // Sand -> Sand
+            5 => Some(ItemStack::new(ItemType::Block(5), 1)),  // Gravel -> Gravel
+            6 => None, // Water -> nothing
+            7 => Some(ItemStack::new(ItemType::Block(7), 1)),  // Ice -> Ice
+            8 => Some(ItemStack::new(ItemType::Block(8), 1)),  // Snow -> Snow
+            9 => Some(ItemStack::new(ItemType::Block(9), 1)),  // Clay -> Clay
+            10 => None, // Bedrock -> nothing (unbreakable)
+            11 => Some(ItemStack::new(ItemType::Block(11), 1)), // Oak Log -> Oak Log
+            12 => None, // Oak Leaves -> nothing (or sticks/saplings in future)
+            13 => Some(ItemStack::new(ItemType::Block(13), 1)), // Birch Log
+            14 => None, // Birch Leaves -> nothing
+            15 => Some(ItemStack::new(ItemType::Block(15), 1)), // Pine Log
+            16 => None, // Pine Leaves -> nothing
+            58 => Some(ItemStack::new(ItemType::Block(58), 1)), // Crafting Table -> Crafting Table
+            59 => Some(ItemStack::new(ItemType::Block(59), 1)), // Furnace -> Furnace
+
+            _ => None, // Unknown block -> nothing
+        };
+
+        if let Some(item_stack) = drop {
+            let item_name = self.hotbar.item_name(Some(&item_stack));
+            if self.try_add_to_hotbar(item_stack) {
+                tracing::info!("Collected: {}", item_name);
+            } else {
+                tracing::warn!("Inventory full! Could not collect: {}", item_name);
+            }
+        }
+    }
+
     /// Handle an event
     pub fn handle_event(
         &mut self,
@@ -1542,43 +1585,31 @@ impl GameWorld {
 
             // Check if mining is complete
             if progress.time_mining >= progress.time_required {
+                // Check if tool can harvest this block (before borrowing chunk)
+                let tool = self.hotbar.selected_tool();
+                let can_harvest = block_props.can_harvest(tool);
+
+                if can_harvest {
+                    tracing::info!(
+                        "Successfully mined block {} at {:?}",
+                        block_id,
+                        hit.block_pos
+                    );
+                } else {
+                    tracing::warn!(
+                        "Mined block {} but cannot harvest (wrong tool tier)",
+                        block_id
+                    );
+                }
+
                 // Mine the block!
                 if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
                     let local_y = hit.block_pos.y as usize;
                     let local_z = hit.block_pos.z.rem_euclid(16) as usize;
 
-                    // Check if tool can harvest this block
-                    let tool = self.hotbar.selected_tool();
-                    let can_harvest = block_props.can_harvest(tool);
-
-                    if can_harvest {
-                        tracing::info!(
-                            "Successfully mined block {} at {:?}",
-                            block_id,
-                            hit.block_pos
-                        );
-                    } else {
-                        tracing::warn!(
-                            "Mined block {} but cannot harvest (wrong tool tier)",
-                            block_id
-                        );
-                    }
-
                     // Remove the block
                     chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
-
-                    // Damage tool durability
-                    if let Some(item) = self.hotbar.selected_item_mut() {
-                        if matches!(item.item_type, ItemType::Tool(_, _)) {
-                            item.damage_durability(1);
-                            if item.is_broken() {
-                                tracing::info!("Tool broke!");
-                                // Remove the broken tool
-                                self.hotbar.slots[self.hotbar.selected] = None;
-                            }
-                        }
-                    }
 
                     // Regenerate mesh
                     let mesh = mesh_chunk(chunk, &self.registry);
@@ -1587,6 +1618,23 @@ impl GameWorld {
                             resources.pipeline.create_chunk_bind_group(resources.device, chunk_pos);
                         self.chunk_manager
                             .add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
+                    }
+                }
+
+                // Add mined item to inventory (after chunk borrow is done)
+                if can_harvest {
+                    self.try_add_mined_block(block_id);
+                }
+
+                // Damage tool durability
+                if let Some(item) = self.hotbar.selected_item_mut() {
+                    if matches!(item.item_type, ItemType::Tool(_, _)) {
+                        item.damage_durability(1);
+                        if item.is_broken() {
+                            tracing::info!("Tool broke!");
+                            // Remove the broken tool
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                        }
                     }
                 }
 
