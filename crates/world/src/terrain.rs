@@ -24,6 +24,8 @@ pub mod blocks {
     pub const SNOW: BlockId = 8;
     pub const CLAY: BlockId = 9;
     pub const BEDROCK: BlockId = 10;
+    pub const IRON_ORE: BlockId = 17;
+    pub const COAL_ORE: BlockId = 18;
 }
 
 /// Terrain generator that fills chunks with blocks.
@@ -87,6 +89,9 @@ impl TerrainGenerator {
                 );
             }
         }
+
+        // Ore pass: Generate ore veins
+        self.populate_ores(&mut chunk, chunk_origin_x, chunk_origin_z);
 
         // Cave pass: Carve caves through the terrain
         self.carve_caves(&mut chunk, chunk_origin_x, chunk_origin_z);
@@ -270,6 +275,75 @@ impl TerrainGenerator {
                 tree.generate_into_chunk(chunk, chunk_origin_x, chunk_origin_z);
             }
         }
+    }
+
+    /// Generate ore veins in stone layers
+    fn populate_ores(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32) {
+        for local_y in 0..CHUNK_SIZE_Y {
+            for local_z in 0..CHUNK_SIZE_Z {
+                for local_x in 0..CHUNK_SIZE_X {
+                    let world_x = chunk_origin_x + local_x as i32;
+                    let world_y = local_y as i32;
+                    let world_z = chunk_origin_z + local_z as i32;
+
+                    let current = chunk.voxel(local_x, local_y, local_z);
+
+                    // Only replace stone blocks with ore
+                    if current.id != blocks::STONE {
+                        continue;
+                    }
+
+                    // Generate coal ore (common, higher up)
+                    if world_y > 0 && world_y < 128 {
+                        let coal_chance = self.ore_noise(world_x, world_y, world_z, 1000);
+                        if coal_chance < 0.02 {
+                            // 2% chance
+                            chunk.set_voxel(
+                                local_x,
+                                local_y,
+                                local_z,
+                                Voxel {
+                                    id: blocks::COAL_ORE,
+                                    ..Default::default()
+                                },
+                            );
+                            continue;
+                        }
+                    }
+
+                    // Generate iron ore (less common, lower down)
+                    if world_y > 0 && world_y < 64 {
+                        let iron_chance = self.ore_noise(world_x, world_y, world_z, 2000);
+                        if iron_chance < 0.015 {
+                            // 1.5% chance
+                            chunk.set_voxel(
+                                local_x,
+                                local_y,
+                                local_z,
+                                Voxel {
+                                    id: blocks::IRON_ORE,
+                                    ..Default::default()
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Deterministic pseudo-random noise for ore generation
+    fn ore_noise(&self, x: i32, y: i32, z: i32, salt: u64) -> f32 {
+        // Simple hash-based noise function
+        let seed = self.world_seed.wrapping_add(salt);
+        let hash = ((x as u64)
+            .wrapping_mul(73856093)
+            .wrapping_add((y as u64).wrapping_mul(19349663))
+            .wrapping_add((z as u64).wrapping_mul(83492791))
+            .wrapping_add(seed))
+            % 1000000;
+
+        (hash as f32) / 1000000.0
     }
 
     /// Carve caves through generated terrain
