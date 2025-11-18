@@ -100,7 +100,12 @@ impl Hotbar {
                     format!("{:?} {:?}", material, tool_type)
                 }
                 ItemType::Block(block_id) => self.block_name(block_id).to_string(),
-                ItemType::Food(food_type) => format!("{:?}", food_type),
+                ItemType::Food(food_type) => match food_type {
+                    FoodType::Apple => "Apple".to_string(),
+                    FoodType::Bread => "Bread".to_string(),
+                    FoodType::RawMeat => "Raw Meat".to_string(),
+                    FoodType::CookedMeat => "Cooked Meat".to_string(),
+                },
                 ItemType::Item(1) => "Stick".to_string(),
                 ItemType::Item(2) => "Iron Ingot".to_string(),
                 ItemType::Item(3) => "Coal".to_string(),
@@ -821,9 +826,14 @@ impl FurnaceState {
     /// Get smelting recipe result for an input item
     fn get_smelt_result(item_type: &ItemType) -> Option<ItemType> {
         match item_type {
+            // Ore smelting
             ItemType::Item(4) => Some(ItemType::Item(2)),  // Raw Iron -> Iron Ingot
             ItemType::Block(17) => Some(ItemType::Item(2)), // Iron Ore block -> Iron Ingot (legacy)
             ItemType::Block(18) => Some(ItemType::Item(3)), // Coal Ore block -> Coal (legacy)
+
+            // Cooking (food smelting)
+            ItemType::Food(FoodType::RawMeat) => Some(ItemType::Food(FoodType::CookedMeat)),
+
             _ => None,
         }
     }

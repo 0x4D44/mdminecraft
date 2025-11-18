@@ -3,7 +3,7 @@
 
 **Project Status**: ✅ **COMPLETE**
 **Branch**: `claude/3d-ui-rust-design-01U56ArDxHhaaxW7hhjYpgh2`
-**Date**: 2025-11-17
+**Date**: 2025-11-18 (Updated with Cooking System)
 
 ---
 
@@ -316,6 +316,12 @@ Implement a complete 3D UI system in Rust for mdminecraft, then use it to build 
 - ✅ Raw Iron → Iron Ingot (10 seconds)
 - ✅ Iron Ore block → Iron Ingot (legacy)
 - ✅ Coal Ore block → Coal (legacy)
+
+**Cooking Recipes:**
+- ✅ Raw Meat → Cooked Meat (10 seconds)
+  * Raw Meat: 3 hunger, 1.8 saturation (poor)
+  * Cooked Meat: 8 hunger, 12.8 saturation (excellent!)
+  * Essential for survival gameplay
 
 **Fuel System:**
 - ✅ Coal: 80 seconds (smelts 8 items) - Best
