@@ -2471,6 +2471,135 @@ impl GameWorld {
                     }
                 }
             }
+
+            // Furnace UI management
+            if self.furnace_open {
+                // Create furnace UI if it doesn't exist
+                if self.furnace_input_slot.is_none() {
+                    tracing::info!("Creating 3D furnace UI");
+
+                    // Position furnace UI to the right of player
+                    let right = camera.right();
+                    let panel_pos = camera.position + camera.forward() * 2.5 + right * 2.0;
+
+                    let slot_size = 0.4;
+                    let slot_spacing = 0.6;
+
+                    // Input slot (top-left)
+                    let input_pos = panel_pos + glam::Vec3::new(-slot_spacing * 0.5, slot_spacing * 0.5, 0.0);
+                    let input_button = Button3D::new(input_pos, "[Input]")
+                        .with_size(slot_size, slot_size)
+                        .with_font_size(0.12)
+                        .with_billboard(true)
+                        .with_callback(300); // ID 300 for input slot
+                    self.furnace_input_slot = Some(ui_manager.add_button(resources.device, input_button));
+
+                    // Fuel slot (bottom-left)
+                    let fuel_pos = panel_pos + glam::Vec3::new(-slot_spacing * 0.5, -slot_spacing * 0.5, 0.0);
+                    let fuel_button = Button3D::new(fuel_pos, "[Fuel]")
+                        .with_size(slot_size, slot_size)
+                        .with_font_size(0.12)
+                        .with_billboard(true)
+                        .with_callback(301); // ID 301 for fuel slot
+                    self.furnace_fuel_slot = Some(ui_manager.add_button(resources.device, fuel_button));
+
+                    // Output slot (right)
+                    let output_pos = panel_pos + glam::Vec3::new(slot_spacing * 0.8, 0.0, 0.0);
+                    let output_button = Button3D::new(output_pos, "[Output]")
+                        .with_size(slot_size, slot_size)
+                        .with_font_size(0.12)
+                        .with_billboard(true)
+                        .with_callback(302); // ID 302 for output slot
+                    self.furnace_output_slot = Some(ui_manager.add_button(resources.device, output_button));
+
+                    // Progress bar (center)
+                    let progress_pos = panel_pos + glam::Vec3::new(0.1, 0.0, 0.0);
+                    let progress_text = Text3D::new(progress_pos, "→\n0%")
+                        .with_font_size(0.2)
+                        .with_color([1.0, 0.5, 0.0, 1.0])
+                        .with_billboard(true);
+                    self.furnace_progress_bar = Some(ui_manager.add_text(resources.device, progress_text));
+
+                    // Title text
+                    let title_pos = panel_pos + glam::Vec3::new(0.0, slot_spacing * 1.2, 0.0);
+                    let title = Text3D::new(title_pos, "Furnace")
+                        .with_font_size(0.25)
+                        .with_color([1.0, 1.0, 0.2, 1.0])
+                        .with_billboard(true);
+                    ui_manager.add_text(resources.device, title);
+
+                    tracing::info!("Created furnace UI");
+                }
+
+                // Update furnace UI elements with current furnace state
+                // Update input slot button text
+                if let Some(input_handle) = self.furnace_input_slot {
+                    let input_text = if let Some(stack) = &self.furnace_state.input_slot {
+                        let name = self.hotbar.item_name(Some(stack));
+                        format!("{}\nx{}", name, stack.count)
+                    } else {
+                        "[Input]".to_string()
+                    };
+                    ui_manager.set_button_text(resources.device, input_handle, input_text);
+                }
+
+                // Update fuel slot button text
+                if let Some(fuel_handle) = self.furnace_fuel_slot {
+                    let fuel_text = if let Some(stack) = &self.furnace_state.fuel_slot {
+                        let name = self.hotbar.item_name(Some(stack));
+                        let burn_status = if self.furnace_state.is_burning() {
+                            "🔥"
+                        } else {
+                            ""
+                        };
+                        format!("{}\nx{} {}", name, stack.count, burn_status)
+                    } else {
+                        "[Fuel]".to_string()
+                    };
+                    ui_manager.set_button_text(resources.device, fuel_handle, fuel_text);
+                }
+
+                // Update output slot button text
+                if let Some(output_handle) = self.furnace_output_slot {
+                    let output_text = if let Some(stack) = &self.furnace_state.output_slot {
+                        let name = self.hotbar.item_name(Some(stack));
+                        format!("{}\nx{}", name, stack.count)
+                    } else {
+                        "[Output]".to_string()
+                    };
+                    ui_manager.set_button_text(resources.device, output_handle, output_text);
+                }
+
+                // Update progress bar
+                if let Some(progress_handle) = self.furnace_progress_bar {
+                    let progress_percent = (self.furnace_state.smelting_progress * 100.0) as i32;
+                    let fuel_display = if self.furnace_state.is_burning() {
+                        format!("\n🔥 {:.1}s", self.furnace_state.fuel_burn_time)
+                    } else {
+                        "".to_string()
+                    };
+                    let progress_text = format!("→\n{}%{}", progress_percent, fuel_display);
+                    ui_manager.set_text_content(resources.device, progress_handle, progress_text);
+                }
+            } else {
+                // Furnace closed - remove UI elements
+                if self.furnace_input_slot.is_some() {
+                    tracing::info!("Closing 3D furnace UI");
+
+                    if let Some(handle) = self.furnace_input_slot.take() {
+                        ui_manager.remove_button(handle);
+                    }
+                    if let Some(handle) = self.furnace_fuel_slot.take() {
+                        ui_manager.remove_button(handle);
+                    }
+                    if let Some(handle) = self.furnace_output_slot.take() {
+                        ui_manager.remove_button(handle);
+                    }
+                    if let Some(handle) = self.furnace_progress_bar.take() {
+                        ui_manager.remove_text(handle);
+                    }
+                }
+            }
         }
     }
 
@@ -2530,6 +2659,15 @@ impl GameWorld {
                             }
                             999 => {
                                 self.handle_craft_button_click();
+                            }
+                            300 => {
+                                self.handle_furnace_input_click();
+                            }
+                            301 => {
+                                self.handle_furnace_fuel_click();
+                            }
+                            302 => {
+                                self.handle_furnace_output_click();
                             }
                             _ => {}
                         }
@@ -2650,6 +2788,104 @@ impl GameWorld {
 
         if !added {
             tracing::warn!("No space in hotbar for crafted item!");
+        }
+    }
+
+    /// Handle clicking on furnace input slot
+    fn handle_furnace_input_click(&mut self) {
+        tracing::info!("Furnace input slot clicked");
+
+        // If input slot is empty, try to add smeltable item from hotbar
+        if self.furnace_state.input_slot.is_none() {
+            // Find smeltable item in hotbar (selected slot)
+            if let Some(selected_stack) = &self.hotbar.selected_item() {
+                // Check if this item can be smelted
+                if FurnaceState::get_smelt_result(&selected_stack.item_type).is_some() {
+                    let item_to_add = ItemStack::new(selected_stack.item_type, 1);
+                    self.furnace_state.input_slot = Some(item_to_add);
+
+                    // Remove 1 from selected hotbar slot
+                    if let Some(stack) = self.hotbar.selected_item_mut() {
+                        stack.count -= 1;
+                        if stack.count == 0 {
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                        }
+                    }
+
+                    tracing::info!("Added {} to furnace input", self.hotbar.item_name(self.furnace_state.input_slot.as_ref()));
+                } else {
+                    tracing::info!("Selected item cannot be smelted");
+                }
+            }
+        } else {
+            // Input slot has items, return all to hotbar
+            if let Some(stack) = self.furnace_state.input_slot.take() {
+                if self.try_add_to_hotbar(stack.clone()) {
+                    tracing::info!("Returned {} from furnace input", self.hotbar.item_name(Some(&stack)));
+                } else {
+                    // Put it back if hotbar is full
+                    self.furnace_state.input_slot = Some(stack);
+                    tracing::warn!("Hotbar full! Cannot remove from furnace");
+                }
+            }
+        }
+    }
+
+    /// Handle clicking on furnace fuel slot
+    fn handle_furnace_fuel_click(&mut self) {
+        tracing::info!("Furnace fuel slot clicked");
+
+        // If fuel slot is empty, try to add fuel from hotbar
+        if self.furnace_state.fuel_slot.is_none() {
+            // Find fuel item in hotbar (selected slot)
+            if let Some(selected_stack) = &self.hotbar.selected_item() {
+                // Check if this item is valid fuel
+                if FurnaceState::get_fuel_time(&selected_stack.item_type).is_some() {
+                    let item_to_add = ItemStack::new(selected_stack.item_type, 1);
+                    self.furnace_state.fuel_slot = Some(item_to_add);
+
+                    // Remove 1 from selected hotbar slot
+                    if let Some(stack) = self.hotbar.selected_item_mut() {
+                        stack.count -= 1;
+                        if stack.count == 0 {
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                        }
+                    }
+
+                    tracing::info!("Added {} to furnace fuel", self.hotbar.item_name(self.furnace_state.fuel_slot.as_ref()));
+                } else {
+                    tracing::info!("Selected item is not fuel");
+                }
+            }
+        } else {
+            // Fuel slot has items, return all to hotbar
+            if let Some(stack) = self.furnace_state.fuel_slot.take() {
+                if self.try_add_to_hotbar(stack.clone()) {
+                    tracing::info!("Returned {} from furnace fuel", self.hotbar.item_name(Some(&stack)));
+                } else {
+                    // Put it back if hotbar is full
+                    self.furnace_state.fuel_slot = Some(stack);
+                    tracing::warn!("Hotbar full! Cannot remove from furnace");
+                }
+            }
+        }
+    }
+
+    /// Handle clicking on furnace output slot
+    fn handle_furnace_output_click(&mut self) {
+        tracing::info!("Furnace output slot clicked");
+
+        // Output slot: Always try to collect to hotbar
+        if let Some(stack) = self.furnace_state.output_slot.take() {
+            if self.try_add_to_hotbar(stack.clone()) {
+                tracing::info!("Collected {} from furnace output", self.hotbar.item_name(Some(&stack)));
+            } else {
+                // Put it back if hotbar is full
+                self.furnace_state.output_slot = Some(stack);
+                tracing::warn!("Hotbar full! Cannot collect output");
+            }
+        } else {
+            tracing::info!("Furnace output is empty");
         }
     }
 
