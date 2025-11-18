@@ -8,9 +8,11 @@ Complete guide to smelting ores and materials in the furnace.
 
 ## 📋 Overview
 
-The furnace is a functional block that converts raw materials into refined products using fuel. It's essential for the iron progression and allows you to create iron ingots from raw iron ore.
+The furnace is a functional block that converts raw materials into refined products using fuel. It's essential for both iron progression and cooking food.
 
 **Key Features:**
+- Smelts ores (Raw Iron → Iron Ingots)
+- Cooks food (Raw Meat → Cooked Meat)
 - Automatic fuel consumption
 - Progress tracking (10 seconds per item)
 - Multiple fuel types with different burn times
@@ -76,8 +78,8 @@ The furnace is a functional block that converts raw materials into refined produ
 3. Click the slot to transfer 1 item from hotbar
 
 **Input Slot:**
-- Only accepts smeltable items (Raw Iron, ore blocks)
-- Shows item name and quantity (e.g., "Raw Iron x10")
+- Accepts smeltable items: Raw Iron, ore blocks, Raw Meat
+- Shows item name and quantity (e.g., "Raw Iron x10" or "Raw Meat x8")
 - Click again to return ALL items to hotbar
 
 **Fuel Slot:**
@@ -142,6 +144,35 @@ Time: 100 seconds total
 - Time: 10 seconds
 
 *Note: These recipes support ore blocks if mined with Silk Touch (future feature)*
+
+### Cooking Recipes (Food)
+
+**Raw Meat → Cooked Meat** 🍖
+- **Input:** Raw Meat (dropped by passive mobs)
+- **Output:** Cooked Meat
+- **Time:** 10 seconds per meat
+- **Fuel Required:** ~1.25 seconds of burn time per meat
+
+**Stats Comparison:**
+- Raw Meat: 3 hunger, 1.8 saturation (poor)
+- Cooked Meat: 8 hunger, 12.8 saturation (excellent!)
+
+**Usage:**
+- Best food source in game
+- Essential for survival gameplay
+- Always cook Raw Meat before eating
+
+**Efficiency:**
+```
+Input: 8 Raw Meat + 1 Coal (80s burn time)
+Result: 8 Cooked Meat
+Hunger Restored: 64 points (3.2× full hunger bar!)
+Time: 80 seconds total
+```
+
+**Pro Tip:** Batch cook meat whenever you have coal. One coal = 8 perfect steaks!
+
+*For complete food system details, see `FOOD_GUIDE.md`*
 
 ---
 
