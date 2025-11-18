@@ -719,6 +719,154 @@ impl PlayerPhysics {
     }
 }
 
+/// Furnace smelting state
+#[derive(Debug, Clone)]
+struct FurnaceState {
+    /// Input slot (ore to smelt)
+    input_slot: Option<ItemStack>,
+    /// Fuel slot (coal, wood, etc.)
+    fuel_slot: Option<ItemStack>,
+    /// Output slot (smelted result)
+    output_slot: Option<ItemStack>,
+    /// Smelting progress (0.0 to 1.0)
+    smelting_progress: f32,
+    /// Remaining fuel burn time (seconds)
+    fuel_burn_time: f32,
+    /// Maximum fuel time for current fuel item
+    max_fuel_time: f32,
+}
+
+impl FurnaceState {
+    fn new() -> Self {
+        Self {
+            input_slot: None,
+            fuel_slot: None,
+            output_slot: None,
+            smelting_progress: 0.0,
+            fuel_burn_time: 0.0,
+            max_fuel_time: 0.0,
+        }
+    }
+
+    /// Check if fuel is currently burning
+    fn is_burning(&self) -> bool {
+        self.fuel_burn_time > 0.0
+    }
+
+    /// Get fuel burn time for an item type
+    fn get_fuel_time(item_type: &ItemType) -> Option<f32> {
+        match item_type {
+            ItemType::Item(3) => Some(80.0),  // Coal: 80 seconds
+            ItemType::Item(1) => Some(5.0),   // Stick: 5 seconds
+            ItemType::Block(11) | ItemType::Block(13) | ItemType::Block(15) => Some(15.0), // Logs: 15 seconds
+            ItemType::Block(7) => Some(7.5),  // Planks: 7.5 seconds (half of log)
+            _ => None,
+        }
+    }
+
+    /// Get smelting recipe result for an input item
+    fn get_smelt_result(item_type: &ItemType) -> Option<ItemType> {
+        match item_type {
+            ItemType::Item(4) => Some(ItemType::Item(2)),  // Raw Iron -> Iron Ingot
+            ItemType::Block(17) => Some(ItemType::Item(2)), // Iron Ore block -> Iron Ingot (legacy)
+            ItemType::Block(18) => Some(ItemType::Item(3)), // Coal Ore block -> Coal (legacy)
+            _ => None,
+        }
+    }
+
+    /// Update furnace smelting (called every frame)
+    fn update(&mut self, dt: f32) {
+        // Decrease fuel burn time
+        if self.fuel_burn_time > 0.0 {
+            self.fuel_burn_time -= dt;
+            if self.fuel_burn_time < 0.0 {
+                self.fuel_burn_time = 0.0;
+            }
+        }
+
+        // Check if we can smelt
+        if let Some(input_stack) = &self.input_slot {
+            if let Some(_result_type) = Self::get_smelt_result(&input_stack.item_type) {
+                // Valid recipe exists
+
+                // Try to consume fuel if not burning
+                if !self.is_burning() && self.fuel_slot.is_some() {
+                    if let Some(fuel_stack) = &self.fuel_slot {
+                        if let Some(fuel_time) = Self::get_fuel_time(&fuel_stack.item_type) {
+                            // Start burning fuel
+                            self.fuel_burn_time = fuel_time;
+                            self.max_fuel_time = fuel_time;
+
+                            // Consume one fuel item
+                            if fuel_stack.count > 1 {
+                                self.fuel_slot.as_mut().unwrap().count -= 1;
+                            } else {
+                                self.fuel_slot = None;
+                            }
+
+                            tracing::info!("Furnace: Started burning fuel ({:.1}s)", fuel_time);
+                        }
+                    }
+                }
+
+                // If burning, increase smelting progress
+                if self.is_burning() {
+                    self.smelting_progress += dt / 10.0; // 10 seconds to smelt
+
+                    // Check if smelting is complete
+                    if self.smelting_progress >= 1.0 {
+                        self.complete_smelting();
+                    }
+                } else {
+                    // Not burning, reset progress
+                    self.smelting_progress = 0.0;
+                }
+            } else {
+                // No valid recipe
+                self.smelting_progress = 0.0;
+            }
+        } else {
+            // No input
+            self.smelting_progress = 0.0;
+        }
+    }
+
+    /// Complete the smelting process
+    fn complete_smelting(&mut self) {
+        if let Some(input_stack) = &self.input_slot {
+            if let Some(result_type) = Self::get_smelt_result(&input_stack.item_type) {
+                // Create result item
+                let result = ItemStack::new(result_type, 1);
+
+                // Try to add to output slot
+                if let Some(output_stack) = &mut self.output_slot {
+                    if output_stack.item_type == result.item_type && output_stack.can_add(1) {
+                        output_stack.count += 1;
+                    } else {
+                        // Output slot has different item or is full, can't complete
+                        tracing::warn!("Furnace output blocked!");
+                        return;
+                    }
+                } else {
+                    self.output_slot = Some(result);
+                }
+
+                // Consume one input item
+                if input_stack.count > 1 {
+                    self.input_slot.as_mut().unwrap().count -= 1;
+                } else {
+                    self.input_slot = None;
+                }
+
+                // Reset progress
+                self.smelting_progress = 0.0;
+
+                tracing::info!("Furnace: Smelting complete!");
+            }
+        }
+    }
+}
+
 /// The game world state
 pub struct GameWorld {
     window: Arc<Window>,
@@ -762,6 +910,13 @@ pub struct GameWorld {
     // Crafting system
     recipe_book: RecipeBook,
     crafting_grid_items: [Option<ItemType>; 9],  // What's currently in the crafting grid
+    // Furnace UI
+    furnace_open: bool,
+    furnace_state: FurnaceState,
+    furnace_input_slot: Option<UIElementHandle>,
+    furnace_fuel_slot: Option<UIElementHandle>,
+    furnace_output_slot: Option<UIElementHandle>,
+    furnace_progress_bar: Option<UIElementHandle>,
 }
 
 impl GameWorld {
@@ -926,6 +1081,12 @@ impl GameWorld {
             craft_button: None,
             recipe_book: RecipeBook::new(),
             crafting_grid_items: [None; 9],
+            furnace_open: false,
+            furnace_state: FurnaceState::new(),
+            furnace_input_slot: None,
+            furnace_fuel_slot: None,
+            furnace_output_slot: None,
+            furnace_progress_bar: None,
         })
     }
 
@@ -1138,6 +1299,38 @@ impl GameWorld {
         }
     }
 
+    /// Test furnace smelting (development/debug function)
+    fn test_furnace_smelting(&mut self) {
+        tracing::info!("=== Furnace Smelting Test ===");
+        tracing::info!("Current furnace state:");
+        tracing::info!("  Input: {:?}", self.furnace_state.input_slot.as_ref().map(|s| (self.hotbar.item_name(Some(s)), s.count)));
+        tracing::info!("  Fuel: {:?}", self.furnace_state.fuel_slot.as_ref().map(|s| (self.hotbar.item_name(Some(s)), s.count)));
+        tracing::info!("  Output: {:?}", self.furnace_state.output_slot.as_ref().map(|s| (self.hotbar.item_name(Some(s)), s.count)));
+        tracing::info!("  Progress: {:.1}%", self.furnace_state.smelting_progress * 100.0);
+        tracing::info!("  Fuel burning: {:.1}s / {:.1}s", self.furnace_state.fuel_burn_time, self.furnace_state.max_fuel_time);
+
+        // If furnace is empty, populate it with test items
+        if self.furnace_state.input_slot.is_none() {
+            self.furnace_state.input_slot = Some(ItemStack::new(ItemType::Item(4), 10)); // 10 Raw Iron
+            self.furnace_state.fuel_slot = Some(ItemStack::new(ItemType::Item(3), 5)); // 5 Coal
+            tracing::info!("Added test items: 10 Raw Iron + 5 Coal");
+        } else {
+            // Collect output if available
+            if let Some(output) = self.furnace_state.output_slot.take() {
+                let item_name = self.hotbar.item_name(Some(&output));
+                if self.try_add_to_hotbar(output.clone()) {
+                    tracing::info!("Collected from furnace: {} x{}", item_name, output.count);
+                } else {
+                    // Put it back if inventory is full
+                    self.furnace_state.output_slot = Some(output);
+                    tracing::warn!("Inventory full! Could not collect output.");
+                }
+            } else {
+                tracing::info!("No output to collect yet.");
+            }
+        }
+    }
+
     /// Try to add mined block to inventory
     /// Determines what item should drop based on block type
     fn try_add_mined_block(&mut self, block_id: BlockId) {
@@ -1269,6 +1462,10 @@ impl GameWorld {
             PhysicalKey::Code(KeyCode::KeyR) => {
                 self.try_eat_food();
             }
+            PhysicalKey::Code(KeyCode::KeyV) => {
+                // Test furnace smelting (for development)
+                self.test_furnace_smelting();
+            }
             PhysicalKey::Code(KeyCode::BracketLeft) => {
                 self.time_of_day.decrease_speed();
             }
@@ -1320,6 +1517,9 @@ impl GameWorld {
 
         // Update mobs
         self.update_mobs();
+
+        // Update furnace smelting
+        self.furnace_state.update(dt);
 
         // Update debug HUD
         self.debug_hud.update_fps(dt);
@@ -1518,9 +1718,30 @@ impl GameWorld {
                 self.mining_progress = None;
             }
 
-            // Right click: place block
+            // Right click: interact with block or place block
             if self.input.is_mouse_clicked(MouseButton::Right) {
-                self.handle_block_placement(hit);
+                // Check if clicking on a furnace block
+                let chunk_x = hit.block_pos.x.div_euclid(16);
+                let chunk_z = hit.block_pos.z.div_euclid(16);
+                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+                let is_furnace = if let Some(chunk) = self.chunks.get(&chunk_pos) {
+                    let local_x = hit.block_pos.x.rem_euclid(16) as usize;
+                    let local_y = hit.block_pos.y as usize;
+                    let local_z = hit.block_pos.z.rem_euclid(16) as usize;
+                    chunk.voxel(local_x, local_y, local_z).id == 59 // Furnace block
+                } else {
+                    false
+                };
+
+                if is_furnace {
+                    // Open furnace UI
+                    self.furnace_open = !self.furnace_open;
+                    tracing::info!("Furnace: {}", if self.furnace_open { "OPEN" } else { "CLOSED" });
+                } else {
+                    // Place block
+                    self.handle_block_placement(hit);
+                }
             }
         } else {
             // No block selected, reset mining progress
