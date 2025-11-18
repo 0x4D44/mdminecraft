@@ -21,6 +21,7 @@ cargo run --release
 | **F** | Toggle fly mode |
 | **E** | Toggle inventory |
 | **C** | Toggle crafting table |
+| **R** | Eat selected food item |
 | **P** | Pause time |
 | **F3** | Toggle debug HUD |
 | **ESC** | Return to menu |
@@ -172,6 +173,41 @@ A floating "Click Me!" button demonstrates the interaction system:
 - Turns yellow when aimed at (hover)
 - Turns blue when clicked (press)
 - Logs to console when activated
+
+### 5. Player Status Bars
+
+**Always-Visible HUD Elements:**
+- Located at bottom center of screen
+- Always visible (not affected by F3 toggle)
+- Real-time updates every frame
+
+**Health Bar (❤):**
+- Shows current/max health (default: 20/20)
+- 200×20px bar with color-coding:
+  - **Green**: >66% health (healthy)
+  - **Yellow**: 33-66% health (wounded)
+  - **Red**: <33% health (critical)
+- White text overlay shows exact values
+- Dark gray background with white border
+
+**Hunger Bar (🍖):**
+- Shows current/max hunger (default: 20/20)
+- 200×20px bar with color-coding:
+  - **Orange**: >66% hunger (well-fed)
+  - **Dark Orange**: 33-66% hunger (getting hungry)
+  - **Dark Red**: <33% hunger (starving)
+- White text overlay shows exact values
+- Dark gray background with white border
+
+**How They Work:**
+- Health decreases when taking damage from mobs
+- Hunger drains at 0.1 points/second (2 minutes to empty)
+- Eating food (press R) restores hunger and saturation
+- Health regenerates based on hunger level:
+  - >18 hunger: 1.0 HP/second (fast regen)
+  - 7-18 hunger: 0.3 HP/second (slow regen)
+  - <6 hunger: No regeneration
+- Starvation (0 hunger) causes 0.5 damage/second
 
 ## 🐄 Mob System
 

@@ -1208,6 +1208,12 @@ impl GameWorld {
         self.debug_hud.camera_rot = [camera.yaw, camera.pitch];
         self.debug_hud.chunks_visible = self.chunks_visible;
 
+        // Update player stats for HUD display
+        self.debug_hud.player_health = self.player_health.current;
+        self.debug_hud.player_max_health = self.player_health.max;
+        self.debug_hud.player_hunger = self.player_hunger.current;
+        self.debug_hud.player_max_hunger = self.player_hunger.max;
+
         // Update camera from input
         self.update_camera(dt);
 
