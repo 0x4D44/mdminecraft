@@ -54,14 +54,8 @@ fn config_from_args() -> Result<CliConfig> {
 
 fn default_registry() -> BlockRegistry {
     BlockRegistry::new(vec![
-        BlockDescriptor {
-            name: "air".into(),
-            opaque: false,
-        },
-        BlockDescriptor {
-            name: "stone".into(),
-            opaque: true,
-        },
+        BlockDescriptor::simple("air", false),
+        BlockDescriptor::simple("stone", true),
     ])
 }
 
@@ -82,7 +76,7 @@ fn demo_mesher(registry: &BlockRegistry, metrics_path: &Path) -> Result<()> {
         },
     );
     let mut cache = ChunkMeshCache::new();
-    let mut driver = ChunkMeshDriver::new(&mut storage, &mut cache, registry);
+    let mut driver = ChunkMeshDriver::new(&mut storage, &mut cache, registry, None);
     let stats = driver.process();
     tracing::info!(chunks = stats.len(), "processed dirty chunks");
     for stat in &stats {

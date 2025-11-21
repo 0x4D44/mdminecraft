@@ -8,8 +8,10 @@ mod camera;
 mod chunk_manager;
 mod driver;
 mod mesh;
+mod particles;
 mod pipeline;
 mod raycast;
+mod texture_atlas;
 mod time;
 mod ui;
 mod window;
@@ -18,12 +20,18 @@ pub use cache::ChunkMeshCache;
 pub use camera::{Camera, CameraUniform};
 pub use chunk_manager::{ChunkManager, ChunkRenderData, Frustum};
 pub use driver::{ChunkMeshDriver, ChunkMeshStat};
+use mdminecraft_assets::TextureAtlasMetadata;
 pub use mesh::{mesh_chunk, MeshBuffers, MeshHash, MeshVertex};
-pub use pipeline::{ChunkMeshBuffer, HighlightUniform, RenderContext, SkyboxPipeline, WireframePipeline, VoxelPipeline};
+pub use particles::{ParticleEmitter, ParticleSystem, ParticleVertex};
+pub use pipeline::{
+    ChunkMeshBuffer, HighlightUniform, ParticlePipeline, RenderContext, SkyboxPipeline,
+    VoxelPipeline, WireframePipeline,
+};
 pub use raycast::{raycast, RaycastHit};
+pub use texture_atlas::{atlas_exists, warn_missing_atlas};
 pub use time::{TimeOfDay, TimeUniform};
-pub use ui::{DebugHud, UiManager};
-pub use window::{InputState, WindowConfig, WindowManager};
+pub use ui::{ControlMode, DebugHud, UiManager, UiRenderContext};
+pub use window::{InputContext, InputSnapshot, InputState, WindowConfig, WindowManager};
 
 /// Renderer configuration for headless + onscreen paths.
 #[derive(Debug, Clone)]
@@ -53,6 +61,7 @@ pub struct Renderer {
     pipeline: Option<VoxelPipeline>,
     skybox_pipeline: Option<SkyboxPipeline>,
     wireframe_pipeline: Option<WireframePipeline>,
+    particle_pipeline: Option<ParticlePipeline>,
     camera: Camera,
     ui: Option<RefCell<UiManager>>,
 }
@@ -69,17 +78,24 @@ impl Renderer {
             pipeline: None,
             skybox_pipeline: None,
             wireframe_pipeline: None,
+            particle_pipeline: None,
             camera,
             ui: None,
         }
     }
 
     /// Initialize GPU resources with a window (async).
-    pub async fn initialize_gpu(&mut self, window: std::sync::Arc<winit::window::Window>) -> anyhow::Result<()> {
+    pub async fn initialize_gpu(
+        &mut self,
+        window: std::sync::Arc<winit::window::Window>,
+    ) -> anyhow::Result<()> {
         let context = RenderContext::new(window.clone()).await?;
         let pipeline = VoxelPipeline::new(&context)?;
         let skybox_pipeline = SkyboxPipeline::new(&context)?;
-        let wireframe_pipeline = WireframePipeline::new(&context)?;
+        let wireframe_pipeline =
+            WireframePipeline::new(&context, pipeline.camera_bind_group_layout())?;
+        let particle_pipeline =
+            ParticlePipeline::new(&context, pipeline.camera_bind_group_layout())?;
 
         // Initialize UI (wrapped in RefCell for interior mutability)
         let ui = UiManager::new(&context.device, context.config.format, &window);
@@ -90,19 +106,25 @@ impl Renderer {
         self.pipeline = Some(pipeline);
         self.skybox_pipeline = Some(skybox_pipeline);
         self.wireframe_pipeline = Some(wireframe_pipeline);
+        self.particle_pipeline = Some(particle_pipeline);
         self.ui = Some(RefCell::new(ui));
 
         Ok(())
     }
 
     /// Get mutable reference to UI manager via RefCell.
-    pub fn ui_mut(&self) -> Option<std::cell::RefMut<UiManager>> {
+    pub fn ui_mut(&self) -> Option<std::cell::RefMut<'_, UiManager>> {
         self.ui.as_ref().map(|cell| cell.borrow_mut())
     }
 
     /// Get reference to UI manager via RefCell.
-    pub fn ui(&self) -> Option<std::cell::Ref<UiManager>> {
+    pub fn ui(&self) -> Option<std::cell::Ref<'_, UiManager>> {
         self.ui.as_ref().map(|cell| cell.borrow())
+    }
+
+    /// Access the renderer configuration provided at construction time.
+    pub fn config(&self) -> &RendererConfig {
+        &self.config
     }
 
     /// Get mutable reference to the camera.
@@ -115,8 +137,17 @@ impl Renderer {
         &self.camera
     }
 
+    /// Access texture atlas metadata if available.
+    pub fn atlas_metadata(&self) -> Option<&TextureAtlasMetadata> {
+        self.pipeline
+            .as_ref()
+            .and_then(|pipeline| pipeline.atlas_metadata())
+    }
+
     /// Resize the renderer.
     pub fn resize(&mut self, new_size: (u32, u32)) {
+        self.config.width = new_size.0;
+        self.config.height = new_size.1;
         if let Some(context) = &mut self.context {
             context.resize(new_size);
             self.camera.set_aspect(context.aspect_ratio());
@@ -140,18 +171,16 @@ impl Renderer {
         // Update camera uniform
         pipeline.update_camera(&context.queue, &self.camera);
 
-        Some(FrameContext {
-            output,
-            view,
-        })
+        Some(FrameContext { output, view })
     }
 
     /// Get render resources for drawing.
-    pub fn render_resources(&self) -> Option<RenderResources> {
+    pub fn render_resources(&self) -> Option<RenderResources<'_>> {
         let context = self.context.as_ref()?;
         let pipeline = self.pipeline.as_ref()?;
         let skybox_pipeline = self.skybox_pipeline.as_ref()?;
         let wireframe_pipeline = self.wireframe_pipeline.as_ref()?;
+        let particle_pipeline = self.particle_pipeline.as_ref()?;
 
         Some(RenderResources {
             device: &context.device,
@@ -159,7 +188,13 @@ impl Renderer {
             pipeline,
             skybox_pipeline,
             wireframe_pipeline,
+            particle_pipeline,
         })
+    }
+
+    /// Access the underlying `wgpu::Device` if the renderer has been initialized.
+    pub fn device(&self) -> Option<&wgpu::Device> {
+        self.context.as_ref().map(|ctx| &ctx.device)
     }
 }
 
@@ -189,4 +224,6 @@ pub struct RenderResources<'a> {
     pub skybox_pipeline: &'a SkyboxPipeline,
     /// Wireframe rendering pipeline.
     pub wireframe_pipeline: &'a WireframePipeline,
+    /// Particle rendering pipeline.
+    pub particle_pipeline: &'a ParticlePipeline,
 }

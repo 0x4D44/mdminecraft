@@ -1,5 +1,5 @@
 use blake3::Hasher;
-use mdminecraft_assets::BlockRegistry;
+use mdminecraft_assets::{BlockFace, BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_world::{
     BlockId, Chunk, Voxel, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
@@ -51,22 +51,37 @@ impl MeshBuffers {
 }
 
 /// Generate greedy-meshed buffers for the given chunk.
-pub fn mesh_chunk(chunk: &Chunk, registry: &BlockRegistry) -> MeshBuffers {
-    let mut builder = MeshBuilder::default();
+pub fn mesh_chunk(
+    chunk: &Chunk,
+    registry: &BlockRegistry,
+    atlas: Option<&TextureAtlasMetadata>,
+) -> MeshBuffers {
+    let mut builder = MeshBuilder::new(registry, atlas);
     GreedyMesher::mesh(chunk, registry, &mut builder);
     builder.finish()
 }
 
-#[derive(Default)]
-struct MeshBuilder {
+struct MeshBuilder<'a> {
     vertices: Vec<MeshVertex>,
     indices: Vec<u32>,
+    registry: &'a BlockRegistry,
+    atlas: Option<&'a TextureAtlasMetadata>,
 }
 
-impl MeshBuilder {
+impl<'a> MeshBuilder<'a> {
+    fn new(registry: &'a BlockRegistry, atlas: Option<&'a TextureAtlasMetadata>) -> Self {
+        Self {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            registry,
+            atlas,
+        }
+    }
+
     fn push_quad(
         &mut self,
         block_id: BlockId,
+        face: BlockFace,
         normal: [f32; 3],
         corners: [[f32; 3]; 4],
         normal_positive: bool,
@@ -74,20 +89,7 @@ impl MeshBuilder {
     ) {
         let base = self.vertices.len() as u32;
 
-        // Generate UV coordinates for the quad
-        // For now, use a simple mapping based on block_id
-        // This maps to a 16×16 texture atlas
-        let atlas_x = (block_id % 16) as f32;
-        let atlas_y = (block_id / 16) as f32;
-        let atlas_size = 16.0;
-
-        // UV coordinates for the four corners of the quad
-        let uvs = [
-            [atlas_x / atlas_size, atlas_y / atlas_size],                                 // Bottom-left
-            [(atlas_x + 1.0) / atlas_size, atlas_y / atlas_size],                         // Bottom-right
-            [(atlas_x + 1.0) / atlas_size, (atlas_y + 1.0) / atlas_size],                 // Top-right
-            [atlas_x / atlas_size, (atlas_y + 1.0) / atlas_size],                         // Top-left
-        ];
+        let uvs = self.resolve_uvs(block_id, face);
 
         for (i, &corner) in corners.iter().enumerate() {
             self.vertices.push(MeshVertex {
@@ -110,7 +112,9 @@ impl MeshBuilder {
     }
 
     fn finish(self) -> MeshBuffers {
-        let MeshBuilder { vertices, indices } = self;
+        let MeshBuilder {
+            vertices, indices, ..
+        } = self;
         let mut hasher = Hasher::new();
         for vertex in &vertices {
             hasher.update(bytemuck::cast_slice(&vertex.position));
@@ -174,7 +178,14 @@ impl GreedyMesher {
                             quad_height += 1;
                         }
 
-                        Self::emit_quad(builder, axis, slice, i, j, quad_width, quad_height, cell);
+                        Self::emit_quad(
+                            builder,
+                            axis,
+                            slice,
+                            (i, j),
+                            (quad_width, quad_height),
+                            cell,
+                        );
 
                         for dy in 0..quad_height {
                             for dx in 0..quad_width {
@@ -226,21 +237,21 @@ impl GreedyMesher {
             (Some(a), Some(b)) => match (is_opaque(a, registry), is_opaque(b, registry)) {
                 (true, false) => {
                     let light = a.light_sky.max(a.light_block);
-                    Some(FaceDesc::new(a.id, axis, true, light))
+                    Some(FaceDesc::new(a.id, axis, false, light))
                 }
                 (false, true) => {
                     let light = b.light_sky.max(b.light_block);
-                    Some(FaceDesc::new(b.id, axis, false, light))
+                    Some(FaceDesc::new(b.id, axis, true, light))
                 }
                 _ => None,
             },
             (Some(a), None) if is_opaque(a, registry) => {
                 let light = a.light_sky.max(a.light_block);
-                Some(FaceDesc::new(a.id, axis, true, light))
+                Some(FaceDesc::new(a.id, axis, false, light))
             }
             (None, Some(b)) if is_opaque(b, registry) => {
                 let light = b.light_sky.max(b.light_block);
-                Some(FaceDesc::new(b.id, axis, false, light))
+                Some(FaceDesc::new(b.id, axis, true, light))
             }
             _ => None,
         }
@@ -250,14 +261,14 @@ impl GreedyMesher {
         builder: &mut MeshBuilder,
         axis: usize,
         slice: usize,
-        u: usize,
-        v: usize,
-        quad_width: usize,
-        quad_height: usize,
+        origin_uv: (usize, usize),
+        quad_size: (usize, usize),
         cell: FaceDesc,
     ) {
         let u_axis = (axis + 1) % 3;
         let v_axis = (axis + 2) % 3;
+        let (u, v) = origin_uv;
+        let (quad_width, quad_height) = quad_size;
 
         let mut origin = [0f32; 3];
         origin[u_axis] = u as f32;
@@ -284,6 +295,7 @@ impl GreedyMesher {
         ];
         builder.push_quad(
             cell.block_id,
+            cell.face(),
             normal,
             [v0, v1, v2, v3],
             cell.normal[axis] > 0,
@@ -309,6 +321,18 @@ impl FaceDesc {
             light,
         }
     }
+
+    fn face(&self) -> BlockFace {
+        match self.normal {
+            [0, 1, 0] => BlockFace::Up,
+            [0, -1, 0] => BlockFace::Down,
+            [0, 0, 1] => BlockFace::South,
+            [0, 0, -1] => BlockFace::North,
+            [1, 0, 0] => BlockFace::East,
+            [-1, 0, 0] => BlockFace::West,
+            _ => BlockFace::Up,
+        }
+    }
 }
 
 fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -322,6 +346,33 @@ fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
         .unwrap_or(voxel.id != BLOCK_AIR)
 }
 
+impl<'a> MeshBuilder<'a> {
+    fn resolve_uvs(&self, block_id: BlockId, face: BlockFace) -> [[f32; 2]; 4] {
+        if let Some(atlas) = self.atlas {
+            if let Some(desc) = self.registry.descriptor(block_id) {
+                if let Some(entry) = atlas.entry(desc.texture_for(face)) {
+                    return [
+                        [entry.u0, entry.v0],
+                        [entry.u1, entry.v0],
+                        [entry.u1, entry.v1],
+                        [entry.u0, entry.v1],
+                    ];
+                }
+            }
+        }
+
+        let atlas_size = 16.0;
+        let atlas_x = (block_id % 16) as f32;
+        let atlas_y = (block_id / 16) as f32;
+        [
+            [atlas_x / atlas_size, atlas_y / atlas_size],
+            [(atlas_x + 1.0) / atlas_size, atlas_y / atlas_size],
+            [(atlas_x + 1.0) / atlas_size, (atlas_y + 1.0) / atlas_size],
+            [atlas_x / atlas_size, (atlas_y + 1.0) / atlas_size],
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
@@ -331,14 +382,8 @@ mod tests {
 
     fn registry() -> BlockRegistry {
         BlockRegistry::new(vec![
-            BlockDescriptor {
-                name: "air".into(),
-                opaque: false,
-            },
-            BlockDescriptor {
-                name: "stone".into(),
-                opaque: true,
-            },
+            BlockDescriptor::simple("air", false),
+            BlockDescriptor::simple("stone", true),
         ])
     }
 
@@ -353,7 +398,7 @@ mod tests {
             light_block: 0,
         };
         chunk.set_voxel(1, 1, 1, voxel);
-        let mesh = mesh_chunk(&chunk, &registry());
+        let mesh = mesh_chunk(&chunk, &registry(), None);
         assert!(!mesh.vertices.is_empty());
         assert_eq!(mesh.indices.len(), 36); // 6 faces * 2 tris * 3 indices
     }
@@ -363,7 +408,7 @@ mod tests {
         let pos = ChunkPos::new(0, 0);
         let mut chunk = Chunk::new(pos);
         let registry = registry();
-        let mesh = mesh_chunk(&chunk, &registry);
+        let mesh = mesh_chunk(&chunk, &registry, None);
         let hash_empty = mesh.hash;
 
         let voxel = Voxel {
@@ -373,7 +418,7 @@ mod tests {
             light_block: 0,
         };
         chunk.set_voxel(0, 0, 0, voxel);
-        let mesh_updated = mesh_chunk(&chunk, &registry);
+        let mesh_updated = mesh_chunk(&chunk, &registry, None);
         assert_ne!(hash_empty, mesh_updated.hash);
     }
 }

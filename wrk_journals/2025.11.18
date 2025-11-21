@@ -1,0 +1,8 @@
+# Journal — Input Overhaul (2025-11-18)
+
+## 19:20 - Kickoff
+- User reports control issues (WASD, mouse look, vertical movement).
+- Need to investigate current input pipeline, review `InputState`, `GameWorld::update_camera`, renderer focus capture, etc.
+- Plan: audit existing code paths, catalog deficiencies, draft comprehensive HLD for improved controls, including mode switching (fly vs physics), mouse capture, keybinds, rebinding architecture.
+- Next: inspect `src/input`, `src/game.rs` sections for movement; gather winit event handling details.
+

@@ -7,9 +7,9 @@ use mdminecraft_ui3d::{
     Text3D,
 };
 use std::time::Instant;
+use wgpu::util::DeviceExt;
 use winit::event::{Event, WindowEvent};
 use winit::keyboard::KeyCode;
-use wgpu::util::DeviceExt;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -54,10 +54,11 @@ fn main() -> Result<()> {
     // Create camera bind group layout for text renderer
     let camera_bind_group_layout = {
         let resources = renderer.render_resources().expect("GPU not initialized");
-        resources.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Camera Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        resources
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
@@ -66,9 +67,8 @@ fn main() -> Result<()> {
                         min_binding_size: None,
                     },
                     count: None,
-                },
-            ],
-        })
+                }],
+            })
     };
 
     // Create text renderer
@@ -175,13 +175,11 @@ fn main() -> Result<()> {
                         if code == KeyCode::Tab {
                             mouse_grabbed = !mouse_grabbed;
                             if mouse_grabbed {
-                                let _ = window.set_cursor_grab(
-                                    winit::window::CursorGrabMode::Confined,
-                                );
+                                let _ =
+                                    window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
                                 window.set_cursor_visible(false);
                             } else {
-                                let _ = window
-                                    .set_cursor_grab(winit::window::CursorGrabMode::None);
+                                let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
                                 window.set_cursor_visible(true);
                             }
                         }
@@ -199,9 +197,8 @@ fn main() -> Result<()> {
                     let center_x = 1280.0 / 2.0;
                     let center_y = 720.0 / 2.0;
                     mouse_delta = (position.x - center_x, position.y - center_y);
-                    let _ = window.set_cursor_position(winit::dpi::PhysicalPosition::new(
-                        center_x, center_y,
-                    ));
+                    let _ = window
+                        .set_cursor_position(winit::dpi::PhysicalPosition::new(center_x, center_y));
                 }
             }
 
@@ -251,11 +248,12 @@ fn main() -> Result<()> {
                 if let Some(frame) = renderer.begin_frame() {
                     let resources = renderer.render_resources().unwrap();
 
-                    let mut encoder = resources.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("Render Encoder"),
-                        },
-                    );
+                    let mut encoder =
+                        resources
+                            .device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("Render Encoder"),
+                            });
 
                     // Clear to dark blue background
                     {
@@ -282,20 +280,21 @@ fn main() -> Result<()> {
 
                     // Render text (without depth buffer for this simple demo)
                     {
-                        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("Text Render Pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &frame.view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            timestamp_writes: None,
-                            occlusion_query_set: None,
-                        });
+                        let mut render_pass =
+                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Text Render Pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &frame.view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
 
                         // Draw all text
                         for (i, ((vertex_buffer, index_buffer), (_vertex_count, index_count))) in
@@ -360,5 +359,7 @@ fn find_system_font() -> Result<String> {
         }
     }
 
-    anyhow::bail!("Could not find a system font. Please install DejaVu Sans or specify a font path.")
+    anyhow::bail!(
+        "Could not find a system font. Please install DejaVu Sans or specify a font path."
+    )
 }

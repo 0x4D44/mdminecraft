@@ -1,0 +1,12 @@
+[package]
+name = "ecs_compare"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+bevy_ecs = { workspace = true }
+clap = { workspace = true }
+hecs = { workspace = true }
+rand = { workspace = true }

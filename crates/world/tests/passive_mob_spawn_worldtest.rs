@@ -9,9 +9,7 @@
 
 use mdminecraft_core::SimTick;
 use mdminecraft_testkit::{EventRecord, JsonlSink};
-use mdminecraft_world::{
-    BiomeAssigner, Heightmap, Mob, MobSpawner, MobState, MobType,
-};
+use mdminecraft_world::{BiomeAssigner, Heightmap, Mob, MobSpawner, MobState, MobType};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -48,12 +46,7 @@ fn passive_mob_spawn_worldtest() {
             let biome = biome_assigner.get_biome(chunk_center_x, chunk_center_z);
 
             // Spawn mobs
-            let mobs = mob_spawner.generate_spawns(
-                chunk_x,
-                chunk_z,
-                biome,
-                heightmap.heights(),
-            );
+            let mobs = mob_spawner.generate_spawns(chunk_x, chunk_z, biome, heightmap.heights());
 
             // Track statistics
             for mob in &mobs {
@@ -116,7 +109,8 @@ fn passive_mob_spawn_worldtest() {
     }
 
     let sim_duration = sim_start.elapsed();
-    let avg_update_time = sim_duration.as_micros() as f64 / (total_mobs as u64 * simulation_ticks) as f64;
+    let avg_update_time =
+        sim_duration.as_micros() as f64 / (total_mobs as u64 * simulation_ticks) as f64;
 
     // Phase 3: Validation
     println!("Phase 3: Validating results...");
@@ -189,17 +183,17 @@ fn passive_mob_spawn_worldtest() {
     for (m2, m3) in mobs2.iter().zip(mobs3.iter()) {
         assert_eq!(m2.x, m3.x, "Mob X position should be deterministic");
         assert_eq!(m2.z, m3.z, "Mob Z position should be deterministic");
-        assert_eq!(
-            m2.mob_type, m3.mob_type,
-            "Mob type should be deterministic"
-        );
+        assert_eq!(m2.mob_type, m3.mob_type, "Mob type should be deterministic");
     }
 
     // Phase 5: Report results
     let test_duration = test_start.elapsed();
 
     println!("\n=== Passive Mob Spawn Worldtest Results ===");
-    println!("Total chunks: {}", (CHUNK_RADIUS * 2 + 1) * (CHUNK_RADIUS * 2 + 1));
+    println!(
+        "Total chunks: {}",
+        (CHUNK_RADIUS * 2 + 1) * (CHUNK_RADIUS * 2 + 1)
+    );
     println!("Total mobs spawned: {}", total_mobs);
     println!("\nMob type distribution:");
     for (mob_type, count) in &mob_type_counts {
@@ -212,10 +206,16 @@ fn passive_mob_spawn_worldtest() {
     println!("\nSimulation ({} ticks):", simulation_ticks);
     println!("  State transitions: {}", state_transitions);
     println!("  Total distance moved: {:.2} blocks", total_distance_moved);
-    println!("  Avg distance per mob: {:.2} blocks", total_distance_moved / total_mobs as f64);
+    println!(
+        "  Avg distance per mob: {:.2} blocks",
+        total_distance_moved / total_mobs as f64
+    );
     println!("\nPerformance:");
     println!("  Simulation time: {:?}", sim_duration);
-    println!("  Avg update time: {:.3}μs per mob per tick", avg_update_time);
+    println!(
+        "  Avg update time: {:.3}μs per mob per tick",
+        avg_update_time
+    );
     println!("  Total test time: {:?}", test_duration);
 
     // Write final summary to event log
@@ -240,12 +240,7 @@ fn test_mob_spawning_respects_biome_rules() {
     let biome_assigner = BiomeAssigner::new(12345);
 
     // Test various biomes
-    let test_cases = vec![
-        (0, 0),
-        (5, 5),
-        (-3, 7),
-        (10, -10),
-    ];
+    let test_cases = vec![(0, 0), (5, 5), (-3, 7), (10, -10)];
 
     for (chunk_x, chunk_z) in test_cases {
         let heightmap = Heightmap::generate(12345, chunk_x, chunk_z);
@@ -281,9 +276,25 @@ fn test_mob_ai_consistency() {
         mob1.update(tick);
         mob2.update(tick);
 
-        assert_eq!(mob1.state, mob2.state, "State should be deterministic at tick {}", tick);
-        assert_eq!(mob1.x, mob2.x, "X position should be deterministic at tick {}", tick);
-        assert_eq!(mob1.z, mob2.z, "Z position should be deterministic at tick {}", tick);
-        assert_eq!(mob1.ai_timer, mob2.ai_timer, "AI timer should be deterministic at tick {}", tick);
+        assert_eq!(
+            mob1.state, mob2.state,
+            "State should be deterministic at tick {}",
+            tick
+        );
+        assert_eq!(
+            mob1.x, mob2.x,
+            "X position should be deterministic at tick {}",
+            tick
+        );
+        assert_eq!(
+            mob1.z, mob2.z,
+            "Z position should be deterministic at tick {}",
+            tick
+        );
+        assert_eq!(
+            mob1.ai_timer, mob2.ai_timer,
+            "AI timer should be deterministic at tick {}",
+            tick
+        );
     }
 }

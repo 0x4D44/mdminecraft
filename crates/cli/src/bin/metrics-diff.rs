@@ -44,9 +44,9 @@ struct MetricDiff {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DiffStatus {
-    Pass,       // Within acceptable range or improved
-    Warning,    // 5-10% degradation
-    Failure,    // >10% degradation
+    Pass,    // Within acceptable range or improved
+    Warning, // 5-10% degradation
+    Failure, // >10% degradation
 }
 
 impl DiffStatus {
@@ -139,8 +139,7 @@ fn load_metrics(path: &PathBuf) -> Result<MetricsReport, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
 
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
 }
 
 fn compare_metrics(
@@ -308,9 +307,15 @@ fn print_text_report(
     println!("  Failure:  {}%", config.threshold_failure * 100.0);
     println!();
 
-    println!("┌────────────────────────────────────┬──────────────┬──────────────┬──────────┬────────┐");
-    println!("│ Metric                             │ Baseline     │ Current      │ Change   │ Status │");
-    println!("├────────────────────────────────────┼──────────────┼──────────────┼──────────┼────────┤");
+    println!(
+        "┌────────────────────────────────────┬──────────────┬──────────────┬──────────┬────────┐"
+    );
+    println!(
+        "│ Metric                             │ Baseline     │ Current      │ Change   │ Status │"
+    );
+    println!(
+        "├────────────────────────────────────┼──────────────┼──────────────┼──────────┼────────┤"
+    );
 
     for diff in diffs {
         let status_str = format!("{} {}", diff.status.to_emoji(), diff.status.to_string());
@@ -324,13 +329,24 @@ fn print_text_report(
         );
     }
 
-    println!("└────────────────────────────────────┴──────────────┴──────────────┴──────────┴────────┘");
+    println!(
+        "└────────────────────────────────────┴──────────────┴──────────────┴──────────┴────────┘"
+    );
     println!();
 
     // Summary
-    let passed = diffs.iter().filter(|d| d.status == DiffStatus::Pass).count();
-    let warned = diffs.iter().filter(|d| d.status == DiffStatus::Warning).count();
-    let failed = diffs.iter().filter(|d| d.status == DiffStatus::Failure).count();
+    let passed = diffs
+        .iter()
+        .filter(|d| d.status == DiffStatus::Pass)
+        .count();
+    let warned = diffs
+        .iter()
+        .filter(|d| d.status == DiffStatus::Warning)
+        .count();
+    let failed = diffs
+        .iter()
+        .filter(|d| d.status == DiffStatus::Failure)
+        .count();
 
     println!("Summary:");
     println!("  ✅ Passed:  {}/{}", passed, diffs.len());
@@ -343,10 +359,16 @@ fn print_text_report(
     println!();
 
     if failed > 0 {
-        println!("❌ FAILURE: Performance regressions detected (>{}%)", config.threshold_failure * 100.0);
+        println!(
+            "❌ FAILURE: Performance regressions detected (>{}%)",
+            config.threshold_failure * 100.0
+        );
     } else if warned > 0 {
-        println!("⚠️  WARNING: Performance degradation detected ({}%-{}%)",
-            config.threshold_warning * 100.0, config.threshold_failure * 100.0);
+        println!(
+            "⚠️  WARNING: Performance degradation detected ({}%-{}%)",
+            config.threshold_warning * 100.0,
+            config.threshold_failure * 100.0
+        );
     } else {
         println!("✅ SUCCESS: All metrics within acceptable ranges");
     }
@@ -370,16 +392,28 @@ fn print_json_report(diffs: &[MetricDiff]) {
 
     report.insert("metrics", serde_json::json!(metrics));
 
-    let passed = diffs.iter().filter(|d| d.status == DiffStatus::Pass).count();
-    let warned = diffs.iter().filter(|d| d.status == DiffStatus::Warning).count();
-    let failed = diffs.iter().filter(|d| d.status == DiffStatus::Failure).count();
+    let passed = diffs
+        .iter()
+        .filter(|d| d.status == DiffStatus::Pass)
+        .count();
+    let warned = diffs
+        .iter()
+        .filter(|d| d.status == DiffStatus::Warning)
+        .count();
+    let failed = diffs
+        .iter()
+        .filter(|d| d.status == DiffStatus::Failure)
+        .count();
 
-    report.insert("summary", serde_json::json!({
-        "total": diffs.len(),
-        "passed": passed,
-        "warnings": warned,
-        "failures": failed,
-    }));
+    report.insert(
+        "summary",
+        serde_json::json!({
+            "total": diffs.len(),
+            "passed": passed,
+            "warnings": warned,
+            "failures": failed,
+        }),
+    );
 
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 }

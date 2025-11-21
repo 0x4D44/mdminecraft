@@ -23,6 +23,11 @@ mdminecraft-world = { path = "../world" }
 mdminecraft-assets = { path = "../assets" }
 mdminecraft-render = { path = "../render" }
 
+[features]
+default = []
+# Stub billboard pipeline; keep disabled in prod until implemented
+ui3d_billboards = []
+
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 pollster = { workspace = true }

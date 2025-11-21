@@ -10,7 +10,7 @@
 //! - Biome transitions are smooth
 //! - No gaps or overlaps
 
-use mdminecraft_world::{Heightmap, BiomeAssigner, CHUNK_SIZE_X, CHUNK_SIZE_Z};
+use mdminecraft_world::{BiomeAssigner, Heightmap, CHUNK_SIZE_X, CHUNK_SIZE_Z};
 use proptest::prelude::*;
 
 /// Maximum allowed height difference at chunk boundaries (blocks)
@@ -227,7 +227,12 @@ mod unit_tests {
             let h1 = hm1.get(CHUNK_SIZE_X - 1, z);
             let h2 = hm2.get(0, z);
             let diff = (h1 as i32 - h2 as i32).abs();
-            assert!(diff <= MAX_SEAM_DIFF, "Known good seam failed at z={}: diff={}", z, diff);
+            assert!(
+                diff <= MAX_SEAM_DIFF,
+                "Known good seam failed at z={}: diff={}",
+                z,
+                diff
+            );
         }
     }
 

@@ -1,0 +1,21 @@
+[
+  { "name": "air", "opaque": false },
+  { "name": "stone", "opaque": true, "texture": "blocks/stone" },
+  { "name": "dirt", "opaque": true, "texture": "blocks/dirt" },
+  {
+    "name": "grass",
+    "opaque": true,
+    "textures": {
+      "top": "blocks/grass_top",
+      "bottom": "blocks/dirt",
+      "side": "blocks/grass_side"
+    }
+  },
+  { "name": "sand", "opaque": true, "texture": "blocks/sand" },
+  { "name": "gravel", "opaque": true, "texture": "blocks/gravel" },
+  { "name": "water", "opaque": false, "texture": "blocks/water" },
+  { "name": "ice", "opaque": true, "texture": "blocks/ice" },
+  { "name": "snow", "opaque": true, "texture": "blocks/snow" },
+  { "name": "clay", "opaque": true, "texture": "blocks/clay" },
+  { "name": "bedrock", "opaque": true, "texture": "blocks/bedrock" }
+]

@@ -52,8 +52,9 @@ impl ClientConnection {
                 player_entity_id,
             } => {
                 if accepted {
-                    let entity_id = player_entity_id
-                        .ok_or_else(|| anyhow::anyhow!("Server accepted but didn't assign entity ID"))?;
+                    let entity_id = player_entity_id.ok_or_else(|| {
+                        anyhow::anyhow!("Server accepted but didn't assign entity ID")
+                    })?;
                     info!("Handshake successful, assigned entity ID: {}", entity_id);
                     Ok(entity_id)
                 } else {
@@ -61,10 +62,7 @@ impl ClientConnection {
                     Err(anyhow::anyhow!("Handshake rejected: {}", reason))
                 }
             }
-            msg => Err(anyhow::anyhow!(
-                "Expected HandshakeResponse, got {:?}",
-                msg
-            )),
+            msg => Err(anyhow::anyhow!("Expected HandshakeResponse, got {:?}", msg)),
         }
     }
 
@@ -189,8 +187,7 @@ impl ServerConnection {
             }
             msg => {
                 warn!("Expected Handshake, got {:?}", msg);
-                self.reject_handshake("Expected handshake message")
-                    .await?;
+                self.reject_handshake("Expected handshake message").await?;
                 Err(anyhow::anyhow!("Expected Handshake, got {:?}", msg))
             }
         }
@@ -291,13 +288,14 @@ fn select_server_channel(msg: &ServerMessage) -> ChannelType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{ClientEndpoint, ServerEndpoint};
+    use crate::transport::{ClientEndpoint, ServerEndpoint, TlsMode};
+    use crate::{InputBundle, MovementInput, Transform};
 
     #[tokio::test]
     async fn test_handshake_success() {
         // Start server
-        let server = ServerEndpoint::bind("127.0.0.1:0".parse().unwrap())
-            .expect("Failed to bind server");
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
         let server_addr = server.local_addr();
 
         // Spawn server task
@@ -326,7 +324,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client_endpoint = ClientEndpoint::new().expect("Failed to create client");
+        let client_endpoint = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("Failed to create client");
         let connection = client_endpoint
             .connect(server_addr)
             .await
@@ -334,10 +333,7 @@ mod tests {
         let client_conn = ClientConnection::new(connection);
 
         // Perform handshake
-        let entity_id = client_conn
-            .handshake()
-            .await
-            .expect("Handshake failed");
+        let entity_id = client_conn.handshake().await.expect("Handshake failed");
 
         assert_eq!(entity_id, 42);
 
@@ -348,8 +344,8 @@ mod tests {
     #[tokio::test]
     async fn test_handshake_version_mismatch() {
         // Start server
-        let server = ServerEndpoint::bind("127.0.0.1:0".parse().unwrap())
-            .expect("Failed to bind server");
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
         let server_addr = server.local_addr();
 
         // Spawn server task
@@ -369,7 +365,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client_endpoint = ClientEndpoint::new().expect("Failed to create client");
+        let client_endpoint = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("Failed to create client");
         let connection = client_endpoint
             .connect(server_addr)
             .await
@@ -399,5 +396,90 @@ mod tests {
 
         // Wait for server task
         server_handle.await.expect("Server task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_input_roundtrip() {
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
+        let server_addr = server.local_addr();
+
+        // Spawn server task
+        let server_handle = tokio::spawn(async move {
+            let incoming = server.accept().await.expect("No incoming connection");
+            let connection = incoming.await.expect("Failed to accept connection");
+            let server_conn = ServerConnection::new(connection);
+
+            // Handshake
+            server_conn.accept_handshake().await.expect("handshake");
+            server_conn
+                .accept_handshake_with_entity(7)
+                .await
+                .expect("assign entity");
+
+            // Receive input (unreliable channel)
+            let msg = server_conn.recv_unreliable().await.expect("recv input");
+            match msg {
+                ClientMessage::Input(bundle) => {
+                    assert_eq!(bundle.tick, 0);
+                }
+                other => panic!("expected input, got {other:?}"),
+            }
+
+            // Send server state (unreliable entity delta channel)
+            let state = ServerMessage::ServerState {
+                tick: 1,
+                player_transform: Transform {
+                    x: 1,
+                    y: 2,
+                    z: 3,
+                    yaw: 4,
+                    pitch: 5,
+                },
+            };
+            server_conn.send(state).await.expect("send state");
+
+            // Keep connection alive briefly to allow client read.
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        });
+
+        // Small delay for server startup
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Client side
+        let client_endpoint = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("create client");
+        let connection = client_endpoint
+            .connect(server_addr)
+            .await
+            .expect("connect");
+        let client_conn = ClientConnection::new(connection);
+
+        // Perform handshake
+        let entity = client_conn.handshake().await.expect("handshake");
+        assert_eq!(entity, 7);
+
+        // Send input bundle
+        let input = ClientMessage::Input(InputBundle {
+            tick: 0,
+            sequence: 0,
+            last_ack_tick: 0,
+            movement: MovementInput::zero(),
+            block_actions: Vec::new(),
+            inventory_actions: Vec::new(),
+        });
+        client_conn.send(input).await.expect("send input");
+
+        // Receive server state
+        let msg = client_conn.recv_unreliable().await.expect("recv state");
+        match msg {
+            ServerMessage::ServerState { tick, player_transform } => {
+                assert_eq!(tick, 1);
+                assert_eq!(player_transform.x, 1);
+            }
+            other => panic!("expected server state, got {other:?}"),
+        }
+
+        server_handle.await.expect("server task");
     }
 }

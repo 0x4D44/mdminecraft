@@ -58,8 +58,7 @@ pub fn decode_chunk_data(msg: &ChunkDataMessage) -> Result<Vec<BlockId>> {
     }
 
     // Decompress RLE data
-    let indices = rle_decompress(&msg.compressed_data)
-        .context("Failed to decompress RLE data")?;
+    let indices = rle_decompress(&msg.compressed_data).context("Failed to decompress RLE data")?;
 
     if indices.len() != 65536 {
         return Err(anyhow::anyhow!(

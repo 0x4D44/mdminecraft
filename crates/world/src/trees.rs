@@ -93,29 +93,35 @@ impl Tree {
     /// Generate tree structure into a chunk.
     ///
     /// Only places blocks that fall within the chunk bounds.
-    pub fn generate_into_chunk(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32) {
+    pub fn generate_into_chunk(&self, chunk: &mut Chunk) {
         let trunk_height = self.tree_type.trunk_height();
         let log_block = self.tree_type.log_block();
         let leaves_block = self.tree_type.leaves_block();
 
         match self.tree_type {
             TreeType::Oak => {
-                self.generate_oak(chunk, chunk_origin_x, chunk_origin_z, trunk_height, log_block, leaves_block);
+                self.generate_oak(chunk, trunk_height, log_block, leaves_block);
             }
             TreeType::Birch => {
-                self.generate_birch(chunk, chunk_origin_x, chunk_origin_z, trunk_height, log_block, leaves_block);
+                self.generate_birch(chunk, trunk_height, log_block, leaves_block);
             }
             TreeType::Pine => {
-                self.generate_pine(chunk, chunk_origin_x, chunk_origin_z, trunk_height, log_block, leaves_block);
+                self.generate_pine(chunk, trunk_height, log_block, leaves_block);
             }
         }
     }
 
     /// Generate oak tree (round canopy).
-    fn generate_oak(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32, trunk_height: usize, log_block: u16, leaves_block: u16) {
+    fn generate_oak(
+        &self,
+        chunk: &mut Chunk,
+        trunk_height: usize,
+        log_block: u16,
+        leaves_block: u16,
+    ) {
         // Trunk
         for y_offset in 0..trunk_height {
-            self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, y_offset as i32, 0, log_block);
+            self.place_block(chunk, 0, y_offset as i32, 0, log_block);
         }
 
         // Canopy (round shape, 3x3x3 with corners cut)
@@ -131,20 +137,26 @@ impl Tree {
                     if dx == 0 && dz == 0 && dy == 0 {
                         continue;
                     }
-                    self.place_block(chunk, chunk_origin_x, chunk_origin_z, dx, canopy_y + dy, dz, leaves_block);
+                    self.place_block(chunk, dx, canopy_y + dy, dz, leaves_block);
                 }
             }
         }
 
         // Top leaf block
-        self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, canopy_y + 3, 0, leaves_block);
+        self.place_block(chunk, 0, canopy_y + 3, 0, leaves_block);
     }
 
     /// Generate birch tree (tall and thin).
-    fn generate_birch(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32, trunk_height: usize, log_block: u16, leaves_block: u16) {
+    fn generate_birch(
+        &self,
+        chunk: &mut Chunk,
+        trunk_height: usize,
+        log_block: u16,
+        leaves_block: u16,
+    ) {
         // Trunk
         for y_offset in 0..trunk_height {
-            self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, y_offset as i32, 0, log_block);
+            self.place_block(chunk, 0, y_offset as i32, 0, log_block);
         }
 
         // Canopy (smaller, 3x3x2)
@@ -156,20 +168,26 @@ impl Tree {
                     if dx == 0 && dz == 0 && dy == 0 {
                         continue;
                     }
-                    self.place_block(chunk, chunk_origin_x, chunk_origin_z, dx, canopy_y + dy, dz, leaves_block);
+                    self.place_block(chunk, dx, canopy_y + dy, dz, leaves_block);
                 }
             }
         }
 
         // Top leaf block
-        self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, canopy_y + 2, 0, leaves_block);
+        self.place_block(chunk, 0, canopy_y + 2, 0, leaves_block);
     }
 
     /// Generate pine tree (conical shape).
-    fn generate_pine(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32, trunk_height: usize, log_block: u16, leaves_block: u16) {
+    fn generate_pine(
+        &self,
+        chunk: &mut Chunk,
+        trunk_height: usize,
+        log_block: u16,
+        leaves_block: u16,
+    ) {
         // Trunk
         for y_offset in 0..trunk_height {
-            self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, y_offset as i32, 0, log_block);
+            self.place_block(chunk, 0, y_offset as i32, 0, log_block);
         }
 
         // Conical canopy (layers getting smaller as they go up)
@@ -181,7 +199,7 @@ impl Tree {
                 if dx == 0 && dz == 0 {
                     continue; // Skip trunk
                 }
-                self.place_block(chunk, chunk_origin_x, chunk_origin_z, dx, canopy_start, dz, leaves_block);
+                self.place_block(chunk, dx, canopy_start, dz, leaves_block);
             }
         }
 
@@ -192,30 +210,25 @@ impl Tree {
                     if dx == 0 && dz == 0 {
                         continue; // Skip trunk
                     }
-                    self.place_block(chunk, chunk_origin_x, chunk_origin_z, dx, canopy_start + dy, dz, leaves_block);
+                    self.place_block(chunk, dx, canopy_start + dy, dz, leaves_block);
                 }
             }
         }
 
         // Top layer (1x1)
-        self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, canopy_start + 4, 0, leaves_block);
-        self.place_block(chunk, chunk_origin_x, chunk_origin_z, 0, canopy_start + 5, 0, leaves_block);
+        self.place_block(chunk, 0, canopy_start + 4, 0, leaves_block);
+        self.place_block(chunk, 0, canopy_start + 5, 0, leaves_block);
     }
 
     /// Place a block at world coordinates if it falls within the chunk.
-    fn place_block(
-        &self,
-        chunk: &mut Chunk,
-        chunk_origin_x: i32,
-        chunk_origin_z: i32,
-        dx: i32,
-        dy: i32,
-        dz: i32,
-        block_id: u16,
-    ) {
+    fn place_block(&self, chunk: &mut Chunk, dx: i32, dy: i32, dz: i32, block_id: u16) {
         let world_x = self.world_x + dx;
         let world_y = self.world_y + dy;
         let world_z = self.world_z + dz;
+
+        let chunk_pos = chunk.position();
+        let chunk_origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+        let chunk_origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
 
         // Check if within chunk bounds
         let local_x = world_x - chunk_origin_x;
@@ -331,7 +344,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         let tree = Tree::new(5, 64, 5, TreeType::Oak);
 
-        tree.generate_into_chunk(&mut chunk, 0, 0);
+        tree.generate_into_chunk(&mut chunk);
 
         // Check trunk blocks exist
         for y in 64..69 {
@@ -345,7 +358,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         let tree = Tree::new(5, 64, 5, TreeType::Oak);
 
-        tree.generate_into_chunk(&mut chunk, 0, 0);
+        tree.generate_into_chunk(&mut chunk);
 
         // Check that leaves exist around trunk top
         let mut leaf_count = 0;
@@ -369,7 +382,7 @@ mod tests {
         // Place tree at edge of chunk
         let tree = Tree::new(15, 64, 15, TreeType::Oak);
 
-        tree.generate_into_chunk(&mut chunk, 0, 0);
+        tree.generate_into_chunk(&mut chunk);
 
         // Should not panic, only places blocks within bounds
         let voxel = chunk.voxel(15, 64, 15);
@@ -392,7 +405,7 @@ mod tests {
         );
 
         let tree = Tree::new(5, 64, 5, TreeType::Oak);
-        tree.generate_into_chunk(&mut chunk, 0, 0);
+        tree.generate_into_chunk(&mut chunk);
 
         // Stone should still be there (tree doesn't replace)
         let voxel = chunk.voxel(5, 65, 5);
@@ -409,9 +422,9 @@ mod tests {
         let mut chunk_birch = Chunk::new(ChunkPos::new(0, 0));
         let mut chunk_pine = Chunk::new(ChunkPos::new(0, 0));
 
-        oak.generate_into_chunk(&mut chunk_oak, 0, 0);
-        birch.generate_into_chunk(&mut chunk_birch, 0, 0);
-        pine.generate_into_chunk(&mut chunk_pine, 0, 0);
+        oak.generate_into_chunk(&mut chunk_oak);
+        birch.generate_into_chunk(&mut chunk_birch);
+        pine.generate_into_chunk(&mut chunk_pine);
 
         // Trees should have different heights
         assert!(oak.tree_type.trunk_height() != pine.tree_type.trunk_height());
@@ -423,7 +436,10 @@ mod tests {
         let positions1 = generate_tree_positions(12345, 0, 0, BiomeId::Forest, 64);
         let positions2 = generate_tree_positions(12345, 0, 0, BiomeId::Forest, 64);
 
-        assert_eq!(positions1, positions2, "Tree positions should be deterministic");
+        assert_eq!(
+            positions1, positions2,
+            "Tree positions should be deterministic"
+        );
     }
 
     #[test]
@@ -433,7 +449,10 @@ mod tests {
         let positions2 = generate_tree_positions(8888, 5, 5, BiomeId::Forest, 64);
 
         // Forest biome should have some trees with these seeds
-        assert!(!positions1.is_empty() || !positions2.is_empty(), "At least one seed should produce trees");
+        assert!(
+            !positions1.is_empty() || !positions2.is_empty(),
+            "At least one seed should produce trees"
+        );
 
         // If both have trees, they should likely differ
         if !positions1.is_empty() && !positions2.is_empty() {

@@ -120,47 +120,23 @@ impl Frustum {
         // Each plane equation is: Ax + By + Cz + D = 0
         // Represented as Vec4(A, B, C, D) where (A,B,C) is normal
 
-        let left = glam::Vec4::new(
-            m[3] + m[0],
-            m[7] + m[4],
-            m[11] + m[8],
-            m[15] + m[12],
-        ).normalize();
+        let left =
+            glam::Vec4::new(m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]).normalize();
 
-        let right = glam::Vec4::new(
-            m[3] - m[0],
-            m[7] - m[4],
-            m[11] - m[8],
-            m[15] - m[12],
-        ).normalize();
+        let right =
+            glam::Vec4::new(m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]).normalize();
 
-        let bottom = glam::Vec4::new(
-            m[3] + m[1],
-            m[7] + m[5],
-            m[11] + m[9],
-            m[15] + m[13],
-        ).normalize();
+        let bottom =
+            glam::Vec4::new(m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]).normalize();
 
-        let top = glam::Vec4::new(
-            m[3] - m[1],
-            m[7] - m[5],
-            m[11] - m[9],
-            m[15] - m[13],
-        ).normalize();
+        let top =
+            glam::Vec4::new(m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]).normalize();
 
-        let near = glam::Vec4::new(
-            m[3] + m[2],
-            m[7] + m[6],
-            m[11] + m[10],
-            m[15] + m[14],
-        ).normalize();
+        let near =
+            glam::Vec4::new(m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]).normalize();
 
-        let far = glam::Vec4::new(
-            m[3] - m[2],
-            m[7] - m[6],
-            m[11] - m[10],
-            m[15] - m[14],
-        ).normalize();
+        let far =
+            glam::Vec4::new(m[3] - m[2], m[7] - m[6], m[11] - m[10], m[15] - m[14]).normalize();
 
         Self {
             planes: [left, right, bottom, top, near, far],
@@ -176,11 +152,7 @@ impl Frustum {
         const CHUNK_SIZE_XZ: f32 = 16.0;
         const CHUNK_SIZE_Y: f32 = 256.0;
 
-        let min = glam::Vec3::new(
-            (chunk_pos.x * 16) as f32,
-            0.0,
-            (chunk_pos.z * 16) as f32,
-        );
+        let min = glam::Vec3::new((chunk_pos.x * 16) as f32, 0.0, (chunk_pos.z * 16) as f32);
 
         let max = glam::Vec3::new(
             min.x + CHUNK_SIZE_XZ,

@@ -4,8 +4,9 @@
 //! queues for deterministic propagation. Light updates track changes for cross-
 //! chunk border handling and event logging.
 
-use crate::chunk::{Chunk, ChunkPos, LocalPos, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{Chunk, ChunkPos, LocalPos, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, BLOCK_AIR};
 use std::collections::VecDeque;
+use std::collections::HashMap;
 
 /// Maximum light level (0-15 range).
 pub const MAX_LIGHT_LEVEL: u8 = 15;
@@ -46,6 +47,22 @@ pub struct LightUpdate {
 pub enum LightType {
     Skylight,
     BlockLight,
+}
+
+impl LightType {
+    fn voxel_level(voxel: &crate::chunk::Voxel, light_type: LightType) -> u8 {
+        match light_type {
+            LightType::Skylight => voxel.light_sky,
+            LightType::BlockLight => voxel.light_block,
+        }
+    }
+
+    fn set_voxel_level(voxel: &mut crate::chunk::Voxel, light_type: LightType, level: u8) {
+        match light_type {
+            LightType::Skylight => voxel.light_sky = level,
+            LightType::BlockLight => voxel.light_block = level,
+        }
+    }
 }
 
 /// BFS queue for light propagation within a single chunk.
@@ -187,6 +204,137 @@ impl LightQueue {
                 self.enqueue(neighbor_pos, new_level);
             }
         }
+    }
+}
+
+/// Propagate light across chunk seams using existing light values as seeds.
+/// Seeds boundary voxels of `chunk_pos` into neighbors, respecting opacity and decay rules.
+pub fn stitch_light_seams(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    registry: &dyn BlockOpacityProvider,
+    chunk_pos: ChunkPos,
+    light_type: LightType,
+) -> usize {
+    let mut queue: VecDeque<(BlockPos, u8)> = VecDeque::new();
+
+    // Seed boundary voxels of the source chunk.
+    if let Some(chunk) = chunks.get(&chunk_pos) {
+        for y in 0..CHUNK_SIZE_Y {
+            for x in 0..CHUNK_SIZE_X {
+                let north = chunk.voxel(x, y, 0);
+                let south = chunk.voxel(x, y, CHUNK_SIZE_Z - 1);
+                enqueue_seed(&mut queue, chunk_pos, x, y, 0, north, light_type);
+                enqueue_seed(&mut queue, chunk_pos, x, y, CHUNK_SIZE_Z - 1, south, light_type);
+            }
+            for z in 0..CHUNK_SIZE_Z {
+                let west = chunk.voxel(0, y, z);
+                let east = chunk.voxel(CHUNK_SIZE_X - 1, y, z);
+                enqueue_seed(&mut queue, chunk_pos, 0, y, z, west, light_type);
+                enqueue_seed(&mut queue, chunk_pos, CHUNK_SIZE_X - 1, y, z, east, light_type);
+            }
+        }
+    }
+
+    let mut processed = 0usize;
+
+    while let Some((pos, level)) = queue.pop_front() {
+        processed += 1;
+
+        // Visit each neighbor in 6 directions.
+        for (dx, dy, dz) in [(0, 1, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)] {
+            if let Some((neighbor_chunk, neighbor_local)) = neighbor_block(pos, dx, dy, dz) {
+                let Some(chunk) = chunks.get_mut(&neighbor_chunk) else { continue; };
+
+                let voxel = chunk.voxel(neighbor_local.x, neighbor_local.y, neighbor_local.z);
+                if registry.is_opaque(voxel.id) {
+                    continue;
+                }
+
+                let new_level = if light_type == LightType::Skylight && dy == -1 {
+                    level
+                } else {
+                    level.saturating_sub(1)
+                };
+
+                if new_level == 0 {
+                    continue;
+                }
+
+                let current = LightType::voxel_level(&voxel, light_type);
+                if current < new_level {
+                    let mut updated = voxel;
+                    LightType::set_voxel_level(&mut updated, light_type, new_level);
+                    chunk.set_voxel(neighbor_local.x, neighbor_local.y, neighbor_local.z, updated);
+                    queue.push_back((BlockPos::new(neighbor_chunk, neighbor_local), new_level));
+                }
+            }
+        }
+    }
+
+    processed
+}
+
+fn enqueue_seed(
+    queue: &mut VecDeque<(BlockPos, u8)>,
+    chunk: ChunkPos,
+    x: usize,
+    y: usize,
+    z: usize,
+    voxel: crate::chunk::Voxel,
+    light_type: LightType,
+) {
+    if voxel.id != BLOCK_AIR {
+        return; // don't propagate from opaque seeds
+    }
+    let level = LightType::voxel_level(&voxel, light_type);
+    if level > 0 {
+        queue.push_back((BlockPos::new(chunk, LocalPos { x, y, z }), level));
+    }
+}
+
+fn neighbor_block(
+    pos: BlockPos,
+    dx: i32,
+    dy: i32,
+    dz: i32,
+) -> Option<(ChunkPos, LocalPos)> {
+    let mut cx = pos.chunk.x;
+    let mut cz = pos.chunk.z;
+    let mut lx = pos.local.x as i32 + dx;
+    let ly = pos.local.y as i32 + dy;
+    let mut lz = pos.local.z as i32 + dz;
+
+    if ly < 0 || ly >= CHUNK_SIZE_Y as i32 {
+        return None;
+    }
+
+    if lx < 0 {
+        cx -= 1;
+        lx += CHUNK_SIZE_X as i32;
+    } else if lx >= CHUNK_SIZE_X as i32 {
+        cx += 1;
+        lx -= CHUNK_SIZE_X as i32;
+    }
+
+    if lz < 0 {
+        cz -= 1;
+        lz += CHUNK_SIZE_Z as i32;
+    } else if lz >= CHUNK_SIZE_Z as i32 {
+        cz += 1;
+        lz -= CHUNK_SIZE_Z as i32;
+    }
+
+    let local = LocalPos {
+        x: lx as usize,
+        y: ly as usize,
+        z: lz as usize,
+    };
+    Some((ChunkPos::new(cx, cz), local))
+}
+
+impl Default for LightQueue {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -332,6 +480,7 @@ pub fn remove_block_light(
 mod tests {
     use super::*;
     use crate::chunk::{BlockId, BLOCK_AIR};
+    use std::collections::HashMap;
 
     /// Mock block registry for testing.
     struct MockRegistry;
@@ -411,5 +560,37 @@ mod tests {
         // Check adjacent positions are also dark.
         let adjacent = chunk.voxel(torch_pos.x + 1, torch_pos.y, torch_pos.z);
         assert_eq!(adjacent.light_block, 0);
+    }
+
+    #[test]
+    fn block_light_crosses_chunk_seams() {
+        let mut chunks = HashMap::new();
+        let pos_a = ChunkPos::new(0, 0);
+        let pos_b = ChunkPos::new(1, 0);
+        let mut chunk_a = Chunk::new(pos_a);
+        let chunk_b = Chunk::new(pos_b);
+
+        // Place a torch-equivalent block light at the east edge of chunk A.
+        let torch_pos = LocalPos {
+            x: CHUNK_SIZE_X - 1,
+            y: 64,
+            z: 8,
+        };
+        let mut torch_voxel = chunk_a.voxel(torch_pos.x, torch_pos.y, torch_pos.z);
+        torch_voxel.light_block = MAX_LIGHT_LEVEL;
+        chunk_a.set_voxel(torch_pos.x, torch_pos.y, torch_pos.z, torch_voxel);
+
+        chunks.insert(pos_a, chunk_a);
+        chunks.insert(pos_b, chunk_b);
+
+        let registry = MockRegistry;
+
+        // Stitch block light across seam.
+        let _ = stitch_light_seams(&mut chunks, &registry, pos_a, LightType::BlockLight);
+
+        // West face of chunk B adjacent to torch should receive propagated light (level 14).
+        let chunk_b = chunks.get(&pos_b).unwrap();
+        let lit = chunk_b.voxel(0, torch_pos.y, torch_pos.z);
+        assert_eq!(lit.light_block, MAX_LIGHT_LEVEL - 1);
     }
 }

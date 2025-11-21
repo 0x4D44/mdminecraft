@@ -8,7 +8,7 @@
 //!
 //! These properties must hold for all possible chunk configurations.
 
-use mdminecraft_world::{Chunk, ChunkPos, Voxel};
+use mdminecraft_world::{lighting::stitch_light_seams, Chunk, ChunkPos, Voxel};
 use proptest::prelude::*;
 
 /// Maximum light level
@@ -219,6 +219,40 @@ proptest! {
             }
         }
     }
+
+    /// Property: Seam stitching never increases light across chunk borders.
+    #[test]
+    fn seam_stitch_monotonic(
+        center_light in 1u8..=MAX_LIGHT,
+        y in 1usize..15,
+        z in 1usize..15,
+    ) {
+        let pos_a = ChunkPos::new(0, 0);
+        let pos_b = ChunkPos::new(1, 0);
+        let mut chunk_a = Chunk::new(pos_a);
+        let chunk_b = Chunk::new(pos_b);
+
+        // Light source at east edge of chunk A
+        let source_x = 15;
+        chunk_a.set_voxel(source_x, y, z, Voxel {
+            id: 0,
+            state: 0,
+            light_sky: 0,
+            light_block: center_light,
+        });
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(pos_a, chunk_a);
+        chunks.insert(pos_b, chunk_b);
+
+        let registry = crate::unit_tests::LocalTestRegistry;
+        // Stitch block light across seam
+        let _ = stitch_light_seams(&mut chunks, &registry, pos_a, mdminecraft_world::lighting::LightType::BlockLight);
+
+        let chunk_b = chunks.get(&pos_b).unwrap();
+        let neighbor = chunk_b.voxel(0, y, z);
+        prop_assert!(neighbor.light_block <= center_light.saturating_sub(1));
+    }
 }
 
 #[cfg(test)]
@@ -244,17 +278,31 @@ mod unit_tests {
     fn set_voxel_preserves_light_range() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
 
-        chunk.set_voxel(5, 5, 5, Voxel {
-            id: 1,
-            state: 0,
-            light_sky: 12,
-            light_block: 8,
-        });
+        chunk.set_voxel(
+            5,
+            5,
+            5,
+            Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 12,
+                light_block: 8,
+            },
+        );
 
         let voxel = chunk.voxel(5, 5, 5);
         assert_eq!(voxel.light_sky, 12);
         assert_eq!(voxel.light_block, 8);
         assert!(voxel.light_sky <= MAX_LIGHT);
         assert!(voxel.light_block <= MAX_LIGHT);
+    }
+
+    /// Mock registry treating non-air as opaque.
+    pub struct LocalTestRegistry;
+
+    impl mdminecraft_world::lighting::BlockOpacityProvider for LocalTestRegistry {
+        fn is_opaque(&self, block_id: u16) -> bool {
+            block_id != 0
+        }
     }
 }

@@ -1,11 +1,13 @@
 #![warn(missing_docs)]
 //! Asset pack schema + validation helpers.
 
+mod atlas;
 mod loader;
 mod registry;
 
+pub use atlas::{AtlasEntry, AtlasError, TextureAtlasMetadata};
 pub use loader::{registry_from_file, registry_from_str};
-pub use registry::{BlockDescriptor, BlockRegistry};
+pub use registry::{BlockDescriptor, BlockFace, BlockRegistry};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -18,6 +20,12 @@ pub struct BlockDefinition {
     /// Whether the block is opaque.
     #[serde(default)]
     pub opaque: bool,
+    /// Atlas entry name to use for all faces (defaults to `name`).
+    #[serde(default)]
+    pub texture: Option<String>,
+    /// Optional per-face textures.
+    #[serde(default)]
+    pub textures: Option<BlockTextureConfig>,
 }
 
 /// Errors emitted during pack loading.
@@ -34,4 +42,25 @@ pub enum AssetError {
 /// Parse a JSON string into a list of blocks.
 pub fn load_blocks_from_str(input: &str) -> Result<Vec<BlockDefinition>, AssetError> {
     Ok(serde_json::from_str(input)?)
+}
+
+/// Configuration for per-face textures.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct BlockTextureConfig {
+    /// Apply to all faces when specified.
+    pub all: Option<String>,
+    /// Apply to all side faces when specified.
+    pub side: Option<String>,
+    /// Specific texture for the top face.
+    pub top: Option<String>,
+    /// Specific texture for the bottom face.
+    pub bottom: Option<String>,
+    /// Specific texture for the north (-Z) face.
+    pub north: Option<String>,
+    /// Specific texture for the south (+Z) face.
+    pub south: Option<String>,
+    /// Specific texture for the east (+X) face.
+    pub east: Option<String>,
+    /// Specific texture for the west (-X) face.
+    pub west: Option<String>,
 }

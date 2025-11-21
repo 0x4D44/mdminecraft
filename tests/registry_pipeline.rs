@@ -1,4 +1,4 @@
-﻿use mdminecraft_assets::registry_from_str;
+use mdminecraft_assets::registry_from_str;
 use mdminecraft_render::{ChunkMeshCache, ChunkMeshDriver};
 use mdminecraft_world::{ChunkPos, ChunkStorage, Voxel};
 
@@ -27,10 +27,9 @@ fn registry_mesh_pipeline_from_json() {
         },
     );
     let mut cache = ChunkMeshCache::new();
-    let mut driver = ChunkMeshDriver::new(&mut storage, &mut cache, &registry);
+    let mut driver = ChunkMeshDriver::new(&mut storage, &mut cache, &registry, None);
     let stats = driver.process();
     assert_eq!(stats.len(), 1);
     assert_eq!(stats[0].position, pos);
     assert!(stats[0].triangles > 0);
 }
-

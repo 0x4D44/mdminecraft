@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use mdminecraft_assets::BlockRegistry;
+use mdminecraft_assets::{BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_testkit::{ChunkMeshMetric, MeshMetricSink};
 use mdminecraft_world::{ChunkPos, ChunkStorage, DirtyFlags};
 
@@ -22,6 +22,7 @@ pub struct ChunkMeshDriver<'a> {
     storage: &'a mut ChunkStorage,
     cache: &'a mut ChunkMeshCache,
     registry: &'a BlockRegistry,
+    atlas: Option<&'a TextureAtlasMetadata>,
 }
 
 impl<'a> ChunkMeshDriver<'a> {
@@ -30,11 +31,13 @@ impl<'a> ChunkMeshDriver<'a> {
         storage: &'a mut ChunkStorage,
         cache: &'a mut ChunkMeshCache,
         registry: &'a BlockRegistry,
+        atlas: Option<&'a TextureAtlasMetadata>,
     ) -> Self {
         Self {
             storage,
             cache,
             registry,
+            atlas,
         }
     }
 
@@ -46,7 +49,9 @@ impl<'a> ChunkMeshDriver<'a> {
             if let Some(chunk) = self.storage.get_mut(pos) {
                 let dirty = chunk.take_dirty_flags();
                 if dirty.contains(DirtyFlags::MESH) {
-                    let mesh = self.cache.update_chunk(chunk, dirty, self.registry);
+                    let mesh = self
+                        .cache
+                        .update_chunk(chunk, dirty, self.registry, self.atlas);
                     stats.push(ChunkMeshStat {
                         position: pos,
                         triangles: mesh.indices.len() / 3,
@@ -91,14 +96,8 @@ mod tests {
 
     fn registry() -> BlockRegistry {
         BlockRegistry::new(vec![
-            BlockDescriptor {
-                name: "air".into(),
-                opaque: false,
-            },
-            BlockDescriptor {
-                name: "stone".into(),
-                opaque: true,
-            },
+            BlockDescriptor::simple("air", false),
+            BlockDescriptor::simple("stone", true),
         ])
     }
 
@@ -120,7 +119,7 @@ mod tests {
         );
         let mut cache = ChunkMeshCache::new();
         let registry = registry();
-        let mut driver = ChunkMeshDriver::new(&mut storage, &mut cache, &registry);
+        let mut driver = ChunkMeshDriver::new(&mut storage, &mut cache, &registry, None);
         let stats = driver.process();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].position, pos);

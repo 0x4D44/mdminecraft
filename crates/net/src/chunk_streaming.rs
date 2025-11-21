@@ -327,7 +327,9 @@ mod tests {
             }
         };
 
-        let result = streamer.try_send_next_chunk(&provider).expect("Send failed");
+        let result = streamer
+            .try_send_next_chunk(&provider)
+            .expect("Send failed");
         assert!(result.is_some());
 
         let chunk_msg = result.unwrap();
@@ -353,11 +355,15 @@ mod tests {
         let provider = |_: i32, _: i32| Some(make_uniform_chunk(1));
 
         // First chunk should send
-        let result1 = streamer.try_send_next_chunk(&provider).expect("Send failed");
+        let result1 = streamer
+            .try_send_next_chunk(&provider)
+            .expect("Send failed");
         assert!(result1.is_some());
 
         // Second chunk should be blocked by bandwidth limit
-        let result2 = streamer.try_send_next_chunk(&provider).expect("Send failed");
+        let result2 = streamer
+            .try_send_next_chunk(&provider)
+            .expect("Send failed");
         assert!(result2.is_none()); // Bandwidth limit reached
 
         assert_eq!(streamer.sent_count(), 1);
@@ -376,7 +382,9 @@ mod tests {
             }
         };
 
-        streamer.try_send_next_chunk(&provider).expect("Send failed");
+        streamer
+            .try_send_next_chunk(&provider)
+            .expect("Send failed");
 
         let metrics = streamer.metrics();
         assert_eq!(metrics.chunks_sent, 1);
@@ -413,7 +421,9 @@ mod tests {
         // Provider returns None
         let provider = |_: i32, _: i32| None;
 
-        let result = streamer.try_send_next_chunk(&provider).expect("Send failed");
+        let result = streamer
+            .try_send_next_chunk(&provider)
+            .expect("Send failed");
         assert!(result.is_none());
 
         // Chunk should be removed from queue
@@ -427,7 +437,9 @@ mod tests {
 
         let provider = |_: i32, _: i32| Some(make_uniform_chunk(1));
 
-        streamer.try_send_next_chunk(&provider).expect("Send failed");
+        streamer
+            .try_send_next_chunk(&provider)
+            .expect("Send failed");
         assert_eq!(streamer.sent_count(), 1);
 
         streamer.clear_sent_history();

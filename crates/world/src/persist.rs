@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Magic number for region file identification ("MDRG" = mdminecraft region).
 const REGION_MAGIC: u32 = 0x4D445247;
@@ -135,7 +135,10 @@ impl RegionStore {
         let region_data = self.load_region(region_x, region_z)?;
 
         let chunk_data = region_data.get(&pos).context("Chunk not found in region")?;
-        debug!(chunk_data_size = chunk_data.len(), "Found chunk data in region");
+        debug!(
+            chunk_data_size = chunk_data.len(),
+            "Found chunk data in region"
+        );
 
         let chunk = deserialize_chunk(pos, chunk_data)?;
         debug!("Chunk loaded successfully");
@@ -159,7 +162,11 @@ impl RegionStore {
         file.read_exact(&mut header_bytes)
             .context("Failed to read region header")?;
         let header = RegionHeader::from_bytes(&header_bytes)?;
-        debug!(version = header.version, payload_len = header.payload_len, "Read region header");
+        debug!(
+            version = header.version,
+            payload_len = header.payload_len,
+            "Read region header"
+        );
 
         // Read compressed payload.
         let mut compressed = vec![0u8; header.payload_len as usize];
@@ -260,8 +267,22 @@ impl RegionStore {
         let (region_x, region_z) = chunk_to_region(pos);
         let region_path = self.region_path(region_x, region_z);
 
-        // Check if region file exists (conservative check - doesn't verify chunk is in region).
-        region_path.exists()
+        if !region_path.exists() {
+            return false;
+        }
+
+        // Try to load region map and verify the chunk key is present. Any parse error -> false.
+        match self.load_region(region_x, region_z) {
+            Ok(map) => map.contains_key(&pos),
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to inspect region {}: {}; returning chunk_exists=false",
+                    region_path.display(),
+                    err
+                );
+                false
+            }
+        }
     }
 }
 
@@ -416,6 +437,28 @@ mod tests {
         assert_eq!(loaded2.voxel(1, 1, 1).id, 20);
 
         // Cleanup.
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn chunk_exists_returns_false_when_missing_from_region() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_exists_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        // Save a single chunk in region (0,0)
+        let pos_present = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos_present);
+        store.save_chunk(&chunk).unwrap();
+
+        // Different chunk in same region (0,1) should report false without load error.
+        let pos_absent = ChunkPos::new(0, 1);
+        assert!(!store.chunk_exists(pos_absent));
+
         fs::remove_dir_all(&temp_dir).ok();
     }
 }

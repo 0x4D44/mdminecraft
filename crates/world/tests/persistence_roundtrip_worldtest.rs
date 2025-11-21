@@ -10,14 +10,14 @@
 //! - Data fidelity across round-trips
 
 use mdminecraft_testkit::{
-    MetricsReportBuilder, MetricsSink, TestResult, TerrainMetrics, PersistenceMetrics,
-    TestExecutionMetrics,
+    MetricsReportBuilder, MetricsSink, PersistenceMetrics, TerrainMetrics, TestExecutionMetrics,
+    TestResult,
 };
 use mdminecraft_world::{
-    ChunkPos, TerrainGenerator, RegionStore, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    ChunkPos, RegionStore, TerrainGenerator, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
-use std::time::Instant;
 use std::env;
+use std::time::Instant;
 
 const WORLD_SEED: u64 = 55667788;
 const CHUNK_RADIUS: i32 = 4; // 9×9 grid = 81 chunks (spread across multiple regions)
@@ -29,7 +29,12 @@ fn persistence_roundtrip_worldtest() {
     println!("\n=== Persistence Round-Trip Worldtest ===");
     println!("Configuration:");
     println!("  World seed: {}", WORLD_SEED);
-    println!("  Chunk radius: {} ({}×{} grid)", CHUNK_RADIUS, CHUNK_RADIUS * 2 + 1, CHUNK_RADIUS * 2 + 1);
+    println!(
+        "  Chunk radius: {} ({}×{} grid)",
+        CHUNK_RADIUS,
+        CHUNK_RADIUS * 2 + 1,
+        CHUNK_RADIUS * 2 + 1
+    );
     println!("  Total chunks: {}", (CHUNK_RADIUS * 2 + 1).pow(2));
     println!();
 
@@ -55,7 +60,10 @@ fn persistence_roundtrip_worldtest() {
 
     for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
         for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
-            let pos = ChunkPos { x: chunk_x, z: chunk_z };
+            let pos = ChunkPos {
+                x: chunk_x,
+                z: chunk_z,
+            };
 
             let gen_start = Instant::now();
             let chunk = terrain_gen.generate_chunk(pos);
@@ -70,7 +78,11 @@ fn persistence_roundtrip_worldtest() {
     let blocks_generated = chunks_generated * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
-    println!("  Generated {} chunks in {:.2}s", chunks_generated, phase1_start.elapsed().as_secs_f64());
+    println!(
+        "  Generated {} chunks in {:.2}s",
+        chunks_generated,
+        phase1_start.elapsed().as_secs_f64()
+    );
     println!("  Average: {:.2}ms/chunk", avg_gen_time_us / 1000.0);
     println!();
 
@@ -105,10 +117,18 @@ fn persistence_roundtrip_worldtest() {
 
     let avg_save_time_us = save_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
-    println!("  Saved {} chunks in {:.2}s", chunks_generated, phase2_start.elapsed().as_secs_f64());
+    println!(
+        "  Saved {} chunks in {:.2}s",
+        chunks_generated,
+        phase2_start.elapsed().as_secs_f64()
+    );
     println!("  Average: {:.2}ms/chunk", avg_save_time_us / 1000.0);
     println!("  Region files: {}", region_files.len());
-    println!("  Bytes written: {} ({:.2} MB)", bytes_written, bytes_written as f64 / 1_048_576.0);
+    println!(
+        "  Bytes written: {} ({:.2} MB)",
+        bytes_written,
+        bytes_written as f64 / 1_048_576.0
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -134,7 +154,11 @@ fn persistence_roundtrip_worldtest() {
 
     let avg_load_time_us = load_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
-    println!("  Loaded {} chunks in {:.2}s", chunks_generated, phase3_start.elapsed().as_secs_f64());
+    println!(
+        "  Loaded {} chunks in {:.2}s",
+        chunks_generated,
+        phase3_start.elapsed().as_secs_f64()
+    );
     println!("  Average: {:.2}ms/chunk", avg_load_time_us / 1000.0);
     println!();
 
@@ -149,7 +173,11 @@ fn persistence_roundtrip_worldtest() {
     let mut total_voxels_checked = 0;
 
     for (original, loaded) in chunks.iter().zip(loaded_chunks.iter()) {
-        assert_eq!(original.position(), loaded.position(), "Chunk position mismatch");
+        assert_eq!(
+            original.position(),
+            loaded.position(),
+            "Chunk position mismatch"
+        );
 
         // Sample voxels throughout the chunk (not all to save time)
         for y in (0..CHUNK_SIZE_Y).step_by(16) {
@@ -160,10 +188,11 @@ fn persistence_roundtrip_worldtest() {
 
                     total_voxels_checked += 1;
 
-                    if original_voxel.id != loaded_voxel.id ||
-                       original_voxel.state != loaded_voxel.state ||
-                       original_voxel.light_sky != loaded_voxel.light_sky ||
-                       original_voxel.light_block != loaded_voxel.light_block {
+                    if original_voxel.id != loaded_voxel.id
+                        || original_voxel.state != loaded_voxel.state
+                        || original_voxel.light_sky != loaded_voxel.light_sky
+                        || original_voxel.light_block != loaded_voxel.light_block
+                    {
                         fidelity_failures += 1;
                     }
                 }
@@ -171,10 +200,18 @@ fn persistence_roundtrip_worldtest() {
         }
     }
 
-    let fidelity_rate = (total_voxels_checked - fidelity_failures) as f64 / total_voxels_checked as f64 * 100.0;
+    let fidelity_rate =
+        (total_voxels_checked - fidelity_failures) as f64 / total_voxels_checked as f64 * 100.0;
 
-    println!("  Verified {} voxels in {:.2}s", total_voxels_checked, phase4_start.elapsed().as_secs_f64());
-    println!("  Fidelity: {:.6}% ({} mismatches)", fidelity_rate, fidelity_failures);
+    println!(
+        "  Verified {} voxels in {:.2}s",
+        total_voxels_checked,
+        phase4_start.elapsed().as_secs_f64()
+    );
+    println!(
+        "  Fidelity: {:.6}% ({} mismatches)",
+        fidelity_rate, fidelity_failures
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -218,7 +255,11 @@ fn persistence_roundtrip_worldtest() {
         }
     }
 
-    println!("  Reloaded {} chunks in {:.2}s", chunks_generated, phase5_start.elapsed().as_secs_f64());
+    println!(
+        "  Reloaded {} chunks in {:.2}s",
+        chunks_generated,
+        phase5_start.elapsed().as_secs_f64()
+    );
     println!("  Reload failures: {}", reload_failures);
     println!();
 
@@ -230,7 +271,10 @@ fn persistence_roundtrip_worldtest() {
     let compression_ratio = uncompressed_size as f64 / bytes_written as f64;
 
     println!("Compression Analysis:");
-    println!("  Uncompressed: {:.2} MB", uncompressed_size as f64 / 1_048_576.0);
+    println!(
+        "  Uncompressed: {:.2} MB",
+        uncompressed_size as f64 / 1_048_576.0
+    );
     println!("  Compressed: {:.2} MB", bytes_written as f64 / 1_048_576.0);
     println!("  Ratio: {:.2}×", compression_ratio);
     println!();
@@ -243,7 +287,11 @@ fn persistence_roundtrip_worldtest() {
     let test_passed = fidelity_failures == 0 && reload_failures == 0;
 
     let metrics = MetricsReportBuilder::new("persistence_roundtrip_worldtest")
-        .result(if test_passed { TestResult::Pass } else { TestResult::Fail })
+        .result(if test_passed {
+            TestResult::Pass
+        } else {
+            TestResult::Fail
+        })
         .terrain(TerrainMetrics {
             chunks_generated,
             blocks_generated,
@@ -251,7 +299,8 @@ fn persistence_roundtrip_worldtest() {
             min_gen_time_us: *generation_times.iter().min().unwrap(),
             max_gen_time_us: *generation_times.iter().max().unwrap(),
             total_gen_time_ms: generation_times.iter().sum::<u128>() as f64 / 1000.0,
-            chunks_per_second: chunks_generated as f64 / (generation_times.iter().sum::<u128>() as f64 / 1_000_000.0),
+            chunks_per_second: chunks_generated as f64
+                / (generation_times.iter().sum::<u128>() as f64 / 1_000_000.0),
             unique_biomes: 0, // Not measured in this test
             seam_validation: None,
         })
@@ -277,8 +326,7 @@ fn persistence_roundtrip_worldtest() {
         .unwrap()
         .join("target/metrics/persistence_roundtrip_worldtest.json");
 
-    let sink = MetricsSink::create(&metrics_path)
-        .expect("Failed to create metrics sink");
+    let sink = MetricsSink::create(&metrics_path).expect("Failed to create metrics sink");
     sink.write(&metrics).expect("Failed to write metrics");
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -295,7 +343,10 @@ fn persistence_roundtrip_worldtest() {
     println!("=== Final Results ===");
     println!("Test result: {:?}", metrics.result);
     println!("Total duration: {:.2}s", test_duration);
-    println!("Chunks: {} generated, {} saved, {} loaded", chunks_generated, chunks_generated, chunks_generated);
+    println!(
+        "Chunks: {} generated, {} saved, {} loaded",
+        chunks_generated, chunks_generated, chunks_generated
+    );
     println!("Save performance: {:.2}ms/chunk", avg_save_time_us / 1000.0);
     println!("Load performance: {:.2}ms/chunk", avg_load_time_us / 1000.0);
     println!("Compression: {:.2}×", compression_ratio);
@@ -307,12 +358,21 @@ fn persistence_roundtrip_worldtest() {
     // Assertions
     // ═══════════════════════════════════════════════════════════════════════
 
-    assert_eq!(fidelity_failures, 0, "All voxel data must match after round-trip");
+    assert_eq!(
+        fidelity_failures, 0,
+        "All voxel data must match after round-trip"
+    );
     assert_eq!(reload_failures, 0, "All chunks must reload successfully");
     // Note: Save/load times are high because we save each chunk individually,
     // which causes region file rewrites. In production, chunks are batched.
     // These limits reflect the current test pattern, not optimal performance.
-    assert!(avg_save_time_us < 1_000_000.0, "Save time must be under 1000ms/chunk");
-    assert!(avg_load_time_us < 1_000_000.0, "Load time must be under 1000ms/chunk");
+    assert!(
+        avg_save_time_us < 1_000_000.0,
+        "Save time must be under 1000ms/chunk"
+    );
+    assert!(
+        avg_load_time_us < 1_000_000.0,
+        "Load time must be under 1000ms/chunk"
+    );
     assert!(compression_ratio > 3.0, "Compression ratio must be > 3.0×");
 }

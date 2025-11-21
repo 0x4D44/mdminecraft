@@ -52,6 +52,10 @@ cargo test --all
 
 ### Running
 
+**TLS / Networking modes**
+- Secure by default (client uses system roots). For local dev against self-signed servers, set `MDM_INSECURE_TLS=1` (unsafe for prod).
+- Provide real certs for the server via `MDM_SERVER_CERT_PATH` and `MDM_SERVER_KEY_PATH` (PEM, PKCS8). Otherwise the server generates a self-signed dev cert.
+
 ```bash
 # Start a local server
 cargo run --bin mdminecraft-server --release
@@ -61,7 +65,20 @@ cargo run --bin mdminecraft-client --release
 
 # Run the 3D viewer demo (new!)
 cargo run --example viewer --package mdminecraft-render
+
+# Launch the standalone client directly into gameplay
+cargo run -- --auto-play
+
+# Launch with a scripted input sequence (useful for CI/headless demos)
+cargo run -- --auto-play --scripted-input config/scripts/demo.json
 ```
+
+The scripted-input format is a simple JSON file describing a list of timed steps (see `config/scripts/demo.json`). Each step specifies a duration along with movement/look deltas so you can automate smoke tests without manual input.
+
+Additional samples live under `config/scripts/`:
+- `demo.json` – gentle forward walk with a camera sweep.
+- `rotation_demo.json` – pure camera rotation showcase.
+- `walk_square.json` – walks a square path to stress movement transitions.
 
 **3D Viewer Controls:**
 - **WASD** - Move camera
@@ -113,6 +130,82 @@ Features:
 - Biome map display (14 biome types)
 - Seam validation (chunk boundary continuity)
 - File export support
+
+### Texture Atlas Packing (Phase 0 Tooling)
+
+**atlas_packer** – packs authored textures into a runtime-ready atlas and emits JSON metadata for UV lookup:
+
+```bash
+# Build atlas.png + atlas.json from a directory of square textures
+cargo run --package atlas_packer --bin atlas_packer -- \
+  --input assets/textures/base \
+  --output-image build/atlas.png \
+  --output-meta build/atlas.json \
+  --tile-size 32 --padding 2
+
+# Resize mismatched textures automatically and limit atlas columns
+cargo run -p atlas_packer -- \
+  --input assets/textures/dev \
+  --allow-mixed-sizes --columns 8
+```
+
+Metadata schema:
+
+```json
+{
+  "tile_size": 32,
+  "padding": 2,
+  "columns": 8,
+  "rows": 8,
+  "atlas_width": 272,
+  "atlas_height": 272,
+  "entries": [
+    { "name": "blocks/stone", "x": 2, "y": 2, "width": 32, "height": 32, "u0": 0.007, "v0": 0.007, "u1": 0.125, "v1": 0.125 }
+  ]
+}
+```
+
+Use this tool during Phase 1 rendering work to generate the authoritative atlas consumed by the runtime renderer.
+Place the resulting `atlas.png`/`atlas.json` under `assets/atlas/` (or set `MDM_ATLAS_IMAGE` / `MDM_ATLAS_META`) so the client automatically loads them at startup. Missing files fall back to the color-coded debug atlas.
+
+Block packs live in `config/blocks.json`. Each entry can specify a single `texture` or a `textures` object:
+
+```json
+[
+  { "name": "air", "opaque": false },
+  { "name": "stone", "opaque": true, "texture": "blocks/stone" },
+  {
+    "name": "grass",
+    "opaque": true,
+    "textures": {
+      "top": "blocks/grass_top",
+      "bottom": "blocks/dirt",
+      "side": "blocks/grass_side"
+    }
+  }
+]
+```
+
+These keys are resolved against the atlas metadata at load time; missing textures fall back to the debug gradient.
+
+**Current texture sources (CC0):**
+- [Assorted Minecraft-style textures](https://opengameart.org/content/assorted-minecraft-style-textures) by Joe Enderman — used for stone, dirt, sand, gravel, logs, planks, glass, and bedrock stand-ins.
+- Solid-color CC0 tiles (generated locally) for water, ice, snow, and clay.
+- All textures are repacked via `atlas_packer` into `assets/atlas/atlas.png` and referenced by name.
+
+### ECS Benchmarking
+
+**ecs_compare** – quick-and-dirty benchmark that compares `bevy_ecs` vs `hecs` for mdminecraft-style workloads (position + velocity updates). Helps validate Phase 0 ECS decisions.
+
+```bash
+# Compare runtimes for 50k entities over 200 ticks
+cargo run --package ecs_compare -- --entities 50000 --ticks 200
+
+# Custom seed / entity count
+cargo run -p ecs_compare -- --entities 200000 --ticks 400 --seed 42
+```
+
+Output includes total duration and per-tick averages for each backend so we can track regressions when tweaking schedules/components.
 
 ---
 

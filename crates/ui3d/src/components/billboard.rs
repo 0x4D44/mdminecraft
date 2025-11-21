@@ -118,19 +118,13 @@ impl Billboard {
     /// Calculate the billboard's orientation matrix relative to camera
     pub fn calculate_orientation(&self, camera_position: Vec3, camera_up: Vec3) -> glam::Mat4 {
         match self.orientation {
-            BillboardOrientation::Full => {
-                self.calculate_full_billboard(camera_position, camera_up)
-            }
-            BillboardOrientation::YAxis => {
-                self.calculate_y_axis_billboard(camera_position)
-            }
-            BillboardOrientation::Fixed => {
-                glam::Mat4::from_scale_rotation_translation(
-                    self.transform.scale,
-                    self.transform.rotation,
-                    self.transform.position,
-                )
-            }
+            BillboardOrientation::Full => self.calculate_full_billboard(camera_position, camera_up),
+            BillboardOrientation::YAxis => self.calculate_y_axis_billboard(camera_position),
+            BillboardOrientation::Fixed => glam::Mat4::from_scale_rotation_translation(
+                self.transform.scale,
+                self.transform.rotation,
+                self.transform.position,
+            ),
         }
     }
 
@@ -212,8 +206,7 @@ mod tests {
 
     #[test]
     fn test_billboard_dimensions() {
-        let billboard = Billboard::new(Vec3::ZERO)
-            .with_size(2.0, 3.0);
+        let billboard = Billboard::new(Vec3::ZERO).with_size(2.0, 3.0);
 
         assert_eq!(billboard.width(), 2.0);
         assert_eq!(billboard.height(), 3.0);

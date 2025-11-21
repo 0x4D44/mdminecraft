@@ -2,13 +2,13 @@
 //!
 //! This module contains all the UI component types that can be rendered in 3D space.
 
-pub mod text3d;
-pub mod label;
 pub mod billboard;
+pub mod label;
+pub mod text3d;
 
-pub use text3d::Text3D;
-pub use label::Label3D;
 pub use billboard::Billboard;
+pub use label::Label3D;
+pub use text3d::Text3D;
 
 use glam::Vec3;
 

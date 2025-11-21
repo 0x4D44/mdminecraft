@@ -4,13 +4,12 @@
 //! for CI/CD integration, performance tracking, and regression detection.
 
 use mdminecraft_testkit::{
-    MetricsReport, MetricsReportBuilder, MetricsSink,
-    TestResult, TerrainMetrics, SeamValidation, MobMetrics, ItemMetrics,
-    TestExecutionMetrics,
+    ItemMetrics, MetricsReport, MetricsReportBuilder, MetricsSink, MobMetrics, SeamValidation,
+    TerrainMetrics, TestExecutionMetrics, TestResult,
 };
 use mdminecraft_world::{
-    BiomeAssigner, Chunk, ChunkPos, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Z,
-    Mob, MobType, DroppedItem, ItemType,
+    BiomeAssigner, Chunk, ChunkPos, DroppedItem, ItemType, Mob, MobType, TerrainGenerator,
+    CHUNK_SIZE_X, CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -34,7 +33,10 @@ fn stage4_metrics_worldtest() {
     for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
         for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
             let gen_start = Instant::now();
-            let chunk = terrain_gen.generate_chunk(ChunkPos { x: chunk_x, z: chunk_z });
+            let chunk = terrain_gen.generate_chunk(ChunkPos {
+                x: chunk_x,
+                z: chunk_z,
+            });
             let gen_time = gen_start.elapsed().as_micros();
             generation_times.push(gen_time);
             chunks.push(chunk);
@@ -201,7 +203,11 @@ fn stage4_metrics_worldtest() {
     let test_passed = seams_failed == 0;
 
     let metrics = MetricsReportBuilder::new("stage4_metrics_worldtest")
-        .result(if test_passed { TestResult::Pass } else { TestResult::Fail })
+        .result(if test_passed {
+            TestResult::Pass
+        } else {
+            TestResult::Fail
+        })
         .terrain(TerrainMetrics {
             chunks_generated,
             blocks_generated,
@@ -248,8 +254,7 @@ fn stage4_metrics_worldtest() {
         .join("target/metrics/stage4_metrics_worldtest.json");
     println!("\nWriting metrics to: {:?}", metrics_path);
 
-    let sink = MetricsSink::create(&metrics_path)
-        .expect("Failed to create metrics sink");
+    let sink = MetricsSink::create(&metrics_path).expect("Failed to create metrics sink");
     sink.write(&metrics).expect("Failed to write metrics");
 
     // Verify file was created
@@ -262,7 +267,10 @@ fn stage4_metrics_worldtest() {
     assert_eq!(seams_failed, 0, "All seams must be continuous");
     assert!(chunks_generated > 0, "Chunks must be generated");
     assert!(unique_biomes >= 3, "Multiple biomes should be present");
-    assert!(avg_gen_time_us < 30_000.0, "Generation must be under 30ms target");
+    assert!(
+        avg_gen_time_us < 30_000.0,
+        "Generation must be under 30ms target"
+    );
 
     // Print human-readable summary
     println!("\n=== Stage 4 Metrics Worldtest Results ===");
@@ -272,9 +280,11 @@ fn stage4_metrics_worldtest() {
         println!("  Chunks: {}", terrain.chunks_generated);
         println!("  Blocks: {}", terrain.blocks_generated);
         println!("  Avg gen: {:.2}ms", terrain.avg_gen_time_us / 1000.0);
-        println!("  Min/Max: {:.2}ms / {:.2}ms",
+        println!(
+            "  Min/Max: {:.2}ms / {:.2}ms",
             terrain.min_gen_time_us as f64 / 1000.0,
-            terrain.max_gen_time_us as f64 / 1000.0);
+            terrain.max_gen_time_us as f64 / 1000.0
+        );
         println!("  Throughput: {:.1} chunks/sec", terrain.chunks_per_second);
         println!("  Biomes: {}", terrain.unique_biomes);
     }
@@ -283,9 +293,11 @@ fn stage4_metrics_worldtest() {
     if let Some(terrain) = &metrics.terrain {
         if let Some(seams) = &terrain.seam_validation {
             println!("  Seams checked: {}", seams.total_seams);
-            println!("  Seams valid: {} ({}%)",
+            println!(
+                "  Seams valid: {} ({}%)",
                 seams.seams_valid,
-                (seams.seams_valid as f64 / seams.total_seams as f64 * 100.0) as usize);
+                (seams.seams_valid as f64 / seams.total_seams as f64 * 100.0) as usize
+            );
             println!("  Max seam diff: {} blocks", seams.max_seam_diff);
             println!("  Avg seam diff: {:.1} blocks", seams.avg_seam_diff);
         }

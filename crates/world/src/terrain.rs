@@ -70,8 +70,7 @@ impl TerrainGenerator {
                 let biome_data = BiomeData::get(biome);
 
                 // Apply biome height modifier
-                let modified_height =
-                    (height as f32 + biome_data.height_modifier * 20.0) as i32;
+                let modified_height = (height as f32 + biome_data.height_modifier * 20.0) as i32;
                 let final_height = modified_height.clamp(0, CHUNK_SIZE_Y as i32 - 1);
 
                 // Generate column
@@ -79,8 +78,6 @@ impl TerrainGenerator {
                     &mut chunk,
                     local_x,
                     local_z,
-                    world_x,
-                    world_z,
                     final_height as usize,
                     biome,
                     &biome_data,
@@ -104,8 +101,6 @@ impl TerrainGenerator {
         chunk: &mut Chunk,
         x: usize,
         z: usize,
-        _world_x: i32,
-        _world_z: i32,
         height: usize,
         biome: BiomeId,
         biome_data: &BiomeData,
@@ -203,18 +198,16 @@ impl TerrainGenerator {
         }
 
         // Snow layer for cold biomes at high elevations
-        if biome_data.temperature < 0.3 && height > 90 {
-            if height + 1 < CHUNK_SIZE_Y {
-                chunk.set_voxel(
-                    x,
-                    height + 1,
-                    z,
-                    Voxel {
-                        id: blocks::SNOW,
-                        ..Default::default()
-                    },
-                );
-            }
+        if biome_data.temperature < 0.3 && height > 90 && height + 1 < CHUNK_SIZE_Y {
+            chunk.set_voxel(
+                x,
+                height + 1,
+                z,
+                Voxel {
+                    id: blocks::SNOW,
+                    ..Default::default()
+                },
+            );
         }
     }
 
@@ -267,7 +260,7 @@ impl TerrainGenerator {
             if surface_block.id == blocks::GRASS || surface_block.id == blocks::DIRT {
                 // Create and place tree
                 let tree = Tree::new(world_x, world_y, world_z, tree_type);
-                tree.generate_into_chunk(chunk, chunk_origin_x, chunk_origin_z);
+                tree.generate_into_chunk(chunk);
             }
         }
     }
@@ -319,11 +312,11 @@ impl TerrainGenerator {
     /// Get surface depth (number of non-stone blocks at top).
     fn get_surface_depth(&self, biome: BiomeId) -> usize {
         match biome {
-            BiomeId::Desert => 5,  // Thick sand layer
-            BiomeId::Ocean => 3,   // Sand/gravel
+            BiomeId::Desert => 5,    // Thick sand layer
+            BiomeId::Ocean => 3,     // Sand/gravel
             BiomeId::DeepOcean => 4, // Thicker ocean floor
-            BiomeId::Swamp => 2,   // Shallow dirt
-            _ => 3,                // Standard grass/dirt depth
+            BiomeId::Swamp => 2,     // Shallow dirt
+            _ => 3,                  // Standard grass/dirt depth
         }
     }
 
@@ -402,10 +395,7 @@ mod tests {
         let mut found_surface = false;
         for y in 50..100 {
             let voxel = chunk.voxel(8, y, 8);
-            if voxel.id == blocks::GRASS
-                || voxel.id == blocks::DIRT
-                || voxel.id == blocks::SAND
-            {
+            if voxel.id == blocks::GRASS || voxel.id == blocks::DIRT || voxel.id == blocks::SAND {
                 found_surface = true;
                 break;
             }
@@ -479,7 +469,10 @@ mod tests {
                 // Check center column
                 for y in (50..100).rev() {
                     let voxel = chunk.voxel(8, y, 8);
-                    if voxel.id != blocks::AIR && voxel.id != blocks::WATER && voxel.id != blocks::ICE {
+                    if voxel.id != blocks::AIR
+                        && voxel.id != blocks::WATER
+                        && voxel.id != blocks::ICE
+                    {
                         // Found surface block, should be a valid surface or tree block
                         assert!(
                             voxel.id == blocks::GRASS

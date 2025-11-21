@@ -32,7 +32,11 @@ fn stage4_integration_worldtest() {
     println!("=== Stage 4 Integration Worldtest ===");
     println!("Testing: Terrain + Biomes + Trees + Mobs + Items");
     println!("World Seed: {}", WORLD_SEED);
-    println!("Grid Size: {}×{} chunks\n", CHUNK_RADIUS * 2 + 1, CHUNK_RADIUS * 2 + 1);
+    println!(
+        "Grid Size: {}×{} chunks\n",
+        CHUNK_RADIUS * 2 + 1,
+        CHUNK_RADIUS * 2 + 1
+    );
 
     // Initialize all Stage 4 systems
     let terrain_gen = TerrainGenerator::new(WORLD_SEED);
@@ -41,7 +45,10 @@ fn stage4_integration_worldtest() {
     let mut item_manager = ItemManager::new();
 
     // Phase 1: Large-scale terrain generation
-    println!("Phase 1: Generating terrain across {} chunks...", (CHUNK_RADIUS * 2 + 1).pow(2));
+    println!(
+        "Phase 1: Generating terrain across {} chunks...",
+        (CHUNK_RADIUS * 2 + 1).pow(2)
+    );
     let phase1_start = Instant::now();
 
     let mut generation_times = Vec::new();
@@ -51,7 +58,10 @@ fn stage4_integration_worldtest() {
     for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
         for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
             let gen_start = Instant::now();
-            let chunk = terrain_gen.generate_chunk(ChunkPos { x: chunk_x, z: chunk_z });
+            let chunk = terrain_gen.generate_chunk(ChunkPos {
+                x: chunk_x,
+                z: chunk_z,
+            });
             let gen_time = gen_start.elapsed().as_micros();
             generation_times.push(gen_time);
 
@@ -82,7 +92,11 @@ fn stage4_integration_worldtest() {
     let max_gen_time = *generation_times.iter().max().unwrap();
 
     println!("  Chunks generated: {}", chunks_generated);
-    println!("  Avg generation time: {}μs ({:.2}ms)", avg_gen_time, avg_gen_time as f64 / 1000.0);
+    println!(
+        "  Avg generation time: {}μs ({:.2}ms)",
+        avg_gen_time,
+        avg_gen_time as f64 / 1000.0
+    );
     println!("  Min/Max: {}μs / {}μs", min_gen_time, max_gen_time);
     println!("  Total blocks: {}", total_blocks_generated);
     println!("  Unique biomes: {}", biome_counts.len());
@@ -94,7 +108,10 @@ fn stage4_integration_worldtest() {
             kind: "TerrainGeneration",
             payload: &format!(
                 "{} chunks, {}μs avg, {} biomes, {} blocks",
-                chunks_generated, avg_gen_time, biome_counts.len(), total_blocks_generated
+                chunks_generated,
+                avg_gen_time,
+                biome_counts.len(),
+                total_blocks_generated
             ),
         })
         .expect("write event");
@@ -141,10 +158,15 @@ fn stage4_integration_worldtest() {
     }
 
     println!("  Seam checks: {}", seam_checks);
-    println!("  Seam failures: {} ({:.2}%)", seam_failures,
-             (seam_failures as f64 / seam_checks as f64) * 100.0);
-    println!("  Seam quality: {}%\n",
-             ((seam_checks - seam_failures) as f64 / seam_checks as f64) * 100.0);
+    println!(
+        "  Seam failures: {} ({:.2}%)",
+        seam_failures,
+        (seam_failures as f64 / seam_checks as f64) * 100.0
+    );
+    println!(
+        "  Seam quality: {}%\n",
+        ((seam_checks - seam_failures) as f64 / seam_checks as f64) * 100.0
+    );
 
     assert_eq!(seam_failures, 0, "All seams should be continuous");
 
@@ -168,12 +190,7 @@ fn stage4_integration_worldtest() {
             let chunk_center_z = chunk_z * 16 + 8;
             let biome = biome_assigner.get_biome(chunk_center_x, chunk_center_z);
 
-            let mobs = mob_spawner.generate_spawns(
-                chunk_x,
-                chunk_z,
-                biome,
-                heightmap.heights(),
-            );
+            let mobs = mob_spawner.generate_spawns(chunk_x, chunk_z, biome, heightmap.heights());
 
             if !mobs.is_empty() {
                 let biome_name = format!("{:?}", biome);
@@ -186,14 +203,20 @@ fn stage4_integration_worldtest() {
 
     println!("  Total mobs spawned: {}", all_mobs.len());
     println!("  Biomes with mobs: {}", mob_spawn_counts.len());
-    println!("  Avg mobs per chunk: {:.2}\n",
-             all_mobs.len() as f64 / chunks_generated as f64);
+    println!(
+        "  Avg mobs per chunk: {:.2}\n",
+        all_mobs.len() as f64 / chunks_generated as f64
+    );
 
     event_log
         .write(&EventRecord {
             tick: SimTick::ZERO.advance(20),
             kind: "MobSpawning",
-            payload: &format!("{} mobs across {} biomes", all_mobs.len(), mob_spawn_counts.len()),
+            payload: &format!(
+                "{} mobs across {} biomes",
+                all_mobs.len(),
+                mob_spawn_counts.len()
+            ),
         })
         .expect("write event");
 
@@ -247,14 +270,25 @@ fn stage4_integration_worldtest() {
     }
     println!();
 
-    assert!(biome_counts.len() >= 5, "Should have at least 5 different biomes");
+    assert!(
+        biome_counts.len() >= 5,
+        "Should have at least 5 different biomes"
+    );
 
     // Phase 6: Performance summary
     println!("Phase 6: Performance Summary");
-    println!("  Terrain generation: {:.2}ms per chunk", avg_gen_time as f64 / 1000.0);
-    println!("  Total generation: {:?} for {} chunks", phase1_time, chunks_generated);
-    println!("  Throughput: {:.0} chunks/sec",
-             chunks_generated as f64 / phase1_time.as_secs_f64());
+    println!(
+        "  Terrain generation: {:.2}ms per chunk",
+        avg_gen_time as f64 / 1000.0
+    );
+    println!(
+        "  Total generation: {:?} for {} chunks",
+        phase1_time, chunks_generated
+    );
+    println!(
+        "  Throughput: {:.0} chunks/sec",
+        chunks_generated as f64 / phase1_time.as_secs_f64()
+    );
     println!();
 
     // Performance targets
@@ -272,8 +306,11 @@ fn stage4_integration_worldtest() {
     println!();
     println!("Validation:");
     println!("  Seams checked: {}", seam_checks);
-    println!("  Seam failures: {} ({}%)", seam_failures,
-             ((seam_failures as f64 / seam_checks as f64) * 100.0));
+    println!(
+        "  Seam failures: {} ({}%)",
+        seam_failures,
+        ((seam_failures as f64 / seam_checks as f64) * 100.0)
+    );
     println!();
     println!("Entities:");
     println!("  Mobs spawned: {}", all_mobs.len());
@@ -281,7 +318,10 @@ fn stage4_integration_worldtest() {
     println!();
     println!("Performance:");
     println!("  Total test time: {:?}", test_duration);
-    println!("  Chunks/sec: {:.0}", chunks_generated as f64 / test_duration.as_secs_f64());
+    println!(
+        "  Chunks/sec: {:.0}",
+        chunks_generated as f64 / test_duration.as_secs_f64()
+    );
     println!();
     println!("Event log: {}", log_path.display());
     println!("================================\n");

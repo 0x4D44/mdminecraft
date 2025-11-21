@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "duration": 2.5, "move_y": 1.0, "look_x": 5.0 },
+    { "duration": 2.5, "move_x": 1.0, "look_x": 5.0 },
+    { "duration": 2.5, "move_y": -1.0, "look_x": 5.0 },
+    { "duration": 2.5, "move_x": -1.0, "look_x": 5.0 }
+  ]
+}

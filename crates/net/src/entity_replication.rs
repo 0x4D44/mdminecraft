@@ -115,7 +115,10 @@ impl EntityReplicationTracker {
             self.last_states.remove(&entity_id);
         }
 
-        EntityDeltaMessage { tick, entities: updates }
+        EntityDeltaMessage {
+            tick,
+            entities: updates,
+        }
     }
 
     /// Check if entity state has changed significantly.
@@ -327,13 +330,18 @@ mod tests {
         tracker.visible_entities.insert(1);
 
         let mut entities = HashMap::new();
-        let state1 = create_entity_state(make_transform(100, 200, 300), "Player", Some((100.0, 100.0)));
+        let state1 = create_entity_state(
+            make_transform(100, 200, 300),
+            "Player",
+            Some((100.0, 100.0)),
+        );
         entities.insert(1, state1);
 
         tracker.generate_delta(1000, &entities);
 
         // Damage entity
-        let state2 = create_entity_state(make_transform(100, 200, 300), "Player", Some((50.0, 100.0)));
+        let state2 =
+            create_entity_state(make_transform(100, 200, 300), "Player", Some((50.0, 100.0)));
         entities.insert(1, state2);
 
         let delta = tracker.generate_delta(1001, &entities);

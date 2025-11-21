@@ -25,11 +25,6 @@ impl SimTime {
         }
     }
 
-    /// Default configuration: 24000 ticks per day (20 minutes real-time at 20 TPS).
-    pub fn default() -> Self {
-        Self::new(24000)
-    }
-
     /// Advance time by one tick.
     pub fn advance(&mut self) {
         self.tick = self.tick.advance(1);
@@ -73,7 +68,7 @@ impl SimTime {
 
 impl Default for SimTime {
     fn default() -> Self {
-        Self::default()
+        Self::new(24000)
     }
 }
 

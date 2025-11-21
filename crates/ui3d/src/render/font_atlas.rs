@@ -129,6 +129,9 @@ pub struct GlyphLayout {
     pub uv_max: (f32, f32),
 }
 
+/// Packed atlas dimensions and glyph positions (x, y per glyph).
+type PackedAtlasLayout = (u32, u32, Vec<(u32, u32)>);
+
 /// Builder for creating font atlases
 pub struct FontAtlasBuilder {
     font_data: Vec<u8>,
@@ -144,14 +147,14 @@ impl FontAtlasBuilder {
             font_data,
             font_size: 48.0, // Default rasterization size
             padding: 2,
-            chars: ASCII_RANGE.filter_map(|c| char::from_u32(c)).collect(),
+            chars: ASCII_RANGE.filter_map(char::from_u32).collect(),
         }
     }
 
     /// Load font from a file
     pub fn from_file(path: &str) -> Result<Self> {
-        let font_data = std::fs::read(path)
-            .with_context(|| format!("Failed to read font file: {}", path))?;
+        let font_data =
+            std::fs::read(path).with_context(|| format!("Failed to read font file: {}", path))?;
         Ok(Self::new(font_data))
     }
 
@@ -208,10 +211,7 @@ impl FontAtlasBuilder {
         let (atlas_width, atlas_height, positions) =
             Self::pack_glyphs_static(&glyph_data, padding)?;
 
-        debug!(
-            "Atlas dimensions: {}x{} pixels",
-            atlas_width, atlas_height
-        );
+        debug!("Atlas dimensions: {}x{} pixels", atlas_width, atlas_height);
 
         // Create atlas texture
         let mut texture_data = vec![0u8; (atlas_width * atlas_height) as usize];
@@ -283,7 +283,7 @@ impl FontAtlasBuilder {
     fn pack_glyphs_static(
         glyphs: &[(char, fontdue::Metrics, Vec<u8>)],
         padding: u32,
-    ) -> Result<(u32, u32, Vec<(u32, u32)>)> {
+    ) -> Result<PackedAtlasLayout> {
         let mut current_x = padding;
         let mut current_y = padding;
         let mut row_height = 0u32;

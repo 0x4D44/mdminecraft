@@ -118,9 +118,7 @@ impl ItemStack {
     /// Create a new item stack
     pub fn new(item_type: ItemType, count: u32) -> Self {
         let durability = match item_type {
-            ItemType::Tool(tool_type, material) => {
-                Some(material.durability(tool_type))
-            }
+            ItemType::Tool(tool_type, material) => Some(material.durability(tool_type)),
             _ => None,
         };
 
@@ -201,10 +199,7 @@ mod tests {
 
     #[test]
     fn test_item_stack() {
-        let mut stack = ItemStack::new(
-            ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron),
-            1,
-        );
+        let mut stack = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1);
 
         assert_eq!(stack.count, 1);
         assert!(stack.durability.is_some());

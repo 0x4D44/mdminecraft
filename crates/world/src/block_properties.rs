@@ -268,16 +268,12 @@ mod tests {
         let hand_time = stone.calculate_mining_time(None, false);
 
         // Wooden pickaxe (correct tool, minimum tier)
-        let wood_pick_time = stone.calculate_mining_time(
-            Some((ToolType::Pickaxe, ToolMaterial::Wood)),
-            false,
-        );
+        let wood_pick_time =
+            stone.calculate_mining_time(Some((ToolType::Pickaxe, ToolMaterial::Wood)), false);
 
         // Diamond pickaxe (correct tool, high tier)
-        let diamond_pick_time = stone.calculate_mining_time(
-            Some((ToolType::Pickaxe, ToolMaterial::Diamond)),
-            false,
-        );
+        let diamond_pick_time =
+            stone.calculate_mining_time(Some((ToolType::Pickaxe, ToolMaterial::Diamond)), false);
 
         assert!(wood_pick_time < hand_time);
         assert!(diamond_pick_time < wood_pick_time);

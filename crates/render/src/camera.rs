@@ -9,6 +9,7 @@ pub struct Camera {
     pub position: Vec3,
     /// Camera rotation (yaw, pitch, roll)
     pub yaw: f32,
+    /// Pitch angle in radians
     pub pitch: f32,
     /// Field of view in radians
     pub fov: f32,
@@ -38,11 +39,7 @@ impl Camera {
     pub fn forward(&self) -> Vec3 {
         let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
         let (pitch_sin, pitch_cos) = self.pitch.sin_cos();
-        Vec3::new(
-            yaw_cos * pitch_cos,
-            pitch_sin,
-            yaw_sin * pitch_cos,
-        ).normalize()
+        Vec3::new(yaw_cos * pitch_cos, pitch_sin, yaw_sin * pitch_cos).normalize()
     }
 
     /// Get the right direction vector.

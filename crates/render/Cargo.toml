@@ -23,6 +23,8 @@ egui = { workspace = true }
 egui-wgpu = { workspace = true }
 egui-winit = { workspace = true }
 pollster = { workspace = true }
+image = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
@@ -30,4 +32,3 @@ tracing-subscriber = { workspace = true }
 [[example]]
 name = "viewer"
 path = "examples/viewer.rs"
-

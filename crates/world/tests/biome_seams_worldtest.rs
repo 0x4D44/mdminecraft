@@ -185,11 +185,7 @@ fn biome_seams_worldtest() {
         .expect("can write event");
 
     // Assertions
-    assert_eq!(
-        total_chunks,
-        81,
-        "Should generate 81 chunks (9×9 grid)"
-    );
+    assert_eq!(total_chunks, 81, "Should generate 81 chunks (9×9 grid)");
     assert_eq!(seam_failures, 0, "All seams should be continuous");
     assert!(
         avg_gen_time < 30_000,
@@ -203,7 +199,11 @@ fn biome_seams_worldtest() {
 
     println!("\n=== BiomeSeams Worldtest Results ===");
     println!("Total chunks: {}", total_chunks);
-    println!("Average generation time: {}μs ({:.2}ms)", avg_gen_time, avg_gen_time as f64 / 1000.0);
+    println!(
+        "Average generation time: {}μs ({:.2}ms)",
+        avg_gen_time,
+        avg_gen_time as f64 / 1000.0
+    );
     println!("Min generation time: {}μs", min_gen_time);
     println!("Max generation time: {}μs", max_gen_time);
     println!("Seam checks: {}", seam_checks);
