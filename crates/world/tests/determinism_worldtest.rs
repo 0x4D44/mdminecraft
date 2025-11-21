@@ -10,12 +10,10 @@
 //! - Cross-platform determinism
 
 use mdminecraft_testkit::{
-    MetricsReportBuilder, MetricsSink, TestResult, TerrainMetrics,
-    TestExecutionMetrics,
+    MetricsReportBuilder, MetricsSink, TerrainMetrics, TestExecutionMetrics, TestResult,
 };
 use mdminecraft_world::{
-    BiomeAssigner, ChunkPos, Heightmap, TerrainGenerator,
-    CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    BiomeAssigner, ChunkPos, Heightmap, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -31,7 +29,12 @@ fn determinism_worldtest() {
     println!("\n=== Determinism Validation Worldtest ===");
     println!("Configuration:");
     println!("  World seed: {}", WORLD_SEED);
-    println!("  Chunk radius: {} ({}×{} grid)", CHUNK_RADIUS, CHUNK_RADIUS * 2 + 1, CHUNK_RADIUS * 2 + 1);
+    println!(
+        "  Chunk radius: {} ({}×{} grid)",
+        CHUNK_RADIUS,
+        CHUNK_RADIUS * 2 + 1,
+        CHUNK_RADIUS * 2 + 1
+    );
     println!("  Verification rounds: {}", VERIFICATION_ROUNDS);
     println!();
 
@@ -49,7 +52,10 @@ fn determinism_worldtest() {
 
     for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
         for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
-            let pos = ChunkPos { x: chunk_x, z: chunk_z };
+            let pos = ChunkPos {
+                x: chunk_x,
+                z: chunk_z,
+            };
             positions.push(pos);
 
             let gen_start = Instant::now();
@@ -65,7 +71,10 @@ fn determinism_worldtest() {
     let blocks_generated = chunks_generated * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
-    println!("  Completed in {:.2}s", phase1_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase1_start.elapsed().as_secs_f64()
+    );
     println!("  Chunks: {}", chunks_generated);
     println!("  Avg: {:.2}ms/chunk", avg_gen_time_us / 1000.0);
     println!();
@@ -91,7 +100,10 @@ fn determinism_worldtest() {
         chunks_randomized.insert(*pos, chunk);
     }
 
-    println!("  Completed in {:.2}s", phase2_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase2_start.elapsed().as_secs_f64()
+    );
     println!("  Verified order independence");
     println!();
 
@@ -110,8 +122,11 @@ fn determinism_worldtest() {
         let pos = positions[idx];
         let regenerated_chunk = chunks_randomized.get(&pos).unwrap();
 
-        assert_eq!(original_chunk.position(), regenerated_chunk.position(),
-            "Chunk positions must match");
+        assert_eq!(
+            original_chunk.position(),
+            regenerated_chunk.position(),
+            "Chunk positions must match"
+        );
 
         let mut chunk_has_mismatch = false;
 
@@ -123,10 +138,11 @@ fn determinism_worldtest() {
 
                     total_voxels_checked += 1;
 
-                    if original.id != regenerated.id ||
-                       original.state != regenerated.state ||
-                       original.light_sky != regenerated.light_sky ||
-                       original.light_block != regenerated.light_block {
+                    if original.id != regenerated.id
+                        || original.state != regenerated.state
+                        || original.light_sky != regenerated.light_sky
+                        || original.light_block != regenerated.light_block
+                    {
                         voxel_mismatches += 1;
                         chunk_has_mismatch = true;
                     }
@@ -139,13 +155,20 @@ fn determinism_worldtest() {
         }
     }
 
-    let fidelity_rate = (total_voxels_checked - voxel_mismatches) as f64 / total_voxels_checked as f64 * 100.0;
+    let fidelity_rate =
+        (total_voxels_checked - voxel_mismatches) as f64 / total_voxels_checked as f64 * 100.0;
 
-    println!("  Completed in {:.2}s", phase3_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase3_start.elapsed().as_secs_f64()
+    );
     println!("  Total voxels checked: {}", total_voxels_checked);
     println!("  Mismatches: {}", voxel_mismatches);
     println!("  Fidelity: {:.12}%", fidelity_rate);
-    println!("  Chunks with mismatches: {}/{}", chunks_with_mismatches, chunks_generated);
+    println!(
+        "  Chunks with mismatches: {}/{}",
+        chunks_with_mismatches, chunks_generated
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -177,10 +200,17 @@ fn determinism_worldtest() {
             }
         }
 
-        println!("  Round {}: {} mismatches", round + 1, round_mismatches[round]);
+        println!(
+            "  Round {}: {} mismatches",
+            round + 1,
+            round_mismatches[round]
+        );
     }
 
-    println!("  Completed in {:.2}s", phase4_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase4_start.elapsed().as_secs_f64()
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -216,7 +246,10 @@ fn determinism_worldtest() {
         }
     }
 
-    println!("  Completed in {:.2}s", phase5_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase5_start.elapsed().as_secs_f64()
+    );
     println!("  Biome samples: {}", total_biome_samples);
     println!("  Biome mismatches: {}", biome_mismatches);
     println!();
@@ -251,7 +284,10 @@ fn determinism_worldtest() {
         }
     }
 
-    println!("  Completed in {:.2}s", phase6_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase6_start.elapsed().as_secs_f64()
+    );
     println!("  Height samples: {}", total_height_samples);
     println!("  Height mismatches: {}", heightmap_mismatches);
     println!();
@@ -262,15 +298,19 @@ fn determinism_worldtest() {
 
     let test_duration = test_start.elapsed().as_secs_f64();
     let total_regenerations = chunks_generated * (1 + VERIFICATION_ROUNDS);
-    let all_checks_passed = voxel_mismatches == 0 &&
-                            biome_mismatches == 0 &&
-                            heightmap_mismatches == 0 &&
-                            round_mismatches.iter().sum::<usize>() == 0;
+    let all_checks_passed = voxel_mismatches == 0
+        && biome_mismatches == 0
+        && heightmap_mismatches == 0
+        && round_mismatches.iter().sum::<usize>() == 0;
 
     let test_passed = all_checks_passed;
 
     let metrics = MetricsReportBuilder::new("determinism_worldtest")
-        .result(if test_passed { TestResult::Pass } else { TestResult::Fail })
+        .result(if test_passed {
+            TestResult::Pass
+        } else {
+            TestResult::Fail
+        })
         .terrain(TerrainMetrics {
             chunks_generated: total_regenerations,
             blocks_generated,
@@ -278,14 +318,17 @@ fn determinism_worldtest() {
             min_gen_time_us: *generation_times.iter().min().unwrap(),
             max_gen_time_us: *generation_times.iter().max().unwrap(),
             total_gen_time_ms: generation_times.iter().sum::<u128>() as f64 / 1000.0,
-            chunks_per_second: chunks_generated as f64 / (generation_times.iter().sum::<u128>() as f64 / 1_000_000.0),
+            chunks_per_second: chunks_generated as f64
+                / (generation_times.iter().sum::<u128>() as f64 / 1_000_000.0),
             unique_biomes: 0, // Not measured in this test
             seam_validation: None,
         })
         .execution(TestExecutionMetrics {
             duration_seconds: test_duration,
             peak_memory_mb: None,
-            assertions_checked: Some(total_voxels_checked + total_biome_samples + total_height_samples),
+            assertions_checked: Some(
+                total_voxels_checked + total_biome_samples + total_height_samples,
+            ),
             validations_passed: Some(total_voxels_checked - voxel_mismatches),
         })
         .build();
@@ -295,8 +338,7 @@ fn determinism_worldtest() {
         .unwrap()
         .join("target/metrics/determinism_worldtest.json");
 
-    let sink = MetricsSink::create(&metrics_path)
-        .expect("Failed to create metrics sink");
+    let sink = MetricsSink::create(&metrics_path).expect("Failed to create metrics sink");
     sink.write(&metrics).expect("Failed to write metrics");
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -308,19 +350,36 @@ fn determinism_worldtest() {
     println!("Total duration: {:.2}s", test_duration);
     println!();
     println!("Generation:");
-    println!("  Chunks: {} (initial) + {} (regenerations) = {} total",
-        chunks_generated, total_regenerations - chunks_generated, total_regenerations);
+    println!(
+        "  Chunks: {} (initial) + {} (regenerations) = {} total",
+        chunks_generated,
+        total_regenerations - chunks_generated,
+        total_regenerations
+    );
     println!("  Avg generation: {:.2}ms/chunk", avg_gen_time_us / 1000.0);
     println!();
     println!("Determinism Validation:");
-    println!("  Voxel fidelity: {:.12}% ({}/{} voxels)",
-        fidelity_rate, total_voxels_checked - voxel_mismatches, total_voxels_checked);
-    println!("  Biome consistency: {}/{} samples",
-        total_biome_samples - biome_mismatches, total_biome_samples);
-    println!("  Heightmap consistency: {}/{} heights",
-        total_height_samples - heightmap_mismatches, total_height_samples);
-    println!("  Multi-round verification: {} rounds, {} total mismatches",
-        VERIFICATION_ROUNDS, round_mismatches.iter().sum::<usize>());
+    println!(
+        "  Voxel fidelity: {:.12}% ({}/{} voxels)",
+        fidelity_rate,
+        total_voxels_checked - voxel_mismatches,
+        total_voxels_checked
+    );
+    println!(
+        "  Biome consistency: {}/{} samples",
+        total_biome_samples - biome_mismatches,
+        total_biome_samples
+    );
+    println!(
+        "  Heightmap consistency: {}/{} heights",
+        total_height_samples - heightmap_mismatches,
+        total_height_samples
+    );
+    println!(
+        "  Multi-round verification: {} rounds, {} total mismatches",
+        VERIFICATION_ROUNDS,
+        round_mismatches.iter().sum::<usize>()
+    );
     println!();
     println!("Metrics: {:?}", metrics_path);
     println!();
@@ -329,11 +388,26 @@ fn determinism_worldtest() {
     // Assertions
     // ═══════════════════════════════════════════════════════════════════════
 
-    assert_eq!(voxel_mismatches, 0, "All voxels must match exactly between generations");
-    assert_eq!(chunks_with_mismatches, 0, "No chunks should have any mismatches");
-    assert_eq!(biome_mismatches, 0, "Biome assignment must be deterministic");
-    assert_eq!(heightmap_mismatches, 0, "Heightmap generation must be deterministic");
-    assert_eq!(round_mismatches.iter().sum::<usize>(), 0,
-        "All regeneration rounds must produce identical results");
+    assert_eq!(
+        voxel_mismatches, 0,
+        "All voxels must match exactly between generations"
+    );
+    assert_eq!(
+        chunks_with_mismatches, 0,
+        "No chunks should have any mismatches"
+    );
+    assert_eq!(
+        biome_mismatches, 0,
+        "Biome assignment must be deterministic"
+    );
+    assert_eq!(
+        heightmap_mismatches, 0,
+        "Heightmap generation must be deterministic"
+    );
+    assert_eq!(
+        round_mismatches.iter().sum::<usize>(),
+        0,
+        "All regeneration rounds must produce identical results"
+    );
     assert!(test_passed, "All determinism checks must pass");
 }

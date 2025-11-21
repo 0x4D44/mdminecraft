@@ -31,9 +31,9 @@
 //! ```
 
 pub mod components;
-pub mod render;
 pub mod interaction;
 pub mod layout;
+pub mod render;
 
 // Re-export commonly used types
 pub use components::{Label3D, Text3D};

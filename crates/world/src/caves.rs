@@ -3,8 +3,8 @@
 //! Generates naturalistic cave systems that carve through terrain
 
 use crate::noise::{NoiseConfig, NoiseGenerator};
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 /// Cave generator using 3D Perlin noise
 pub struct CaveGenerator {
@@ -58,23 +58,19 @@ impl CaveGenerator {
     /// Uses multiple octaves of 3D Perlin noise to create organic cave shapes
     pub fn is_cave(&self, world_x: i32, world_y: i32, world_z: i32) -> bool {
         // Don't carve caves near the surface or at bedrock
-        if world_y < 10 || world_y > 120 {
+        if !(10..=120).contains(&world_y) {
             return false;
         }
 
         // Sample cave noise (already scaled by frequency in NoiseConfig)
-        let cave_value = self.cave_noise.sample_3d(
-            world_x as f64,
-            world_y as f64,
-            world_z as f64,
-        );
+        let cave_value = self
+            .cave_noise
+            .sample_3d(world_x as f64, world_y as f64, world_z as f64);
 
         // Sample tunnel noise
-        let tunnel_value = self.tunnel_noise.sample_3d(
-            world_x as f64,
-            world_y as f64,
-            world_z as f64,
-        );
+        let tunnel_value =
+            self.tunnel_noise
+                .sample_3d(world_x as f64, world_y as f64, world_z as f64);
 
         // Reduce cave density at higher altitudes
         let altitude_factor = (120 - world_y) as f64 / 110.0;
@@ -89,21 +85,17 @@ impl CaveGenerator {
     ///
     /// Useful for smooth transitions or decorations
     pub fn cave_density(&self, world_x: i32, world_y: i32, world_z: i32) -> f64 {
-        if world_y < 10 || world_y > 120 {
+        if !(10..=120).contains(&world_y) {
             return 0.0;
         }
 
-        let cave_value = self.cave_noise.sample_3d(
-            world_x as f64,
-            world_y as f64,
-            world_z as f64,
-        );
+        let cave_value = self
+            .cave_noise
+            .sample_3d(world_x as f64, world_y as f64, world_z as f64);
 
-        let tunnel_value = self.tunnel_noise.sample_3d(
-            world_x as f64,
-            world_y as f64,
-            world_z as f64,
-        );
+        let tunnel_value =
+            self.tunnel_noise
+                .sample_3d(world_x as f64, world_y as f64, world_z as f64);
 
         // Return maximum density from either source
         // Normalize from [-1, 1] to [0, 1]
@@ -144,7 +136,10 @@ mod tests {
 
         // Should have some caves but not be completely hollow
         assert!(cave_count > 100, "Expected some caves");
-        assert!(cave_count < 20000, "Too many caves, should be ~10-30% hollow");
+        assert!(
+            cave_count < 20000,
+            "Too many caves, should be ~10-30% hollow"
+        );
     }
 
     #[test]

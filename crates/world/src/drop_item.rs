@@ -55,10 +55,7 @@ impl ItemType {
             | ItemType::Planks => 64,
 
             // Food and resources stack to 16
-            ItemType::RawPork
-            | ItemType::RawBeef
-            | ItemType::Leather
-            | ItemType::Egg => 16,
+            ItemType::RawPork | ItemType::RawBeef | ItemType::Leather | ItemType::Egg => 16,
         }
     }
 
@@ -67,11 +64,11 @@ impl ItemType {
     /// Returns Some((item_type, count)) or None if nothing drops.
     pub fn from_block(block_id: u16) -> Option<(ItemType, u32)> {
         match block_id {
-            1 => Some((ItemType::Stone, 1)),      // Stone block
-            2 => Some((ItemType::Dirt, 1)),       // Dirt block
-            3 => Some((ItemType::Grass, 1)),      // Grass block -> grass item
-            4 => Some((ItemType::Sand, 1)),       // Sand block
-            5 => Some((ItemType::Gravel, 1)),     // Gravel block
+            1 => Some((ItemType::Stone, 1)),  // Stone block
+            2 => Some((ItemType::Dirt, 1)),   // Dirt block
+            3 => Some((ItemType::Grass, 1)),  // Grass block -> grass item
+            4 => Some((ItemType::Sand, 1)),   // Sand block
+            5 => Some((ItemType::Gravel, 1)), // Gravel block
             // TODO: Add more block -> item mappings
             _ => None, // Air, water, etc. don't drop items
         }
@@ -448,7 +445,7 @@ mod tests {
 
         assert!(!item.update(64.0)); // Tick 1
         assert!(!item.update(64.0)); // Tick 2
-        assert!(item.update(64.0));  // Tick 3 - should despawn
+        assert!(item.update(64.0)); // Tick 3 - should despawn
     }
 
     #[test]

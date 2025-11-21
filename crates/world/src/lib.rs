@@ -6,7 +6,7 @@ mod crafting;
 mod drop_item;
 mod heightmap;
 mod inventory;
-mod lighting;
+pub mod lighting;
 mod mob;
 mod noise;
 mod persist;

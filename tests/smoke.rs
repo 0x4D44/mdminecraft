@@ -1,4 +1,4 @@
-﻿use mdminecraft_core::SimTick;
+use mdminecraft_core::SimTick;
 use mdminecraft_testkit::{EventRecord, JsonlSink};
 
 #[test]

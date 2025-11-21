@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mdminecraft_assets::BlockRegistry;
+use mdminecraft_assets::{BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_world::{Chunk, ChunkPos, DirtyFlags};
 
 use crate::{mesh_chunk, MeshBuffers};
@@ -25,11 +25,12 @@ impl ChunkMeshCache {
         chunk: &Chunk,
         dirty: DirtyFlags,
         registry: &BlockRegistry,
+        atlas: Option<&TextureAtlasMetadata>,
     ) -> &MeshBuffers {
         let pos = chunk.position();
         let entry = self.entries.entry(pos).or_insert_with(MeshBuffers::empty);
         if dirty.contains(DirtyFlags::MESH) {
-            *entry = mesh_chunk(chunk, registry);
+            *entry = mesh_chunk(chunk, registry, atlas);
         }
         entry
     }
@@ -49,14 +50,8 @@ mod tests {
 
     fn registry() -> BlockRegistry {
         BlockRegistry::new(vec![
-            BlockDescriptor {
-                name: "air".into(),
-                opaque: false,
-            },
-            BlockDescriptor {
-                name: "stone".into(),
-                opaque: true,
-            },
+            BlockDescriptor::simple("air", false),
+            BlockDescriptor::simple("stone", true),
         ])
     }
 
@@ -68,9 +63,9 @@ mod tests {
         let registry = registry();
 
         let dirty = chunk.take_dirty_flags();
-        let mesh_a = cache.update_chunk(&chunk, dirty, &registry).hash;
+        let mesh_a = cache.update_chunk(&chunk, dirty, &registry, None).hash;
         let clean = chunk.take_dirty_flags();
-        let mesh_b = cache.update_chunk(&chunk, clean, &registry).hash;
+        let mesh_b = cache.update_chunk(&chunk, clean, &registry, None).hash;
         assert_eq!(mesh_a, mesh_b);
 
         chunk.set_voxel(
@@ -85,7 +80,7 @@ mod tests {
             },
         );
         let dirty = chunk.take_dirty_flags();
-        let mesh_c = cache.update_chunk(&chunk, dirty, &registry).hash;
+        let mesh_c = cache.update_chunk(&chunk, dirty, &registry, None).hash;
         assert_ne!(mesh_b, mesh_c);
     }
 }

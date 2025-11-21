@@ -12,12 +12,10 @@
 //! - Long-running simulation stability
 
 use mdminecraft_testkit::{
-    MetricsReportBuilder, MetricsSink, TestResult, MobMetrics, TerrainMetrics,
-    TestExecutionMetrics,
+    MetricsReportBuilder, MetricsSink, MobMetrics, TerrainMetrics, TestExecutionMetrics, TestResult,
 };
 use mdminecraft_world::{
-    BiomeAssigner, ChunkPos, TerrainGenerator, Mob, MobType,
-    CHUNK_SIZE_X, CHUNK_SIZE_Z,
+    BiomeAssigner, ChunkPos, Mob, MobType, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -34,9 +32,17 @@ fn mob_lifecycle_worldtest() {
     println!("\n=== Mob Lifecycle Worldtest ===");
     println!("Configuration:");
     println!("  World seed: {}", WORLD_SEED);
-    println!("  Chunk radius: {} ({}×{} grid)", CHUNK_RADIUS, CHUNK_RADIUS * 2 + 1, CHUNK_RADIUS * 2 + 1);
-    println!("  Simulation ticks: {} (~{:.1} minutes at 20 TPS)",
-        SIMULATION_TICKS, SIMULATION_TICKS as f64 / 20.0 / 60.0);
+    println!(
+        "  Chunk radius: {} ({}×{} grid)",
+        CHUNK_RADIUS,
+        CHUNK_RADIUS * 2 + 1,
+        CHUNK_RADIUS * 2 + 1
+    );
+    println!(
+        "  Simulation ticks: {} (~{:.1} minutes at 20 TPS)",
+        SIMULATION_TICKS,
+        SIMULATION_TICKS as f64 / 20.0 / 60.0
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -52,7 +58,10 @@ fn mob_lifecycle_worldtest() {
 
     for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
         for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
-            let pos = ChunkPos { x: chunk_x, z: chunk_z };
+            let pos = ChunkPos {
+                x: chunk_x,
+                z: chunk_z,
+            };
 
             let gen_start = Instant::now();
             let chunk = terrain_gen.generate_chunk(pos);
@@ -64,7 +73,8 @@ fn mob_lifecycle_worldtest() {
 
         // Progress indicator every 5 rows
         if (chunk_z + CHUNK_RADIUS) % 5 == 0 {
-            let progress = ((chunk_z + CHUNK_RADIUS + 1) as f64 / (CHUNK_RADIUS * 2 + 1) as f64) * 100.0;
+            let progress =
+                ((chunk_z + CHUNK_RADIUS + 1) as f64 / (CHUNK_RADIUS * 2 + 1) as f64) * 100.0;
             println!("  Progress: {:.1}%", progress);
         }
     }
@@ -73,7 +83,10 @@ fn mob_lifecycle_worldtest() {
     let blocks_generated = chunks_generated * CHUNK_SIZE_X * 256 * CHUNK_SIZE_Z;
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
-    println!("  Completed in {:.2}s", phase1_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase1_start.elapsed().as_secs_f64()
+    );
     println!("  Chunks: {}", chunks_generated);
     println!("  Avg: {:.2}ms/chunk", avg_gen_time_us / 1000.0);
     println!();
@@ -136,7 +149,10 @@ fn mob_lifecycle_worldtest() {
     let total_spawned = mobs.len();
     let spawn_density = total_spawned as f64 / chunks_generated as f64;
 
-    println!("  Completed in {:.2}s", phase2_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase2_start.elapsed().as_secs_f64()
+    );
     println!("  Total mobs spawned: {}", total_spawned);
     println!("  Spawn density: {:.2} mobs/chunk", spawn_density);
     println!("  Unique mob types: {}", spawn_by_type.len());
@@ -155,7 +171,10 @@ fn mob_lifecycle_worldtest() {
     // Phase 3: Simulate Mob Updates
     // ═══════════════════════════════════════════════════════════════════════
 
-    println!("Phase 3: Simulating mob lifecycle ({} ticks)...", SIMULATION_TICKS);
+    println!(
+        "Phase 3: Simulating mob lifecycle ({} ticks)...",
+        SIMULATION_TICKS
+    );
     let phase3_start = Instant::now();
 
     let mut update_times = Vec::new();
@@ -163,9 +182,7 @@ fn mob_lifecycle_worldtest() {
     let mut mobs_moved = 0;
 
     // Sample initial positions
-    let initial_positions: Vec<(f64, f64, f64)> = mobs.iter()
-        .map(|m| (m.x, m.y, m.z))
-        .collect();
+    let initial_positions: Vec<(f64, f64, f64)> = mobs.iter().map(|m| (m.x, m.y, m.z)).collect();
 
     // Run simulation with progress updates
     let progress_interval = SIMULATION_TICKS / 10;
@@ -184,8 +201,10 @@ fn mob_lifecycle_worldtest() {
             let progress = ((tick + 1) as f64 / SIMULATION_TICKS as f64) * 100.0;
             let elapsed = phase3_start.elapsed().as_secs_f64();
             let eta = (elapsed / progress * 100.0) - elapsed;
-            println!("  Progress: {:.0}% ({:.1}s elapsed, ETA: {:.1}s)",
-                progress, elapsed, eta);
+            println!(
+                "  Progress: {:.0}% ({:.1}s elapsed, ETA: {:.1}s)",
+                progress, elapsed, eta
+            );
         }
     }
 
@@ -215,11 +234,24 @@ fn mob_lifecycle_worldtest() {
         0.0
     };
 
-    println!("  Completed in {:.2}s", phase3_start.elapsed().as_secs_f64());
-    println!("  Total updates: {} ({} mobs × {} ticks)", total_updates, total_spawned, SIMULATION_TICKS);
+    println!(
+        "  Completed in {:.2}s",
+        phase3_start.elapsed().as_secs_f64()
+    );
+    println!(
+        "  Total updates: {} ({} mobs × {} ticks)",
+        total_updates, total_spawned, SIMULATION_TICKS
+    );
     println!("  Avg update time: {:.3}μs/update", avg_update_time_us);
-    println!("  Mobs that moved: {} ({:.1}%)", mobs_moved, (mobs_moved as f64 / total_spawned as f64) * 100.0);
-    println!("  Avg distance traveled: {:.2} blocks", avg_distance_per_mob);
+    println!(
+        "  Mobs that moved: {} ({:.1}%)",
+        mobs_moved,
+        (mobs_moved as f64 / total_spawned as f64) * 100.0
+    );
+    println!(
+        "  Avg distance traveled: {:.2} blocks",
+        avg_distance_per_mob
+    );
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -240,7 +272,8 @@ fn mob_lifecycle_worldtest() {
         ai_timer_sum += mob.ai_timer as u64;
 
         // Calculate velocity magnitude
-        let vel_mag = (mob.vel_x * mob.vel_x + mob.vel_y * mob.vel_y + mob.vel_z * mob.vel_z).sqrt();
+        let vel_mag =
+            (mob.vel_x * mob.vel_x + mob.vel_y * mob.vel_y + mob.vel_z * mob.vel_z).sqrt();
         velocity_magnitudes.push(vel_mag);
     }
 
@@ -248,7 +281,10 @@ fn mob_lifecycle_worldtest() {
     let avg_velocity = velocity_magnitudes.iter().sum::<f64>() / velocity_magnitudes.len() as f64;
     let max_velocity = velocity_magnitudes.iter().cloned().fold(0.0f64, f64::max);
 
-    println!("  Completed in {:.2}s", phase4_start.elapsed().as_secs_f64());
+    println!(
+        "  Completed in {:.2}s",
+        phase4_start.elapsed().as_secs_f64()
+    );
     println!("  AI state distribution:");
     for (state, count) in state_counts.iter() {
         let percentage = (*count as f64 / total_spawned as f64) * 100.0;
@@ -302,7 +338,11 @@ fn mob_lifecycle_worldtest() {
     let test_passed = mobs_alive > 0 && avg_update_time_us < 1.0; // Must be under 1μs/update
 
     let metrics = MetricsReportBuilder::new("mob_lifecycle_worldtest")
-        .result(if test_passed { TestResult::Pass } else { TestResult::Fail })
+        .result(if test_passed {
+            TestResult::Pass
+        } else {
+            TestResult::Fail
+        })
         .terrain(TerrainMetrics {
             chunks_generated,
             blocks_generated,
@@ -310,7 +350,8 @@ fn mob_lifecycle_worldtest() {
             min_gen_time_us: *generation_times.iter().min().unwrap(),
             max_gen_time_us: *generation_times.iter().max().unwrap(),
             total_gen_time_ms: generation_times.iter().sum::<u128>() as f64 / 1000.0,
-            chunks_per_second: chunks_generated as f64 / (generation_times.iter().sum::<u128>() as f64 / 1_000_000.0),
+            chunks_per_second: chunks_generated as f64
+                / (generation_times.iter().sum::<u128>() as f64 / 1_000_000.0),
             unique_biomes: spawn_by_biome.len(),
             seam_validation: None,
         })
@@ -334,8 +375,7 @@ fn mob_lifecycle_worldtest() {
         .unwrap()
         .join("target/metrics/mob_lifecycle_worldtest.json");
 
-    let sink = MetricsSink::create(&metrics_path)
-        .expect("Failed to create metrics sink");
+    let sink = MetricsSink::create(&metrics_path).expect("Failed to create metrics sink");
     sink.write(&metrics).expect("Failed to write metrics");
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -352,20 +392,30 @@ fn mob_lifecycle_worldtest() {
     println!();
     println!("Mob Lifecycle:");
     println!("  Spawned: {}", total_spawned);
-    println!("  Alive after simulation: {} ({:.1}%)",
-        mobs_alive, (mobs_alive as f64 / total_spawned as f64) * 100.0);
+    println!(
+        "  Alive after simulation: {} ({:.1}%)",
+        mobs_alive,
+        (mobs_alive as f64 / total_spawned as f64) * 100.0
+    );
     println!("  Spawn density: {:.2} mobs/chunk", spawn_density);
     println!("  Unique types: {}", spawn_by_type.len());
     println!();
     println!("Movement:");
-    println!("  Mobs moved: {} ({:.1}%)", mobs_moved, (mobs_moved as f64 / total_spawned as f64) * 100.0);
+    println!(
+        "  Mobs moved: {} ({:.1}%)",
+        mobs_moved,
+        (mobs_moved as f64 / total_spawned as f64) * 100.0
+    );
     println!("  Avg distance: {:.2} blocks", avg_distance_per_mob);
     println!();
     println!("Performance:");
     println!("  Total updates: {}", total_updates);
     println!("  Avg update time: {:.3}μs", avg_update_time_us);
     println!("  P95 tick time: {:.3}μs", p95_update_ns as f64 / 1000.0);
-    println!("  Throughput: {:.0} updates/sec", total_updates as f64 / phase3_start.elapsed().as_secs_f64());
+    println!(
+        "  Throughput: {:.0} updates/sec",
+        total_updates as f64 / phase3_start.elapsed().as_secs_f64()
+    );
     println!();
     println!("Metrics: {:?}", metrics_path);
     println!();
@@ -376,9 +426,21 @@ fn mob_lifecycle_worldtest() {
 
     assert!(total_spawned > 0, "Mobs must spawn");
     assert!(mobs_alive > 0, "Some mobs must remain alive");
-    assert_eq!(mobs_alive, total_spawned, "All mobs should remain alive (no damage system)");
-    assert!(spawn_by_type.len() >= 3, "At least 3 different mob types should spawn");
-    assert!(avg_update_time_us < 1.0, "Update time must be under 1μs per mob per tick");
+    assert_eq!(
+        mobs_alive, total_spawned,
+        "All mobs should remain alive (no damage system)"
+    );
+    assert!(
+        spawn_by_type.len() >= 3,
+        "At least 3 different mob types should spawn"
+    );
+    assert!(
+        avg_update_time_us < 1.0,
+        "Update time must be under 1μs per mob per tick"
+    );
     // At 20 TPS, we have 50ms per tick budget. With ~80k mobs, P99 should be well under that.
-    assert!(p99_update_ns < 5_000_000, "P99 tick time must be under 5ms for scalability");
+    assert!(
+        p99_update_ns < 5_000_000,
+        "P99 tick time must be under 5ms for scalability"
+    );
 }

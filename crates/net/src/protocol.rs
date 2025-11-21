@@ -373,8 +373,7 @@ mod tests {
         };
 
         let encoded = postcard::to_allocvec(&msg).expect("Failed to encode");
-        let decoded: ClientMessage =
-            postcard::from_bytes(&encoded).expect("Failed to decode");
+        let decoded: ClientMessage = postcard::from_bytes(&encoded).expect("Failed to decode");
 
         assert_eq!(msg, decoded);
     }
@@ -388,8 +387,7 @@ mod tests {
         };
 
         let encoded = postcard::to_allocvec(&msg).expect("Failed to encode");
-        let decoded: ServerMessage =
-            postcard::from_bytes(&encoded).expect("Failed to decode");
+        let decoded: ServerMessage = postcard::from_bytes(&encoded).expect("Failed to decode");
 
         assert_eq!(msg, decoded);
     }
@@ -411,8 +409,7 @@ mod tests {
         };
 
         let encoded = postcard::to_allocvec(&bundle).expect("Failed to encode");
-        let decoded: InputBundle =
-            postcard::from_bytes(&encoded).expect("Failed to decode");
+        let decoded: InputBundle = postcard::from_bytes(&encoded).expect("Failed to decode");
 
         assert_eq!(bundle, decoded);
     }

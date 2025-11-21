@@ -3,8 +3,10 @@
 
 // Time uniform
 struct TimeUniform {
-    time: f32,
-    sun_dir: vec3<f32>,
+    time: vec4<f32>,
+    sun_dir: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog_params: vec4<f32>,
 }
 
 @group(0) @binding(0)
@@ -13,7 +15,7 @@ var<uniform> time_uniform: TimeUniform;
 // Vertex output / Fragment input
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) view_dir: vec2<f32>,
+    @location(0) view_dir: vec3<f32>,
 }
 
 // Vertex shader - generates full-screen triangle
@@ -26,15 +28,21 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let x = f32((vertex_index & 1u) << 2u) - 1.0;  // -1 or 3
     let y = f32((vertex_index & 2u) << 1u) - 1.0;  // -1 or 3
 
+    let dir = normalize(vec3<f32>(x, y, 1.0));
+
     out.clip_position = vec4<f32>(x, y, 1.0, 1.0);  // Far plane (z=1)
-    out.view_dir = vec2<f32>(x, y);
+    out.view_dir = dir;
 
     return out;
 }
 
+struct SkyColors {
+    horizon: vec3<f32>,
+    zenith: vec3<f32>,
+}
+
 // Get sky colors based on time of day
-fn get_sky_colors(time: f32) -> vec4<vec3<f32>> {
-    // Returns: (horizon_color, zenith_color)
+fn get_sky_colors(time: f32) -> SkyColors {
 
     // Night (0.0-0.2, 0.8-1.0)
     let night_horizon = vec3<f32>(0.1, 0.1, 0.2);
@@ -81,7 +89,7 @@ fn get_sky_colors(time: f32) -> vec4<vec3<f32>> {
         zenith = mix(dusk_zenith, night_zenith, t);
     }
 
-    return vec4<vec3<f32>>(horizon, zenith, vec3<f32>(0.0), vec3<f32>(0.0));
+    return SkyColors(horizon, zenith);
 }
 
 // Fragment shader - creates gradient with time-of-day
@@ -89,16 +97,62 @@ fn get_sky_colors(time: f32) -> vec4<vec3<f32>> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Normalize Y coordinate from [-1, 1] to [0, 1]
     // -1 (bottom) -> 0, +1 (top) -> 1
-    let t = (in.view_dir.y + 1.0) * 0.5;
+    let dir = normalize(in.view_dir);
+    let t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
 
     // Get colors for current time of day
-    let colors = get_sky_colors(time_uniform.time);
-    let horizon_color = colors.x;
-    let zenith_color = colors.y;
+    let colors = get_sky_colors(time_uniform.time.x);
+    let horizon_color = colors.horizon;
+    let zenith_color = colors.zenith;
 
     // Smooth interpolation from horizon to zenith
     let gradient_t = smoothstep(0.0, 1.0, t);
     let sky_color = mix(horizon_color, zenith_color, gradient_t);
 
-    return vec4<f32>(sky_color, 1.0);
+    // Sun disc
+    let sun_dir = normalize(time_uniform.sun_dir.xyz);
+    let sun_dot = max(dot(dir, sun_dir), 0.0);
+    let sun_intensity = smoothstep(0.997, 1.0, sun_dot);
+    let sun_color = vec3<f32>(1.0, 0.95, 0.85);
+
+    // Moon disc opposite the sun
+    let moon_dir = -sun_dir;
+    let moon_dot = max(dot(dir, moon_dir), 0.0);
+    let moon_intensity = smoothstep(0.997, 1.0, moon_dot);
+    let moon_color = vec3<f32>(0.8, 0.85, 1.0);
+
+    var color = sky_color
+        + sun_color * sun_intensity
+        + moon_color * moon_intensity * 0.4;
+
+    // Simple procedural clouds
+    let uv = dir.xz * 0.5 + vec2<f32>(time_uniform.time.x * 0.02, time_uniform.time.x * 0.015);
+    let cloud = cloud_noise(uv * 4.0);
+    let cloud_mask = smoothstep(0.5, 0.7, cloud);
+    color = mix(color, color + vec3<f32>(0.1, 0.1, 0.12), cloud_mask * 0.3);
+
+    let precipitation = time_uniform.fog_params.w;
+    if (precipitation > 0.001) {
+        let overcast = vec3<f32>(0.55, 0.58, 0.65);
+        color = mix(color, overcast, clamp(precipitation * 0.7, 0.0, 1.0));
+        color -= vec3<f32>(0.0, 0.0, 0.05) * precipitation * 0.3;
+    }
+
+    return vec4<f32>(color, 1.0);
+}
+
+fn hash(p: vec2<f32>) -> f32 {
+    let h = sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453;
+    return fract(h);
+}
+
+fn cloud_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let a = hash(i);
+    let b = hash(i + vec2<f32>(1.0, 0.0));
+    let c = hash(i + vec2<f32>(0.0, 1.0));
+    let d = hash(i + vec2<f32>(1.0, 1.0));
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }

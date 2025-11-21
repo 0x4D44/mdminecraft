@@ -1,9 +1,12 @@
 //! Window management and event handling with winit.
 
 use anyhow::Result;
+use std::collections::HashSet;
+use tracing::warn;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{DeviceEvent, Event, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::EventLoop,
+    keyboard::KeyCode,
     window::{Window, WindowBuilder},
 };
 
@@ -54,7 +57,10 @@ impl WindowManager {
     }
 
     /// Create a new window with an existing event loop.
-    pub fn new_with_event_loop(config: WindowConfig, event_loop: &winit::event_loop::EventLoopWindowTarget<()>) -> Result<Self> {
+    pub fn new_with_event_loop(
+        config: WindowConfig,
+        event_loop: &winit::event_loop::EventLoopWindowTarget<()>,
+    ) -> Result<Self> {
         let window = WindowBuilder::new()
             .with_title(config.title)
             .with_inner_size(winit::dpi::PhysicalSize::new(config.width, config.height))
@@ -89,7 +95,9 @@ impl WindowManager {
     where
         F: FnMut(Event<()>, &Window) -> bool + 'static,
     {
-        let event_loop = self.event_loop.take()
+        let event_loop = self
+            .event_loop
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Event loop already consumed"))?;
 
         let window = self.window;
@@ -106,27 +114,106 @@ impl WindowManager {
     }
 }
 
+/// Active input context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputContext {
+    /// Menu UI owns input. Gameplay should pause.
+    #[default]
+    Menu,
+    /// Gameplay (first-person control) owns input.
+    Gameplay,
+    /// HUD/overlay UI is focused but gameplay may still preview input.
+    UiOverlay,
+}
+
+/// Snapshot of per-frame input data.
+#[derive(Debug, Clone)]
+pub struct InputSnapshot {
+    /// Context at the time of snapshot.
+    pub context: InputContext,
+    /// Keys that were held when the snapshot was taken.
+    pub keys_pressed: HashSet<KeyCode>,
+    /// Mouse buttons held at snapshot time.
+    pub mouse_buttons: HashSet<MouseButton>,
+    /// Mouse buttons clicked during the frame.
+    pub mouse_clicks: HashSet<MouseButton>,
+    /// Absolute cursor position.
+    pub mouse_pos: (f64, f64),
+    /// Window-relative cursor delta accumulated this frame.
+    pub mouse_delta: (f64, f64),
+    /// Raw device delta accumulated this frame.
+    pub raw_mouse_delta: (f64, f64),
+    /// Scroll delta accumulated this frame.
+    pub scroll_delta: f32,
+    /// Whether the cursor was captured/hidden.
+    pub cursor_captured: bool,
+}
+
 /// Input state tracking.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct InputState {
     /// Keys currently pressed
-    pub keys_pressed: std::collections::HashSet<winit::keyboard::KeyCode>,
+    pub keys_pressed: HashSet<KeyCode>,
     /// Mouse position (x, y) in pixels
     pub mouse_pos: (f64, f64),
     /// Mouse delta since last frame (x, y)
     pub mouse_delta: (f64, f64),
+    /// Raw mouse delta reported by DeviceEvents
+    pub raw_mouse_delta: (f64, f64),
     /// Mouse buttons pressed
-    pub mouse_buttons: std::collections::HashSet<winit::event::MouseButton>,
+    pub mouse_buttons: HashSet<MouseButton>,
     /// Mouse buttons clicked this frame
-    pub mouse_clicks: std::collections::HashSet<winit::event::MouseButton>,
-    /// Whether cursor is grabbed
-    pub cursor_grabbed: bool,
+    pub mouse_clicks: HashSet<MouseButton>,
+    /// Scroll delta accumulated this frame
+    pub scroll_delta: f32,
+    /// Whether cursor is currently captured/hidden
+    pub cursor_captured: bool,
+    /// Current context
+    pub context: InputContext,
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        Self {
+            keys_pressed: HashSet::new(),
+            mouse_pos: (0.0, 0.0),
+            mouse_delta: (0.0, 0.0),
+            raw_mouse_delta: (0.0, 0.0),
+            mouse_buttons: HashSet::new(),
+            mouse_clicks: HashSet::new(),
+            scroll_delta: 0.0,
+            cursor_captured: false,
+            context: InputContext::default(),
+        }
+    }
 }
 
 impl InputState {
     /// Create a new input state.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Return an immutable snapshot and reset per-frame state.
+    pub fn snapshot(&mut self) -> InputSnapshot {
+        let snapshot = self.snapshot_view();
+        self.reset_frame();
+        snapshot
+    }
+
+    /// Peek at the current snapshot without resetting state.
+    pub fn snapshot_view(&self) -> InputSnapshot {
+        InputSnapshot {
+            context: self.context,
+            keys_pressed: self.keys_pressed.clone(),
+            mouse_buttons: self.mouse_buttons.clone(),
+            mouse_clicks: self.mouse_clicks.clone(),
+            mouse_pos: self.mouse_pos,
+            mouse_delta: self.mouse_delta,
+            raw_mouse_delta: self.raw_mouse_delta,
+            scroll_delta: self.scroll_delta,
+            cursor_captured: self.cursor_captured,
+        }
     }
 
     /// Check if a key is currently pressed.
@@ -147,6 +234,8 @@ impl InputState {
     /// Reset per-frame state (like mouse delta and clicks).
     pub fn reset_frame(&mut self) {
         self.mouse_delta = (0.0, 0.0);
+        self.raw_mouse_delta = (0.0, 0.0);
+        self.scroll_delta = 0.0;
         self.mouse_clicks.clear();
     }
 
@@ -168,49 +257,101 @@ impl InputState {
                     }
                 }
             }
-            WindowEvent::MouseInput { state, button, .. } => {
-                match state {
-                    ElementState::Pressed => {
-                        self.mouse_buttons.insert(*button);
-                        self.mouse_clicks.insert(*button);
-                    }
-                    ElementState::Released => {
-                        self.mouse_buttons.remove(button);
-                    }
+            WindowEvent::MouseInput { state, button, .. } => match state {
+                ElementState::Pressed => {
+                    self.mouse_buttons.insert(*button);
+                    self.mouse_clicks.insert(*button);
                 }
-            }
+                ElementState::Released => {
+                    self.mouse_buttons.remove(button);
+                }
+            },
             WindowEvent::CursorMoved { position, .. } => {
                 let new_pos = (position.x, position.y);
-                let delta = (
-                    new_pos.0 - self.mouse_pos.0,
-                    new_pos.1 - self.mouse_pos.1,
-                );
+                let delta = (new_pos.0 - self.mouse_pos.0, new_pos.1 - self.mouse_pos.1);
                 self.mouse_pos = new_pos;
 
-                // Only update delta if cursor is grabbed
-                if self.cursor_grabbed {
-                    self.mouse_delta = delta;
-                }
+                // Accumulate delta; caller decides if cursor is captured
+                self.mouse_delta.0 += delta.0;
+                self.mouse_delta.1 += delta.1;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll = match *delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(pos) => (pos.y / 120.0) as f32,
+                };
+                self.scroll_delta += scroll;
             }
             _ => {}
         }
     }
 
+    /// Handle device-level events (raw mouse motion).
+    pub fn handle_device_event(&mut self, event: &DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta } = event {
+            self.raw_mouse_delta.0 += delta.0;
+            self.raw_mouse_delta.1 += delta.1;
+        }
+    }
+
+    /// Set the current input context.
+    pub fn set_context(&mut self, context: InputContext) {
+        self.context = context;
+    }
+
     /// Toggle cursor grab state.
     pub fn toggle_cursor_grab(&mut self, window: &Window) -> Result<()> {
+        let capture = !self.cursor_captured;
+        self.set_cursor_capture(window, capture)
+    }
+
+    /// Explicitly set cursor capture state.
+    pub fn set_cursor_capture(&mut self, window: &Window, capture: bool) -> Result<()> {
         use winit::window::CursorGrabMode;
 
-        self.cursor_grabbed = !self.cursor_grabbed;
-
-        if self.cursor_grabbed {
-            window.set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))?;
+        if capture {
+            let locked = window.set_cursor_grab(CursorGrabMode::Locked);
+            if locked.is_err() {
+                if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
+                    warn!("Failed to capture cursor: {err}");
+                    self.cursor_captured = false;
+                    return Ok(());
+                }
+            }
             window.set_cursor_visible(false);
+            self.cursor_captured = true;
         } else {
-            window.set_cursor_grab(CursorGrabMode::None)?;
+            if let Err(err) = window.set_cursor_grab(CursorGrabMode::None) {
+                warn!("Failed to release cursor grab: {err}");
+            }
             window.set_cursor_visible(true);
+            self.cursor_captured = false;
         }
 
+        Ok(())
+    }
+
+    /// Enter gameplay context (captures cursor and resets frame state).
+    pub fn enter_gameplay(&mut self, window: &Window) -> Result<()> {
+        self.context = InputContext::Gameplay;
+        self.set_cursor_capture(window, true)?;
+        self.reset_frame();
+        Ok(())
+    }
+
+    /// Enter menu context (releases cursor and resets frame state).
+    pub fn enter_menu(&mut self, window: &Window) -> Result<()> {
+        self.context = InputContext::Menu;
+        self.set_cursor_capture(window, false)?;
+        self.reset_frame();
+        Ok(())
+    }
+
+    /// Enter UI overlay context (releases cursor but keeps gameplay state).
+    pub fn enter_ui_overlay(&mut self, window: &Window) -> Result<()> {
+        self.context = InputContext::UiOverlay;
+        self.set_cursor_capture(window, false)?;
+        self.reset_frame();
         Ok(())
     }
 }

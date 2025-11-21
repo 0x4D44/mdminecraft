@@ -146,8 +146,7 @@ mod tests {
 
     #[test]
     fn test_label_fade() {
-        let label = Label3D::new(Vec3::ZERO, "Test")
-            .with_fade_distance(10.0, 20.0);
+        let label = Label3D::new(Vec3::ZERO, "Test").with_fade_distance(10.0, 20.0);
 
         let camera_close = Vec3::new(5.0, 0.0, 0.0);
         let camera_mid = Vec3::new(15.0, 0.0, 0.0);

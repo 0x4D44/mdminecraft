@@ -19,3 +19,9 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Unit tests
         run: cargo test --workspace
+
+      - name: Targeted regressions (net integration & lighting seams)
+        run: |
+          cargo test -p mdminecraft-net connection::tests::test_input_roundtrip
+          cargo test -p mdminecraft-world lighting::tests::block_light_crosses_chunk_seams
+          cargo test -p mdminecraft --bin mdminecraft --quiet

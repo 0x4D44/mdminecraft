@@ -181,15 +181,13 @@ impl Inventory {
     /// Returns the remaining items that couldn't fit (if any).
     pub fn add_item(&mut self, mut stack: ItemStack) -> Option<ItemStack> {
         // First pass: try to merge with existing stacks.
-        for slot in &mut self.slots {
-            if let Some(existing) = slot {
-                if existing.can_merge(&stack) && !existing.is_full() {
-                    let remainder = existing.add(stack.count);
-                    if remainder == 0 {
-                        return None; // All items added
-                    }
-                    stack.count = remainder;
+        for existing in self.slots.iter_mut().flatten() {
+            if existing.can_merge(&stack) && !existing.is_full() {
+                let remainder = existing.add(stack.count);
+                if remainder == 0 {
+                    return None; // All items added
                 }
+                stack.count = remainder;
             }
         }
 
@@ -250,7 +248,7 @@ impl Inventory {
     pub fn find_item(&self, item_id: ItemId) -> Option<usize> {
         self.slots
             .iter()
-            .position(|slot| slot.as_ref().map_or(false, |s| s.item_id == item_id))
+            .position(|slot| slot.as_ref().is_some_and(|s| s.item_id == item_id))
     }
 
     /// Get the number of empty slots.

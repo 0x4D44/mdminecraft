@@ -68,7 +68,11 @@ impl ChannelManager {
     ///
     /// Opens a new unidirectional stream for each message.
     pub async fn send_reliable(&self, channel: ChannelType, data: &[u8]) -> Result<()> {
-        debug_assert!(channel.is_reliable(), "Channel {:?} is not reliable", channel);
+        debug_assert!(
+            channel.is_reliable(),
+            "Channel {:?} is not reliable",
+            channel
+        );
 
         trace!("Sending {} bytes on reliable {:?}", data.len(), channel);
 
@@ -99,9 +103,7 @@ impl ChannelManager {
             .context("Failed to write data")?;
 
         // Finish the stream
-        send_stream
-            .finish()
-            .context("Failed to finish stream")?;
+        send_stream.finish().context("Failed to finish stream")?;
 
         trace!("Sent {} bytes on reliable {:?}", data.len(), channel);
 
@@ -193,11 +195,7 @@ impl ChannelManager {
         // Extract data
         let data = datagram[1..].to_vec();
 
-        trace!(
-            "Received {} bytes on unreliable {:?}",
-            data.len(),
-            channel
-        );
+        trace!("Received {} bytes on unreliable {:?}", data.len(), channel);
 
         Ok((channel, data))
     }
@@ -216,13 +214,13 @@ impl ChannelManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{ClientEndpoint, ServerEndpoint};
+    use crate::transport::{ClientEndpoint, ServerEndpoint, TlsMode};
 
     #[tokio::test]
     async fn test_reliable_channel() {
         // Start server
-        let server = ServerEndpoint::bind("127.0.0.1:0".parse().unwrap())
-            .expect("Failed to bind server");
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
         let server_addr = server.local_addr();
 
         // Spawn server task
@@ -253,7 +251,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client = ClientEndpoint::new().expect("Failed to create client");
+        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("Failed to create client");
         let connection = client
             .connect(server_addr)
             .await
@@ -281,8 +280,8 @@ mod tests {
     #[tokio::test]
     async fn test_unreliable_channel() {
         // Start server
-        let server = ServerEndpoint::bind("127.0.0.1:0".parse().unwrap())
-            .expect("Failed to bind server");
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
         let server_addr = server.local_addr();
 
         // Spawn server task
@@ -313,7 +312,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client = ClientEndpoint::new().expect("Failed to create client");
+        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("Failed to create client");
         let connection = client
             .connect(server_addr)
             .await

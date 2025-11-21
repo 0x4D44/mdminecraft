@@ -73,7 +73,10 @@ fn drop_item_lifecycle_worldtest() {
     }
 
     assert!(ticks_to_land > 0, "Items should have landed");
-    assert!(ticks_to_land < max_physics_ticks, "Items should land quickly");
+    assert!(
+        ticks_to_land < max_physics_ticks,
+        "Items should land quickly"
+    );
 
     println!("  All items landed in {} ticks", ticks_to_land);
 
@@ -90,7 +93,10 @@ fn drop_item_lifecycle_worldtest() {
         .write(&EventRecord {
             tick: SimTick::ZERO.advance(ticks_to_land),
             kind: "ItemsLanded",
-            payload: &format!("All {} items landed in {} ticks", spawn_count, ticks_to_land),
+            payload: &format!(
+                "All {} items landed in {} ticks",
+                spawn_count, ticks_to_land
+            ),
         })
         .expect("write event");
 
@@ -225,7 +231,10 @@ fn drop_item_lifecycle_worldtest() {
     let perf_duration = perf_start.elapsed();
     let avg_update_time = perf_duration.as_micros() as f64 / physics_ticks as f64;
 
-    println!("  Simulated {} items for {} ticks", scale_count, physics_ticks);
+    println!(
+        "  Simulated {} items for {} ticks",
+        scale_count, physics_ticks
+    );
     println!("  Total time: {:?}", perf_duration);
     println!("  Avg update time: {:.2}μs per tick", avg_update_time);
 

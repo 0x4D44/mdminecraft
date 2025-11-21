@@ -48,8 +48,8 @@ impl Heightmap {
         let chunk_origin_z = chunk_z * CHUNK_SIZE_Z as i32;
 
         // Generate height for each column in the chunk
-        for local_z in 0..CHUNK_SIZE_Z {
-            for local_x in 0..CHUNK_SIZE_X {
+        for (local_z, column) in heights.iter_mut().enumerate() {
+            for (local_x, cell) in column.iter_mut().enumerate() {
                 // Calculate world-space coordinates
                 let world_x = chunk_origin_x + local_x as i32;
                 let world_z = chunk_origin_z + local_z as i32;
@@ -63,7 +63,7 @@ impl Heightmap {
                 // Clamp to valid range
                 let clamped_height = height.clamp(MIN_HEIGHT, MAX_HEIGHT);
 
-                heights[local_z][local_x] = clamped_height;
+                *cell = clamped_height;
             }
         }
 
@@ -125,11 +125,7 @@ impl Heightmap {
 ///
 /// This is a test utility to verify heightmap generation continuity.
 /// Returns true if height differences at boundaries are reasonable (no sudden jumps).
-pub fn check_seam_continuity(
-    world_seed: u64,
-    chunk1: (i32, i32),
-    chunk2: (i32, i32),
-) -> bool {
+pub fn check_seam_continuity(world_seed: u64, chunk1: (i32, i32), chunk2: (i32, i32)) -> bool {
     let hm1 = Heightmap::generate(world_seed, chunk1.0, chunk1.1);
     let hm2 = Heightmap::generate(world_seed, chunk2.0, chunk2.1);
 

@@ -5,7 +5,7 @@
 /// - 0.25-0.50: Dawn → Noon
 /// - 0.50-0.75: Noon → Dusk
 /// - 0.75-1.00: Dusk → Night
-
+///
 /// Time-of-day state.
 #[derive(Debug, Clone)]
 pub struct TimeOfDay {
@@ -20,7 +20,7 @@ pub struct TimeOfDay {
 impl Default for TimeOfDay {
     fn default() -> Self {
         Self {
-            time: 0.3, // Start at morning
+            time: 0.3,  // Start at morning
             speed: 0.1, // Slower progression for testing (60 seconds = 1 cycle)
             paused: false,
         }
@@ -87,9 +87,9 @@ impl TimeOfDay {
         let angle = self.time * std::f32::consts::PI * 2.0;
 
         // Sun position on unit sphere
-        let x = angle.sin() * 0.5;           // East-West movement
-        let y = (-angle.cos() * 0.5) + 0.5;  // Height (0 at horizon, 1 at zenith)
-        let z = 0.3;                          // Slight north offset
+        let x = angle.sin() * 0.5; // East-West movement
+        let y = (-angle.cos() * 0.5) + 0.5; // Height (0 at horizon, 1 at zenith)
+        let z = 0.3; // Slight north offset
 
         // Normalize
         let length = (x * x + y * y + z * z).sqrt();
@@ -117,18 +117,71 @@ impl TimeOfDay {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TimeUniform {
-    /// Current time (0.0 to 1.0)
-    pub time: f32,
+    /// Current time plus padding for std140 alignment
+    pub time: [f32; 4],
     /// Sun direction (normalized)
-    pub sun_dir: [f32; 3],
+    pub sun_dir: [f32; 4],
+    /// Fog color for current time
+    pub fog_color: [f32; 4],
+    /// Fog parameters (start, end, density, unused)
+    pub fog_params: [f32; 4],
 }
 
 impl TimeUniform {
     /// Create from TimeOfDay state.
-    pub fn from_time_of_day(time: &TimeOfDay) -> Self {
+    pub fn from_time_of_day(time: &TimeOfDay, weather_intensity: f32) -> Self {
+        let dir = time.sun_direction();
+        let fog_color = fog_color_for_time(time.time());
+        let precipitation_tint = [0.55, 0.58, 0.64];
+        let fog_color = mix_color(
+            fog_color,
+            precipitation_tint,
+            (weather_intensity * 0.85).clamp(0.0, 1.0),
+        );
+        let fog_start = mix_scalar(48.0, 24.0, weather_intensity);
+        let fog_end = mix_scalar(120.0, 70.0, weather_intensity);
+        let fog_density = 0.0;
         Self {
-            time: time.time(),
-            sun_dir: time.sun_direction(),
+            time: [time.time(), 0.0, 0.0, 0.0],
+            sun_dir: [dir[0], dir[1], dir[2], 0.0],
+            fog_color: [fog_color[0], fog_color[1], fog_color[2], 1.0],
+            fog_params: [fog_start, fog_end, fog_density, weather_intensity],
         }
     }
+}
+
+fn fog_color_for_time(t: f32) -> [f32; 3] {
+    let night = [0.05, 0.07, 0.12];
+    let dawn = [0.5, 0.4, 0.35];
+    let day = [0.7, 0.8, 0.9];
+    let dusk = [0.45, 0.35, 0.4];
+
+    if t < 0.2 {
+        mix_color(night, dawn, smoothstep(0.15, 0.2, t))
+    } else if t < 0.3 {
+        mix_color(dawn, day, smoothstep(0.2, 0.3, t))
+    } else if t < 0.7 {
+        day
+    } else if t < 0.8 {
+        mix_color(day, dusk, smoothstep(0.7, 0.8, t))
+    } else {
+        mix_color(dusk, night, smoothstep(0.8, 0.9, t))
+    }
+}
+
+fn mix_color(a: [f32; 3], b: [f32; 3], factor: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * factor,
+        a[1] + (b[1] - a[1]) * factor,
+        a[2] + (b[2] - a[2]) * factor,
+    ]
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn mix_scalar(a: f32, b: f32, factor: f32) -> f32 {
+    a + (b - a) * factor.clamp(0.0, 1.0)
 }

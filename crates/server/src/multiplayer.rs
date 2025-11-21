@@ -6,13 +6,13 @@ use bevy_ecs::world::World;
 use mdminecraft_core::SimTick;
 use mdminecraft_ecs::{build_default_schedule, run_tick};
 use mdminecraft_net::{
-    ChunkStreamer, EntityReplicationTracker, EventLogger, InputLogger,
-    NetworkEvent, ServerConnection, ServerEndpoint, ServerMessage, Transform,
+    ChunkStreamer, EntityReplicationTracker, EventLogger, InputLogger, NetworkEvent,
+    ServerConnection, ServerEndpoint, ServerMessage, Transform,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use tracing::{debug, info, warn, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// Client state tracked by the server.
 pub struct ConnectedClient {
@@ -58,8 +58,7 @@ pub struct MultiplayerServer {
 impl MultiplayerServer {
     /// Create a new multiplayer server bound to the specified address.
     pub fn bind(addr: SocketAddr) -> Result<Self> {
-        let endpoint =
-            ServerEndpoint::bind(addr).context("Failed to bind server endpoint")?;
+        let endpoint = ServerEndpoint::bind(addr).context("Failed to bind server endpoint")?;
 
         let local_addr = endpoint.local_addr();
         info!("Multiplayer server bound to {}", local_addr);
@@ -175,10 +174,7 @@ impl MultiplayerServer {
                 let player_entity_id = self.next_entity_id;
                 self.next_entity_id += 1;
 
-                info!(
-                    player_entity_id,
-                    "Client authenticated successfully"
-                );
+                info!(player_entity_id, "Client authenticated successfully");
 
                 // Create client state
                 let client = ConnectedClient {

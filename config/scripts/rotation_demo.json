@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "duration": 3.0, "look_x": 45.0 },
+    { "duration": 3.0, "look_x": -90.0 },
+    { "duration": 3.0, "look_y": -10.0 }
+  ]
+}

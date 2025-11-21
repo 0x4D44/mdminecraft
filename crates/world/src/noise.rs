@@ -149,7 +149,10 @@ impl NoiseGenerator {
         let mut max_value = 0.0;
 
         for _ in 0..self.config.octaves {
-            value += self.perlin.get([x * frequency, y * frequency, z * frequency]) * amplitude;
+            value += self
+                .perlin
+                .get([x * frequency, y * frequency, z * frequency])
+                * amplitude;
             max_value += amplitude;
 
             amplitude *= self.config.persistence;
@@ -219,7 +222,10 @@ impl SimplexGenerator {
         let mut max_value = 0.0;
 
         for _ in 0..self.config.octaves {
-            value += self.simplex.get([x * frequency, y * frequency, z * frequency]) * amplitude;
+            value += self
+                .simplex
+                .get([x * frequency, y * frequency, z * frequency])
+                * amplitude;
             max_value += amplitude;
 
             amplitude *= self.config.persistence;
@@ -344,7 +350,10 @@ mod tests {
             }
         }
 
-        assert!(any_different, "Different seeds should produce different noise");
+        assert!(
+            any_different,
+            "Different seeds should produce different noise"
+        );
     }
 
     #[test]

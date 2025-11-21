@@ -10,6 +10,8 @@ pub struct TextRenderer {
     pipeline: wgpu::RenderPipeline,
     pipeline_fixed: wgpu::RenderPipeline,
     font_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)]
+    // Texture must stay alive for the bind group even if unused directly.
     font_texture: wgpu::Texture,
     atlas: FontAtlas,
 }

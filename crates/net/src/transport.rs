@@ -5,9 +5,42 @@
 use anyhow::{Context, Result};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::RootCertStore;
+use rustls_native_certs;
+use std::fs::File;
+use std::io::BufReader;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+
+/// TLS behavior for clients.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TlsMode {
+    /// Enforce certificate validation using system/webpki roots.
+    Secure,
+    /// Skip certificate verification (development only).
+    InsecureSkipVerify,
+}
+
+impl TlsMode {
+    /// Resolve TLS mode from environment and build config defaults.
+    ///
+    /// - `MDM_INSECURE_TLS=1` forces insecure mode.
+    /// - debug builds default to insecure for developer convenience.
+    /// - release builds default to secure.
+    pub fn from_env() -> Self {
+        let insecure_env = std::env::var("MDM_INSECURE_TLS")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
+            .unwrap_or(false);
+
+        if insecure_env || cfg!(debug_assertions) {
+            TlsMode::InsecureSkipVerify
+        } else {
+            TlsMode::Secure
+        }
+    }
+}
 
 /// Server endpoint for accepting QUIC connections.
 pub struct ServerEndpoint {
@@ -17,16 +50,27 @@ pub struct ServerEndpoint {
 
 impl ServerEndpoint {
     /// Create a new server endpoint bound to the given address.
-    ///
-    /// Uses self-signed TLS certificates for development.
     pub fn bind(addr: SocketAddr) -> Result<Self> {
         info!("Creating server endpoint on {}", addr);
 
         // Install default crypto provider if not already installed
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // Generate self-signed certificate for development
-        let (cert, key) = generate_self_signed_cert()?;
+        // Load certificate if provided, else fall back to self-signed (dev only).
+        let (cert, key) = match load_cert_from_env() {
+            Ok(Some(pair)) => {
+                info!("Using server certificate from MDM_SERVER_CERT_PATH/MDM_SERVER_KEY_PATH");
+                pair
+            }
+            Ok(None) => {
+                warn!("No server cert env vars set; generating self-signed development cert");
+                generate_self_signed_cert()?
+            }
+            Err(e) => {
+                warn!("Failed to load server cert from env: {e:?}; generating self-signed dev cert");
+                generate_self_signed_cert()?
+            }
+        };
 
         // Configure rustls with the certificate
         let mut server_crypto = rustls::ServerConfig::builder()
@@ -50,8 +94,8 @@ impl ServerEndpoint {
         server_config.transport_config(Arc::new(transport_config));
 
         // Bind the endpoint
-        let endpoint = Endpoint::server(server_config, addr)
-            .context("Failed to bind server endpoint")?;
+        let endpoint =
+            Endpoint::server(server_config, addr).context("Failed to bind server endpoint")?;
 
         let actual_addr = endpoint.local_addr()?;
         info!("Server endpoint bound to {}", actual_addr);
@@ -87,19 +131,38 @@ pub struct ClientEndpoint {
 
 impl ClientEndpoint {
     /// Create a new client endpoint.
-    ///
-    /// Accepts self-signed certificates for development (insecure).
-    pub fn new() -> Result<Self> {
+    pub fn new(mode: TlsMode) -> Result<Self> {
         debug!("Creating client endpoint");
 
         // Install default crypto provider if not already installed
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        // Configure rustls to accept self-signed certificates (development only)
-        let mut client_crypto = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
-            .with_no_client_auth();
+        let mut client_crypto = match mode {
+            TlsMode::InsecureSkipVerify => {
+                warn!("Using insecure TLS (certificate verification disabled)");
+
+                rustls::ClientConfig::builder()
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
+                    .with_no_client_auth()
+            }
+            TlsMode::Secure => {
+                let mut root_store = RootCertStore::empty();
+                let native = rustls_native_certs::load_native_certs();
+                let (added, ignored) = root_store.add_parsable_certificates(native.certs.into_iter());
+                if !native.errors.is_empty() {
+                    warn!("Some native roots failed to load: {:?}", native.errors);
+                }
+                debug!(added, ignored, "Loaded native root certificates");
+                if added == 0 {
+                    warn!("No native root certificates found; set MDM_INSECURE_TLS=1 for dev or provide roots");
+                }
+
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth()
+            }
+        };
 
         client_crypto.alpn_protocols = vec![b"mdminecraft".to_vec()];
 
@@ -116,6 +179,11 @@ impl ClientEndpoint {
         debug!("Client endpoint created on {}", endpoint.local_addr()?);
 
         Ok(Self { endpoint })
+    }
+
+    /// Create a new client endpoint using env/default TLS mode.
+    pub fn new_default() -> Result<Self> {
+        Self::new(TlsMode::from_env())
     }
 
     /// Connect to a server at the given address.
@@ -144,7 +212,7 @@ impl ClientEndpoint {
 
 impl Default for ClientEndpoint {
     fn default() -> Self {
-        Self::new().expect("Failed to create default client endpoint")
+        Self::new_default().expect("Failed to create default client endpoint")
     }
 }
 
@@ -161,6 +229,41 @@ fn generate_self_signed_cert() -> Result<(CertificateDer<'static>, PrivateKeyDer
     let cert_der = CertificateDer::from(cert.cert);
 
     Ok((cert_der, key))
+}
+
+/// Load TLS cert/key pair from PEM files specified via env vars.
+/// Returns Ok(None) when env vars are not set.
+fn load_cert_from_env() -> Result<Option<(CertificateDer<'static>, PrivateKeyDer<'static>)>> {
+    let cert_path = match std::env::var("MDM_SERVER_CERT_PATH") {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+
+    let key_path = std::env::var("MDM_SERVER_KEY_PATH")
+        .map_err(|_| anyhow::anyhow!("MDM_SERVER_KEY_PATH must be set when MDM_SERVER_CERT_PATH is set"))?;
+
+    let cert_file = File::open(Path::new(&cert_path)).context("Failed to open server cert")?;
+    let mut cert_reader = BufReader::new(cert_file);
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to read certificates from PEM")?;
+    let cert = certs
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("No certificates found in PEM"))?;
+
+    let key_file = File::open(Path::new(&key_path)).context("Failed to open server key")?;
+    let mut key_reader = BufReader::new(key_file);
+    let keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to read private key from PEM")?;
+    let key = keys
+        .into_iter()
+        .next()
+        .map(PrivateKeyDer::Pkcs8)
+        .ok_or_else(|| anyhow::anyhow!("No PKCS8 keys found in PEM"))?;
+
+    Ok(Some((cert, key)))
 }
 
 /// Certificate verifier that accepts all certificates (development only).
@@ -214,22 +317,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_bind() {
-        let server = ServerEndpoint::bind("127.0.0.1:0".parse().unwrap())
-            .expect("Failed to bind server");
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
         assert!(server.local_addr().port() > 0);
     }
 
     #[tokio::test]
     async fn test_client_creation() {
-        let client = ClientEndpoint::new().expect("Failed to create client");
+        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("Failed to create client");
         client.close();
     }
 
     #[tokio::test]
     async fn test_connection_handshake() {
         // Start server
-        let server = ServerEndpoint::bind("127.0.0.1:0".parse().unwrap())
-            .expect("Failed to bind server");
+        let server =
+            ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()).expect("Failed to bind server");
         let server_addr = server.local_addr();
 
         // Spawn server accept task
@@ -242,7 +346,8 @@ mod tests {
         });
 
         // Connect client
-        let client = ClientEndpoint::new().expect("Failed to create client");
+        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
+            .expect("Failed to create client");
         let client_conn = client
             .connect(server_addr)
             .await

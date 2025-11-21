@@ -38,14 +38,8 @@ impl MobType {
                 (MobType::Cow, 4.0),
                 (MobType::Chicken, 10.0),
             ],
-            BiomeId::Hills => vec![
-                (MobType::Sheep, 15.0),
-                (MobType::Cow, 5.0),
-            ],
-            BiomeId::Savanna => vec![
-                (MobType::Cow, 6.0),
-                (MobType::Chicken, 8.0),
-            ],
+            BiomeId::Hills => vec![(MobType::Sheep, 15.0), (MobType::Cow, 5.0)],
+            BiomeId::Savanna => vec![(MobType::Cow, 6.0), (MobType::Chicken, 8.0)],
             // No mobs in cold, ocean, or extreme biomes
             _ => vec![],
         }
@@ -141,7 +135,9 @@ impl Mob {
                     self.ai_timer = 0;
 
                     // Choose random direction based on position + tick
-                    let angle = ((tick + self.x as u64 + self.z as u64) % 360) as f64 * std::f64::consts::PI / 180.0;
+                    let angle = ((tick + self.x as u64 + self.z as u64) % 360) as f64
+                        * std::f64::consts::PI
+                        / 180.0;
                     let speed = self.mob_type.movement_speed() as f64;
                     self.vel_x = angle.cos() * speed;
                     self.vel_z = angle.sin() * speed;
@@ -223,7 +219,8 @@ impl MobSpawner {
         let chunk_origin_z = chunk_z * CHUNK_SIZE_Z as i32;
 
         // Deterministic pseudo-random based on chunk position and world seed
-        let chunk_seed = self.world_seed
+        let chunk_seed = self
+            .world_seed
             .wrapping_add((chunk_x as u64).wrapping_mul(374761393))
             .wrapping_add((chunk_z as u64).wrapping_mul(668265263));
 
@@ -379,11 +376,15 @@ mod tests {
 
         // Different chunks should potentially have different mob counts or positions
         let positions_different = mobs1.len() != mobs2.len()
-            || mobs1.iter().zip(mobs2.iter()).any(|(m1, m2)| {
-                m1.x != m2.x || m1.z != m2.z
-            });
+            || mobs1
+                .iter()
+                .zip(mobs2.iter())
+                .any(|(m1, m2)| m1.x != m2.x || m1.z != m2.z);
 
-        assert!(positions_different, "Different chunks should have different mob spawns");
+        assert!(
+            positions_different,
+            "Different chunks should have different mob spawns"
+        );
     }
 
     #[test]
@@ -430,9 +431,9 @@ mod tests {
         let mobs = spawner.generate_spawns(0, 0, BiomeId::Plains, &heights);
 
         // Find any mob that spawned at (0, 0)
-        let surface_mob = mobs.iter().find(|m| {
-            m.x >= 0.0 && m.x < 1.0 && m.z >= 0.0 && m.z < 1.0
-        });
+        let surface_mob = mobs
+            .iter()
+            .find(|m| m.x >= 0.0 && m.x < 1.0 && m.z >= 0.0 && m.z < 1.0);
 
         if let Some(mob) = surface_mob {
             assert_eq!(mob.y, 101.0, "Mob should spawn 1 block above surface");
@@ -450,10 +451,14 @@ mod tests {
 
         // Different seeds should produce different results
         let spawns_different = mobs1.len() != mobs2.len()
-            || mobs1.iter().zip(mobs2.iter()).any(|(m1, m2)| {
-                m1.mob_type != m2.mob_type || m1.x != m2.x || m1.z != m2.z
-            });
+            || mobs1
+                .iter()
+                .zip(mobs2.iter())
+                .any(|(m1, m2)| m1.mob_type != m2.mob_type || m1.x != m2.x || m1.z != m2.z);
 
-        assert!(spawns_different, "Different seeds should produce different spawns");
+        assert!(
+            spawns_different,
+            "Different seeds should produce different spawns"
+        );
     }
 }

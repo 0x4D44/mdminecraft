@@ -10,7 +10,7 @@
 //! - CRC validation catches corruption
 //! - No buffer overflows or memory corruption
 
-use mdminecraft_world::{Chunk, ChunkPos, Voxel, CHUNK_VOLUME, RegionStore};
+use mdminecraft_world::{Chunk, ChunkPos, RegionStore, Voxel, CHUNK_VOLUME};
 use proptest::prelude::*;
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -237,12 +237,14 @@ mod unit_tests {
 
     #[test]
     fn valid_empty_chunk_roundtrips() {
-        let voxels: Vec<Voxel> = (0..CHUNK_VOLUME).map(|_| Voxel {
-            id: 0,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        }).collect();
+        let voxels: Vec<Voxel> = (0..CHUNK_VOLUME)
+            .map(|_| Voxel {
+                id: 0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            })
+            .collect();
 
         let serialized = bincode::serialize(&voxels).unwrap();
         let deserialized: Vec<Voxel> = bincode::deserialize(&serialized).unwrap();
@@ -253,12 +255,14 @@ mod unit_tests {
 
     #[test]
     fn oversized_vec_deserializes_but_wrong_length() {
-        let voxels: Vec<Voxel> = (0..CHUNK_VOLUME * 2).map(|_| Voxel {
-            id: 1,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        }).collect();
+        let voxels: Vec<Voxel> = (0..CHUNK_VOLUME * 2)
+            .map(|_| Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            })
+            .collect();
 
         let serialized = bincode::serialize(&voxels).unwrap();
         let deserialized: Vec<Voxel> = bincode::deserialize(&serialized).unwrap();

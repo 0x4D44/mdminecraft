@@ -4,10 +4,8 @@
 //! network input gracefully without crashing.
 
 use mdminecraft_net::{
-    decode_client_message, decode_server_message,
-    encode_client_message, encode_server_message,
-    ClientMessage, ServerMessage, InputBundle, MovementInput,
-    PROTOCOL_VERSION,
+    decode_client_message, decode_server_message, encode_client_message, encode_server_message,
+    ClientMessage, InputBundle, MovementInput, ServerMessage, PROTOCOL_VERSION,
 };
 use proptest::prelude::*;
 

@@ -34,7 +34,7 @@ pub use replay::{
     EventLogger, InputLogEntry, InputLogger, NetworkEvent, ReplayPlayer, ReplayValidator,
     ValidationError,
 };
-pub use transport::{ClientEndpoint, ServerEndpoint};
+pub use transport::{ClientEndpoint, ServerEndpoint, TlsMode};
 
 use serde::{Deserialize, Serialize};
 

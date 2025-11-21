@@ -28,6 +28,11 @@ impl ChunkStorage {
         self.chunks.len()
     }
 
+    /// Returns true when no chunks are currently stored.
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
     /// Obtain mutable access to a chunk, creating it if necessary.
     pub fn ensure_chunk(&mut self, pos: ChunkPos) -> &mut Chunk {
         if !self.chunks.contains_key(&pos) {

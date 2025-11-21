@@ -5,9 +5,11 @@ use mdminecraft_core::SimTick;
 use mdminecraft_net::{
     ClientConnection, ClientEndpoint, ClientMessage, ClientPredictor, EntityInterpolator,
     InputBundle, MovementInput, ReconciliationResult, ServerMessage, ServerSnapshot, Transform,
+    TlsMode,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 
 /// Multiplayer client with networking and prediction.
@@ -59,7 +61,8 @@ impl MultiplayerClient {
         info!("Connecting to server at {}", server_addr);
 
         // Create client endpoint
-        let endpoint = ClientEndpoint::new().context("Failed to create client endpoint")?;
+        let endpoint = ClientEndpoint::new(TlsMode::from_env())
+            .context("Failed to create client endpoint")?;
 
         // Connect to server
         let quinn_connection = endpoint
@@ -71,10 +74,7 @@ impl MultiplayerClient {
         let connection = ClientConnection::new(quinn_connection);
 
         // Perform handshake
-        let player_entity_id = connection
-            .handshake()
-            .await
-            .context("Handshake failed")?;
+        let player_entity_id = connection.handshake().await.context("Handshake failed")?;
 
         info!(
             "Connected to server, assigned entity ID: {}",
@@ -93,9 +93,7 @@ impl MultiplayerClient {
         let input_bundle = InputBundle {
             tick: self.client_tick.0,
             sequence: self.client_tick.0 as u32, // Simple sequence for now
-            last_ack_tick: self
-                .predictor
-                .last_confirmed_tick(),
+            last_ack_tick: self.predictor.last_confirmed_tick(),
             movement: movement_input.clone(),
             block_actions: Vec::new(),
             inventory_actions: Vec::new(),
@@ -132,10 +130,34 @@ impl MultiplayerClient {
             return Ok(());
         };
 
-        // Note: In full implementation, this would use a non-blocking receive
-        // or process messages on a separate task. For now, we skip receiving
-        // to avoid blocking the game loop.
-        // TODO: Implement proper async message processing
+        const MAX_RELIABLE: usize = 32;
+        const MAX_UNRELIABLE: usize = 32;
+
+        // Drain reliable channel without blocking the frame.
+        for _ in 0..MAX_RELIABLE {
+            match timeout(Duration::from_millis(0), connection.recv_reliable()).await {
+                Ok(Ok(msg)) => self.handle_server_message(msg)?,
+                Ok(Err(e)) => {
+                    warn!("Reliable channel closed: {}", e);
+                    self.connection = None;
+                    return Err(e);
+                }
+                Err(_) => break, // no more messages ready
+            }
+        }
+
+        // Drain unreliable channel (datagrams).
+        for _ in 0..MAX_UNRELIABLE {
+            match timeout(Duration::from_millis(0), connection.recv_unreliable()).await {
+                Ok(Ok(msg)) => self.handle_server_message(msg)?,
+                Ok(Err(e)) => {
+                    warn!("Unreliable channel closed: {}", e);
+                    self.connection = None;
+                    return Err(e);
+                }
+                Err(_) => break,
+            }
+        }
 
         Ok(())
     }
@@ -185,7 +207,10 @@ impl MultiplayerClient {
                 }
             }
             ServerMessage::EntityDelta(delta) => {
-                debug!("Received entity delta with {} updates", delta.entities.len());
+                debug!(
+                    "Received entity delta with {} updates",
+                    delta.entities.len()
+                );
 
                 // Process entity updates
                 for update in delta.entities {
@@ -194,9 +219,9 @@ impl MultiplayerClient {
                             transform,
                             entity_type: _,
                         } => {
-                            self.remote_entities.insert(update.entity_id, transform.clone());
-                            self.interpolator
-                                .set_target(update.entity_id, transform);
+                            self.remote_entities
+                                .insert(update.entity_id, transform.clone());
+                            self.interpolator.set_target(update.entity_id, transform);
                         }
                         mdminecraft_net::EntityUpdateType::Transform(transform) => {
                             if let Some(current) = self.remote_entities.get(&update.entity_id) {
@@ -243,7 +268,8 @@ impl MultiplayerClient {
 
         if movement.forward != 0 {
             // Move forward/backward based on yaw
-            let yaw_radians = (self.player_transform.yaw as f32 / 256.0) * 2.0 * std::f32::consts::PI;
+            let yaw_radians =
+                (self.player_transform.yaw as f32 / 256.0) * 2.0 * std::f32::consts::PI;
             let dx = (yaw_radians.sin() * movement.forward as f32 * MOVE_SPEED as f32) as i32;
             let dz = (yaw_radians.cos() * movement.forward as f32 * MOVE_SPEED as f32) as i32;
 
@@ -253,7 +279,8 @@ impl MultiplayerClient {
 
         if movement.strafe != 0 {
             // Strafe left/right
-            let yaw_radians = (self.player_transform.yaw as f32 / 256.0) * 2.0 * std::f32::consts::PI;
+            let yaw_radians =
+                (self.player_transform.yaw as f32 / 256.0) * 2.0 * std::f32::consts::PI;
             let dx = (yaw_radians.cos() * movement.strafe as f32 * MOVE_SPEED as f32) as i32;
             let dz = (-yaw_radians.sin() * movement.strafe as f32 * MOVE_SPEED as f32) as i32;
 
@@ -274,7 +301,8 @@ impl MultiplayerClient {
     /// Update entity interpolation.
     fn update_entity_interpolation(&mut self) {
         for (entity_id, current_transform) in &mut self.remote_entities {
-            if let Some(interpolated) = self.interpolator.interpolate(*entity_id, current_transform) {
+            if let Some(interpolated) = self.interpolator.interpolate(*entity_id, current_transform)
+            {
                 *current_transform = interpolated;
             }
         }

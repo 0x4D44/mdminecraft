@@ -5,7 +5,7 @@ use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
-    RendererConfig, TimeOfDay, WindowConfig, WindowManager,
+    RendererConfig, TimeOfDay, UiRenderContext, WindowConfig, WindowManager,
 };
 use mdminecraft_world::{BlockId, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
 use std::collections::HashMap;
@@ -181,23 +181,17 @@ fn main() -> Result<()> {
             for z in -chunk_radius..=chunk_radius {
                 let chunk_pos = ChunkPos::new(x, z);
                 let chunk = generator.generate_chunk(chunk_pos);
-                let mesh = mesh_chunk(&chunk, &registry);
+                let mesh = mesh_chunk(&chunk, &registry, renderer.atlas_metadata());
 
                 total_vertices += mesh.vertices.len();
                 total_indices += mesh.indices.len();
 
                 // Create chunk bind group
-                let chunk_bind_group = resources.pipeline.create_chunk_bind_group(
-                    resources.device,
-                    chunk_pos,
-                );
+                let chunk_bind_group = resources
+                    .pipeline
+                    .create_chunk_bind_group(resources.device, chunk_pos);
 
-                chunk_manager.add_chunk(
-                    resources.device,
-                    &mesh,
-                    chunk_pos,
-                    chunk_bind_group,
-                );
+                chunk_manager.add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
 
                 // Store chunk data for modification
                 chunks.insert(chunk_pos, chunk);
@@ -258,26 +252,32 @@ fn main() -> Result<()> {
                     WindowEvent::CloseRequested => return false,
 
                     WindowEvent::KeyboardInput { event, .. } => {
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::Escape) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::Escape) =
+                            event.physical_key
+                        {
                             return false;
                         }
 
                         // Toggle cursor grab with Tab
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::Tab) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::Tab) = event.physical_key
+                        {
                             if event.state.is_pressed() {
                                 let _ = input.toggle_cursor_grab(window);
                             }
                         }
 
                         // Toggle debug HUD with F3
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::F3) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::F3) = event.physical_key
+                        {
                             if event.state.is_pressed() {
                                 debug_hud.toggle();
                             }
                         }
 
                         // Toggle physics with F
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::KeyF) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::KeyF) =
+                            event.physical_key
+                        {
                             if event.state.is_pressed() {
                                 player_physics.toggle_physics();
                                 tracing::info!(
@@ -292,19 +292,25 @@ fn main() -> Result<()> {
                         }
 
                         // Time controls
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::KeyP) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::KeyP) =
+                            event.physical_key
+                        {
                             if event.state.is_pressed() {
                                 time_of_day.toggle_pause();
                                 tracing::info!("Time paused: {}", !time_of_day.is_daytime());
                             }
                         }
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::BracketLeft) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::BracketLeft) =
+                            event.physical_key
+                        {
                             if event.state.is_pressed() {
                                 time_of_day.decrease_speed();
                                 tracing::info!("Time speed decreased");
                             }
                         }
-                        if let winit::keyboard::PhysicalKey::Code(KeyCode::BracketRight) = event.physical_key {
+                        if let winit::keyboard::PhysicalKey::Code(KeyCode::BracketRight) =
+                            event.physical_key
+                        {
                             if event.state.is_pressed() {
                                 time_of_day.increase_speed();
                                 tracing::info!("Time speed increased");
@@ -348,11 +354,8 @@ fn main() -> Result<()> {
                         // Update debug HUD
                         debug_hud.update_fps(dt);
                         let camera = renderer.camera();
-                        debug_hud.camera_pos = [
-                            camera.position.x,
-                            camera.position.y,
-                            camera.position.z,
-                        ];
+                        debug_hud.camera_pos =
+                            [camera.position.x, camera.position.y, camera.position.z];
                         debug_hud.camera_rot = [camera.yaw, camera.pitch];
                         debug_hud.chunks_visible = chunks_visible;
 
@@ -360,7 +363,7 @@ fn main() -> Result<()> {
                         update_camera(&mut renderer, &input, &mut player_physics, &chunks, dt);
 
                         // Raycast for block selection (only when cursor is grabbed)
-                        if input.cursor_grabbed {
+                        if input.cursor_captured {
                             let camera = renderer.camera();
                             let ray_origin = camera.position;
                             let ray_dir = camera.forward();
@@ -401,15 +404,22 @@ fn main() -> Result<()> {
                                         let local_z = hit.block_pos.z.rem_euclid(16) as usize;
 
                                         // Set block to air
-                                        chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                                        chunk.set_voxel(
+                                            local_x,
+                                            local_y,
+                                            local_z,
+                                            Voxel::default(),
+                                        );
 
                                         // Regenerate mesh
-                                        let mesh = mesh_chunk(chunk, &registry);
+                                        let mesh =
+                                            mesh_chunk(chunk, &registry, renderer.atlas_metadata());
                                         if let Some(resources) = renderer.render_resources() {
-                                            let chunk_bind_group = resources.pipeline.create_chunk_bind_group(
-                                                resources.device,
-                                                chunk_pos,
-                                            );
+                                            let chunk_bind_group =
+                                                resources.pipeline.create_chunk_bind_group(
+                                                    resources.device,
+                                                    chunk_pos,
+                                                );
                                             chunk_manager.add_chunk(
                                                 resources.device,
                                                 &mesh,
@@ -450,15 +460,23 @@ fn main() -> Result<()> {
                                                     light_sky: 0,
                                                     light_block: 0,
                                                 };
-                                                chunk.set_voxel(local_x, local_y, local_z, new_voxel);
+                                                chunk.set_voxel(
+                                                    local_x, local_y, local_z, new_voxel,
+                                                );
 
                                                 // Regenerate mesh
-                                                let mesh = mesh_chunk(chunk, &registry);
-                                                if let Some(resources) = renderer.render_resources() {
-                                                    let chunk_bind_group = resources.pipeline.create_chunk_bind_group(
-                                                        resources.device,
-                                                        chunk_pos,
-                                                    );
+                                                let mesh = mesh_chunk(
+                                                    chunk,
+                                                    &registry,
+                                                    renderer.atlas_metadata(),
+                                                );
+                                                if let Some(resources) = renderer.render_resources()
+                                                {
+                                                    let chunk_bind_group =
+                                                        resources.pipeline.create_chunk_bind_group(
+                                                            resources.device,
+                                                            chunk_pos,
+                                                        );
                                                     chunk_manager.add_chunk(
                                                         resources.device,
                                                         &mesh,
@@ -482,8 +500,14 @@ fn main() -> Result<()> {
                             let resources = renderer.render_resources().unwrap();
 
                             // Update time uniforms for both pipelines
-                            resources.skybox_pipeline.update_time(resources.queue, &time_of_day);
-                            resources.pipeline.update_time(resources.queue, &time_of_day);
+                            resources.skybox_pipeline.update_time(
+                                resources.queue,
+                                &time_of_day,
+                                0.0,
+                            );
+                            resources
+                                .pipeline
+                                .update_time(resources.queue, &time_of_day, 0.0);
 
                             let mut encoder = resources.device.create_command_encoder(
                                 &wgpu::CommandEncoderDescriptor {
@@ -493,10 +517,11 @@ fn main() -> Result<()> {
 
                             // Render skybox (background)
                             {
-                                let mut render_pass =
-                                    resources.skybox_pipeline.begin_render_pass(&mut encoder, &frame.view);
+                                let mut render_pass = resources
+                                    .skybox_pipeline
+                                    .begin_render_pass(&mut encoder, &frame.view);
                                 render_pass.set_pipeline(resources.skybox_pipeline.pipeline());
-                                render_pass.draw(0..3, 0..1);  // Full-screen triangle
+                                render_pass.draw(0..3, 0..1); // Full-screen triangle
                             }
 
                             // Create frustum for culling
@@ -507,8 +532,9 @@ fn main() -> Result<()> {
                             // Render voxels with frustum culling
                             chunks_visible = 0;
                             {
-                                let mut render_pass =
-                                    resources.pipeline.begin_render_pass(&mut encoder, &frame.view);
+                                let mut render_pass = resources
+                                    .pipeline
+                                    .begin_render_pass(&mut encoder, &frame.view);
 
                                 render_pass.set_pipeline(resources.pipeline.pipeline());
                                 render_pass.set_bind_group(
@@ -531,7 +557,11 @@ fn main() -> Result<()> {
 
                                     chunks_visible += 1;
 
-                                    render_pass.set_bind_group(1, &chunk_data.chunk_bind_group, &[]);
+                                    render_pass.set_bind_group(
+                                        1,
+                                        &chunk_data.chunk_bind_group,
+                                        &[],
+                                    );
                                     render_pass
                                         .set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
                                     render_pass.set_index_buffer(
@@ -559,11 +589,9 @@ fn main() -> Result<()> {
 
                                 // Render wireframe
                                 let depth_view = resources.pipeline.depth_view();
-                                let mut render_pass = resources.wireframe_pipeline.begin_render_pass(
-                                    &mut encoder,
-                                    &frame.view,
-                                    depth_view,
-                                );
+                                let mut render_pass = resources
+                                    .wireframe_pipeline
+                                    .begin_render_pass(&mut encoder, &frame.view, depth_view);
 
                                 render_pass.set_pipeline(resources.wireframe_pipeline.pipeline());
                                 render_pass.set_bind_group(
@@ -591,11 +619,13 @@ fn main() -> Result<()> {
                                 };
 
                                 ui.render(
-                                    resources.device,
-                                    resources.queue,
-                                    &mut encoder,
-                                    &frame.view,
-                                    screen_descriptor,
+                                    UiRenderContext {
+                                        device: resources.device,
+                                        queue: resources.queue,
+                                        encoder: &mut encoder,
+                                        view: &frame.view,
+                                        screen: screen_descriptor,
+                                    },
                                     window,
                                     |ctx| {
                                         debug_hud.render(ctx);
@@ -641,7 +671,7 @@ fn update_camera(
     let camera = renderer.camera_mut();
 
     // Mouse look
-    if input.cursor_grabbed {
+    if input.cursor_captured {
         let sensitivity = 0.002;
         let mouse_delta = input.mouse_delta;
         camera.rotate(
@@ -845,25 +875,21 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                         ui.set_min_size(egui::vec2(50.0, 50.0));
                         ui.vertical_centered(|ui| {
                             // Show slot number at top
-                            ui.label(
-                                egui::RichText::new(format!("{}", i + 1))
-                                    .size(10.0)
-                                    .color(if is_selected {
-                                        egui::Color32::WHITE
-                                    } else {
-                                        egui::Color32::GRAY
-                                    }),
-                            );
+                            ui.label(egui::RichText::new(format!("{}", i + 1)).size(10.0).color(
+                                if is_selected {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::GRAY
+                                },
+                            ));
                             // Show block name at bottom
-                            ui.label(
-                                egui::RichText::new(block_name)
-                                    .size(9.0)
-                                    .color(if is_selected {
-                                        egui::Color32::WHITE
-                                    } else {
-                                        egui::Color32::LIGHT_GRAY
-                                    }),
-                            );
+                            ui.label(egui::RichText::new(block_name).size(9.0).color(
+                                if is_selected {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::LIGHT_GRAY
+                                },
+                            ));
                         });
                     });
                 }

@@ -6,18 +6,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Weather state affecting ambient lighting and gameplay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum WeatherState {
     /// Clear skies, no precipitation.
+    #[default]
     Clear,
     /// Active precipitation (rain in warm biomes, snow in cold biomes).
     Precipitation,
-}
-
-impl Default for WeatherState {
-    fn default() -> Self {
-        Self::Clear
-    }
 }
 
 /// Component attached to world singleton for weather management.

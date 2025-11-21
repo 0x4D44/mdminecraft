@@ -226,13 +226,11 @@ impl BiomeLookup {
         let mut table = vec![vec![BiomeId::Plains; RESOLUTION]; RESOLUTION];
 
         // Fill lookup table based on temperature (rows) and humidity (columns)
-        for temp_idx in 0..RESOLUTION {
-            for humidity_idx in 0..RESOLUTION {
-                let temp = temp_idx as f32 / (RESOLUTION - 1) as f32;
+        for (temp_idx, row) in table.iter_mut().enumerate() {
+            let temp = temp_idx as f32 / (RESOLUTION - 1) as f32;
+            for (humidity_idx, cell) in row.iter_mut().enumerate() {
                 let humidity = humidity_idx as f32 / (RESOLUTION - 1) as f32;
-
-                let biome = Self::select_biome(temp, humidity);
-                table[temp_idx][humidity_idx] = biome;
+                *cell = Self::select_biome(temp, humidity);
             }
         }
 
@@ -266,18 +264,16 @@ impl BiomeLookup {
             }
         }
         // Temperate biomes (0.3 <= temp <= 0.7)
-        else {
-            if humidity > 0.8 {
-                BiomeId::Swamp
-            } else if humidity > 0.55 {
-                BiomeId::Forest
-            } else if humidity > 0.45 {
-                BiomeId::BirchForest
-            } else if humidity > 0.3 {
-                BiomeId::Plains
-            } else {
-                BiomeId::Hills
-            }
+        else if humidity > 0.8 {
+            BiomeId::Swamp
+        } else if humidity > 0.55 {
+            BiomeId::Forest
+        } else if humidity > 0.45 {
+            BiomeId::BirchForest
+        } else if humidity > 0.3 {
+            BiomeId::Plains
+        } else {
+            BiomeId::Hills
         }
     }
 

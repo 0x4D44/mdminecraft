@@ -160,14 +160,11 @@ impl ClientPredictor {
         self.last_confirmed_tick = server_tick;
 
         // Remove confirmed inputs
-        self.pending_inputs
-            .retain(|(tick, _)| *tick > server_tick);
+        self.pending_inputs.retain(|(tick, _)| *tick > server_tick);
 
         // Check for mismatch
-        let error = calculate_transform_error(
-            &server_snapshot.player_transform,
-            current_player_transform,
-        );
+        let error =
+            calculate_transform_error(&server_snapshot.player_transform, current_player_transform);
 
         if error > POSITION_ERROR_TOLERANCE {
             // Mismatch detected - need to rollback and replay
@@ -311,11 +308,7 @@ impl EntityInterpolator {
     }
 
     /// Update interpolation and get current transform for an entity.
-    pub fn interpolate(
-        &mut self,
-        entity_id: EntityId,
-        current: &Transform,
-    ) -> Option<Transform> {
+    pub fn interpolate(&mut self, entity_id: EntityId, current: &Transform) -> Option<Transform> {
         let target = self.targets.get(&entity_id)?;
         let alpha = self.alphas.get_mut(&entity_id)?;
 

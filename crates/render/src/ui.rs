@@ -1,6 +1,22 @@
 //! egui UI integration for debug HUD and overlays.
 
+use std::fmt;
+
 use egui_wgpu::ScreenDescriptor;
+
+/// References required to render an egui frame.
+pub struct UiRenderContext<'a> {
+    /// GPU device for updating buffers and textures.
+    pub device: &'a wgpu::Device,
+    /// Queue used to submit resource updates.
+    pub queue: &'a wgpu::Queue,
+    /// Command encoder for recording the render pass.
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// Target texture view to render egui into.
+    pub view: &'a wgpu::TextureView,
+    /// Screen descriptor describing resolution and scale.
+    pub screen: ScreenDescriptor,
+}
 
 /// UI overlay manager using egui.
 pub struct UiManager {
@@ -19,13 +35,7 @@ impl UiManager {
         let context = egui::Context::default();
 
         let viewport_id = context.viewport_id();
-        let state = egui_winit::State::new(
-            context.clone(),
-            viewport_id,
-            window,
-            None,
-            None,
-        );
+        let state = egui_winit::State::new(context.clone(), viewport_id, window, None, None);
 
         let renderer = egui_wgpu::Renderer::new(device, surface_format, None, 1);
 
@@ -37,7 +47,11 @@ impl UiManager {
     }
 
     /// Handle window event.
-    pub fn handle_event(&mut self, window: &winit::window::Window, event: &winit::event::WindowEvent) -> bool {
+    pub fn handle_event(
+        &mut self,
+        window: &winit::window::Window,
+        event: &winit::event::WindowEvent,
+    ) -> bool {
         self.state.on_window_event(window, event).consumed
     }
 
@@ -50,16 +64,8 @@ impl UiManager {
     }
 
     /// Render UI with custom content.
-    pub fn render<F>(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-        screen_descriptor: ScreenDescriptor,
-        window: &winit::window::Window,
-        ui_fn: F,
-    ) where
+    pub fn render<F>(&mut self, ctx: UiRenderContext<'_>, window: &winit::window::Window, ui_fn: F)
+    where
         F: FnOnce(&egui::Context),
     {
         // Take input and run UI
@@ -67,31 +73,30 @@ impl UiManager {
         let full_output = self.context.run(raw_input, ui_fn);
 
         // Handle platform output
-        self.state.handle_platform_output(window, full_output.platform_output);
+        self.state
+            .handle_platform_output(window, full_output.platform_output);
 
         // Convert egui shapes to render primitives
-        let paint_jobs = self.context.tessellate(full_output.shapes, full_output.pixels_per_point);
+        let paint_jobs = self
+            .context
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
 
         // Upload textures
         for (id, image_delta) in full_output.textures_delta.set {
-            self.renderer.update_texture(device, queue, id, &image_delta);
+            self.renderer
+                .update_texture(ctx.device, ctx.queue, id, &image_delta);
         }
 
         // Update buffers
-        self.renderer.update_buffers(
-            device,
-            queue,
-            encoder,
-            &paint_jobs,
-            &screen_descriptor,
-        );
+        self.renderer
+            .update_buffers(ctx.device, ctx.queue, ctx.encoder, &paint_jobs, &ctx.screen);
 
         // Render
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = ctx.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: ctx.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load, // Don't clear, render over existing content
@@ -102,7 +107,8 @@ impl UiManager {
                 ..Default::default()
             });
 
-            self.renderer.render(&mut render_pass, &paint_jobs, &screen_descriptor);
+            self.renderer
+                .render(&mut render_pass, &paint_jobs, &ctx.screen);
         }
 
         // Free textures
@@ -113,6 +119,33 @@ impl UiManager {
 }
 
 /// Debug HUD showing performance and world info.
+/// Coarse-grained state describing who currently owns input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ControlMode {
+    /// Menu UI owns the cursor and gameplay is paused.
+    #[default]
+    Menu,
+    /// Gameplay is active with physics-grounded movement.
+    GameplayPhysics,
+    /// Gameplay is active with free-flying camera controls.
+    GameplayFly,
+    /// UI overlay is focused while gameplay previews inputs.
+    UiOverlay,
+}
+
+impl fmt::Display for ControlMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            ControlMode::Menu => "Menu",
+            ControlMode::GameplayPhysics => "Gameplay — Physics",
+            ControlMode::GameplayFly => "Gameplay — Fly",
+            ControlMode::UiOverlay => "UI Overlay",
+        };
+        write!(f, "{label}")
+    }
+}
+
+/// Aggregated state values rendered via the debug HUD overlay.
 pub struct DebugHud {
     /// Whether the HUD is visible
     pub visible: bool,
@@ -136,6 +169,22 @@ pub struct DebugHud {
     pub total_triangles: usize,
     /// Mining progress (0-100%)
     pub mining_progress: Option<f32>,
+    /// Current control mode/context info
+    pub control_mode: ControlMode,
+    /// Whether the cursor is currently captured
+    pub cursor_captured: bool,
+    /// Active mouse sensitivity value
+    pub mouse_sensitivity: f32,
+    /// Human-readable weather state label
+    pub weather_state: String,
+    /// Precipitation intensity used by shaders
+    pub weather_intensity: f32,
+    /// Number of chunk meshes uploaded during the last frame
+    pub chunk_uploads_last_frame: u32,
+    /// Active particle count sent to the GPU
+    pub particle_count: usize,
+    /// Particle budget ceiling for throttling
+    pub particle_budget: usize,
 }
 
 impl DebugHud {
@@ -153,6 +202,14 @@ impl DebugHud {
             total_vertices: 0,
             total_triangles: 0,
             mining_progress: None,
+            control_mode: ControlMode::default(),
+            cursor_captured: false,
+            mouse_sensitivity: 0.0,
+            weather_state: "Unknown".to_string(),
+            weather_intensity: 0.0,
+            chunk_uploads_last_frame: 0,
+            particle_count: 0,
+            particle_budget: 0,
         }
     }
 
@@ -191,7 +248,11 @@ impl DebugHud {
 
                 // FPS graph (simplified - egui 0.26 plot API may differ)
                 if !self.fps_history.is_empty() {
-                    let min_fps = self.fps_history.iter().cloned().fold(f32::INFINITY, f32::min);
+                    let min_fps = self
+                        .fps_history
+                        .iter()
+                        .cloned()
+                        .fold(f32::INFINITY, f32::min);
                     let max_fps = self.fps_history.iter().cloned().fold(0.0f32, f32::max);
                     ui.label(format!("FPS range: {:.1} - {:.1}", min_fps, max_fps));
                 }
@@ -215,7 +276,8 @@ impl DebugHud {
                 ui.separator();
 
                 ui.label(format!("Chunks Loaded: {}", self.chunks_loaded));
-                ui.label(format!("Chunks Visible: {} ({:.1}%)",
+                ui.label(format!(
+                    "Chunks Visible: {} ({:.1}%)",
                     self.chunks_visible,
                     if self.chunks_loaded > 0 {
                         (self.chunks_visible as f32 / self.chunks_loaded as f32) * 100.0
@@ -225,6 +287,14 @@ impl DebugHud {
                 ));
                 ui.label(format!("Total Vertices: {}", self.total_vertices));
                 ui.label(format!("Total Triangles: {}", self.total_triangles));
+                ui.label(format!(
+                    "Chunk Uploads (frame): {}",
+                    self.chunk_uploads_last_frame
+                ));
+                ui.label(format!(
+                    "Particles: {}/{}",
+                    self.particle_count, self.particle_budget
+                ));
 
                 // Mining progress
                 if let Some(progress) = self.mining_progress {
@@ -234,6 +304,25 @@ impl DebugHud {
                     ui.label(format!("Progress: {:.1}%", progress));
                     ui.add(egui::ProgressBar::new(progress / 100.0).show_percentage());
                 }
+
+                ui.add_space(10.0);
+                ui.heading("Input");
+                ui.separator();
+                ui.label(format!("Mode: {}", self.control_mode));
+                ui.label(format!(
+                    "Cursor Captured: {}",
+                    if self.cursor_captured { "Yes" } else { "No" }
+                ));
+                ui.label(format!("Mouse Sensitivity: {:.3}", self.mouse_sensitivity));
+
+                ui.add_space(10.0);
+                ui.heading("Atmosphere");
+                ui.separator();
+                ui.label(format!("Weather: {}", self.weather_state));
+                ui.label(format!(
+                    "Precipitation Intensity: {:.2}",
+                    self.weather_intensity
+                ));
 
                 ui.add_space(10.0);
                 ui.label("Press F3 to toggle this HUD");
