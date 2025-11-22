@@ -37,6 +37,11 @@ mdminecraft-ui3d = { path = "crates/ui3d" }
 [dev-dependencies]
 mdminecraft-testkit = { path = "crates/testkit" }
 
+[features]
+default = []
+# Propagate ui3d billboard feature to the ui3d crate.
+ui3d_billboards = ["mdminecraft-ui3d/ui3d_billboards"]
+
 [workspace]
 members = [
     "crates/core",

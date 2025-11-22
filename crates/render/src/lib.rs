@@ -192,6 +192,11 @@ impl Renderer {
         })
     }
 
+    /// Surface format used by the swapchain (if initialized).
+    pub fn surface_format(&self) -> Option<wgpu::TextureFormat> {
+        self.context.as_ref().map(|ctx| ctx.config.format)
+    }
+
     /// Access the underlying `wgpu::Device` if the renderer has been initialized.
     pub fn device(&self) -> Option<&wgpu::Device> {
         self.context.as_ref().map(|ctx| &ctx.device)

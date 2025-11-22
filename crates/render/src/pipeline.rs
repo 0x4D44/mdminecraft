@@ -253,6 +253,8 @@ pub struct VoxelPipeline {
     camera_bind_group_layout: wgpu::BindGroupLayout,
     chunk_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group: wgpu::BindGroup,
+    atlas_view: wgpu::TextureView,
+    atlas_sampler: wgpu::Sampler,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     atlas_metadata: Option<TextureAtlasMetadata>,
@@ -532,6 +534,8 @@ impl VoxelPipeline {
             camera_bind_group_layout,
             chunk_bind_group_layout,
             texture_bind_group,
+            atlas_view,
+            atlas_sampler,
             depth_texture,
             depth_view,
             atlas_metadata,
@@ -541,6 +545,16 @@ impl VoxelPipeline {
     /// Get the texture bind group for rendering.
     pub fn texture_bind_group(&self) -> &wgpu::BindGroup {
         &self.texture_bind_group
+    }
+
+    /// Get the atlas texture view used by voxel rendering.
+    pub fn atlas_view(&self) -> &wgpu::TextureView {
+        &self.atlas_view
+    }
+
+    /// Get the atlas sampler used by voxel rendering.
+    pub fn atlas_sampler(&self) -> &wgpu::Sampler {
+        &self.atlas_sampler
     }
 
     /// Access atlas metadata if a runtime atlas was loaded.
