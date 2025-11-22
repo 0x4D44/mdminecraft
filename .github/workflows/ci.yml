@@ -25,3 +25,15 @@ jobs:
           cargo test -p mdminecraft-net connection::tests::test_input_roundtrip
           cargo test -p mdminecraft-world lighting::tests::block_light_crosses_chunk_seams
           cargo test -p mdminecraft --bin mdminecraft --quiet
+
+  ui3d-billboards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Billboard feature tests
+        run: cargo test -p mdminecraft-ui3d --features ui3d_billboards --lib
+      - name: Billboard smoke example
+        run: cargo run --package mdminecraft-ui3d --example billboard_demo --features ui3d_billboards --quiet

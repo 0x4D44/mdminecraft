@@ -1397,7 +1397,6 @@ impl GameWorld {
                                 }
                             }
                         }
-
                     }
                 }
             }
@@ -1446,12 +1445,8 @@ impl GameWorld {
 
         for pos in neighbors {
             if self.chunks.contains_key(&pos) {
-                let _ = stitch_light_seams(
-                    &mut self.chunks,
-                    &self.registry,
-                    pos,
-                    LightType::Skylight,
-                );
+                let _ =
+                    stitch_light_seams(&mut self.chunks, &self.registry, pos, LightType::Skylight);
             }
         }
     }

@@ -2038,6 +2038,7 @@ name = "mdminecraft-ui3d"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitflags 2.10.0",
  "bytemuck",
  "fontdue",
  "glam",

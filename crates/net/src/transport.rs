@@ -67,7 +67,9 @@ impl ServerEndpoint {
                 generate_self_signed_cert()?
             }
             Err(e) => {
-                warn!("Failed to load server cert from env: {e:?}; generating self-signed dev cert");
+                warn!(
+                    "Failed to load server cert from env: {e:?}; generating self-signed dev cert"
+                );
                 generate_self_signed_cert()?
             }
         };
@@ -149,7 +151,8 @@ impl ClientEndpoint {
             TlsMode::Secure => {
                 let mut root_store = RootCertStore::empty();
                 let native = rustls_native_certs::load_native_certs();
-                let (added, ignored) = root_store.add_parsable_certificates(native.certs.into_iter());
+                let (added, ignored) =
+                    root_store.add_parsable_certificates(native.certs.into_iter());
                 if !native.errors.is_empty() {
                     warn!("Some native roots failed to load: {:?}", native.errors);
                 }
@@ -239,8 +242,9 @@ fn load_cert_from_env() -> Result<Option<(CertificateDer<'static>, PrivateKeyDer
         Err(_) => return Ok(None),
     };
 
-    let key_path = std::env::var("MDM_SERVER_KEY_PATH")
-        .map_err(|_| anyhow::anyhow!("MDM_SERVER_KEY_PATH must be set when MDM_SERVER_CERT_PATH is set"))?;
+    let key_path = std::env::var("MDM_SERVER_KEY_PATH").map_err(|_| {
+        anyhow::anyhow!("MDM_SERVER_KEY_PATH must be set when MDM_SERVER_CERT_PATH is set")
+    })?;
 
     let cert_file = File::open(Path::new(&cert_path)).context("Failed to open server cert")?;
     let mut cert_reader = BufReader::new(cert_file);
@@ -324,8 +328,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_creation() {
-        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("Failed to create client");
+        let client =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("Failed to create client");
         client.close();
     }
 
@@ -346,8 +350,8 @@ mod tests {
         });
 
         // Connect client
-        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("Failed to create client");
+        let client =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("Failed to create client");
         let client_conn = client
             .connect(server_addr)
             .await

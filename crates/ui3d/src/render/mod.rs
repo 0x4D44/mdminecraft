@@ -6,6 +6,8 @@ pub mod font_atlas;
 pub mod text_renderer;
 
 #[cfg(feature = "ui3d_billboards")]
-pub use billboard_pipeline::BillboardPipeline;
+pub use billboard_pipeline::{
+    BillboardEmitter, BillboardFlags, BillboardInstance, BillboardRenderer, BillboardStats,
+};
 pub use font_atlas::{FontAtlas, FontAtlasBuilder};
 pub use text_renderer::TextRenderer;

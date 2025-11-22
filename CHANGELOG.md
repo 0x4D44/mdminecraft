@@ -9,7 +9,7 @@ All notable changes for mdminecraft.
 - Cross-chunk lighting seam stitching for skylight/block light; property test prevents light amplification across seams.
 - HUD shows particle budget vs active counts; block edits trigger targeted lighting recompute/remesh.
 - CI runs targeted regressions (net roundtrip, lighting seam, bin smoke) alongside workspace tests.
-- Billboard pipeline gated behind `ui3d_billboards` feature while stubbed.
+- Implemented UI3D billboard pipeline (instanced quads, depth + overlay paths) behind `ui3d_billboards`; includes smoke test and demo example.
 
 ## 0.1.0
 - Initial release (deterministic voxel sandbox MVP).
