@@ -324,8 +324,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client_endpoint = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("Failed to create client");
+        let client_endpoint =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("Failed to create client");
         let connection = client_endpoint
             .connect(server_addr)
             .await
@@ -365,8 +365,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client_endpoint = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("Failed to create client");
+        let client_endpoint =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("Failed to create client");
         let connection = client_endpoint
             .connect(server_addr)
             .await
@@ -447,12 +447,9 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Client side
-        let client_endpoint = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("create client");
-        let connection = client_endpoint
-            .connect(server_addr)
-            .await
-            .expect("connect");
+        let client_endpoint =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("create client");
+        let connection = client_endpoint.connect(server_addr).await.expect("connect");
         let client_conn = ClientConnection::new(connection);
 
         // Perform handshake
@@ -473,7 +470,10 @@ mod tests {
         // Receive server state
         let msg = client_conn.recv_unreliable().await.expect("recv state");
         match msg {
-            ServerMessage::ServerState { tick, player_transform } => {
+            ServerMessage::ServerState {
+                tick,
+                player_transform,
+            } => {
                 assert_eq!(tick, 1);
                 assert_eq!(player_transform.x, 1);
             }

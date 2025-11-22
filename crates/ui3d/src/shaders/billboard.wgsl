@@ -1,99 +1,77 @@
-// Billboard Rendering Shader for 3D UI
-//
-// This shader renders camera-facing quads with optional textures.
-// Supports multiple billboard orientations and depth modes.
+// Billboard pipeline (instanced camera-facing quads)
+// Feature-gated via `ui3d_billboards`.
 
-// Camera uniforms
-struct CameraUniforms {
+struct CameraUniform {
     view_proj: mat4x4<f32>,
-    view: mat4x4<f32>,
-    projection: mat4x4<f32>,
-    camera_position: vec3<f32>,
-    _padding: f32,
+    camera_pos: vec4<f32>,
 }
 
 @group(0) @binding(0)
-var<uniform> camera: CameraUniforms;
+var<uniform> camera: CameraUniform;
 
-// Texture (optional - can render solid colors)
 @group(1) @binding(0)
-var billboard_texture: texture_2d<f32>;
+var atlas_texture: texture_2d<f32>;
 @group(1) @binding(1)
-var billboard_sampler: sampler;
+var atlas_sampler: sampler;
 
-// Vertex input
-struct VertexInput {
-    @location(0) position: vec3<f32>,     // World position of quad corner
-    @location(1) uv: vec2<f32>,           // Texture coordinates
-    @location(2) color: vec4<f32>,        // Tint color
-    @location(3) center: vec3<f32>,       // Billboard center
-    @location(4) orientation_mode: u32,   // 0=Full, 1=YAxis, 2=Fixed
-}
-
-// Vertex output / Fragment input
-struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
+struct VSOut {
+    @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) light: f32,
+    @location(3) flags: u32,
+}
+
+fn rotate(local: vec2<f32>, angle: f32) -> vec2<f32> {
+    let s = sin(angle);
+    let c = cos(angle);
+    return vec2<f32>(local.x * c - local.y * s, local.x * s + local.y * c);
 }
 
 @vertex
-fn vs_main(vertex: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-
-    var world_position: vec3<f32>;
-
-    if (vertex.orientation_mode == 0u) {
-        // Full billboard - face camera completely
-        world_position = billboard_full(vertex.position, vertex.center);
-    } else if (vertex.orientation_mode == 1u) {
-        // Y-axis billboard - rotate around Y only
-        world_position = billboard_y_axis(vertex.position, vertex.center);
-    } else {
-        // Fixed orientation - no billboarding
-        world_position = vertex.position;
+fn vs_main(
+    @location(0) quad_pos: vec2<f32>,
+    @location(1) position: vec3<f32>,
+    @location(2) size: vec2<f32>,
+    @location(3) rot: f32,
+    @location(4) uv_min: vec2<f32>,
+    @location(5) uv_max: vec2<f32>,
+    @location(6) color: vec4<f32>,
+    @location(7) light: f32,
+    @location(8) layer_flags: vec2<i32>,
+) -> VSOut {
+    // Build facing basis from camera -> instance vector
+    let forward = normalize(camera.camera_pos.xyz - position);
+    let world_up = vec3<f32>(0.0, 1.0, 0.0);
+    // If camera is exactly above/below, right may degenerate; fall back to X axis in that rare case.
+    var right = cross(world_up, forward);
+    if (length(right) < 1e-3) {
+        right = vec3<f32>(1.0, 0.0, 0.0);
     }
+    right = normalize(right);
+    let up = normalize(cross(forward, right));
 
-    out.clip_position = camera.view_proj * vec4<f32>(world_position, 1.0);
-    out.uv = vertex.uv;
-    out.color = vertex.color;
+    // Apply per-instance rotation about camera-forward
+    let rotated = rotate(quad_pos, rot);
+    let world = position + right * rotated.x * size.x + up * rotated.y * size.y;
 
+    var out: VSOut;
+    out.clip = camera.view_proj * vec4<f32>(world, 1.0);
+    out.uv = mix(uv_min, uv_max, quad_pos * 0.5 + vec2<f32>(0.5));
+    out.color = color;
+    out.light = light;
+    // second component carries flags packed into lower 16 bits (sign-extended by vertex fetch)
+    out.flags = bitcast<u32>(layer_flags.y);
     return out;
 }
 
-fn billboard_full(position: vec3<f32>, center: vec3<f32>) -> vec3<f32> {
-    let to_camera = normalize(camera.camera_position - center);
-    let up = vec3<f32>(0.0, 1.0, 0.0);
-    let right = normalize(cross(up, to_camera));
-    let billboard_up = cross(to_camera, right);
-
-    let offset = position - center;
-    let world_offset = offset.x * right + offset.y * billboard_up;
-    return center + world_offset;
-}
-
-fn billboard_y_axis(position: vec3<f32>, center: vec3<f32>) -> vec3<f32> {
-    var to_camera = camera.camera_position - center;
-    to_camera.y = 0.0; // Project to XZ plane
-    to_camera = normalize(to_camera);
-
-    let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), to_camera));
-    let up = vec3<f32>(0.0, 1.0, 0.0);
-
-    let offset = position - center;
-    let world_offset = offset.x * right + offset.y * up;
-    return center + world_offset;
-}
-
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample texture and apply color tint
-    let tex_color = textureSample(billboard_texture, billboard_sampler, in.uv);
-    return tex_color * in.color;
-}
-
-// Variant for solid color (no texture)
-@fragment
-fn fs_main_solid(in: VertexOutput) -> @location(0) vec4<f32> {
-    return in.color;
+fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+    var c = textureSample(atlas_texture, atlas_sampler, in.uv) * in.color;
+    if ((in.flags & 0x1u) == 0u) {
+        let l = clamp(in.light, 0.0, 1.0);
+        let lit = mix(0.35, 1.0, l);
+        c = vec4<f32>(c.rgb * lit, c.a);
+    }
+    return c;
 }

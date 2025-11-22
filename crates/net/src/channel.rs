@@ -251,8 +251,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("Failed to create client");
+        let client =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("Failed to create client");
         let connection = client
             .connect(server_addr)
             .await
@@ -312,8 +312,8 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Connect client
-        let client = ClientEndpoint::new(TlsMode::InsecureSkipVerify)
-            .expect("Failed to create client");
+        let client =
+            ClientEndpoint::new(TlsMode::InsecureSkipVerify).expect("Failed to create client");
         let connection = client
             .connect(server_addr)
             .await

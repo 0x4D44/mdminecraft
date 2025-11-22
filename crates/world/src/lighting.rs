@@ -4,9 +4,11 @@
 //! queues for deterministic propagation. Light updates track changes for cross-
 //! chunk border handling and event logging.
 
-use crate::chunk::{Chunk, ChunkPos, LocalPos, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, BLOCK_AIR};
-use std::collections::VecDeque;
+use crate::chunk::{
+    Chunk, ChunkPos, LocalPos, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 /// Maximum light level (0-15 range).
 pub const MAX_LIGHT_LEVEL: u8 = 15;
@@ -224,13 +226,29 @@ pub fn stitch_light_seams(
                 let north = chunk.voxel(x, y, 0);
                 let south = chunk.voxel(x, y, CHUNK_SIZE_Z - 1);
                 enqueue_seed(&mut queue, chunk_pos, x, y, 0, north, light_type);
-                enqueue_seed(&mut queue, chunk_pos, x, y, CHUNK_SIZE_Z - 1, south, light_type);
+                enqueue_seed(
+                    &mut queue,
+                    chunk_pos,
+                    x,
+                    y,
+                    CHUNK_SIZE_Z - 1,
+                    south,
+                    light_type,
+                );
             }
             for z in 0..CHUNK_SIZE_Z {
                 let west = chunk.voxel(0, y, z);
                 let east = chunk.voxel(CHUNK_SIZE_X - 1, y, z);
                 enqueue_seed(&mut queue, chunk_pos, 0, y, z, west, light_type);
-                enqueue_seed(&mut queue, chunk_pos, CHUNK_SIZE_X - 1, y, z, east, light_type);
+                enqueue_seed(
+                    &mut queue,
+                    chunk_pos,
+                    CHUNK_SIZE_X - 1,
+                    y,
+                    z,
+                    east,
+                    light_type,
+                );
             }
         }
     }
@@ -241,9 +259,18 @@ pub fn stitch_light_seams(
         processed += 1;
 
         // Visit each neighbor in 6 directions.
-        for (dx, dy, dz) in [(0, 1, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1)] {
+        for (dx, dy, dz) in [
+            (0, 1, 0),
+            (0, -1, 0),
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ] {
             if let Some((neighbor_chunk, neighbor_local)) = neighbor_block(pos, dx, dy, dz) {
-                let Some(chunk) = chunks.get_mut(&neighbor_chunk) else { continue; };
+                let Some(chunk) = chunks.get_mut(&neighbor_chunk) else {
+                    continue;
+                };
 
                 let voxel = chunk.voxel(neighbor_local.x, neighbor_local.y, neighbor_local.z);
                 if registry.is_opaque(voxel.id) {
@@ -264,7 +291,12 @@ pub fn stitch_light_seams(
                 if current < new_level {
                     let mut updated = voxel;
                     LightType::set_voxel_level(&mut updated, light_type, new_level);
-                    chunk.set_voxel(neighbor_local.x, neighbor_local.y, neighbor_local.z, updated);
+                    chunk.set_voxel(
+                        neighbor_local.x,
+                        neighbor_local.y,
+                        neighbor_local.z,
+                        updated,
+                    );
                     queue.push_back((BlockPos::new(neighbor_chunk, neighbor_local), new_level));
                 }
             }
@@ -292,12 +324,7 @@ fn enqueue_seed(
     }
 }
 
-fn neighbor_block(
-    pos: BlockPos,
-    dx: i32,
-    dy: i32,
-    dz: i32,
-) -> Option<(ChunkPos, LocalPos)> {
+fn neighbor_block(pos: BlockPos, dx: i32, dy: i32, dz: i32) -> Option<(ChunkPos, LocalPos)> {
     let mut cx = pos.chunk.x;
     let mut cz = pos.chunk.z;
     let mut lx = pos.local.x as i32 + dx;

@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use mdminecraft_core::SimTick;
 use mdminecraft_net::{
     ClientConnection, ClientEndpoint, ClientMessage, ClientPredictor, EntityInterpolator,
-    InputBundle, MovementInput, ReconciliationResult, ServerMessage, ServerSnapshot, Transform,
-    TlsMode,
+    InputBundle, MovementInput, ReconciliationResult, ServerMessage, ServerSnapshot, TlsMode,
+    Transform,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -61,8 +61,8 @@ impl MultiplayerClient {
         info!("Connecting to server at {}", server_addr);
 
         // Create client endpoint
-        let endpoint = ClientEndpoint::new(TlsMode::from_env())
-            .context("Failed to create client endpoint")?;
+        let endpoint =
+            ClientEndpoint::new(TlsMode::from_env()).context("Failed to create client endpoint")?;
 
         // Connect to server
         let quinn_connection = endpoint
