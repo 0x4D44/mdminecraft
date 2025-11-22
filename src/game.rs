@@ -14,6 +14,10 @@ use mdminecraft_render::{
     ParticleEmitter, ParticleSystem, ParticleVertex, RaycastHit, Renderer, RendererConfig,
     TimeOfDay, UiRenderContext, WindowConfig, WindowManager,
 };
+#[cfg(feature = "ui3d_billboards")]
+use mdminecraft_ui3d::render::{
+    BillboardEmitter, BillboardFlags, BillboardInstance, BillboardRenderer,
+};
 use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
     BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, WeatherState,
@@ -428,6 +432,10 @@ pub struct GameWorld {
     weather_blend: f32,
     /// Last frame delta time (seconds)
     frame_dt: f32,
+    #[cfg(feature = "ui3d_billboards")]
+    billboard_renderer: Option<BillboardRenderer>,
+    #[cfg(feature = "ui3d_billboards")]
+    billboard_emitter: BillboardEmitter,
 }
 
 impl GameWorld {
@@ -460,6 +468,26 @@ impl GameWorld {
 
         // Initialize GPU
         pollster::block_on(renderer.initialize_gpu(window.clone()))?;
+        #[cfg(feature = "ui3d_billboards")]
+        let billboard_renderer = {
+            let resources = renderer.render_resources().expect("GPU not initialized");
+            let format = renderer
+                .surface_format()
+                .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+            match BillboardRenderer::new(
+                resources.device,
+                format,
+                resources.pipeline.camera_bind_group_layout(),
+                resources.pipeline.atlas_view(),
+                resources.pipeline.atlas_sampler(),
+            ) {
+                Ok(r) => Some(r),
+                Err(err) => {
+                    tracing::warn!(?err, "Failed to initialize billboard renderer");
+                    None
+                }
+            }
+        };
 
         // Generate world
         let registry = load_block_registry();
@@ -562,6 +590,10 @@ impl GameWorld {
             rng,
             weather_blend: 0.0,
             frame_dt: 0.0,
+            #[cfg(feature = "ui3d_billboards")]
+            billboard_renderer,
+            #[cfg(feature = "ui3d_billboards")]
+            billboard_emitter: BillboardEmitter::default(),
         };
 
         world.player_physics.last_ground_y = spawn_point.y;
@@ -957,6 +989,30 @@ impl GameWorld {
         }
         self.debug_hud.particle_count = self.particle_emitter.vertices.len();
         self.debug_hud.particle_budget = MAX_PARTICLES;
+    }
+
+    #[cfg(feature = "ui3d_billboards")]
+    fn populate_billboards(&mut self) {
+        self.billboard_emitter.clear();
+
+        if let Some(hit) = self.selected_block {
+            let pos = glam::Vec3::new(
+                hit.block_pos.x as f32 + 0.5,
+                hit.block_pos.y as f32 + 0.5,
+                hit.block_pos.z as f32 + 0.5,
+            );
+
+            self.billboard_emitter.submit(
+                1,
+                BillboardInstance {
+                    position: pos.to_array(),
+                    size: [0.6, 0.6],
+                    color: [1.0, 1.0, 1.0, 0.35],
+                    flags: (BillboardFlags::OVERLAY_NO_DEPTH | BillboardFlags::EMISSIVE).bits(),
+                    ..Default::default()
+                },
+            );
+        }
     }
 
     fn current_control_mode(&self) -> ControlMode {
@@ -1455,6 +1511,8 @@ impl GameWorld {
         if let Some(frame) = self.renderer.begin_frame() {
             let weather_intensity = self.weather_intensity();
             self.populate_particle_emitter();
+            #[cfg(feature = "ui3d_billboards")]
+            self.populate_billboards();
 
             let resources = self.renderer.render_resources().unwrap();
             let particle_system = if self.particle_emitter.vertices.is_empty() {
@@ -1569,6 +1627,22 @@ impl GameWorld {
                 render_pass
                     .set_vertex_buffer(0, resources.wireframe_pipeline.vertex_buffer().slice(..));
                 render_pass.draw(0..24, 0..1);
+            }
+
+            #[cfg(feature = "ui3d_billboards")]
+            if let Some(renderer) = self.billboard_renderer.as_mut() {
+                let depth_view = resources.pipeline.depth_view();
+                if let Err(err) = renderer.render(
+                    resources.device,
+                    resources.queue,
+                    &mut encoder,
+                    &frame.view,
+                    depth_view,
+                    resources.pipeline.camera_bind_group(),
+                    &mut self.billboard_emitter,
+                ) {
+                    tracing::warn!(?err, "Billboard rendering failed");
+                }
             }
 
             // Render UI overlay
