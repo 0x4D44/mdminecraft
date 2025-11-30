@@ -165,6 +165,7 @@ impl Hotbar {
 /// AABB for collision detection
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 struct AABB {
     min: glam::Vec3,
     max: glam::Vec3,
@@ -188,6 +189,7 @@ struct PlayerPhysics {
     jump_strength: f32,
     terminal_velocity: f32,
     player_height: f32,
+    eye_height: f32,
     player_width: f32,
     physics_enabled: bool,
     /// Previous Y position for fall damage calculation
@@ -369,6 +371,8 @@ impl PlayerHealth {
 }
 
 impl PlayerPhysics {
+    const GROUND_EPS: f32 = 0.001;
+
     fn new() -> Self {
         Self {
             velocity: glam::Vec3::ZERO,
@@ -377,6 +381,7 @@ impl PlayerPhysics {
             jump_strength: 8.0,
             terminal_velocity: -50.0,
             player_height: 1.8,
+            eye_height: 1.62,
             player_width: 0.6,
             physics_enabled: true,
             last_ground_y: 100.0, // Initial spawn height
@@ -391,9 +396,11 @@ impl PlayerPhysics {
         }
     }
 
-    fn get_aabb(&self, position: glam::Vec3) -> AABB {
+    /// Build an AABB using the camera position (eye). Feet are offset down by `eye_height`.
+    fn get_aabb(&self, camera_pos: glam::Vec3) -> AABB {
+        let feet = camera_pos - glam::Vec3::new(0.0, self.eye_height, 0.0);
         let size = glam::Vec3::new(self.player_width, self.player_height, self.player_width);
-        let center = position + glam::Vec3::new(0.0, self.player_height * 0.5, 0.0);
+        let center = feet + glam::Vec3::new(0.0, self.player_height * 0.5, 0.0);
         AABB::from_center_size(center, size)
     }
 }
@@ -439,6 +446,13 @@ pub struct GameWorld {
 }
 
 impl GameWorld {
+    #[inline(always)]
+    fn flat_directions(camera: &mdminecraft_render::Camera) -> (glam::Vec3, glam::Vec3) {
+        let yaw = camera.yaw;
+        let forward = glam::Vec3::new(yaw.cos(), 0.0, yaw.sin()).normalize_or_zero();
+        let right = glam::Vec3::new(-forward.z, 0.0, forward.x).normalize_or_zero();
+        (forward, right)
+    }
     /// Create a new game world
     pub fn new(
         event_loop: &EventLoopWindowTarget<()>,
@@ -538,11 +552,12 @@ impl GameWorld {
         );
 
         // Determine spawn point near world origin so the player doesn't start mid-air.
-        let spawn_point = Self::determine_spawn_point(&chunks, &registry)
+        let spawn_feet = Self::determine_spawn_point(&chunks, &registry)
             .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
 
-        // Setup camera
-        renderer.camera_mut().position = spawn_point;
+        // Setup camera at eye height above feet
+        renderer.camera_mut().position =
+            spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
         renderer.camera_mut().yaw = 0.0;
         renderer.camera_mut().pitch = -0.3;
 
@@ -576,7 +591,7 @@ impl GameWorld {
             player_health: PlayerHealth::new(),
             chunks_visible: 0,
             mining_progress: None,
-            spawn_point,
+            spawn_point: spawn_feet,
             controls,
             input_processor,
             actions: ActionState::default(),
@@ -596,7 +611,7 @@ impl GameWorld {
             billboard_emitter: BillboardEmitter::default(),
         };
 
-        world.player_physics.last_ground_y = spawn_point.y;
+        world.player_physics.last_ground_y = spawn_feet.y;
 
         let _ = world.input.enter_gameplay(&world.window);
 
@@ -664,7 +679,12 @@ impl GameWorld {
         }
 
         best.map(|(world_x, world_z, y)| {
-            glam::Vec3::new(world_x as f32 + 0.5, y as f32 + 1.8, world_z as f32 + 0.5)
+            // Feet rest slightly above block top to avoid initial intersection.
+            glam::Vec3::new(
+                world_x as f32 + 0.5,
+                y as f32 + 1.0 + PlayerPhysics::GROUND_EPS,
+                world_z as f32 + 0.5,
+            )
         })
     }
 
@@ -1058,10 +1078,9 @@ impl GameWorld {
     }
 
     fn apply_physics_movement(&mut self, actions: &ActionState, dt: f32) {
-        let mut position = self.renderer.camera().position;
-        let yaw = self.renderer.camera().yaw;
-        let forward_h = glam::Vec3::new(yaw.cos(), 0.0, yaw.sin()).normalize_or_zero();
-        let right_h = glam::Vec3::new(-forward_h.z, 0.0, forward_h.x).normalize_or_zero();
+        let camera_snapshot = self.renderer.camera().clone();
+        let mut camera_pos = camera_snapshot.position;
+        let (forward_h, right_h) = Self::flat_directions(&camera_snapshot);
 
         let mut fall_damage: Option<f32> = None;
 
@@ -1084,22 +1103,25 @@ impl GameWorld {
 
             if axis.length_squared() > 0.0 {
                 let move_dir = forward_h * axis.y + right_h * axis.x;
-                position += move_dir * move_speed * dt;
+                camera_pos += move_dir * move_speed * dt;
             }
 
-            position.y += physics.velocity.y * dt;
+            camera_pos.y += physics.velocity.y * dt;
 
             let was_on_ground = physics.on_ground;
             let was_falling = physics.velocity.y < 0.0;
-            let player_aabb = physics.get_aabb(position);
+            let player_aabb = physics.get_aabb(camera_pos);
             let feet_y = player_aabb.min.y;
-            let head_y = player_aabb.max.y;
-            let ground_y =
-                Self::column_ground_height(&self.chunks, &self.registry, position.x, position.z);
+            let ground_y = Self::column_ground_height(
+                &self.chunks,
+                &self.registry,
+                player_aabb.min.x + physics.player_width * 0.5, // approx center footprint
+                player_aabb.min.z + physics.player_width * 0.5,
+            );
 
             if feet_y < ground_y {
-                let correction = ground_y - feet_y;
-                position.y += correction;
+                let correction = ground_y - feet_y + PlayerPhysics::GROUND_EPS;
+                camera_pos.y += correction;
 
                 if !was_on_ground && was_falling {
                     fall_damage = Some(physics.last_ground_y - ground_y);
@@ -1107,10 +1129,10 @@ impl GameWorld {
 
                 physics.velocity.y = 0.0;
                 physics.on_ground = true;
-                physics.last_ground_y = head_y;
+                physics.last_ground_y = ground_y;
             } else {
                 if physics.on_ground {
-                    physics.last_ground_y = head_y;
+                    physics.last_ground_y = ground_y;
                 }
                 physics.on_ground = false;
             }
@@ -1125,20 +1147,20 @@ impl GameWorld {
             self.calculate_fall_damage(dist);
         }
 
-        self.renderer.camera_mut().position = position;
+        self.renderer.camera_mut().position = camera_pos;
     }
 
     fn apply_fly_movement(&mut self, actions: &ActionState, dt: f32) {
         let (forward, right, mut position) = {
             let camera = self.renderer.camera();
-            (camera.forward(), camera.right(), camera.position)
+            let (f, r) = Self::flat_directions(camera);
+            (f, r, camera.position)
         };
 
         let mut movement = glam::Vec3::ZERO;
         if actions.move_y.abs() > f32::EPSILON || actions.move_x.abs() > f32::EPSILON {
-            movement += forward.normalize_or_zero() * actions.move_y;
-            let right_h = glam::Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
-            movement += right_h * actions.move_x;
+            movement += forward * actions.move_y;
+            movement += right * actions.move_x;
         }
         if actions.move_z.abs() > f32::EPSILON {
             movement += glam::Vec3::Y * actions.move_z;
@@ -1697,7 +1719,8 @@ impl GameWorld {
 
         // Respawn player at spawn point
         let camera = self.renderer.camera_mut();
-        camera.position = self.spawn_point;
+        camera.position =
+            self.spawn_point + glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
 
         // Reset health
         self.player_health.reset();
