@@ -36,6 +36,29 @@ struct LightNode {
     level: u8,
 }
 
+/// Represents a pending cross-chunk light update.
+/// Used to queue updates that need to be processed in neighboring chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrossChunkLightUpdate {
+    /// The neighboring chunk that needs updating.
+    pub target_chunk: ChunkPos,
+    /// Local position within the target chunk.
+    pub target_pos: LocalPos,
+    /// Light level to propagate.
+    pub level: u8,
+    /// Type of light (skylight or block light).
+    pub light_type: LightType,
+}
+
+/// Result of light propagation, including any cross-chunk updates needed.
+#[derive(Debug, Clone, Default)]
+pub struct LightPropagationResult {
+    /// Number of nodes processed within the chunk.
+    pub nodes_processed: usize,
+    /// Pending updates for neighboring chunks.
+    pub cross_chunk_updates: Vec<CrossChunkLightUpdate>,
+}
+
 /// Describes a light update event for instrumentation/testkit.
 #[derive(Debug, Clone)]
 pub struct LightUpdate {
@@ -70,18 +93,36 @@ impl LightType {
 /// BFS queue for light propagation within a single chunk.
 pub struct LightQueue {
     queue: VecDeque<LightNode>,
+    /// Chunk position for calculating cross-chunk updates.
+    chunk_pos: ChunkPos,
+    /// Pending cross-chunk updates collected during propagation.
+    cross_chunk_updates: Vec<CrossChunkLightUpdate>,
 }
 
 impl LightQueue {
-    pub fn new() -> Self {
+    /// Create a new light queue for the given chunk.
+    pub fn new_for_chunk(chunk_pos: ChunkPos) -> Self {
         Self {
             queue: VecDeque::with_capacity(256),
+            chunk_pos,
+            cross_chunk_updates: Vec::new(),
         }
+    }
+
+    /// Create a new light queue (uses default chunk position).
+    /// Use `new_for_chunk` when cross-chunk updates need to be tracked.
+    pub fn new() -> Self {
+        Self::new_for_chunk(ChunkPos::new(0, 0))
     }
 
     /// Add a light source to the propagation queue.
     pub fn enqueue(&mut self, pos: LocalPos, level: u8) {
         self.queue.push_back(LightNode { pos, level });
+    }
+
+    /// Take the collected cross-chunk updates, clearing the internal buffer.
+    pub fn take_cross_chunk_updates(&mut self) -> Vec<CrossChunkLightUpdate> {
+        std::mem::take(&mut self.cross_chunk_updates)
     }
 
     /// Process all queued light updates for skylight.
@@ -169,18 +210,68 @@ impl LightQueue {
             let ny = pos.y as i32 + dy;
             let nz = pos.z as i32 + dz;
 
-            // Check bounds (stay within chunk).
-            if nx < 0
-                || nx >= CHUNK_SIZE_X as i32
-                || ny < 0
-                || ny >= CHUNK_SIZE_Y as i32
-                || nz < 0
-                || nz >= CHUNK_SIZE_Z as i32
-            {
-                // TODO: Queue cross-chunk light updates for border handling.
+            // Calculate new light level (decay by 1, special case for skylight downward).
+            let new_level = if is_skylight && dy == -1 {
+                // Skylight propagates downward without decay.
+                level
+            } else {
+                level.saturating_sub(1)
+            };
+
+            if new_level == 0 {
+                continue; // No point propagating zero light
+            }
+
+            // Check vertical bounds (no chunks above/below).
+            if ny < 0 || ny >= CHUNK_SIZE_Y as i32 {
                 continue;
             }
 
+            // Check horizontal bounds and queue cross-chunk updates if needed.
+            let mut target_chunk = self.chunk_pos;
+            let mut local_x = nx;
+            let mut local_z = nz;
+
+            // Handle X boundary crossing
+            if nx < 0 {
+                target_chunk.x -= 1;
+                local_x = CHUNK_SIZE_X as i32 - 1;
+            } else if nx >= CHUNK_SIZE_X as i32 {
+                target_chunk.x += 1;
+                local_x = 0;
+            }
+
+            // Handle Z boundary crossing
+            if nz < 0 {
+                target_chunk.z -= 1;
+                local_z = CHUNK_SIZE_Z as i32 - 1;
+            } else if nz >= CHUNK_SIZE_Z as i32 {
+                target_chunk.z += 1;
+                local_z = 0;
+            }
+
+            // If we crossed a chunk boundary, queue the cross-chunk update
+            if target_chunk != self.chunk_pos {
+                let light_type = if is_skylight {
+                    LightType::Skylight
+                } else {
+                    LightType::BlockLight
+                };
+
+                self.cross_chunk_updates.push(CrossChunkLightUpdate {
+                    target_chunk,
+                    target_pos: LocalPos {
+                        x: local_x as usize,
+                        y: ny as usize,
+                        z: local_z as usize,
+                    },
+                    level: new_level,
+                    light_type,
+                });
+                continue;
+            }
+
+            // Within chunk bounds - check opacity and enqueue
             let neighbor_pos = LocalPos {
                 x: nx as usize,
                 y: ny as usize,
@@ -194,17 +285,7 @@ impl LightQueue {
                 continue;
             }
 
-            // Calculate new light level (decay by 1, special case for skylight downward).
-            let new_level = if is_skylight && dy == -1 {
-                // Skylight propagates downward without decay.
-                level
-            } else {
-                level.saturating_sub(1)
-            };
-
-            if new_level > 0 {
-                self.enqueue(neighbor_pos, new_level);
-            }
+            self.enqueue(neighbor_pos, new_level);
         }
     }
 }
@@ -371,8 +452,10 @@ pub trait BlockOpacityProvider {
 }
 
 /// Skylight initialization: flood from top of chunk downward.
+/// Returns a LightUpdate for metrics and any pending cross-chunk updates.
 pub fn init_skylight(chunk: &mut Chunk, registry: &dyn BlockOpacityProvider) -> LightUpdate {
-    let mut queue = LightQueue::new();
+    let chunk_pos = chunk.position();
+    let mut queue = LightQueue::new_for_chunk(chunk_pos);
 
     // Start from top layer (Y = CHUNK_SIZE_Y - 1) with max light.
     for x in 0..CHUNK_SIZE_X {
@@ -390,10 +473,45 @@ pub fn init_skylight(chunk: &mut Chunk, registry: &dyn BlockOpacityProvider) -> 
     chunk.take_dirty_flags(); // Clear dirty flags after init.
 
     LightUpdate {
-        chunk_pos: chunk.position(),
+        chunk_pos,
         light_type: LightType::Skylight,
         nodes_processed,
     }
+}
+
+/// Skylight initialization with cross-chunk update tracking.
+/// Returns both the update metrics and pending cross-chunk updates.
+pub fn init_skylight_with_neighbors(
+    chunk: &mut Chunk,
+    registry: &dyn BlockOpacityProvider,
+) -> (LightUpdate, Vec<CrossChunkLightUpdate>) {
+    let chunk_pos = chunk.position();
+    let mut queue = LightQueue::new_for_chunk(chunk_pos);
+
+    // Start from top layer (Y = CHUNK_SIZE_Y - 1) with max light.
+    for x in 0..CHUNK_SIZE_X {
+        for z in 0..CHUNK_SIZE_Z {
+            let pos = LocalPos {
+                x,
+                y: CHUNK_SIZE_Y - 1,
+                z,
+            };
+            queue.enqueue(pos, MAX_LIGHT_LEVEL);
+        }
+    }
+
+    let nodes_processed = queue.propagate_skylight(chunk, registry);
+    let cross_chunk_updates = queue.take_cross_chunk_updates();
+    chunk.take_dirty_flags();
+
+    (
+        LightUpdate {
+            chunk_pos,
+            light_type: LightType::Skylight,
+            nodes_processed,
+        },
+        cross_chunk_updates,
+    )
 }
 
 /// Add a block light source at the given position.
@@ -403,15 +521,121 @@ pub fn add_block_light(
     intensity: u8,
     registry: &dyn BlockOpacityProvider,
 ) -> LightUpdate {
-    let mut queue = LightQueue::new();
+    let chunk_pos = chunk.position();
+    let mut queue = LightQueue::new_for_chunk(chunk_pos);
     queue.enqueue(pos, intensity.min(MAX_LIGHT_LEVEL));
     let nodes_processed = queue.propagate_blocklight(chunk, registry);
 
     LightUpdate {
-        chunk_pos: chunk.position(),
+        chunk_pos,
         light_type: LightType::BlockLight,
         nodes_processed,
     }
+}
+
+/// Add a block light source with cross-chunk update tracking.
+/// Returns both the update metrics and pending cross-chunk updates.
+pub fn add_block_light_with_neighbors(
+    chunk: &mut Chunk,
+    pos: LocalPos,
+    intensity: u8,
+    registry: &dyn BlockOpacityProvider,
+) -> (LightUpdate, Vec<CrossChunkLightUpdate>) {
+    let chunk_pos = chunk.position();
+    let mut queue = LightQueue::new_for_chunk(chunk_pos);
+    queue.enqueue(pos, intensity.min(MAX_LIGHT_LEVEL));
+    let nodes_processed = queue.propagate_blocklight(chunk, registry);
+    let cross_chunk_updates = queue.take_cross_chunk_updates();
+
+    (
+        LightUpdate {
+            chunk_pos,
+            light_type: LightType::BlockLight,
+            nodes_processed,
+        },
+        cross_chunk_updates,
+    )
+}
+
+/// Apply pending cross-chunk light updates to a chunk collection.
+///
+/// This function processes a list of cross-chunk updates, applying light values
+/// to the appropriate chunks and potentially generating further updates.
+///
+/// # Arguments
+/// * `chunks` - Mutable reference to the chunk collection
+/// * `registry` - Block opacity provider for light propagation
+/// * `updates` - List of pending cross-chunk updates to apply
+///
+/// # Returns
+/// Number of voxels updated across all chunks.
+pub fn apply_cross_chunk_updates(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    registry: &dyn BlockOpacityProvider,
+    updates: Vec<CrossChunkLightUpdate>,
+) -> usize {
+    let mut total_updated = 0;
+    let mut pending: VecDeque<CrossChunkLightUpdate> = updates.into_iter().collect();
+
+    while let Some(update) = pending.pop_front() {
+        let Some(chunk) = chunks.get_mut(&update.target_chunk) else {
+            continue; // Chunk not loaded, skip
+        };
+
+        let voxel = chunk.voxel(update.target_pos.x, update.target_pos.y, update.target_pos.z);
+
+        // Check if this voxel blocks light
+        if registry.is_opaque(voxel.id) {
+            continue;
+        }
+
+        // Check current light level
+        let current_level = match update.light_type {
+            LightType::Skylight => voxel.light_sky,
+            LightType::BlockLight => voxel.light_block,
+        };
+
+        // Only update if new level is higher
+        if update.level <= current_level {
+            continue;
+        }
+
+        // Update the voxel's light level
+        let mut updated_voxel = voxel;
+        match update.light_type {
+            LightType::Skylight => updated_voxel.light_sky = update.level,
+            LightType::BlockLight => updated_voxel.light_block = update.level,
+        }
+        chunk.set_voxel(
+            update.target_pos.x,
+            update.target_pos.y,
+            update.target_pos.z,
+            updated_voxel,
+        );
+        total_updated += 1;
+
+        // Propagate to neighbors using a local queue
+        let mut queue = LightQueue::new_for_chunk(update.target_chunk);
+        queue.enqueue(update.target_pos, update.level);
+
+        // Only propagate to get cross-chunk updates (don't re-process same chunk)
+        // The BFS will naturally handle intra-chunk propagation
+        match update.light_type {
+            LightType::Skylight => {
+                queue.propagate_skylight(chunk, registry);
+            }
+            LightType::BlockLight => {
+                queue.propagate_blocklight(chunk, registry);
+            }
+        }
+
+        // Add any new cross-chunk updates to the queue
+        for new_update in queue.take_cross_chunk_updates() {
+            pending.push_back(new_update);
+        }
+    }
+
+    total_updated
 }
 
 /// Remove block light at a position (reverse BFS for light removal).
@@ -619,5 +843,123 @@ mod tests {
         let chunk_b = chunks.get(&pos_b).unwrap();
         let lit = chunk_b.voxel(0, torch_pos.y, torch_pos.z);
         assert_eq!(lit.light_block, MAX_LIGHT_LEVEL - 1);
+    }
+
+    #[test]
+    fn add_block_light_generates_cross_chunk_updates() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = MockRegistry;
+
+        // Place torch at the very edge of the chunk (east boundary).
+        let torch_pos = LocalPos {
+            x: CHUNK_SIZE_X - 1,
+            y: 64,
+            z: 8,
+        };
+
+        let (update, cross_chunk_updates) =
+            add_block_light_with_neighbors(&mut chunk, torch_pos, MAX_LIGHT_LEVEL, &registry);
+
+        assert!(update.nodes_processed > 0);
+
+        // Should have generated at least one cross-chunk update for the east neighbor.
+        assert!(
+            !cross_chunk_updates.is_empty(),
+            "Expected cross-chunk updates for edge torch"
+        );
+
+        // Verify at least one update targets the chunk to the east.
+        let east_updates: Vec<_> = cross_chunk_updates
+            .iter()
+            .filter(|u| u.target_chunk == ChunkPos::new(1, 0))
+            .collect();
+
+        assert!(
+            !east_updates.is_empty(),
+            "Expected update for east neighbor chunk"
+        );
+
+        // Check the first east update has correct position and level.
+        let first_east = east_updates[0];
+        assert_eq!(first_east.target_pos.x, 0); // Should be west edge of east chunk
+        assert_eq!(first_east.target_pos.y, torch_pos.y);
+        assert_eq!(first_east.light_type, LightType::BlockLight);
+        assert_eq!(first_east.level, MAX_LIGHT_LEVEL - 1); // Decayed by 1
+    }
+
+    #[test]
+    fn apply_cross_chunk_updates_propagates_light() {
+        let mut chunks = HashMap::new();
+        let pos_a = ChunkPos::new(0, 0);
+        let pos_b = ChunkPos::new(1, 0);
+        let mut chunk_a = Chunk::new(pos_a);
+        let chunk_b = Chunk::new(pos_b);
+        let registry = MockRegistry;
+
+        // Add torch at east edge of chunk A.
+        let torch_pos = LocalPos {
+            x: CHUNK_SIZE_X - 1,
+            y: 64,
+            z: 8,
+        };
+
+        let (_, cross_chunk_updates) =
+            add_block_light_with_neighbors(&mut chunk_a, torch_pos, MAX_LIGHT_LEVEL, &registry);
+
+        chunks.insert(pos_a, chunk_a);
+        chunks.insert(pos_b, chunk_b);
+
+        // Apply the cross-chunk updates.
+        let updated = apply_cross_chunk_updates(&mut chunks, &registry, cross_chunk_updates);
+
+        assert!(updated > 0, "Expected some voxels to be updated");
+
+        // Verify chunk B received light at its west edge.
+        let chunk_b = chunks.get(&pos_b).unwrap();
+        let lit_voxel = chunk_b.voxel(0, torch_pos.y, torch_pos.z);
+        assert!(
+            lit_voxel.light_block > 0,
+            "Expected chunk B to receive light"
+        );
+    }
+
+    #[test]
+    fn cross_chunk_update_respects_opacity() {
+        let mut chunks = HashMap::new();
+        let pos_a = ChunkPos::new(0, 0);
+        let pos_b = ChunkPos::new(1, 0);
+        let mut chunk_a = Chunk::new(pos_a);
+        let mut chunk_b = Chunk::new(pos_b);
+        let registry = MockRegistry;
+
+        // Add torch at east edge of chunk A.
+        let torch_pos = LocalPos {
+            x: CHUNK_SIZE_X - 1,
+            y: 64,
+            z: 8,
+        };
+
+        // Place an opaque block in chunk B at the position that would receive light.
+        let mut blocking_voxel = chunk_b.voxel(0, torch_pos.y, torch_pos.z);
+        blocking_voxel.id = 1; // Opaque block (not air)
+        chunk_b.set_voxel(0, torch_pos.y, torch_pos.z, blocking_voxel);
+
+        let (_, cross_chunk_updates) =
+            add_block_light_with_neighbors(&mut chunk_a, torch_pos, MAX_LIGHT_LEVEL, &registry);
+
+        chunks.insert(pos_a, chunk_a);
+        chunks.insert(pos_b, chunk_b);
+
+        // Apply the cross-chunk updates.
+        apply_cross_chunk_updates(&mut chunks, &registry, cross_chunk_updates);
+
+        // Verify chunk B did NOT receive light (blocked by opaque block).
+        let chunk_b = chunks.get(&pos_b).unwrap();
+        let blocked_voxel = chunk_b.voxel(0, torch_pos.y, torch_pos.z);
+        assert_eq!(
+            blocked_voxel.light_block, 0,
+            "Opaque block should not receive light"
+        );
     }
 }

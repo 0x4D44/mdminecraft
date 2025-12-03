@@ -41,11 +41,11 @@ The roadmap is organized into 6 phases, ordered by dependency and priority:
 - [ ] Document texture pack creation process
 
 ### 1.4 Complete Existing TODOs
-- [ ] `crates/world/src/drop_item.rs:72` - Complete block→item mappings
-- [ ] `crates/world/src/lighting.rs:180` - Queue cross-chunk light updates
-- [ ] `crates/world/src/crafting.rs:56` - Implement crafting rollback
-- [ ] `src/menu.rs:220` - Settings menu (basic implementation)
-- [ ] `src/game.rs:1733` - Death screen implementation
+- [x] `crates/world/src/drop_item.rs:72` - Complete block→item mappings (2024-12-03)
+- [x] `crates/world/src/lighting.rs:180` - Queue cross-chunk light updates (2024-12-03)
+- [x] `crates/world/src/crafting.rs:56` - Implement crafting rollback (2024-12-03)
+- [x] `src/menu.rs:220` - Settings menu (basic implementation) (2024-12-03)
+- [x] `src/game.rs:1733` - Death screen implementation (2024-12-03)
 
 ### 1.5 Test Infrastructure
 - [ ] Add benchmark suite for performance regression testing
