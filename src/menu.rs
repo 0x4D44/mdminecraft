@@ -16,6 +16,81 @@ pub enum MenuAction {
     Quit,
 }
 
+/// Current view in the menu system
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuView {
+    /// Main menu with Play/Settings/Quit
+    Main,
+    /// Settings submenu
+    Settings,
+}
+
+/// Game settings that can be configured
+#[derive(Debug, Clone)]
+pub struct GameSettings {
+    pub mouse_sensitivity: f32,
+    pub invert_y: bool,
+    pub render_distance: i32,
+    pub vsync: bool,
+    pub show_fps: bool,
+    pub fov: f32,
+}
+
+impl Default for GameSettings {
+    fn default() -> Self {
+        Self {
+            mouse_sensitivity: 0.05,
+            invert_y: false,
+            render_distance: 8,
+            vsync: true,
+            show_fps: true,
+            fov: 70.0,
+        }
+    }
+}
+
+impl GameSettings {
+    /// Load settings from the controls config file
+    pub fn load() -> Self {
+        use crate::config::ControlsConfig;
+        let controls = ControlsConfig::load();
+        Self {
+            mouse_sensitivity: controls.mouse_sensitivity,
+            invert_y: controls.invert_y,
+            ..Default::default()
+        }
+    }
+
+    /// Save settings to the controls config file
+    pub fn save(&self) -> Result<()> {
+        use std::fs;
+        let toml_content = format!(
+            r#"# mdminecraft Controls Configuration
+
+mouse_sensitivity = {}
+invert_y = {}
+
+# Key bindings can be customized below
+[bindings.base]
+# Example: toggle_cursor = ["Tab"]
+
+[bindings.gameplay]
+# Example: forward = ["W", "Up"]
+
+[bindings.ui]
+# Example: close = ["Escape"]
+"#,
+            self.mouse_sensitivity, self.invert_y
+        );
+
+        // Ensure config directory exists
+        fs::create_dir_all("config")?;
+        fs::write("config/controls.toml", toml_content)?;
+        tracing::info!("Settings saved to config/controls.toml");
+        Ok(())
+    }
+}
+
 /// Main menu state
 pub struct MenuState {
     window: Arc<Window>,
@@ -26,6 +101,12 @@ pub struct MenuState {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     egui_renderer: egui_wgpu::Renderer,
+    /// Current view (main menu or settings)
+    current_view: MenuView,
+    /// Game settings
+    settings: GameSettings,
+    /// Whether settings have been modified
+    settings_dirty: bool,
 }
 
 impl MenuState {
@@ -107,7 +188,15 @@ impl MenuState {
             surface,
             surface_config,
             egui_renderer,
+            current_view: MenuView::Main,
+            settings: GameSettings::load(),
+            settings_dirty: false,
         })
+    }
+
+    /// Get the current settings
+    pub fn settings(&self) -> &GameSettings {
+        &self.settings
     }
 
     /// Handle an event
@@ -170,80 +259,54 @@ impl MenuState {
 
         // Prepare egui
         let raw_input = self.egui_state.take_egui_input(&self.window);
+
+        // Track state changes from UI
+        let mut goto_settings = false;
+        let mut goto_main = false;
+        let mut save_settings = false;
+        let current_view = self.current_view;
+        let mut settings = self.settings.clone();
+        let mut settings_dirty = self.settings_dirty;
+
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Main menu panel
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 30)))
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(150.0);
-
-                        // Title
-                        ui.heading(
-                            egui::RichText::new("mdminecraft")
-                                .size(72.0)
-                                .color(egui::Color32::from_rgb(100, 200, 255)),
-                        );
-
-                        ui.add_space(20.0);
-                        ui.label(
-                            egui::RichText::new("A Deterministic Voxel Sandbox Engine")
-                                .size(16.0)
-                                .color(egui::Color32::LIGHT_GRAY),
-                        );
-
-                        ui.add_space(100.0);
-
-                        // Menu buttons
-                        let button_width = 300.0;
-                        let button_height = 50.0;
-
-                        if ui
-                            .add_sized(
-                                [button_width, button_height],
-                                egui::Button::new(egui::RichText::new("Play").size(24.0)),
-                            )
-                            .clicked()
-                        {
-                            action = MenuAction::StartGame;
+                    match current_view {
+                        MenuView::Main => {
+                            render_main_menu_ui(ui, &mut action, &mut goto_settings);
                         }
-
-                        ui.add_space(15.0);
-
-                        if ui
-                            .add_sized(
-                                [button_width, button_height],
-                                egui::Button::new(egui::RichText::new("Settings").size(24.0)),
-                            )
-                            .clicked()
-                        {
-                            // TODO: Settings menu
-                            tracing::info!("Settings not yet implemented");
+                        MenuView::Settings => {
+                            render_settings_menu_ui(
+                                ui,
+                                &mut settings,
+                                &mut settings_dirty,
+                                &mut goto_main,
+                                &mut save_settings,
+                            );
                         }
-
-                        ui.add_space(15.0);
-
-                        if ui
-                            .add_sized(
-                                [button_width, button_height],
-                                egui::Button::new(egui::RichText::new("Quit").size(24.0)),
-                            )
-                            .clicked()
-                        {
-                            action = MenuAction::Quit;
-                        }
-
-                        ui.add_space(100.0);
-
-                        // Version info
-                        ui.label(
-                            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                                .size(12.0)
-                                .color(egui::Color32::DARK_GRAY),
-                        );
-                    });
+                    }
                 });
         });
+
+        // Apply changes from UI
+        self.settings = settings;
+        self.settings_dirty = settings_dirty;
+
+        // Handle view transitions after UI rendering
+        if goto_settings {
+            self.current_view = MenuView::Settings;
+        }
+        if goto_main {
+            self.current_view = MenuView::Main;
+        }
+        if save_settings {
+            if let Err(e) = self.settings.save() {
+                tracing::error!("Failed to save settings: {}", e);
+            }
+            self.settings_dirty = false;
+        }
 
         // Handle platform output
         self.egui_state
@@ -316,4 +379,288 @@ impl MenuState {
 
         action
     }
+
+}
+
+/// Render the main menu UI (standalone function to avoid borrow issues)
+fn render_main_menu_ui(ui: &mut egui::Ui, action: &mut MenuAction, goto_settings: &mut bool) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(150.0);
+
+        // Title
+        ui.heading(
+            egui::RichText::new("mdminecraft")
+                .size(72.0)
+                .color(egui::Color32::from_rgb(100, 200, 255)),
+        );
+
+        ui.add_space(20.0);
+        ui.label(
+            egui::RichText::new("A Deterministic Voxel Sandbox Engine")
+                .size(16.0)
+                .color(egui::Color32::LIGHT_GRAY),
+        );
+
+        ui.add_space(100.0);
+
+        // Menu buttons
+        let button_width = 300.0;
+        let button_height = 50.0;
+
+        if ui
+            .add_sized(
+                [button_width, button_height],
+                egui::Button::new(egui::RichText::new("Play").size(24.0)),
+            )
+            .clicked()
+        {
+            *action = MenuAction::StartGame;
+        }
+
+        ui.add_space(15.0);
+
+        if ui
+            .add_sized(
+                [button_width, button_height],
+                egui::Button::new(egui::RichText::new("Settings").size(24.0)),
+            )
+            .clicked()
+        {
+            *goto_settings = true;
+        }
+
+        ui.add_space(15.0);
+
+        if ui
+            .add_sized(
+                [button_width, button_height],
+                egui::Button::new(egui::RichText::new("Quit").size(24.0)),
+            )
+            .clicked()
+        {
+            *action = MenuAction::Quit;
+        }
+
+        ui.add_space(100.0);
+
+        // Version info
+        ui.label(
+            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                .size(12.0)
+                .color(egui::Color32::DARK_GRAY),
+        );
+    });
+}
+
+/// Render the settings menu UI (standalone function to avoid borrow issues)
+fn render_settings_menu_ui(
+    ui: &mut egui::Ui,
+    settings: &mut GameSettings,
+    settings_dirty: &mut bool,
+    goto_main: &mut bool,
+    save_settings: &mut bool,
+) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(80.0);
+
+        // Settings title
+        ui.heading(
+            egui::RichText::new("Settings")
+                .size(48.0)
+                .color(egui::Color32::from_rgb(100, 200, 255)),
+        );
+
+        ui.add_space(40.0);
+
+        // Settings panel
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 40, 200))
+            .inner_margin(egui::Margin::same(20.0))
+            .outer_margin(egui::Margin::symmetric(100.0, 0.0))
+            .rounding(8.0)
+            .show(ui, |ui| {
+                ui.set_min_width(500.0);
+
+                // Controls section
+                ui.heading(
+                    egui::RichText::new("Controls")
+                        .size(20.0)
+                        .color(egui::Color32::WHITE),
+                );
+                ui.add_space(10.0);
+
+                // Mouse sensitivity
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Mouse Sensitivity:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.mouse_sensitivity, 0.01..=0.2)
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // Invert Y axis
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Invert Y Axis:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui.checkbox(&mut settings.invert_y, "").changed() {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Graphics section
+                ui.heading(
+                    egui::RichText::new("Graphics")
+                        .size(20.0)
+                        .color(egui::Color32::WHITE),
+                );
+                ui.add_space(10.0);
+
+                // Field of View
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Field of View:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.fov, 60.0..=110.0)
+                                .suffix("°")
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // Render distance
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Render Distance:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.render_distance, 2..=16)
+                                .suffix(" chunks")
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // VSync
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("VSync:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui.checkbox(&mut settings.vsync, "").changed() {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // Show FPS
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Show FPS:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui.checkbox(&mut settings.show_fps, "").changed() {
+                        *settings_dirty = true;
+                    }
+                });
+            });
+
+        ui.add_space(40.0);
+
+        // Buttons
+        ui.horizontal(|ui| {
+            ui.add_space(150.0);
+
+            // Save button (highlighted if dirty)
+            let save_button = if *settings_dirty {
+                egui::Button::new(
+                    egui::RichText::new("Save")
+                        .size(20.0)
+                        .color(egui::Color32::WHITE),
+                )
+                .fill(egui::Color32::from_rgb(60, 120, 60))
+            } else {
+                egui::Button::new(
+                    egui::RichText::new("Save")
+                        .size(20.0)
+                        .color(egui::Color32::LIGHT_GRAY),
+                )
+                .fill(egui::Color32::from_rgb(60, 60, 60))
+            };
+
+            if ui.add_sized([120.0, 45.0], save_button).clicked() {
+                *save_settings = true;
+            }
+
+            ui.add_space(20.0);
+
+            // Back button
+            if ui
+                .add_sized(
+                    [120.0, 45.0],
+                    egui::Button::new(
+                        egui::RichText::new("Back")
+                            .size(20.0)
+                            .color(egui::Color32::WHITE),
+                    ),
+                )
+                .clicked()
+            {
+                *goto_main = true;
+            }
+        });
+
+        // Dirty indicator
+        if *settings_dirty {
+            ui.add_space(10.0);
+            ui.label(
+                egui::RichText::new("* Unsaved changes")
+                    .size(12.0)
+                    .color(egui::Color32::YELLOW),
+            );
+        }
+    });
 }
