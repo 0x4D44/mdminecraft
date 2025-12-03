@@ -46,6 +46,15 @@ pub enum GameAction {
     Quit,
 }
 
+/// Player state (alive, dead, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerState {
+    /// Player is alive and can move/interact
+    Alive,
+    /// Player is dead and viewing death screen
+    Dead,
+}
+
 /// Hotbar for item selection
 struct Hotbar {
     slots: [Option<ItemStack>; 9],
@@ -439,6 +448,14 @@ pub struct GameWorld {
     weather_blend: f32,
     /// Last frame delta time (seconds)
     frame_dt: f32,
+    /// Current player state (alive/dead)
+    player_state: PlayerState,
+    /// Cause of death message for display
+    death_message: String,
+    /// Whether respawn was requested from death screen
+    respawn_requested: bool,
+    /// Whether return to menu was requested from death screen
+    menu_requested: bool,
     #[cfg(feature = "ui3d_billboards")]
     billboard_renderer: Option<BillboardRenderer>,
     #[cfg(feature = "ui3d_billboards")]
@@ -605,6 +622,10 @@ impl GameWorld {
             rng,
             weather_blend: 0.0,
             frame_dt: 0.0,
+            player_state: PlayerState::Alive,
+            death_message: String::new(),
+            respawn_requested: false,
+            menu_requested: false,
             #[cfg(feature = "ui3d_billboards")]
             billboard_renderer,
             #[cfg(feature = "ui3d_billboards")]
@@ -730,6 +751,11 @@ impl GameWorld {
                     }
                     WindowEvent::RedrawRequested => {
                         self.update_and_render();
+
+                        // Check for death screen actions after render
+                        if let Some(action) = self.check_death_screen_actions() {
+                            return action;
+                        }
                     }
                     _ => {}
                 }
@@ -1195,8 +1221,8 @@ impl GameWorld {
         self.debug_hud.particle_count = self.particles.len();
 
         // Check for death
-        if self.player_health.is_dead() {
-            self.handle_death();
+        if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
+            self.handle_death("You died!");
         }
 
         // Update debug HUD
@@ -1211,11 +1237,13 @@ impl GameWorld {
         self.debug_hud.weather_state = self.weather_state_label().to_string();
         self.debug_hud.weather_intensity = self.weather_intensity();
 
-        // Update camera from input
-        self.update_camera(dt);
+        // Update camera from input (only if alive)
+        if self.player_state == PlayerState::Alive {
+            self.update_camera(dt);
+        }
 
-        // Raycast for block selection
-        if self.input.cursor_captured {
+        // Raycast for block selection (only if alive)
+        if self.input.cursor_captured && self.player_state == PlayerState::Alive {
             let camera = self.renderer.camera();
             let ray_origin = camera.position;
             let ray_dir = camera.forward();
@@ -1668,6 +1696,11 @@ impl GameWorld {
             }
 
             // Render UI overlay
+            let is_dead = self.player_state == PlayerState::Dead;
+            let death_msg = self.death_message.clone();
+            let mut respawn_clicked = false;
+            let mut menu_clicked = false;
+
             if let Some(mut ui) = self.renderer.ui_mut() {
                 let screen_descriptor = egui_wgpu::ScreenDescriptor {
                     size_in_pixels: [1280, 720],
@@ -1687,8 +1720,23 @@ impl GameWorld {
                         self.debug_hud.render(ctx);
                         render_hotbar(ctx, &self.hotbar);
                         render_health_bar(ctx, &self.player_health);
+
+                        // Show death screen if player is dead
+                        if is_dead {
+                            let (respawn, menu) = render_death_screen(ctx, &death_msg);
+                            respawn_clicked = respawn;
+                            menu_clicked = menu;
+                        }
                     },
                 );
+            }
+
+            // Handle death screen button clicks
+            if respawn_clicked {
+                self.respawn_requested = true;
+            }
+            if menu_clicked {
+                self.menu_requested = true;
             }
 
             resources.queue.submit(std::iter::once(encoder.finish()));
@@ -1710,12 +1758,38 @@ impl GameWorld {
                 fall_distance,
                 damage
             );
+
+            // Check if this killed the player
+            if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
+                let msg = format!("You fell from a high place ({:.0} blocks)", fall_distance);
+                self.handle_death(&msg);
+            }
         }
     }
 
-    /// Handle player death
-    fn handle_death(&mut self) {
-        tracing::info!("Player died! Respawning at spawn point...");
+    /// Handle player death - enter death state and show death screen
+    fn handle_death(&mut self, cause: &str) {
+        if self.player_state == PlayerState::Dead {
+            return; // Already dead
+        }
+
+        tracing::info!("Player died! Cause: {}", cause);
+
+        self.player_state = PlayerState::Dead;
+        self.death_message = cause.to_string();
+        self.respawn_requested = false;
+        self.menu_requested = false;
+
+        // Release cursor so player can click UI buttons
+        let _ = self.input.enter_menu(&self.window);
+
+        // Stop player movement
+        self.player_physics.velocity = glam::Vec3::ZERO;
+    }
+
+    /// Respawn the player at spawn point
+    fn respawn(&mut self) {
+        tracing::info!("Respawning player at spawn point...");
 
         // Respawn player at spawn point
         let camera = self.renderer.camera_mut();
@@ -1730,7 +1804,34 @@ impl GameWorld {
         self.player_physics.on_ground = false;
         self.player_physics.last_ground_y = self.spawn_point.y;
 
-        // TODO: Drop inventory items, show death screen, etc.
+        // Reset state
+        self.player_state = PlayerState::Alive;
+        self.death_message.clear();
+
+        // Re-capture cursor for gameplay
+        let _ = self.input.enter_gameplay(&self.window);
+    }
+
+    /// Check if player requested respawn from death screen
+    fn check_death_screen_actions(&mut self) -> Option<GameAction> {
+        if self.player_state != PlayerState::Dead {
+            return None;
+        }
+
+        if self.respawn_requested {
+            self.respawn_requested = false;
+            self.respawn();
+            return None;
+        }
+
+        if self.menu_requested {
+            self.menu_requested = false;
+            self.player_state = PlayerState::Alive; // Reset state before returning
+            self.player_health.reset();
+            return Some(GameAction::ReturnToMenu);
+        }
+
+        None
     }
 }
 
@@ -1858,4 +1959,83 @@ fn render_health_bar(ctx: &egui::Context, health: &PlayerHealth) {
                 );
             });
         });
+}
+
+/// Render the death screen overlay
+/// Returns (respawn_clicked, menu_clicked)
+fn render_death_screen(ctx: &egui::Context, death_message: &str) -> (bool, bool) {
+    let mut respawn_clicked = false;
+    let mut menu_clicked = false;
+
+    // Semi-transparent red overlay
+    egui::Area::new(egui::Id::new("death_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(139, 0, 0, 180), // Dark red
+            );
+        });
+
+    // Death screen content
+    egui::Area::new(egui::Id::new("death_screen"))
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(20.0);
+
+                // "You Died!" title
+                ui.label(
+                    egui::RichText::new("You Died!")
+                        .size(64.0)
+                        .color(egui::Color32::WHITE)
+                        .strong(),
+                );
+
+                ui.add_space(20.0);
+
+                // Death message
+                ui.label(
+                    egui::RichText::new(death_message)
+                        .size(24.0)
+                        .color(egui::Color32::from_rgb(255, 200, 200)),
+                );
+
+                ui.add_space(40.0);
+
+                // Respawn button
+                let respawn_button = egui::Button::new(
+                    egui::RichText::new("Respawn")
+                        .size(24.0)
+                        .color(egui::Color32::WHITE),
+                )
+                .min_size(egui::vec2(200.0, 50.0))
+                .fill(egui::Color32::from_rgb(60, 120, 60));
+
+                if ui.add(respawn_button).clicked() {
+                    respawn_clicked = true;
+                }
+
+                ui.add_space(15.0);
+
+                // Return to menu button
+                let menu_button = egui::Button::new(
+                    egui::RichText::new("Title Screen")
+                        .size(18.0)
+                        .color(egui::Color32::LIGHT_GRAY),
+                )
+                .min_size(egui::vec2(180.0, 40.0))
+                .fill(egui::Color32::from_rgb(80, 80, 80));
+
+                if ui.add(menu_button).clicked() {
+                    menu_clicked = true;
+                }
+
+                ui.add_space(20.0);
+            });
+        });
+
+    (respawn_clicked, menu_clicked)
 }

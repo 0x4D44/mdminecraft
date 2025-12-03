@@ -15,14 +15,24 @@ pub const PICKUP_RADIUS: f64 = 1.5;
 /// Types of items that can be dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ItemType {
-    // Block items
+    // Block items - terrain
     Stone,
     Dirt,
     Grass,
     Sand,
     Gravel,
-    Wood,
-    Leaves,
+    Ice,
+    Snow,
+    Clay,
+    Bedrock,
+
+    // Block items - trees
+    OakLog,
+    OakLeaves,
+    BirchLog,
+    BirchLeaves,
+    PineLog,
+    PineLeaves,
 
     // Mob drops
     RawPork,
@@ -35,42 +45,157 @@ pub enum ItemType {
     // Crafted items (for future use)
     Stick,
     Planks,
+    OakPlanks,
+    BirchPlanks,
+    PinePlanks,
+
+    // Special items
+    Sapling,
+    Apple,
 }
 
 impl ItemType {
     /// Get the maximum stack size for this item type.
     pub fn max_stack_size(&self) -> u32 {
         match self {
-            // Most items stack to 64
+            // Most block items stack to 64
             ItemType::Stone
             | ItemType::Dirt
             | ItemType::Grass
             | ItemType::Sand
             | ItemType::Gravel
-            | ItemType::Wood
-            | ItemType::Leaves
+            | ItemType::Ice
+            | ItemType::Snow
+            | ItemType::Clay
+            | ItemType::Bedrock
+            | ItemType::OakLog
+            | ItemType::OakLeaves
+            | ItemType::BirchLog
+            | ItemType::BirchLeaves
+            | ItemType::PineLog
+            | ItemType::PineLeaves
             | ItemType::Wool
             | ItemType::Feather
             | ItemType::Stick
-            | ItemType::Planks => 64,
+            | ItemType::Planks
+            | ItemType::OakPlanks
+            | ItemType::BirchPlanks
+            | ItemType::PinePlanks
+            | ItemType::Sapling => 64,
 
             // Food and resources stack to 16
-            ItemType::RawPork | ItemType::RawBeef | ItemType::Leather | ItemType::Egg => 16,
+            ItemType::RawPork
+            | ItemType::RawBeef
+            | ItemType::Leather
+            | ItemType::Egg
+            | ItemType::Apple => 16,
         }
     }
 
     /// Get the item that drops when a block is broken.
     ///
     /// Returns Some((item_type, count)) or None if nothing drops.
+    ///
+    /// Block IDs reference (from terrain.rs and trees.rs):
+    /// - 0: Air (no drop)
+    /// - 1: Stone
+    /// - 2: Dirt
+    /// - 3: Grass (drops dirt, not grass block)
+    /// - 4: Sand
+    /// - 5: Gravel
+    /// - 6: Water (no drop)
+    /// - 7: Ice
+    /// - 8: Snow
+    /// - 9: Clay
+    /// - 10: Bedrock (no drop in survival)
+    /// - 11: Oak Log
+    /// - 12: Oak Leaves (chance to drop sapling/apple)
+    /// - 13: Birch Log
+    /// - 14: Birch Leaves (chance to drop sapling)
+    /// - 15: Pine Log
+    /// - 16: Pine Leaves (chance to drop sapling)
     pub fn from_block(block_id: u16) -> Option<(ItemType, u32)> {
         match block_id {
-            1 => Some((ItemType::Stone, 1)),  // Stone block
-            2 => Some((ItemType::Dirt, 1)),   // Dirt block
-            3 => Some((ItemType::Grass, 1)),  // Grass block -> grass item
-            4 => Some((ItemType::Sand, 1)),   // Sand block
-            5 => Some((ItemType::Gravel, 1)), // Gravel block
-            // TODO: Add more block -> item mappings
-            _ => None, // Air, water, etc. don't drop items
+            // Terrain blocks
+            1 => Some((ItemType::Stone, 1)),
+            2 => Some((ItemType::Dirt, 1)),
+            3 => Some((ItemType::Dirt, 1)), // Grass drops dirt (like Minecraft)
+            4 => Some((ItemType::Sand, 1)),
+            5 => Some((ItemType::Gravel, 1)),
+            7 => Some((ItemType::Ice, 1)),
+            8 => Some((ItemType::Snow, 1)),
+            9 => Some((ItemType::Clay, 1)),
+
+            // Tree blocks
+            11 => Some((ItemType::OakLog, 1)),
+            12 => Some((ItemType::OakLeaves, 1)), // Could add random sapling drop
+            13 => Some((ItemType::BirchLog, 1)),
+            14 => Some((ItemType::BirchLeaves, 1)),
+            15 => Some((ItemType::PineLog, 1)),
+            16 => Some((ItemType::PineLeaves, 1)),
+
+            // No drops: Air (0), Water (6), Bedrock (10)
+            _ => None,
+        }
+    }
+
+    /// Get the item that drops from leaves with random chance.
+    ///
+    /// Leaves have a chance to drop saplings (1/16) and oak leaves
+    /// have a chance to drop apples (1/200).
+    ///
+    /// # Arguments
+    /// * `block_id` - The block ID of the leaves
+    /// * `random_value` - A random value from 0.0 to 1.0
+    ///
+    /// # Returns
+    /// Some((item_type, count)) if a special drop occurs, None otherwise.
+    pub fn from_leaves_random(block_id: u16, random_value: f64) -> Option<(ItemType, u32)> {
+        match block_id {
+            12 => {
+                // Oak leaves: 1/200 apple, 1/16 sapling
+                if random_value < 0.005 {
+                    Some((ItemType::Apple, 1))
+                } else if random_value < 0.005 + 0.0625 {
+                    Some((ItemType::Sapling, 1))
+                } else {
+                    None
+                }
+            }
+            14 | 16 => {
+                // Birch/Pine leaves: 1/16 sapling
+                if random_value < 0.0625 {
+                    Some((ItemType::Sapling, 1))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the block ID that this item places (if applicable).
+    ///
+    /// # Returns
+    /// Some(block_id) if this item can be placed as a block, None otherwise.
+    pub fn to_block(&self) -> Option<u16> {
+        match self {
+            ItemType::Stone => Some(1),
+            ItemType::Dirt => Some(2),
+            ItemType::Grass => Some(3),
+            ItemType::Sand => Some(4),
+            ItemType::Gravel => Some(5),
+            ItemType::Ice => Some(7),
+            ItemType::Snow => Some(8),
+            ItemType::Clay => Some(9),
+            ItemType::OakLog => Some(11),
+            ItemType::OakLeaves => Some(12),
+            ItemType::BirchLog => Some(13),
+            ItemType::BirchLeaves => Some(14),
+            ItemType::PineLog => Some(15),
+            ItemType::PineLeaves => Some(16),
+            // Non-placeable items
+            _ => None,
         }
     }
 }
@@ -394,16 +519,87 @@ mod tests {
 
     #[test]
     fn test_item_type_max_stack() {
+        // Block items stack to 64
         assert_eq!(ItemType::Stone.max_stack_size(), 64);
-        assert_eq!(ItemType::RawPork.max_stack_size(), 16);
+        assert_eq!(ItemType::OakLog.max_stack_size(), 64);
+        assert_eq!(ItemType::Ice.max_stack_size(), 64);
         assert_eq!(ItemType::Feather.max_stack_size(), 64);
+
+        // Food/resources stack to 16
+        assert_eq!(ItemType::RawPork.max_stack_size(), 16);
+        assert_eq!(ItemType::Apple.max_stack_size(), 16);
     }
 
     #[test]
     fn test_item_type_from_block() {
+        // Terrain blocks
         assert_eq!(ItemType::from_block(1), Some((ItemType::Stone, 1)));
         assert_eq!(ItemType::from_block(2), Some((ItemType::Dirt, 1)));
+        assert_eq!(ItemType::from_block(3), Some((ItemType::Dirt, 1))); // Grass drops dirt
+        assert_eq!(ItemType::from_block(4), Some((ItemType::Sand, 1)));
+        assert_eq!(ItemType::from_block(5), Some((ItemType::Gravel, 1)));
+        assert_eq!(ItemType::from_block(7), Some((ItemType::Ice, 1)));
+        assert_eq!(ItemType::from_block(8), Some((ItemType::Snow, 1)));
+        assert_eq!(ItemType::from_block(9), Some((ItemType::Clay, 1)));
+
+        // Tree blocks
+        assert_eq!(ItemType::from_block(11), Some((ItemType::OakLog, 1)));
+        assert_eq!(ItemType::from_block(12), Some((ItemType::OakLeaves, 1)));
+        assert_eq!(ItemType::from_block(13), Some((ItemType::BirchLog, 1)));
+        assert_eq!(ItemType::from_block(14), Some((ItemType::BirchLeaves, 1)));
+        assert_eq!(ItemType::from_block(15), Some((ItemType::PineLog, 1)));
+        assert_eq!(ItemType::from_block(16), Some((ItemType::PineLeaves, 1)));
+
+        // No drops
         assert_eq!(ItemType::from_block(0), None); // Air
+        assert_eq!(ItemType::from_block(6), None); // Water
+        assert_eq!(ItemType::from_block(10), None); // Bedrock
+    }
+
+    #[test]
+    fn test_item_type_to_block() {
+        assert_eq!(ItemType::Stone.to_block(), Some(1));
+        assert_eq!(ItemType::Dirt.to_block(), Some(2));
+        assert_eq!(ItemType::OakLog.to_block(), Some(11));
+        assert_eq!(ItemType::BirchLeaves.to_block(), Some(14));
+
+        // Non-placeable items
+        assert_eq!(ItemType::RawPork.to_block(), None);
+        assert_eq!(ItemType::Apple.to_block(), None);
+        assert_eq!(ItemType::Stick.to_block(), None);
+    }
+
+    #[test]
+    fn test_leaves_random_drops() {
+        // Oak leaves - apple drop (< 0.005)
+        assert_eq!(
+            ItemType::from_leaves_random(12, 0.001),
+            Some((ItemType::Apple, 1))
+        );
+
+        // Oak leaves - sapling drop (0.005 to 0.0675)
+        assert_eq!(
+            ItemType::from_leaves_random(12, 0.01),
+            Some((ItemType::Sapling, 1))
+        );
+
+        // Oak leaves - no drop (> 0.0675)
+        assert_eq!(ItemType::from_leaves_random(12, 0.1), None);
+
+        // Birch leaves - sapling drop
+        assert_eq!(
+            ItemType::from_leaves_random(14, 0.03),
+            Some((ItemType::Sapling, 1))
+        );
+
+        // Pine leaves - sapling drop
+        assert_eq!(
+            ItemType::from_leaves_random(16, 0.05),
+            Some((ItemType::Sapling, 1))
+        );
+
+        // Non-leaf block
+        assert_eq!(ItemType::from_leaves_random(1, 0.001), None);
     }
 
     #[test]
