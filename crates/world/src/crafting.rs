@@ -42,23 +42,37 @@ impl Recipe {
 
     /// Try to craft this recipe using items from the inventory.
     /// Returns the output item stack if successful, None if inputs are missing.
+    ///
+    /// This function is atomic - if crafting fails partway through,
+    /// all removed items are restored to the inventory.
     pub fn craft(&self, inventory: &mut Inventory) -> Option<ItemStack> {
         // Check if we have all inputs.
         if !self.can_craft(inventory) {
             return None;
         }
 
+        // Track removed items for potential rollback
+        let mut removed_items: Vec<(ItemId, u8)> = Vec::with_capacity(self.inputs.len());
+
         // Remove inputs from inventory.
         for input in &self.inputs {
             let removed = inventory.remove_item(input.item_id, input.count);
             if removed < input.count {
-                // This shouldn't happen if can_craft returned true, but be safe.
-                // TODO: Rollback removed items?
+                // This shouldn't happen if can_craft returned true, but handle gracefully.
+                // Rollback all previously removed items
+                for (item_id, count) in removed_items {
+                    inventory.add_item(ItemStack::new(item_id, count));
+                }
+                // Also return the partially removed items from this iteration
+                if removed > 0 {
+                    inventory.add_item(ItemStack::new(input.item_id, removed));
+                }
                 return None;
             }
+            removed_items.push((input.item_id, removed));
         }
 
-        // Return output.
+        // All inputs successfully removed - return output
         Some(ItemStack::new(self.output_item, self.output_count))
     }
 }
@@ -317,5 +331,79 @@ mod tests {
 
         grid.clear();
         assert!(grid.is_empty());
+    }
+
+    #[test]
+    fn craft_rollback_on_partial_failure() {
+        // Create a recipe requiring multiple different items
+        let recipe = Recipe {
+            id: "complex".into(),
+            inputs: vec![
+                RecipeInput {
+                    item_id: 1,
+                    count: 2,
+                },
+                RecipeInput {
+                    item_id: 2,
+                    count: 3,
+                },
+                RecipeInput {
+                    item_id: 3,
+                    count: 5,
+                },
+            ],
+            output_item: 10,
+            output_count: 1,
+        };
+
+        // Create inventory with enough of first two items but not third
+        let mut inv = Inventory::new();
+        inv.add_item(ItemStack::new(1, 5)); // 5 of item 1
+        inv.add_item(ItemStack::new(2, 4)); // 4 of item 2
+        inv.add_item(ItemStack::new(3, 2)); // Only 2 of item 3 (need 5)
+
+        // Record original counts
+        let orig_1 = inv.count_item(1);
+        let orig_2 = inv.count_item(2);
+        let orig_3 = inv.count_item(3);
+
+        // Crafting should fail because we don't have enough of item 3
+        assert!(recipe.craft(&mut inv).is_none());
+
+        // Verify all items were restored (rollback worked)
+        assert_eq!(inv.count_item(1), orig_1, "Item 1 should be restored");
+        assert_eq!(inv.count_item(2), orig_2, "Item 2 should be restored");
+        assert_eq!(inv.count_item(3), orig_3, "Item 3 should be restored");
+    }
+
+    #[test]
+    fn craft_success_consumes_all_inputs() {
+        let recipe = Recipe {
+            id: "multi".into(),
+            inputs: vec![
+                RecipeInput {
+                    item_id: 1,
+                    count: 2,
+                },
+                RecipeInput {
+                    item_id: 2,
+                    count: 1,
+                },
+            ],
+            output_item: 10,
+            output_count: 3,
+        };
+
+        let mut inv = Inventory::new();
+        inv.add_item(ItemStack::new(1, 5));
+        inv.add_item(ItemStack::new(2, 3));
+
+        let output = recipe.craft(&mut inv).unwrap();
+        assert_eq!(output.item_id, 10);
+        assert_eq!(output.count, 3);
+
+        // Verify inputs were consumed
+        assert_eq!(inv.count_item(1), 3); // 5 - 2 = 3
+        assert_eq!(inv.count_item(2), 2); // 3 - 1 = 2
     }
 }

@@ -37,7 +37,7 @@ fn drop_item_lifecycle_worldtest() {
         let item_type = match i % 4 {
             0 => ItemType::Stone,
             1 => ItemType::Dirt,
-            2 => ItemType::Wood,
+            2 => ItemType::OakLog,
             _ => ItemType::Sand,
         };
 
@@ -149,7 +149,7 @@ fn drop_item_lifecycle_worldtest() {
     let mut pickup_manager = ItemManager::new();
     pickup_manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
     pickup_manager.spawn_item(10.5, 64.0, 20.5, ItemType::Dirt, 3);
-    pickup_manager.spawn_item(20.0, 64.0, 30.0, ItemType::Wood, 7);
+    pickup_manager.spawn_item(20.0, 64.0, 30.0, ItemType::OakLog, 7);
 
     // Pickup items near (10, 64, 20)
     let picked_up = pickup_manager.pickup_items(10.0, 64.0, 20.0);
@@ -291,9 +291,21 @@ fn test_item_type_block_mapping() {
     assert_eq!(ItemType::from_block(0), None); // Air
     assert_eq!(ItemType::from_block(1), Some((ItemType::Stone, 1)));
     assert_eq!(ItemType::from_block(2), Some((ItemType::Dirt, 1)));
-    assert_eq!(ItemType::from_block(3), Some((ItemType::Grass, 1)));
+    assert_eq!(ItemType::from_block(3), Some((ItemType::Dirt, 1))); // Grass drops dirt
     assert_eq!(ItemType::from_block(4), Some((ItemType::Sand, 1)));
     assert_eq!(ItemType::from_block(5), Some((ItemType::Gravel, 1)));
+    assert_eq!(ItemType::from_block(7), Some((ItemType::Ice, 1)));
+    assert_eq!(ItemType::from_block(8), Some((ItemType::Snow, 1)));
+    assert_eq!(ItemType::from_block(9), Some((ItemType::Clay, 1)));
+    assert_eq!(ItemType::from_block(11), Some((ItemType::OakLog, 1)));
+    assert_eq!(ItemType::from_block(12), Some((ItemType::OakLeaves, 1)));
+    assert_eq!(ItemType::from_block(13), Some((ItemType::BirchLog, 1)));
+    assert_eq!(ItemType::from_block(14), Some((ItemType::BirchLeaves, 1)));
+    assert_eq!(ItemType::from_block(15), Some((ItemType::PineLog, 1)));
+    assert_eq!(ItemType::from_block(16), Some((ItemType::PineLeaves, 1)));
+    // No drops
+    assert_eq!(ItemType::from_block(6), None); // Water
+    assert_eq!(ItemType::from_block(10), None); // Bedrock
 }
 
 #[test]
