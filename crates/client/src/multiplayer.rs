@@ -126,15 +126,19 @@ impl MultiplayerClient {
 
     /// Process incoming messages from server.
     async fn process_server_messages(&mut self) -> Result<()> {
-        let Some(connection) = &self.connection else {
+        if self.connection.is_none() {
             return Ok(());
-        };
+        }
 
         const MAX_RELIABLE: usize = 32;
         const MAX_UNRELIABLE: usize = 32;
 
         // Drain reliable channel without blocking the frame.
         for _ in 0..MAX_RELIABLE {
+            let connection = match &self.connection {
+                Some(conn) => conn,
+                None => break,
+            };
             match timeout(Duration::from_millis(0), connection.recv_reliable()).await {
                 Ok(Ok(msg)) => self.handle_server_message(msg)?,
                 Ok(Err(e)) => {
@@ -148,6 +152,10 @@ impl MultiplayerClient {
 
         // Drain unreliable channel (datagrams).
         for _ in 0..MAX_UNRELIABLE {
+            let connection = match &self.connection {
+                Some(conn) => conn,
+                None => break,
+            };
             match timeout(Duration::from_millis(0), connection.recv_unreliable()).await {
                 Ok(Ok(msg)) => self.handle_server_message(msg)?,
                 Ok(Err(e)) => {
