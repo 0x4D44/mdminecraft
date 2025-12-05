@@ -2,8 +2,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bevy_ecs::{
+    component::Component,
+    prelude::IntoSystemConfigs,
     schedule::Schedule,
-    system::{IntoSystemConfigs, Query},
+    system::Query,
     world::World,
 };
 use clap::Parser;
@@ -24,14 +26,14 @@ struct Args {
     seed: u64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Component)]
 struct Position {
     x: f32,
     y: f32,
     z: f32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Component)]
 struct Velocity {
     x: f32,
     y: f32,
@@ -108,8 +110,7 @@ fn benchmark_hecs(entities: usize, ticks: usize, seed: u64) -> Duration {
 
     let start = Instant::now();
     for _ in 0..ticks {
-        let mut query = world.query::<(&mut Position, &Velocity)>();
-        for (mut pos, vel) in query.iter() {
+        for (_entity, (pos, vel)) in world.query::<(&mut Position, &Velocity)>().iter() {
             pos.x += vel.x;
             pos.y += vel.y;
             pos.z += vel.z;

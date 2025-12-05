@@ -344,9 +344,17 @@ fn large_scale_terrain_worldtest() {
         unique_biomes >= 5,
         "Should have at least 5 different biomes"
     );
+    // Performance threshold: 30ms for release, 150ms for debug
+    let performance_threshold = if cfg!(debug_assertions) {
+        150_000.0
+    } else {
+        30_000.0
+    };
     assert!(
-        avg_gen_time_us < 30_000.0,
-        "Average generation must be under 30ms"
+        avg_gen_time_us < performance_threshold,
+        "Average generation must be under {}ms (was {:.1}μs)",
+        performance_threshold / 1000.0,
+        avg_gen_time_us
     );
     assert!(
         max_seam_diff <= MAX_SEAM_DIFF,

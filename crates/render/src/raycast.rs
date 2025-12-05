@@ -67,20 +67,32 @@ where
 
     // Distance from origin to next voxel boundary in each axis
     let mut t_max = Vec3::new(
-        if direction.x > 0.0 {
-            ((voxel.x + 1) as f32 - origin.x) / direction.x
+        if direction.x != 0.0 {
+            if direction.x > 0.0 {
+                ((voxel.x + 1) as f32 - origin.x) / direction.x
+            } else {
+                (voxel.x as f32 - origin.x) / direction.x
+            }
         } else {
-            (voxel.x as f32 - origin.x) / direction.x
+            f32::MAX
         },
-        if direction.y > 0.0 {
-            ((voxel.y + 1) as f32 - origin.y) / direction.y
+        if direction.y != 0.0 {
+            if direction.y > 0.0 {
+                ((voxel.y + 1) as f32 - origin.y) / direction.y
+            } else {
+                (voxel.y as f32 - origin.y) / direction.y
+            }
         } else {
-            (voxel.y as f32 - origin.y) / direction.y
+            f32::MAX
         },
-        if direction.z > 0.0 {
-            ((voxel.z + 1) as f32 - origin.z) / direction.z
+        if direction.z != 0.0 {
+            if direction.z > 0.0 {
+                ((voxel.z + 1) as f32 - origin.z) / direction.z
+            } else {
+                (voxel.z as f32 - origin.z) / direction.z
+            }
         } else {
-            (voxel.z as f32 - origin.z) / direction.z
+            f32::MAX
         },
     );
 

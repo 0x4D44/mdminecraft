@@ -582,7 +582,11 @@ pub fn apply_cross_chunk_updates(
             continue; // Chunk not loaded, skip
         };
 
-        let voxel = chunk.voxel(update.target_pos.x, update.target_pos.y, update.target_pos.z);
+        let voxel = chunk.voxel(
+            update.target_pos.x,
+            update.target_pos.y,
+            update.target_pos.z,
+        );
 
         // Check if this voxel blocks light
         if registry.is_opaque(voxel.id) {

@@ -272,20 +272,18 @@ impl MenuState {
             // Main menu panel
             egui::CentralPanel::default()
                 .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 30)))
-                .show(ctx, |ui| {
-                    match current_view {
-                        MenuView::Main => {
-                            render_main_menu_ui(ui, &mut action, &mut goto_settings);
-                        }
-                        MenuView::Settings => {
-                            render_settings_menu_ui(
-                                ui,
-                                &mut settings,
-                                &mut settings_dirty,
-                                &mut goto_main,
-                                &mut save_settings,
-                            );
-                        }
+                .show(ctx, |ui| match current_view {
+                    MenuView::Main => {
+                        render_main_menu_ui(ui, &mut action, &mut goto_settings);
+                    }
+                    MenuView::Settings => {
+                        render_settings_menu_ui(
+                            ui,
+                            &mut settings,
+                            &mut settings_dirty,
+                            &mut goto_main,
+                            &mut save_settings,
+                        );
                     }
                 });
         });
@@ -379,7 +377,6 @@ impl MenuState {
 
         action
     }
-
 }
 
 /// Render the main menu UI (standalone function to avoid borrow issues)
