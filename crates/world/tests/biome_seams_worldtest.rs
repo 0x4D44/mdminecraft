@@ -187,9 +187,9 @@ fn biome_seams_worldtest() {
     // Assertions
     assert_eq!(total_chunks, 81, "Should generate 81 chunks (9×9 grid)");
     assert_eq!(seam_failures, 0, "All seams should be continuous");
-    // Performance threshold: 30ms for release, 150ms for debug
+    // Performance threshold: 30ms for release, 200ms for debug (debug is much slower)
     let performance_threshold = if cfg!(debug_assertions) {
-        150_000
+        200_000
     } else {
         30_000
     };

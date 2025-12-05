@@ -19,7 +19,10 @@ mod weather;
 pub use biome::*;
 pub use block_properties::*;
 pub use caves::*;
-pub use chunk::*;
+pub use chunk::{
+    BlockId, BlockState, Chunk, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR,
+    BLOCK_CRAFTING_TABLE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+};
 pub use crafting::*;
 pub use drop_item::*;
 pub use heightmap::*;

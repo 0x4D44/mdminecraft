@@ -17,6 +17,9 @@ pub type BlockState = u16;
 /// Reserved ID for air.
 pub const BLOCK_AIR: BlockId = 0;
 
+/// ID for crafting table (from blocks.json index).
+pub const BLOCK_CRAFTING_TABLE: BlockId = 13;
+
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {

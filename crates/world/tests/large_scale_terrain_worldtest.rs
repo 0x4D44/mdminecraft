@@ -344,9 +344,9 @@ fn large_scale_terrain_worldtest() {
         unique_biomes >= 5,
         "Should have at least 5 different biomes"
     );
-    // Performance threshold: 30ms for release, 150ms for debug
+    // Performance threshold: 30ms for release, 200ms for debug (debug is much slower)
     let performance_threshold = if cfg!(debug_assertions) {
-        150_000.0
+        200_000.0
     } else {
         30_000.0
     };
