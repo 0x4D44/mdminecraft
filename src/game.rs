@@ -20,8 +20,9 @@ use mdminecraft_ui3d::render::{
 };
 use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
-    BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, TerrainGenerator, Voxel, WeatherState,
-    WeatherToggle, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, Inventory, ItemManager,
+    ItemType as DroppedItemType, Mob, MobSpawner, TerrainGenerator, Voxel, WeatherState,
+    WeatherToggle, BLOCK_AIR, BLOCK_CRAFTING_TABLE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -460,6 +461,22 @@ pub struct GameWorld {
     billboard_renderer: Option<BillboardRenderer>,
     #[cfg(feature = "ui3d_billboards")]
     billboard_emitter: BillboardEmitter,
+    /// Dropped item manager for block drops and pickups
+    item_manager: ItemManager,
+    /// Whether the inventory UI is open
+    inventory_open: bool,
+    /// Full player inventory (36 slots: 9 hotbar + 27 main)
+    inventory: mdminecraft_world::Inventory,
+    /// Mob spawner for passive mobs
+    mob_spawner: MobSpawner,
+    /// Active mobs in the world
+    mobs: Vec<Mob>,
+    /// Frame counter for tick-based updates
+    frame_count: u64,
+    /// Whether the crafting UI is open
+    crafting_open: bool,
+    /// Crafting grid (3x3)
+    crafting_grid: [[Option<ItemStack>; 3]; 3],
 }
 
 impl GameWorld {
@@ -568,6 +585,41 @@ impl GameWorld {
             total_indices
         );
 
+        // Spawn passive mobs in generated chunks
+        let mob_spawner = MobSpawner::new(world_seed);
+        let mut mobs = Vec::new();
+        for (pos, chunk) in &chunks {
+            // Get biome at chunk center
+            let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
+            let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
+            let biome = generator.biome_assigner().get_biome(chunk_center_x, chunk_center_z);
+
+            // Calculate surface heights for each (x, z) position
+            let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
+            for local_z in 0..CHUNK_SIZE_Z {
+                for local_x in 0..CHUNK_SIZE_X {
+                    // Find highest non-air block
+                    for y in (0..CHUNK_SIZE_Y).rev() {
+                        let voxel = chunk.voxel(local_x, y, local_z);
+                        if voxel.id != BLOCK_AIR {
+                            surface_heights[local_z][local_x] = y as i32;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let mut new_mobs = mob_spawner.generate_spawns(pos.x, pos.z, biome, &surface_heights);
+            tracing::debug!(
+                "Spawned {} mobs in chunk {:?} ({:?})",
+                new_mobs.len(),
+                pos,
+                biome
+            );
+            mobs.append(&mut new_mobs);
+        }
+        tracing::info!("Spawned {} passive mobs", mobs.len());
+
         // Determine spawn point near world origin so the player doesn't start mid-air.
         let spawn_feet = Self::determine_spawn_point(&chunks, &registry)
             .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
@@ -630,6 +682,14 @@ impl GameWorld {
             billboard_renderer,
             #[cfg(feature = "ui3d_billboards")]
             billboard_emitter: BillboardEmitter::default(),
+            item_manager: ItemManager::new(),
+            inventory_open: false,
+            inventory: Inventory::new(),
+            mob_spawner,
+            mobs,
+            frame_count: 0,
+            crafting_open: false,
+            crafting_grid: Default::default(),
         };
 
         world.player_physics.last_ground_y = spawn_feet.y;
@@ -805,6 +865,20 @@ impl GameWorld {
                 self.weather_timer = 0.0;
                 self.next_weather_change = self.rng.gen_range(45.0..120.0);
                 tracing::info!(state = ?self.weather.state, "Weather toggled");
+            }
+            PhysicalKey::Code(KeyCode::KeyE) => {
+                if self.crafting_open {
+                    self.close_crafting();
+                } else {
+                    self.toggle_inventory();
+                }
+            }
+            PhysicalKey::Code(KeyCode::Escape) => {
+                if self.crafting_open {
+                    self.close_crafting();
+                } else if self.inventory_open {
+                    self.toggle_inventory();
+                }
             }
             _ => {}
         }
@@ -1220,6 +1294,13 @@ impl GameWorld {
         self.update_particles(dt);
         self.debug_hud.particle_count = self.particles.len();
 
+        // Update dropped items and handle pickup
+        self.update_dropped_items();
+
+        // Update mobs
+        self.update_mobs(dt);
+        self.frame_count = self.frame_count.wrapping_add(1);
+
         // Check for death
         if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
             self.handle_death("You died!");
@@ -1307,9 +1388,30 @@ impl GameWorld {
                 self.mining_progress = None;
             }
 
-            // Right click: place block
+            // Right click: interact with block or place block
             if self.input.is_mouse_clicked(MouseButton::Right) {
-                self.handle_block_placement(hit);
+                // Check if the block is a crafting table
+                let chunk_x = hit.block_pos.x.div_euclid(16);
+                let chunk_z = hit.block_pos.z.div_euclid(16);
+                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                let is_crafting_table = if let Some(chunk) = self.chunks.get(&chunk_pos) {
+                    let local_x = hit.block_pos.x.rem_euclid(16) as usize;
+                    let local_y = hit.block_pos.y as usize;
+                    let local_z = hit.block_pos.z.rem_euclid(16) as usize;
+                    if local_y < 256 {
+                        chunk.voxel(local_x, local_y, local_z).id == BLOCK_CRAFTING_TABLE
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if is_crafting_table {
+                    self.open_crafting();
+                } else {
+                    self.handle_block_placement(hit);
+                }
             }
         } else {
             // No block selected, reset mining progress
@@ -1444,6 +1546,27 @@ impl GameWorld {
                             self.debug_hud.chunk_uploads_last_frame += 1;
                         }
                     }
+
+                    // Spawn dropped item if harvested successfully
+                    let tool = self.hotbar.selected_tool();
+                    let can_harvest = self.block_properties.get(block_id).can_harvest(tool);
+                    if can_harvest {
+                        if let Some((drop_type, count)) = DroppedItemType::from_block(block_id) {
+                            let drop_x = hit.block_pos.x as f64 + 0.5;
+                            let drop_y = hit.block_pos.y as f64 + 0.5;
+                            let drop_z = hit.block_pos.z as f64 + 0.5;
+                            self.item_manager
+                                .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                            tracing::debug!(
+                                "Dropped {:?} x{} at ({:.1}, {:.1}, {:.1})",
+                                drop_type,
+                                count,
+                                drop_x,
+                                drop_y,
+                                drop_z
+                            );
+                        }
+                    }
                 }
 
                 if let Some(center) = spawn_particles_at {
@@ -1558,6 +1681,9 @@ impl GameWorld {
     }
 
     fn render(&mut self) {
+        let mut close_inventory_requested = false;
+        let mut close_crafting_requested = false;
+
         if let Some(frame) = self.renderer.begin_frame() {
             let weather_intensity = self.weather_intensity();
             self.populate_particle_emitter();
@@ -1698,6 +1824,8 @@ impl GameWorld {
             // Render UI overlay
             let is_dead = self.player_state == PlayerState::Dead;
             let death_msg = self.death_message.clone();
+            let inventory_open = self.inventory_open;
+            let crafting_open = self.crafting_open;
             let mut respawn_clicked = false;
             let mut menu_clicked = false;
 
@@ -1721,6 +1849,18 @@ impl GameWorld {
                         render_hotbar(ctx, &self.hotbar);
                         render_health_bar(ctx, &self.player_health);
 
+                        // Show inventory if open
+                        if inventory_open {
+                            close_inventory_requested =
+                                render_inventory(ctx, &self.hotbar, &self.inventory);
+                        }
+
+                        // Show crafting if open
+                        if crafting_open {
+                            close_crafting_requested =
+                                render_crafting(ctx, &self.crafting_grid);
+                        }
+
                         // Show death screen if player is dead
                         if is_dead {
                             let (respawn, menu) = render_death_screen(ctx, &death_msg);
@@ -1741,6 +1881,16 @@ impl GameWorld {
 
             resources.queue.submit(std::iter::once(encoder.finish()));
             frame.present();
+        }
+
+        // Handle inventory close (after frame render to avoid borrow issues)
+        if close_inventory_requested {
+            self.toggle_inventory();
+        }
+
+        // Handle crafting close
+        if close_crafting_requested {
+            self.close_crafting();
         }
 
         self.input.reset_frame();
@@ -1832,6 +1982,140 @@ impl GameWorld {
         }
 
         None
+    }
+
+    /// Update dropped items and handle player pickup
+    fn update_dropped_items(&mut self) {
+        // Get player position (feet position)
+        let camera_pos = self.renderer.camera().position;
+        let player_x = camera_pos.x as f64;
+        let player_y = (camera_pos.y - self.player_physics.eye_height) as f64;
+        let player_z = camera_pos.z as f64;
+
+        // Create closure to get ground height
+        let chunks = &self.chunks;
+        let registry = &self.registry;
+        let get_ground_height = |x: f64, z: f64| -> f64 {
+            Self::column_ground_height(chunks, registry, x as f32, z as f32) as f64
+        };
+
+        // Update item physics
+        self.item_manager.update(get_ground_height);
+
+        // Merge nearby items
+        self.item_manager.merge_nearby_items();
+
+        // Check for item pickup
+        let picked_up = self.item_manager.pickup_items(player_x, player_y, player_z);
+
+        // Add picked up items to hotbar
+        for (drop_type, count) in picked_up {
+            if let Some(core_item_type) = Self::convert_dropped_item_type(drop_type) {
+                let stack = ItemStack::new(core_item_type, count);
+
+                // Try to add to existing stack in hotbar first
+                let mut added = false;
+                for slot in &mut self.hotbar.slots {
+                    if let Some(existing) = slot {
+                        if existing.item_type == core_item_type && existing.can_add(count) {
+                            existing.count += count;
+                            added = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If not merged, find empty slot
+                if !added {
+                    for slot in &mut self.hotbar.slots {
+                        if slot.is_none() {
+                            *slot = Some(stack);
+                            added = true;
+                            break;
+                        }
+                    }
+                }
+
+                if added {
+                    tracing::info!("Picked up {:?} x{}", drop_type, count);
+                }
+            }
+        }
+    }
+
+    /// Update mob AI and movement
+    fn update_mobs(&mut self, _dt: f32) {
+        // Use frame count as tick for deterministic behavior
+        // TODO: Use proper SimTick for multiplayer sync
+        let tick = self.frame_count;
+
+        // Update each mob
+        for mob in &mut self.mobs {
+            mob.update(tick);
+        }
+    }
+
+    /// Toggle inventory UI open/closed
+    fn toggle_inventory(&mut self) {
+        self.inventory_open = !self.inventory_open;
+        self.crafting_open = false; // Close crafting when toggling inventory
+        if self.inventory_open {
+            // Release cursor when inventory is open
+            let _ = self.input.enter_ui_overlay(&self.window);
+            tracing::info!("Inventory opened");
+        } else {
+            // Capture cursor when inventory is closed
+            let _ = self.input.enter_gameplay(&self.window);
+            tracing::info!("Inventory closed");
+        }
+    }
+
+    /// Open crafting table UI
+    fn open_crafting(&mut self) {
+        self.crafting_open = true;
+        self.inventory_open = false; // Close inventory when opening crafting
+        // Release cursor for UI interaction
+        let _ = self.input.enter_ui_overlay(&self.window);
+        tracing::info!("Crafting table opened");
+    }
+
+    /// Close crafting UI
+    fn close_crafting(&mut self) {
+        self.crafting_open = false;
+        // Clear crafting grid
+        for row in &mut self.crafting_grid {
+            for slot in row {
+                *slot = None;
+            }
+        }
+        // Capture cursor for gameplay
+        let _ = self.input.enter_gameplay(&self.window);
+        tracing::info!("Crafting closed");
+    }
+
+    /// Convert dropped item type to core item type
+    fn convert_dropped_item_type(drop_type: DroppedItemType) -> Option<ItemType> {
+        use mdminecraft_core::item::FoodType;
+
+        // First check if it's a block item
+        if let Some(block_id) = drop_type.to_block() {
+            return Some(ItemType::Block(block_id));
+        }
+
+        // Handle non-block items
+        match drop_type {
+            DroppedItemType::RawPork | DroppedItemType::RawBeef => {
+                Some(ItemType::Food(FoodType::RawMeat))
+            }
+            DroppedItemType::Apple => Some(ItemType::Food(FoodType::Apple)),
+            DroppedItemType::Stick => Some(ItemType::Item(100)), // Arbitrary item ID
+            DroppedItemType::Feather => Some(ItemType::Item(101)),
+            DroppedItemType::Leather => Some(ItemType::Item(102)),
+            DroppedItemType::Wool => Some(ItemType::Item(103)),
+            DroppedItemType::Egg => Some(ItemType::Item(104)),
+            DroppedItemType::Sapling => Some(ItemType::Item(105)),
+            _ => None,
+        }
     }
 }
 
@@ -2038,4 +2322,291 @@ fn render_death_screen(ctx: &egui::Context, death_message: &str) -> (bool, bool)
         });
 
     (respawn_clicked, menu_clicked)
+}
+
+/// Render the inventory UI
+/// Returns true if the close button was clicked
+fn render_inventory(ctx: &egui::Context, hotbar: &Hotbar, inventory: &Inventory) -> bool {
+    let mut close_clicked = false;
+
+    // Semi-transparent dark overlay
+    egui::Area::new(egui::Id::new("inventory_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    // Inventory window
+    egui::Window::new("Inventory")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(400.0);
+
+            // Close button
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Inventory").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            // Main inventory (27 slots in 3 rows of 9)
+            ui.label("Main Inventory");
+            for row in 0..3 {
+                ui.horizontal(|ui| {
+                    for col in 0..9 {
+                        let slot_idx = 9 + row * 9 + col; // Slots 9-35 are main inventory
+                        render_inventory_slot_world(ui, inventory.get(slot_idx), false);
+                    }
+                });
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+
+            // Hotbar (9 slots)
+            ui.label("Hotbar");
+            ui.horizontal(|ui| {
+                for i in 0..9 {
+                    let is_selected = i == hotbar.selected;
+                    render_inventory_slot_core(ui, hotbar.slots[i].as_ref(), is_selected);
+                }
+            });
+
+            ui.add_space(5.0);
+            ui.label(
+                egui::RichText::new("Press E to close")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+        });
+
+    close_clicked
+}
+
+/// Render a single inventory slot with core::ItemStack
+fn render_inventory_slot_core(
+    ui: &mut egui::Ui,
+    item: Option<&mdminecraft_core::ItemStack>,
+    is_selected: bool,
+) {
+    let frame = if is_selected {
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgba_unmultiplied(80, 80, 80, 200))
+            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE))
+            .inner_margin(4.0)
+    } else {
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+            .inner_margin(4.0)
+    };
+
+    frame.show(ui, |ui| {
+        ui.set_min_size(egui::vec2(36.0, 36.0));
+        ui.set_max_size(egui::vec2(36.0, 36.0));
+
+        if let Some(stack) = item {
+            ui.vertical_centered(|ui| {
+                // Item name (abbreviated)
+                let name = match stack.item_type {
+                    mdminecraft_core::ItemType::Tool(tool, _) => format!("{:?}", tool),
+                    mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
+                    mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
+                    mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
+                };
+                ui.label(
+                    egui::RichText::new(&name[..name.len().min(4)])
+                        .size(9.0)
+                        .color(egui::Color32::WHITE),
+                );
+
+                // Count
+                if stack.count > 1 {
+                    ui.label(
+                        egui::RichText::new(format!("{}", stack.count))
+                            .size(10.0)
+                            .color(egui::Color32::YELLOW),
+                    );
+                }
+            });
+        }
+    });
+}
+
+/// Render a single inventory slot with world::ItemStack
+fn render_inventory_slot_world(
+    ui: &mut egui::Ui,
+    item: Option<&mdminecraft_world::ItemStack>,
+    is_selected: bool,
+) {
+    let frame = if is_selected {
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgba_unmultiplied(80, 80, 80, 200))
+            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE))
+            .inner_margin(4.0)
+    } else {
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+            .inner_margin(4.0)
+    };
+
+    frame.show(ui, |ui| {
+        ui.set_min_size(egui::vec2(36.0, 36.0));
+        ui.set_max_size(egui::vec2(36.0, 36.0));
+
+        if let Some(stack) = item {
+            ui.vertical_centered(|ui| {
+                // Show item ID
+                ui.label(
+                    egui::RichText::new(format!("#{}", stack.item_id))
+                        .size(9.0)
+                        .color(egui::Color32::WHITE),
+                );
+
+                // Count
+                if stack.count > 1 {
+                    ui.label(
+                        egui::RichText::new(format!("{}", stack.count))
+                            .size(10.0)
+                            .color(egui::Color32::YELLOW),
+                    );
+                }
+            });
+        }
+    });
+}
+
+/// Render the crafting table UI
+/// Returns true if the close button was clicked
+fn render_crafting(ctx: &egui::Context, crafting_grid: &[[Option<ItemStack>; 3]; 3]) -> bool {
+    let mut close_clicked = false;
+
+    // Semi-transparent dark overlay
+    egui::Area::new(egui::Id::new("crafting_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    // Crafting window
+    egui::Window::new("Crafting Table")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(350.0);
+
+            // Close button
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Crafting").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                // 3x3 Crafting grid
+                ui.vertical(|ui| {
+                    ui.label("Crafting Grid");
+                    for row in 0..3 {
+                        ui.horizontal(|ui| {
+                            for col in 0..3 {
+                                render_crafting_slot(ui, crafting_grid[row][col].as_ref());
+                            }
+                        });
+                    }
+                });
+
+                ui.add_space(20.0);
+
+                // Arrow and result
+                ui.vertical(|ui| {
+                    ui.add_space(40.0);
+                    ui.label(
+                        egui::RichText::new("→")
+                            .size(24.0)
+                            .color(egui::Color32::WHITE),
+                    );
+                });
+
+                ui.add_space(20.0);
+
+                // Result slot
+                ui.vertical(|ui| {
+                    ui.label("Result");
+                    ui.add_space(30.0);
+                    render_crafting_slot(ui, None); // TODO: Show actual result
+                });
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+
+            ui.label(
+                egui::RichText::new("Right-click crafting table to open, Escape or X to close")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+        });
+
+    close_clicked
+}
+
+/// Render a single crafting slot
+fn render_crafting_slot(ui: &mut egui::Ui, item: Option<&ItemStack>) {
+    let frame = egui::Frame::none()
+        .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+        .inner_margin(4.0);
+
+    frame.show(ui, |ui| {
+        ui.set_min_size(egui::vec2(40.0, 40.0));
+        ui.set_max_size(egui::vec2(40.0, 40.0));
+
+        if let Some(stack) = item {
+            ui.vertical_centered(|ui| {
+                let name = match stack.item_type {
+                    mdminecraft_core::ItemType::Tool(tool, _) => format!("{:?}", tool),
+                    mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
+                    mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
+                    mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
+                };
+                ui.label(
+                    egui::RichText::new(&name[..name.len().min(4)])
+                        .size(10.0)
+                        .color(egui::Color32::WHITE),
+                );
+
+                if stack.count > 1 {
+                    ui.label(
+                        egui::RichText::new(format!("{}", stack.count))
+                            .size(10.0)
+                            .color(egui::Color32::YELLOW),
+                    );
+                }
+            });
+        }
+    });
 }

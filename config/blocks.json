@@ -17,5 +17,16 @@
   { "name": "ice", "opaque": true, "texture": "blocks/ice" },
   { "name": "snow", "opaque": true, "texture": "blocks/snow" },
   { "name": "clay", "opaque": true, "texture": "blocks/clay" },
-  { "name": "bedrock", "opaque": true, "texture": "blocks/bedrock" }
+  { "name": "bedrock", "opaque": true, "texture": "blocks/bedrock" },
+  { "name": "oak_log", "opaque": true, "texture": "blocks/oak_log" },
+  { "name": "oak_planks", "opaque": true, "texture": "blocks/oak_planks" },
+  {
+    "name": "crafting_table",
+    "opaque": true,
+    "textures": {
+      "top": "blocks/crafting_table_top",
+      "bottom": "blocks/oak_planks",
+      "side": "blocks/crafting_table_side"
+    }
+  }
 ]
