@@ -24,6 +24,12 @@ pub mod blocks {
     pub const SNOW: BlockId = 8;
     pub const CLAY: BlockId = 9;
     pub const BEDROCK: BlockId = 10;
+
+    // Ore block IDs
+    pub const COAL_ORE: BlockId = 14;
+    pub const IRON_ORE: BlockId = 15;
+    pub const GOLD_ORE: BlockId = 16;
+    pub const DIAMOND_ORE: BlockId = 17;
 }
 
 /// Terrain generator that fills chunks with blocks.
@@ -84,6 +90,9 @@ impl TerrainGenerator {
                 );
             }
         }
+
+        // Ore generation pass: Replace some stone with ores
+        self.generate_ores(&mut chunk, chunk_origin_x, chunk_origin_z);
 
         // Cave pass: Carve caves through the terrain
         self.carve_caves(&mut chunk, chunk_origin_x, chunk_origin_z);
@@ -343,6 +352,89 @@ impl TerrainGenerator {
     /// Get the biome assigner for external use.
     pub fn biome_assigner(&self) -> &BiomeAssigner {
         &self.biome_assigner
+    }
+
+    /// Generate ores in stone blocks using deterministic seeded RNG.
+    ///
+    /// Ore distribution by height:
+    /// - Coal: y 0-128, ~1% chance
+    /// - Iron: y 0-64, ~0.7% chance
+    /// - Gold: y 0-32, ~0.3% chance
+    /// - Diamond: y 0-16, ~0.1% chance
+    fn generate_ores(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32) {
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+
+        // Create a single RNG per chunk seeded deterministically from chunk position
+        let chunk_hash = (chunk_origin_x as u64)
+            .wrapping_mul(73856093)
+            .wrapping_add((chunk_origin_z as u64).wrapping_mul(19349663));
+        let ore_seed = self.world_seed.wrapping_add(chunk_hash).wrapping_add(0xDEAD_BEEF);
+        let mut rng = StdRng::seed_from_u64(ore_seed);
+
+        for local_y in 0..CHUNK_SIZE_Y {
+            for local_z in 0..CHUNK_SIZE_Z {
+                for local_x in 0..CHUNK_SIZE_X {
+                    let voxel = chunk.voxel(local_x, local_y, local_z);
+
+                    // Only replace stone blocks with ores
+                    if voxel.id != blocks::STONE {
+                        continue;
+                    }
+
+                    let roll: f32 = rng.gen();
+
+                    // Diamond: y 0-16, 0.1% chance
+                    if local_y <= 16 && roll < 0.001 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::DIAMOND_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    // Gold: y 0-32, 0.3% chance
+                    else if local_y <= 32 && roll < 0.003 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::GOLD_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    // Iron: y 0-64, 0.7% chance
+                    else if local_y <= 64 && roll < 0.007 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::IRON_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    // Coal: y 0-128, 1% chance
+                    else if local_y <= 128 && roll < 0.01 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::COAL_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 

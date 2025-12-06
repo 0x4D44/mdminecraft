@@ -291,8 +291,18 @@ fn stage4_integration_worldtest() {
     );
     println!();
 
-    // Performance targets
-    assert!(avg_gen_time < 30_000, "Chunk generation should be <30ms");
+    // Performance targets: 30ms for release, 300ms for debug (debug is much slower)
+    let performance_threshold = if cfg!(debug_assertions) {
+        300_000
+    } else {
+        30_000
+    };
+    assert!(
+        avg_gen_time < performance_threshold,
+        "Chunk generation should be <{}ms (was {}μs)",
+        performance_threshold / 1000,
+        avg_gen_time
+    );
 
     // Final report
     let test_duration = test_start.elapsed();

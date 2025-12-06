@@ -287,9 +287,9 @@ fn drop_item_lifecycle_worldtest() {
 
 #[test]
 fn test_item_type_block_mapping() {
-    // Verify all block types have proper item mappings
+    // Verify all block types have proper item mappings (based on blocks.json)
     assert_eq!(ItemType::from_block(0), None); // Air
-    assert_eq!(ItemType::from_block(1), Some((ItemType::Stone, 1)));
+    assert_eq!(ItemType::from_block(1), Some((ItemType::Cobblestone, 1))); // Stone drops cobblestone (like Minecraft)
     assert_eq!(ItemType::from_block(2), Some((ItemType::Dirt, 1)));
     assert_eq!(ItemType::from_block(3), Some((ItemType::Dirt, 1))); // Grass drops dirt
     assert_eq!(ItemType::from_block(4), Some((ItemType::Sand, 1)));
@@ -298,14 +298,16 @@ fn test_item_type_block_mapping() {
     assert_eq!(ItemType::from_block(8), Some((ItemType::Snow, 1)));
     assert_eq!(ItemType::from_block(9), Some((ItemType::Clay, 1)));
     assert_eq!(ItemType::from_block(11), Some((ItemType::OakLog, 1)));
-    assert_eq!(ItemType::from_block(12), Some((ItemType::OakLeaves, 1)));
-    assert_eq!(ItemType::from_block(13), Some((ItemType::BirchLog, 1)));
-    assert_eq!(ItemType::from_block(14), Some((ItemType::BirchLeaves, 1)));
-    assert_eq!(ItemType::from_block(15), Some((ItemType::PineLog, 1)));
-    assert_eq!(ItemType::from_block(16), Some((ItemType::PineLeaves, 1)));
+    assert_eq!(ItemType::from_block(12), Some((ItemType::OakPlanks, 1)));
+    // Ore blocks (coal ore drops coal directly, like Minecraft)
+    assert_eq!(ItemType::from_block(14), Some((ItemType::Coal, 1)));
+    assert_eq!(ItemType::from_block(15), Some((ItemType::IronOre, 1)));
+    assert_eq!(ItemType::from_block(16), Some((ItemType::GoldOre, 1)));
+    assert_eq!(ItemType::from_block(17), Some((ItemType::DiamondOre, 1)));
     // No drops
     assert_eq!(ItemType::from_block(6), None); // Water
     assert_eq!(ItemType::from_block(10), None); // Bedrock
+    assert_eq!(ItemType::from_block(13), None); // Crafting table
 }
 
 #[test]

@@ -1,15 +1,17 @@
-//! Passive mob system with deterministic spawning and behavior.
+//! Mob system with deterministic spawning and behavior.
 //!
-//! Provides biome-specific mob spawning and simple AI for wandering behavior.
+//! Provides biome-specific mob spawning, simple AI for wandering behavior,
+//! and hostile mob AI for chasing and attacking players.
 
 use crate::biome::BiomeId;
 use crate::chunk::CHUNK_SIZE_X;
 use crate::chunk::CHUNK_SIZE_Z;
 use serde::{Deserialize, Serialize};
 
-/// Types of passive mobs that can spawn in the world.
+/// Types of mobs that can spawn in the world.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MobType {
+    // Passive mobs
     /// Pig - spawns in plains, forests
     Pig,
     /// Cow - spawns in plains, forests
@@ -18,6 +20,16 @@ pub enum MobType {
     Sheep,
     /// Chicken - spawns in plains, forests
     Chicken,
+
+    // Hostile mobs
+    /// Zombie - spawns at night or in darkness, attacks players
+    Zombie,
+    /// Skeleton - spawns at night or in darkness, attacks players
+    Skeleton,
+    /// Spider - spawns at night, fast and jumps, drops String
+    Spider,
+    /// Creeper - spawns at night, explodes near players, drops Gunpowder
+    Creeper,
 }
 
 impl MobType {
@@ -52,6 +64,10 @@ impl MobType {
             MobType::Cow => 0.2,
             MobType::Sheep => 0.23,
             MobType::Chicken => 0.4,
+            MobType::Zombie => 0.23,
+            MobType::Skeleton => 0.25,
+            MobType::Spider => 0.35,  // Spiders are fast
+            MobType::Creeper => 0.2,  // Creepers are slow but sneaky
         }
     }
 
@@ -62,11 +78,100 @@ impl MobType {
             MobType::Cow => 0.7,
             MobType::Sheep => 0.45,
             MobType::Chicken => 0.3,
+            MobType::Zombie => 0.6,
+            MobType::Skeleton => 0.6,
+            MobType::Spider => 0.7,   // Spiders are wide
+            MobType::Creeper => 0.5,  // Creepers are medium sized
+        }
+    }
+
+    /// Check if this mob type is hostile.
+    pub fn is_hostile(&self) -> bool {
+        matches!(
+            self,
+            MobType::Zombie | MobType::Skeleton | MobType::Spider | MobType::Creeper
+        )
+    }
+
+    /// Get the mob's maximum health.
+    pub fn max_health(&self) -> f32 {
+        match self {
+            MobType::Pig => 10.0,
+            MobType::Cow => 10.0,
+            MobType::Sheep => 8.0,
+            MobType::Chicken => 4.0,
+            MobType::Zombie => 20.0,
+            MobType::Skeleton => 20.0,
+            MobType::Spider => 16.0,
+            MobType::Creeper => 20.0,
+        }
+    }
+
+    /// Get the attack damage for hostile mobs.
+    pub fn attack_damage(&self) -> f32 {
+        match self {
+            MobType::Zombie => 3.0,
+            MobType::Skeleton => 2.0,
+            MobType::Spider => 2.0,
+            MobType::Creeper => 0.0, // Creepers explode instead of attacking
+            _ => 0.0, // Passive mobs don't attack
+        }
+    }
+
+    /// Get the detection range for hostile mobs (in blocks).
+    pub fn detection_range(&self) -> f32 {
+        match self {
+            MobType::Zombie | MobType::Skeleton => 16.0,
+            MobType::Spider => 16.0,
+            MobType::Creeper => 12.0, // Creepers detect at shorter range
+            _ => 0.0, // Passive mobs don't detect players
+        }
+    }
+
+    /// Get explosion damage for mobs that explode.
+    pub fn explosion_damage(&self) -> f32 {
+        match self {
+            MobType::Creeper => 15.0, // Creeper explosion deals 10-20 damage (center: 15)
+            _ => 0.0,
+        }
+    }
+
+    /// Get explosion radius for mobs that explode.
+    pub fn explosion_radius(&self) -> f32 {
+        match self {
+            MobType::Creeper => 3.0, // 3 block radius
+            _ => 0.0,
+        }
+    }
+
+    /// Check if this mob explodes instead of attacking.
+    pub fn explodes(&self) -> bool {
+        matches!(self, MobType::Creeper)
+    }
+
+    /// Get the fuse time before explosion (in seconds).
+    pub fn fuse_time(&self) -> f32 {
+        match self {
+            MobType::Creeper => 1.5, // 1.5 seconds to explode
+            _ => 0.0,
+        }
+    }
+
+    /// Check if this mob can climb walls (spiders).
+    pub fn can_climb_walls(&self) -> bool {
+        matches!(self, MobType::Spider)
+    }
+
+    /// Check if this mob is hostile only at night (spiders are neutral in daylight).
+    pub fn is_hostile_at_time(&self, is_night: bool) -> bool {
+        match self {
+            MobType::Spider => is_night, // Spiders are neutral in daylight
+            _ => self.is_hostile(),      // Other hostile mobs are always hostile
         }
     }
 }
 
-/// A passive mob instance in the world.
+/// A mob instance in the world.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mob {
     /// World X position (floating point for smooth movement)
@@ -87,6 +192,18 @@ pub struct Mob {
     pub ai_timer: u32,
     /// Current AI state
     pub state: MobState,
+    /// Current health
+    pub health: f32,
+    /// Attack cooldown timer
+    pub attack_cooldown: f32,
+    /// Whether mob is marked for removal (dead)
+    pub dead: bool,
+    /// Damage flash timer (for visual feedback)
+    pub damage_flash: f32,
+    /// Fuse timer for creepers (counts down to explosion)
+    pub fuse_timer: f32,
+    /// Whether the creeper is about to explode
+    pub exploding: bool,
 }
 
 /// AI state for mob behavior.
@@ -96,6 +213,12 @@ pub enum MobState {
     Idle,
     /// Wandering in a direction
     Wandering,
+    /// Chasing a target (hostile mobs)
+    Chasing,
+    /// Attacking a target (hostile mobs)
+    Attacking,
+    /// Charging up to explode (creepers)
+    Exploding,
 }
 
 impl Mob {
@@ -111,7 +234,49 @@ impl Mob {
             mob_type,
             ai_timer: 0,
             state: MobState::Idle,
+            health: mob_type.max_health(),
+            attack_cooldown: 0.0,
+            dead: false,
+            damage_flash: 0.0,
+            fuse_timer: 0.0,
+            exploding: false,
         }
+    }
+
+    /// Take damage and return true if mob died.
+    pub fn damage(&mut self, amount: f32) -> bool {
+        self.health -= amount;
+        self.damage_flash = 0.5; // Flash for 0.5 seconds
+
+        if self.health <= 0.0 {
+            self.dead = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Apply knockback in a direction.
+    pub fn apply_knockback(&mut self, dx: f64, dz: f64, strength: f64) {
+        let dist = (dx * dx + dz * dz).sqrt();
+        if dist > 0.0 {
+            self.vel_x = (dx / dist) * strength;
+            self.vel_z = (dz / dist) * strength;
+            self.vel_y = 0.3; // Small upward knockback
+        }
+    }
+
+    /// Calculate distance to a point.
+    pub fn distance_to(&self, x: f64, y: f64, z: f64) -> f64 {
+        let dx = self.x - x;
+        let dy = self.y - y;
+        let dz = self.z - z;
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+
+    /// Check if this mob is hostile.
+    pub fn is_hostile(&self) -> bool {
+        self.mob_type.is_hostile()
     }
 
     /// Update the mob's AI and position based on deterministic simulation.
@@ -121,9 +286,19 @@ impl Mob {
     /// - Wander in random direction for 20-60 ticks
     /// - Repeat
     ///
+    /// For hostile mobs, use `update_with_target` instead.
+    ///
     /// # Arguments
     /// * `tick` - Current simulation tick for deterministic behavior
     pub fn update(&mut self, tick: u64) {
+        // Update timers
+        if self.attack_cooldown > 0.0 {
+            self.attack_cooldown -= 0.05; // Assume ~20 TPS
+        }
+        if self.damage_flash > 0.0 {
+            self.damage_flash -= 0.05;
+        }
+
         self.ai_timer += 1;
 
         match self.state {
@@ -153,6 +328,14 @@ impl Mob {
                     self.vel_z = 0.0;
                 }
             }
+            MobState::Chasing | MobState::Attacking | MobState::Exploding => {
+                // These states are handled by update_with_target
+                // Fall back to idle if no target
+                self.state = MobState::Idle;
+                self.ai_timer = 0;
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
         }
 
         // Apply velocity to position
@@ -164,6 +347,170 @@ impl Mob {
             self.y += self.vel_y;
             self.vel_y -= 0.08; // Gravity acceleration
             self.vel_y *= 0.98; // Air resistance
+        }
+    }
+
+    /// Update hostile mob AI with a target position (player).
+    ///
+    /// Returns true if the mob dealt damage this tick.
+    ///
+    /// # Arguments
+    /// * `tick` - Current simulation tick
+    /// * `target_x, target_y, target_z` - Target (player) position
+    pub fn update_with_target(
+        &mut self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+    ) -> bool {
+        // Update timers
+        if self.attack_cooldown > 0.0 {
+            self.attack_cooldown -= 0.05; // Assume ~20 TPS
+        }
+        if self.damage_flash > 0.0 {
+            self.damage_flash -= 0.05;
+        }
+
+        // If not hostile, use regular update
+        if !self.is_hostile() {
+            self.update(tick);
+            return false;
+        }
+
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = self.mob_type.detection_range() as f64;
+        let attack_range = self.mob_type.size() as f64 + 1.5; // Attack when close
+
+        let mut dealt_damage = false;
+
+        // Special handling for creepers
+        if self.mob_type.explodes() {
+            if self.exploding {
+                // Fuse is counting down
+                self.fuse_timer -= 0.05;
+                self.state = MobState::Exploding;
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+
+                // Check if player moved away - cancel explosion
+                let explode_range = self.mob_type.explosion_radius() as f64 + 1.0;
+                if distance > explode_range * 1.5 {
+                    // Player escaped, cancel fuse
+                    self.exploding = false;
+                    self.fuse_timer = 0.0;
+                    self.state = MobState::Chasing;
+                } else if self.fuse_timer <= 0.0 {
+                    // BOOM! Mark for explosion (caller handles damage)
+                    self.dead = true;
+                    dealt_damage = true;
+                }
+            } else if distance <= attack_range {
+                // Start fuse!
+                self.exploding = true;
+                self.fuse_timer = self.mob_type.fuse_time();
+                self.state = MobState::Exploding;
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            } else if distance <= detection_range {
+                // Chase player
+                self.state = MobState::Chasing;
+                let dx = target_x - self.x;
+                let dz = target_z - self.z;
+                let dist_h = (dx * dx + dz * dz).sqrt();
+                if dist_h > 0.1 {
+                    let speed = self.mob_type.movement_speed() as f64;
+                    self.vel_x = (dx / dist_h) * speed;
+                    self.vel_z = (dz / dist_h) * speed;
+                }
+            } else {
+                // Wander
+                self.update_wander(tick);
+            }
+        } else {
+            // Normal hostile mob behavior
+            if distance <= attack_range && self.attack_cooldown <= 0.0 {
+                // Close enough to attack
+                self.state = MobState::Attacking;
+                self.attack_cooldown = 1.0; // 1 second cooldown
+                dealt_damage = true;
+                // Stop moving while attacking
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            } else if distance <= detection_range {
+                // Within detection range, chase
+                self.state = MobState::Chasing;
+                self.ai_timer = 0;
+
+                // Move toward target
+                let dx = target_x - self.x;
+                let dy = target_y - self.y;
+                let dz = target_z - self.z;
+                let dist_h = (dx * dx + dz * dz).sqrt();
+                if dist_h > 0.1 {
+                    let speed = self.mob_type.movement_speed() as f64;
+                    self.vel_x = (dx / dist_h) * speed;
+                    self.vel_z = (dz / dist_h) * speed;
+
+                    // Spiders can climb walls - give upward velocity when target is above
+                    if self.mob_type.can_climb_walls() && dy > 0.5 {
+                        // Climb at same speed as horizontal movement
+                        self.vel_y = speed * 0.5;
+                    }
+                }
+            } else {
+                // Out of range, wander normally
+                self.update_wander(tick);
+            }
+        }
+
+        // Apply velocity to position
+        self.x += self.vel_x;
+        self.z += self.vel_z;
+
+        // Simple gravity
+        if self.vel_y.abs() > 0.01 {
+            self.y += self.vel_y;
+            self.vel_y -= 0.08;
+            self.vel_y *= 0.98;
+        }
+
+        dealt_damage
+    }
+
+    /// Helper for wandering behavior
+    fn update_wander(&mut self, tick: u64) {
+        self.ai_timer += 1;
+        match self.state {
+            MobState::Idle => {
+                let idle_duration = 40 + ((tick + self.x as u64) % 40);
+                if self.ai_timer >= idle_duration as u32 {
+                    self.state = MobState::Wandering;
+                    self.ai_timer = 0;
+                    let angle = ((tick + self.x as u64 + self.z as u64) % 360) as f64
+                        * std::f64::consts::PI
+                        / 180.0;
+                    let speed = self.mob_type.movement_speed() as f64;
+                    self.vel_x = angle.cos() * speed;
+                    self.vel_z = angle.sin() * speed;
+                }
+            }
+            MobState::Wandering => {
+                let wander_duration = 20 + ((tick + self.z as u64) % 40);
+                if self.ai_timer >= wander_duration as u32 {
+                    self.state = MobState::Idle;
+                    self.ai_timer = 0;
+                    self.vel_x = 0.0;
+                    self.vel_z = 0.0;
+                }
+            }
+            MobState::Chasing | MobState::Attacking | MobState::Exploding => {
+                // Lost target, go idle
+                self.state = MobState::Idle;
+                self.ai_timer = 0;
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
         }
     }
 

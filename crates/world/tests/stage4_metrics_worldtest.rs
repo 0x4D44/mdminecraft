@@ -267,9 +267,17 @@ fn stage4_metrics_worldtest() {
     assert_eq!(seams_failed, 0, "All seams must be continuous");
     assert!(chunks_generated > 0, "Chunks must be generated");
     assert!(unique_biomes >= 3, "Multiple biomes should be present");
+    // Performance threshold: 30ms for release, 300ms for debug (debug is much slower)
+    let performance_threshold = if cfg!(debug_assertions) {
+        300_000.0
+    } else {
+        30_000.0
+    };
     assert!(
-        avg_gen_time_us < 30_000.0,
-        "Generation must be under 30ms target"
+        avg_gen_time_us < performance_threshold,
+        "Generation must be under {}ms target (was {:.1}μs)",
+        performance_threshold / 1000.0,
+        avg_gen_time_us
     );
 
     // Print human-readable summary

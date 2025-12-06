@@ -17,6 +17,7 @@ pub const PICKUP_RADIUS: f64 = 1.5;
 pub enum ItemType {
     // Block items - terrain
     Stone,
+    Cobblestone,
     Dirt,
     Grass,
     Sand,
@@ -34,6 +35,12 @@ pub enum ItemType {
     PineLog,
     PineLeaves,
 
+    // Block items - ores
+    CoalOre,
+    IronOre,
+    GoldOre,
+    DiamondOre,
+
     // Mob drops
     RawPork,
     RawBeef,
@@ -41,6 +48,17 @@ pub enum ItemType {
     Wool,
     Feather,
     Egg,
+    Bone,
+    RottenFlesh,
+    String,
+    Gunpowder,
+
+    // Smelted/processed items
+    IronIngot,
+    GoldIngot,
+    CookedPork,
+    CookedBeef,
+    Coal,
 
     // Crafted items (for future use)
     Stick,
@@ -48,18 +66,57 @@ pub enum ItemType {
     OakPlanks,
     BirchPlanks,
     PinePlanks,
+    Furnace,
 
     // Special items
     Sapling,
     Apple,
+    Flint,
+
+    // Combat items
+    Arrow,
+    Bow,
+
+    // Armor - Leather
+    LeatherHelmet,
+    LeatherChestplate,
+    LeatherLeggings,
+    LeatherBoots,
+
+    // Armor - Iron
+    IronHelmet,
+    IronChestplate,
+    IronLeggings,
+    IronBoots,
+
+    // Armor - Gold
+    GoldHelmet,
+    GoldChestplate,
+    GoldLeggings,
+    GoldBoots,
+
+    // Armor - Diamond
+    DiamondHelmet,
+    DiamondChestplate,
+    DiamondLeggings,
+    DiamondBoots,
+
+    // Resources
+    Diamond,
 }
 
 impl ItemType {
+    /// Get the numeric ID for this item type (used in crafting recipes).
+    pub fn id(&self) -> u16 {
+        *self as u16
+    }
+
     /// Get the maximum stack size for this item type.
     pub fn max_stack_size(&self) -> u32 {
         match self {
             // Most block items stack to 64
             ItemType::Stone
+            | ItemType::Cobblestone
             | ItemType::Dirt
             | ItemType::Grass
             | ItemType::Sand
@@ -74,21 +131,57 @@ impl ItemType {
             | ItemType::BirchLeaves
             | ItemType::PineLog
             | ItemType::PineLeaves
+            | ItemType::CoalOre
+            | ItemType::IronOre
+            | ItemType::GoldOre
+            | ItemType::DiamondOre
             | ItemType::Wool
             | ItemType::Feather
+            | ItemType::Bone
+            | ItemType::RottenFlesh
+            | ItemType::String
+            | ItemType::Gunpowder
+            | ItemType::IronIngot
+            | ItemType::GoldIngot
+            | ItemType::Coal
             | ItemType::Stick
             | ItemType::Planks
             | ItemType::OakPlanks
             | ItemType::BirchPlanks
             | ItemType::PinePlanks
-            | ItemType::Sapling => 64,
+            | ItemType::Furnace
+            | ItemType::Sapling
+            | ItemType::Flint
+            | ItemType::Arrow => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
             | ItemType::RawBeef
+            | ItemType::CookedPork
+            | ItemType::CookedBeef
             | ItemType::Leather
             | ItemType::Egg
-            | ItemType::Apple => 16,
+            | ItemType::Apple
+            | ItemType::Diamond => 16,
+
+            // Non-stackable items (weapons and armor)
+            ItemType::Bow
+            | ItemType::LeatherHelmet
+            | ItemType::LeatherChestplate
+            | ItemType::LeatherLeggings
+            | ItemType::LeatherBoots
+            | ItemType::IronHelmet
+            | ItemType::IronChestplate
+            | ItemType::IronLeggings
+            | ItemType::IronBoots
+            | ItemType::GoldHelmet
+            | ItemType::GoldChestplate
+            | ItemType::GoldLeggings
+            | ItemType::GoldBoots
+            | ItemType::DiamondHelmet
+            | ItemType::DiamondChestplate
+            | ItemType::DiamondLeggings
+            | ItemType::DiamondBoots => 1,
         }
     }
 
@@ -96,7 +189,7 @@ impl ItemType {
     ///
     /// Returns Some((item_type, count)) or None if nothing drops.
     ///
-    /// Block IDs reference (from terrain.rs and trees.rs):
+    /// Block IDs reference (from blocks.json):
     /// - 0: Air (no drop)
     /// - 1: Stone
     /// - 2: Dirt
@@ -109,15 +202,16 @@ impl ItemType {
     /// - 9: Clay
     /// - 10: Bedrock (no drop in survival)
     /// - 11: Oak Log
-    /// - 12: Oak Leaves (chance to drop sapling/apple)
-    /// - 13: Birch Log
-    /// - 14: Birch Leaves (chance to drop sapling)
-    /// - 15: Pine Log
-    /// - 16: Pine Leaves (chance to drop sapling)
+    /// - 12: Oak Planks
+    /// - 13: Crafting Table
+    /// - 14: Coal Ore
+    /// - 15: Iron Ore
+    /// - 16: Gold Ore
+    /// - 17: Diamond Ore
     pub fn from_block(block_id: u16) -> Option<(ItemType, u32)> {
         match block_id {
             // Terrain blocks
-            1 => Some((ItemType::Stone, 1)),
+            1 => Some((ItemType::Cobblestone, 1)), // Stone drops cobblestone (like Minecraft)
             2 => Some((ItemType::Dirt, 1)),
             3 => Some((ItemType::Dirt, 1)), // Grass drops dirt (like Minecraft)
             4 => Some((ItemType::Sand, 1)),
@@ -128,13 +222,19 @@ impl ItemType {
 
             // Tree blocks
             11 => Some((ItemType::OakLog, 1)),
-            12 => Some((ItemType::OakLeaves, 1)), // Could add random sapling drop
-            13 => Some((ItemType::BirchLog, 1)),
-            14 => Some((ItemType::BirchLeaves, 1)),
-            15 => Some((ItemType::PineLog, 1)),
-            16 => Some((ItemType::PineLeaves, 1)),
+            12 => Some((ItemType::OakPlanks, 1)),
 
-            // No drops: Air (0), Water (6), Bedrock (10)
+            // Ore blocks - coal drops coal, others drop ore blocks
+            14 => Some((ItemType::Coal, 1)),
+            15 => Some((ItemType::IronOre, 1)),
+            16 => Some((ItemType::GoldOre, 1)),
+            17 => Some((ItemType::DiamondOre, 1)),
+
+            // Furnace
+            18 => Some((ItemType::Furnace, 1)),
+            19 => Some((ItemType::Furnace, 1)), // Lit furnace also drops furnace
+
+            // No drops: Air (0), Water (6), Bedrock (10), Crafting Table (13)
             _ => None,
         }
     }
@@ -181,6 +281,7 @@ impl ItemType {
     pub fn to_block(&self) -> Option<u16> {
         match self {
             ItemType::Stone => Some(1),
+            ItemType::Cobblestone => Some(1), // Cobblestone places as stone (until separate block added)
             ItemType::Dirt => Some(2),
             ItemType::Grass => Some(3),
             ItemType::Sand => Some(4),
@@ -189,12 +290,13 @@ impl ItemType {
             ItemType::Snow => Some(8),
             ItemType::Clay => Some(9),
             ItemType::OakLog => Some(11),
-            ItemType::OakLeaves => Some(12),
-            ItemType::BirchLog => Some(13),
-            ItemType::BirchLeaves => Some(14),
-            ItemType::PineLog => Some(15),
-            ItemType::PineLeaves => Some(16),
-            // Non-placeable items
+            ItemType::OakPlanks => Some(12),
+            ItemType::CoalOre => Some(14),
+            ItemType::IronOre => Some(15),
+            ItemType::GoldOre => Some(16),
+            ItemType::DiamondOre => Some(17),
+            ItemType::Furnace => Some(18),
+            // Non-placeable items (leaves, mob drops, food, crafted items)
             _ => None,
         }
     }
@@ -532,8 +634,8 @@ mod tests {
 
     #[test]
     fn test_item_type_from_block() {
-        // Terrain blocks
-        assert_eq!(ItemType::from_block(1), Some((ItemType::Stone, 1)));
+        // Terrain blocks - stone drops cobblestone (like Minecraft)
+        assert_eq!(ItemType::from_block(1), Some((ItemType::Cobblestone, 1)));
         assert_eq!(ItemType::from_block(2), Some((ItemType::Dirt, 1)));
         assert_eq!(ItemType::from_block(3), Some((ItemType::Dirt, 1))); // Grass drops dirt
         assert_eq!(ItemType::from_block(4), Some((ItemType::Sand, 1)));
@@ -542,18 +644,21 @@ mod tests {
         assert_eq!(ItemType::from_block(8), Some((ItemType::Snow, 1)));
         assert_eq!(ItemType::from_block(9), Some((ItemType::Clay, 1)));
 
-        // Tree blocks
+        // Tree/building blocks
         assert_eq!(ItemType::from_block(11), Some((ItemType::OakLog, 1)));
-        assert_eq!(ItemType::from_block(12), Some((ItemType::OakLeaves, 1)));
-        assert_eq!(ItemType::from_block(13), Some((ItemType::BirchLog, 1)));
-        assert_eq!(ItemType::from_block(14), Some((ItemType::BirchLeaves, 1)));
-        assert_eq!(ItemType::from_block(15), Some((ItemType::PineLog, 1)));
-        assert_eq!(ItemType::from_block(16), Some((ItemType::PineLeaves, 1)));
+        assert_eq!(ItemType::from_block(12), Some((ItemType::OakPlanks, 1)));
+
+        // Ore blocks - coal ore drops coal directly (like Minecraft)
+        assert_eq!(ItemType::from_block(14), Some((ItemType::Coal, 1)));
+        assert_eq!(ItemType::from_block(15), Some((ItemType::IronOre, 1)));
+        assert_eq!(ItemType::from_block(16), Some((ItemType::GoldOre, 1)));
+        assert_eq!(ItemType::from_block(17), Some((ItemType::DiamondOre, 1)));
 
         // No drops
         assert_eq!(ItemType::from_block(0), None); // Air
         assert_eq!(ItemType::from_block(6), None); // Water
         assert_eq!(ItemType::from_block(10), None); // Bedrock
+        assert_eq!(ItemType::from_block(13), None); // Crafting table
     }
 
     #[test]
@@ -561,7 +666,11 @@ mod tests {
         assert_eq!(ItemType::Stone.to_block(), Some(1));
         assert_eq!(ItemType::Dirt.to_block(), Some(2));
         assert_eq!(ItemType::OakLog.to_block(), Some(11));
-        assert_eq!(ItemType::BirchLeaves.to_block(), Some(14));
+        assert_eq!(ItemType::OakPlanks.to_block(), Some(12));
+        assert_eq!(ItemType::CoalOre.to_block(), Some(14));
+        assert_eq!(ItemType::IronOre.to_block(), Some(15));
+        assert_eq!(ItemType::GoldOre.to_block(), Some(16));
+        assert_eq!(ItemType::DiamondOre.to_block(), Some(17));
 
         // Non-placeable items
         assert_eq!(ItemType::RawPork.to_block(), None);
@@ -571,6 +680,11 @@ mod tests {
 
     #[test]
     fn test_leaves_random_drops() {
+        // Note: Block IDs in from_leaves_random still reference the old tree leaf IDs
+        // from trees.rs which uses different IDs than blocks.json.
+        // This function works with the trees.rs leaf block IDs:
+        // 12 = oak leaves (trees.rs), 14 = birch leaves, 16 = pine leaves
+
         // Oak leaves - apple drop (< 0.005)
         assert_eq!(
             ItemType::from_leaves_random(12, 0.001),
@@ -586,13 +700,13 @@ mod tests {
         // Oak leaves - no drop (> 0.0675)
         assert_eq!(ItemType::from_leaves_random(12, 0.1), None);
 
-        // Birch leaves - sapling drop
+        // Birch leaves - sapling drop (trees.rs ID 14)
         assert_eq!(
             ItemType::from_leaves_random(14, 0.03),
             Some((ItemType::Sapling, 1))
         );
 
-        // Pine leaves - sapling drop
+        // Pine leaves - sapling drop (trees.rs ID 16)
         assert_eq!(
             ItemType::from_leaves_random(16, 0.05),
             Some((ItemType::Sapling, 1))
