@@ -25,7 +25,9 @@ pub struct BindingOverrides {
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
-            mouse_sensitivity: 0.05,
+            // Sensitivity of 0.006 means ~0.34° per pixel of mouse movement
+            // Range: 0.001 (very slow) to 0.01 (fast)
+            mouse_sensitivity: 0.006,
             invert_y: false,
             bindings: BindingOverrides::default(),
         }

@@ -54,7 +54,16 @@ impl Camera {
 
     /// Build the view matrix.
     pub fn view_matrix(&self) -> Mat4 {
-        let rotation = Quat::from_euler(glam::EulerRot::YXZ, self.yaw, self.pitch, 0.0);
+        // The forward() function defines yaw=0 as looking at +X, with yaw increasing CCW.
+        // Standard cameras look down -Z by default.
+        // To align: we need yaw=0 to look at +X, and increasing yaw to rotate CCW.
+        //
+        // The quaternion rotation rotates the camera frame. To make the camera's -Z axis
+        // (view direction) point at forward(), we need to:
+        // 1. Rotate 90° so -Z points at +X when yaw=0
+        // 2. Negate yaw so increasing yaw rotates CCW (matching forward())
+        let adjusted_yaw = -self.yaw - std::f32::consts::FRAC_PI_2;
+        let rotation = Quat::from_euler(glam::EulerRot::YXZ, adjusted_yaw, self.pitch, 0.0);
         Mat4::from_rotation_translation(rotation, self.position).inverse()
     }
 
@@ -122,6 +131,63 @@ mod tests {
         assert!((forward.x - 1.0).abs() < 0.01);
         assert!(forward.y.abs() < 0.01);
         assert!(forward.z.abs() < 0.01);
+    }
+
+    /// Test that forward() direction matches what the view matrix actually renders
+    #[test]
+    fn test_forward_matches_view_matrix() {
+        let mut camera = Camera::new(16.0 / 9.0);
+
+        // Test at various yaw angles - diagnose the relationship
+        println!("\nDiagnosing forward() vs view_matrix relationship:");
+        println!("yaw(deg) | forward()              | view_dir (where cam looks)");
+        println!("---------+------------------------+---------------------------");
+        for yaw_deg in [0.0f32, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0] {
+            camera.yaw = yaw_deg.to_radians();
+            camera.pitch = 0.0;
+
+            let forward = camera.forward();
+
+            // The view matrix transforms world coords to camera space
+            // The camera's forward direction in world space should be where -Z maps to
+            // after applying the inverse of the view matrix
+            let view = camera.view_matrix();
+            let view_inv = view.inverse();
+
+            // Camera's -Z axis in world space (where camera looks)
+            let camera_look_dir = view_inv.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
+
+            println!(
+                "{:>8.0} | ({:>6.3}, {:>6.3}, {:>6.3}) | ({:>6.3}, {:>6.3}, {:>6.3})",
+                yaw_deg,
+                forward.x, forward.y, forward.z,
+                camera_look_dir.x, camera_look_dir.y, camera_look_dir.z
+            );
+        }
+
+        // Now check what rotation offset exists
+        camera.yaw = 0.0;
+        camera.pitch = 0.0;
+        let forward_at_0 = camera.forward();
+        let view = camera.view_matrix();
+        let view_inv = view.inverse();
+        let view_dir_at_0 = view_inv.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
+
+        // What angle is between them? (clamp dot product to avoid NaN from acos)
+        let dot = forward_at_0.dot(view_dir_at_0).clamp(-1.0, 1.0);
+        let angle_between = dot.acos();
+        println!(
+            "\nAngle between forward() and view_dir at yaw=0: {:.1}° (dot={})",
+            angle_between.to_degrees(),
+            dot
+        );
+
+        // After fix: forward() and view_dir should match (dot product should be ~1)
+        assert!(
+            dot > 0.99,
+            "forward() and view_dir should be aligned, but dot product is {}",
+            dot
+        );
     }
 
     #[test]

@@ -1413,7 +1413,9 @@ impl GameWorld {
         look.1 = look.1 * sensitivity * invert;
 
         if look.0 != 0.0 || look.1 != 0.0 {
-            camera.rotate(-look.0, -look.1);
+            // Note: yaw is negated in view_matrix(), so we use positive look.0 here
+            // to get the expected mouse direction (move right → look right)
+            camera.rotate(look.0, -look.1);
         }
     }
 
