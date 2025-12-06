@@ -98,6 +98,10 @@ impl BillboardEmitter {
         self.entries.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     fn sort_by_layer_then_id(&mut self) {
         self.entries.sort_by(|a, b| {
             a.instance
@@ -342,6 +346,7 @@ impl BillboardRenderer {
     }
 
     /// Render billboards. Consumes the emitter for this frame and clears it.
+    #[allow(clippy::too_many_arguments)]
     pub fn render<'a>(
         &mut self,
         device: &wgpu::Device,
@@ -352,7 +357,7 @@ impl BillboardRenderer {
         camera_bind_group: &'a wgpu::BindGroup,
         emitter: &mut BillboardEmitter,
     ) -> Result<BillboardStats> {
-        if emitter.len() == 0 {
+        if emitter.is_empty() {
             self.stats = BillboardStats::default();
             return Ok(self.stats);
         }

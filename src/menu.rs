@@ -195,6 +195,7 @@ impl MenuState {
     }
 
     /// Get the current settings
+    #[allow(dead_code)]
     pub fn settings(&self) -> &GameSettings {
         &self.settings
     }

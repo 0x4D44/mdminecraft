@@ -139,11 +139,7 @@ mod tests {
 
         // Should have some caves but not be completely hollow
         // With 40x80x40 = 128,000 blocks, expect at least 0.3% to be caves
-        assert!(
-            cave_count > 400,
-            "Expected some caves, got {}",
-            cave_count
-        );
+        assert!(cave_count > 400, "Expected some caves, got {}", cave_count);
         assert!(
             cave_count < 80000,
             "Too many caves, should be ~10-30% hollow, got {}",

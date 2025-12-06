@@ -196,7 +196,7 @@ impl PlayerArmor {
             ArmorSlot::Leggings => &mut self.leggings,
             ArmorSlot::Boots => &mut self.boots,
         };
-        std::mem::replace(slot, Some(piece))
+        slot.replace(piece)
     }
 
     /// Unequip armor from a slot

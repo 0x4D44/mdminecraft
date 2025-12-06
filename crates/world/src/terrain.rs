@@ -369,7 +369,10 @@ impl TerrainGenerator {
         let chunk_hash = (chunk_origin_x as u64)
             .wrapping_mul(73856093)
             .wrapping_add((chunk_origin_z as u64).wrapping_mul(19349663));
-        let ore_seed = self.world_seed.wrapping_add(chunk_hash).wrapping_add(0xDEAD_BEEF);
+        let ore_seed = self
+            .world_seed
+            .wrapping_add(chunk_hash)
+            .wrapping_add(0xDEAD_BEEF);
         let mut rng = StdRng::seed_from_u64(ore_seed);
 
         for local_y in 0..CHUNK_SIZE_Y {
