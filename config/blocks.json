@@ -28,5 +28,29 @@
       "bottom": "blocks/oak_planks",
       "side": "blocks/crafting_table_side"
     }
+  },
+  { "name": "coal_ore", "opaque": true, "texture": "blocks/coal_ore" },
+  { "name": "iron_ore", "opaque": true, "texture": "blocks/iron_ore" },
+  { "name": "gold_ore", "opaque": true, "texture": "blocks/gold_ore" },
+  { "name": "diamond_ore", "opaque": true, "texture": "blocks/diamond_ore" },
+  {
+    "name": "furnace",
+    "opaque": true,
+    "textures": {
+      "top": "blocks/furnace_top",
+      "bottom": "blocks/furnace_top",
+      "side": "blocks/furnace_side",
+      "front": "blocks/furnace_front"
+    }
+  },
+  {
+    "name": "furnace_lit",
+    "opaque": true,
+    "textures": {
+      "top": "blocks/furnace_top",
+      "bottom": "blocks/furnace_top",
+      "side": "blocks/furnace_side",
+      "front": "blocks/furnace_front_lit"
+    }
   }
 ]

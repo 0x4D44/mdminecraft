@@ -13,21 +13,13 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
-//! use mdminecraft_ui3d::{UIManager, Label3D};
+//! ```rust,ignore
+//! use mdminecraft_ui3d::Label3D;
 //! use glam::Vec3;
 //!
-//! let mut ui_manager = UIManager::new();
-//!
-//! ui_manager.add_label(Label3D {
-//!     position: Vec3::new(0.0, 75.0, 0.0),
-//!     text: "Welcome!".to_string(),
-//!     color: [1.0, 1.0, 0.0, 1.0],
-//! });
-//!
-//! // In your render loop:
-//! ui_manager.update(dt, camera, &input);
-//! ui_manager.render(&mut encoder, &frame_view, camera);
+//! // Create a label at position with text and color
+//! let label = Label3D::new(Vec3::new(0.0, 75.0, 0.0), "Welcome!")
+//!     .with_color([1.0, 1.0, 0.0, 1.0]);
 //! ```
 
 pub mod components;

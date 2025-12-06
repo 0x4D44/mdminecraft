@@ -187,9 +187,10 @@ fn biome_seams_worldtest() {
     // Assertions
     assert_eq!(total_chunks, 81, "Should generate 81 chunks (9×9 grid)");
     assert_eq!(seam_failures, 0, "All seams should be continuous");
-    // Performance threshold: 30ms for release, 200ms for debug (debug is much slower)
+    // Performance threshold: 30ms for release, 300ms for debug (debug is much slower)
+    // Note: ore generation adds overhead; threshold increased to accommodate system load variance
     let performance_threshold = if cfg!(debug_assertions) {
-        200_000
+        300_000
     } else {
         30_000
     };

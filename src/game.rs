@@ -20,9 +20,11 @@ use mdminecraft_ui3d::render::{
 };
 use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
-    BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, Inventory, ItemManager,
-    ItemType as DroppedItemType, Mob, MobSpawner, TerrainGenerator, Voxel, WeatherState,
-    WeatherToggle, BLOCK_AIR, BLOCK_CRAFTING_TABLE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, FurnaceState,
+    Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor,
+    Projectile, ProjectileManager, TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR,
+    BLOCK_CRAFTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -82,9 +84,9 @@ impl Hotbar {
                     ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood),
                     1,
                 )),
+                Some(ItemStack::new(ItemType::Item(1), 1)),   // Bow
+                Some(ItemStack::new(ItemType::Item(2), 64)),  // Arrows
                 Some(ItemStack::new(ItemType::Block(2), 64)), // Dirt
-                Some(ItemStack::new(ItemType::Block(3), 64)), // Wood
-                Some(ItemStack::new(ItemType::Block(1), 64)), // Stone
                 Some(ItemStack::new(ItemType::Block(6), 64)), // Cobblestone
                 Some(ItemStack::new(ItemType::Block(7), 64)), // Planks
             ],
@@ -140,6 +142,72 @@ impl Hotbar {
         }
     }
 
+    /// Get the food type if selected item is food
+    fn selected_food(&self) -> Option<mdminecraft_core::item::FoodType> {
+        if let Some(item) = self.selected_item() {
+            match item.item_type {
+                ItemType::Food(food_type) => Some(food_type),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Consume one of the selected item (for eating food)
+    /// Returns true if item was consumed
+    fn consume_selected(&mut self) -> bool {
+        if let Some(item) = self.slots[self.selected].as_mut() {
+            if item.count > 1 {
+                item.count -= 1;
+                true
+            } else {
+                // Remove the item if count becomes 0
+                self.slots[self.selected] = None;
+                true
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Check if the selected item is a bow
+    fn has_bow_selected(&self) -> bool {
+        if let Some(item) = self.selected_item() {
+            matches!(item.item_type, ItemType::Item(1)) // Item ID 1 = Bow
+        } else {
+            false
+        }
+    }
+
+    /// Check if player has arrows in hotbar
+    fn has_arrows(&self) -> bool {
+        self.slots.iter().any(|slot| {
+            if let Some(item) = slot {
+                matches!(item.item_type, ItemType::Item(2)) // Item ID 2 = Arrow
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Consume one arrow from inventory
+    fn consume_arrow(&mut self) -> bool {
+        for slot in &mut self.slots {
+            if let Some(item) = slot {
+                if matches!(item.item_type, ItemType::Item(2)) {
+                    if item.count > 1 {
+                        item.count -= 1;
+                    } else {
+                        *slot = None;
+                    }
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn item_name(&self, item_stack: Option<&ItemStack>) -> String {
         if let Some(stack) = item_stack {
             match stack.item_type {
@@ -148,7 +216,39 @@ impl Hotbar {
                 }
                 ItemType::Block(block_id) => self.block_name(block_id).to_string(),
                 ItemType::Food(food_type) => format!("{:?}", food_type),
-                ItemType::Item(_) => "Item".to_string(),
+                ItemType::Item(id) => match id {
+                    1 => "Bow".to_string(),
+                    2 => "Arrow".to_string(),
+                    3 => "Stick".to_string(),
+                    4 => "String".to_string(),
+                    5 => "Flint".to_string(),
+                    6 => "Feather".to_string(),
+                    7 => "Iron Ingot".to_string(),
+                    // Iron armor
+                    10 => "Iron Helmet".to_string(),
+                    11 => "Iron Chestplate".to_string(),
+                    12 => "Iron Leggings".to_string(),
+                    13 => "Iron Boots".to_string(),
+                    14 => "Diamond".to_string(),
+                    // Leather armor
+                    20 => "Leather Helmet".to_string(),
+                    21 => "Leather Chestplate".to_string(),
+                    22 => "Leather Leggings".to_string(),
+                    23 => "Leather Boots".to_string(),
+                    // Diamond armor
+                    30 => "Diamond Helmet".to_string(),
+                    31 => "Diamond Chestplate".to_string(),
+                    32 => "Diamond Leggings".to_string(),
+                    33 => "Diamond Boots".to_string(),
+                    // Resource items
+                    100 => "Stick".to_string(),
+                    101 => "Feather".to_string(),
+                    102 => "Leather".to_string(),
+                    103 => "Wool".to_string(),
+                    104 => "Egg".to_string(),
+                    105 => "Sapling".to_string(),
+                    _ => format!("Item({})", id),
+                },
             }
         } else {
             "Empty".to_string()
@@ -318,6 +418,16 @@ struct PlayerHealth {
     time_since_damage: f32,
     /// Invulnerability time after taking damage
     invulnerability_time: f32,
+    /// Current hunger (0-20, measured in half-shanks)
+    hunger: f32,
+    /// Maximum hunger
+    max_hunger: f32,
+    /// Time accumulator for hunger depletion
+    hunger_timer: f32,
+    /// Time accumulator for starvation damage
+    starvation_timer: f32,
+    /// Whether player is actively moving (depletes hunger faster)
+    is_active: bool,
 }
 
 impl PlayerHealth {
@@ -325,9 +435,14 @@ impl PlayerHealth {
         Self {
             current: 20.0,
             max: 20.0,
-            regeneration_rate: 0.0, // Disabled for now, could be 1.0 per second
+            regeneration_rate: 0.5, // Regenerate 0.5 health per second when hunger >= 18
             time_since_damage: 0.0,
             invulnerability_time: 0.0,
+            hunger: 20.0,
+            max_hunger: 20.0,
+            hunger_timer: 0.0,
+            starvation_timer: 0.0,
+            is_active: false,
         }
     }
 
@@ -358,7 +473,17 @@ impl PlayerHealth {
         self.current <= 0.0
     }
 
-    /// Update health (regeneration, timers)
+    /// Eat food and restore hunger
+    fn eat(&mut self, hunger_restore: f32) -> bool {
+        if self.hunger >= self.max_hunger {
+            return false; // Already full
+        }
+        self.hunger = (self.hunger + hunger_restore).min(self.max_hunger);
+        tracing::info!("Ate food, hunger now {:.1}/20", self.hunger);
+        true
+    }
+
+    /// Update health (regeneration, hunger depletion, starvation)
     fn update(&mut self, dt: f32) {
         self.time_since_damage += dt;
 
@@ -366,17 +491,111 @@ impl PlayerHealth {
             self.invulnerability_time -= dt;
         }
 
-        // Regenerate health if enabled and enough time has passed
-        if self.regeneration_rate > 0.0 && self.time_since_damage > 3.0 && self.current < self.max {
+        // Hunger depletion
+        self.hunger_timer += dt;
+        let depletion_interval = if self.is_active { 30.0 } else { 60.0 }; // 30s active, 60s idle
+        let depletion_amount = if self.is_active { 1.0 } else { 0.5 };
+
+        if self.hunger_timer >= depletion_interval {
+            self.hunger_timer = 0.0;
+            self.hunger = (self.hunger - depletion_amount).max(0.0);
+        }
+
+        // Starvation damage when hunger is 0
+        if self.hunger <= 0.0 {
+            self.starvation_timer += dt;
+            if self.starvation_timer >= 1.0 {
+                self.starvation_timer = 0.0;
+                // Bypass invulnerability for starvation
+                self.current = (self.current - 1.0).max(0.0);
+                tracing::info!("Starvation damage! Health now {:.1}/20", self.current);
+            }
+        } else {
+            self.starvation_timer = 0.0;
+        }
+
+        // Regenerate health only when hunger >= 18 and enough time since damage
+        if self.hunger >= 18.0 && self.time_since_damage > 3.0 && self.current < self.max {
             self.heal(self.regeneration_rate * dt);
         }
     }
 
-    /// Reset health to full (for respawn)
+    /// Reset health and hunger to full (for respawn)
     fn reset(&mut self) {
         self.current = self.max;
+        self.hunger = self.max_hunger;
         self.time_since_damage = 0.0;
         self.invulnerability_time = 0.0;
+        self.hunger_timer = 0.0;
+        self.starvation_timer = 0.0;
+    }
+
+    /// Set active state for hunger depletion rate
+    fn set_active(&mut self, active: bool) {
+        self.is_active = active;
+    }
+}
+
+/// Get hunger restoration amount for a food type
+fn food_hunger_restore(food_type: mdminecraft_core::item::FoodType) -> f32 {
+    use mdminecraft_core::item::FoodType;
+    match food_type {
+        FoodType::Apple => 4.0,
+        FoodType::Bread => 5.0,
+        FoodType::RawMeat => 3.0,
+        FoodType::CookedMeat => 8.0,
+    }
+}
+
+/// Ray-AABB intersection test
+/// Returns Some(t) where t is the distance along the ray, or None if no intersection
+fn ray_aabb_intersect(origin: glam::Vec3, dir: glam::Vec3, min: glam::Vec3, max: glam::Vec3) -> Option<f32> {
+    let inv_dir = glam::Vec3::new(
+        if dir.x.abs() < 1e-6 { f32::MAX } else { 1.0 / dir.x },
+        if dir.y.abs() < 1e-6 { f32::MAX } else { 1.0 / dir.y },
+        if dir.z.abs() < 1e-6 { f32::MAX } else { 1.0 / dir.z },
+    );
+
+    let t1 = (min.x - origin.x) * inv_dir.x;
+    let t2 = (max.x - origin.x) * inv_dir.x;
+    let t3 = (min.y - origin.y) * inv_dir.y;
+    let t4 = (max.y - origin.y) * inv_dir.y;
+    let t5 = (min.z - origin.z) * inv_dir.z;
+    let t6 = (max.z - origin.z) * inv_dir.z;
+
+    let tmin = t1.min(t2).max(t3.min(t4)).max(t5.min(t6));
+    let tmax = t1.max(t2).min(t3.max(t4)).min(t5.max(t6));
+
+    if tmax >= tmin && tmax >= 0.0 {
+        Some(if tmin >= 0.0 { tmin } else { tmax })
+    } else {
+        None
+    }
+}
+
+/// Calculate attack damage based on held item
+fn calculate_attack_damage(tool: Option<(ToolType, ToolMaterial)>) -> f32 {
+    match tool {
+        Some((tool_type, material)) => {
+            // Base damage varies by tool type
+            let base = match tool_type {
+                ToolType::Sword => 4.0,
+                ToolType::Axe => 3.0,
+                ToolType::Pickaxe => 2.0,
+                ToolType::Shovel => 1.5,
+                ToolType::Hoe => 1.0,
+            };
+            // Material multiplier
+            let multiplier = match material {
+                ToolMaterial::Wood => 1.0,
+                ToolMaterial::Stone => 1.25,
+                ToolMaterial::Iron => 1.5,
+                ToolMaterial::Gold => 1.0,    // Gold is fast but weak
+                ToolMaterial::Diamond => 1.75,
+            };
+            base * multiplier
+        }
+        None => 1.0, // Fist damage
     }
 }
 
@@ -477,6 +696,20 @@ pub struct GameWorld {
     crafting_open: bool,
     /// Crafting grid (3x3)
     crafting_grid: [[Option<ItemStack>; 3]; 3],
+    /// Whether the furnace UI is open
+    furnace_open: bool,
+    /// Currently open furnace position (if any)
+    open_furnace_pos: Option<IVec3>,
+    /// Furnace states by position
+    furnaces: HashMap<IVec3, FurnaceState>,
+    /// Player armor (helmet, chestplate, leggings, boots)
+    player_armor: PlayerArmor,
+    /// Projectile manager for arrows and other projectiles
+    projectiles: ProjectileManager,
+    /// Bow drawing state (charge progress 0.0 to 1.0)
+    bow_charge: f32,
+    /// Whether the bow is currently being drawn
+    bow_drawing: bool,
 }
 
 impl GameWorld {
@@ -690,6 +923,13 @@ impl GameWorld {
             frame_count: 0,
             crafting_open: false,
             crafting_grid: Default::default(),
+            furnace_open: false,
+            open_furnace_pos: None,
+            furnaces: HashMap::new(),
+            player_armor: PlayerArmor::new(),
+            projectiles: ProjectileManager::new(),
+            bow_charge: 0.0,
+            bow_drawing: false,
         };
 
         world.player_physics.last_ground_y = spawn_feet.y;
@@ -1297,8 +1537,15 @@ impl GameWorld {
         // Update dropped items and handle pickup
         self.update_dropped_items();
 
+        // Update furnaces
+        self.update_furnaces(dt);
+
         // Update mobs
         self.update_mobs(dt);
+
+        // Update projectiles (arrows)
+        self.update_projectiles();
+
         self.frame_count = self.frame_count.wrapping_add(1);
 
         // Check for death
@@ -1376,9 +1623,64 @@ impl GameWorld {
         } else {
             self.apply_fly_movement(&actions, dt);
         }
+
+        // Update player activity state for hunger depletion
+        let is_moving = actions.move_x.abs() > 0.01 || actions.move_y.abs() > 0.01;
+        self.player_health.set_active(is_moving || actions.sprint);
     }
 
     fn handle_block_interaction(&mut self, dt: f32) {
+        // Handle bow charging and shooting (before other interactions)
+        if self.hotbar.has_bow_selected() && self.hotbar.has_arrows() {
+            if self.input.is_mouse_pressed(MouseButton::Right) {
+                // Charging bow
+                if !self.bow_drawing {
+                    self.bow_drawing = true;
+                    self.bow_charge = 0.0;
+                }
+                // Increase charge over time (max 1.0 at 1 second)
+                self.bow_charge = (self.bow_charge + dt).min(1.0);
+            } else if self.bow_drawing {
+                // Released - shoot arrow!
+                if self.bow_charge >= 0.1 {
+                    // Consume an arrow
+                    if self.hotbar.consume_arrow() {
+                        // Get camera position and direction
+                        let camera = self.renderer.camera();
+                        let arrow = Projectile::shoot_arrow(
+                            camera.position.x as f64,
+                            camera.position.y as f64,
+                            camera.position.z as f64,
+                            camera.yaw,
+                            camera.pitch,
+                            self.bow_charge,
+                        );
+                        self.projectiles.spawn(arrow);
+                        tracing::debug!("Shot arrow with charge {:.2}", self.bow_charge);
+                    }
+                }
+                self.bow_drawing = false;
+                self.bow_charge = 0.0;
+            }
+            // Skip other interactions while drawing bow
+            if self.bow_drawing {
+                return;
+            }
+        } else {
+            // Not holding bow, reset bow state
+            self.bow_drawing = false;
+            self.bow_charge = 0.0;
+        }
+
+        // Left click: try to attack a mob first (on click, not hold)
+        if self.input.is_mouse_clicked(MouseButton::Left) {
+            if self.try_attack_mob() {
+                // Attacked a mob, don't mine
+                self.mining_progress = None;
+                return;
+            }
+        }
+
         if let Some(hit) = self.selected_block {
             // Left click/hold: mine block
             if self.input.is_mouse_pressed(MouseButton::Left) {
@@ -1388,29 +1690,65 @@ impl GameWorld {
                 self.mining_progress = None;
             }
 
-            // Right click: interact with block or place block
+            // Right click: equip armor, eat food, interact with block, or place block
             if self.input.is_mouse_clicked(MouseButton::Right) {
-                // Check if the block is a crafting table
-                let chunk_x = hit.block_pos.x.div_euclid(16);
-                let chunk_z = hit.block_pos.z.div_euclid(16);
-                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
-                let is_crafting_table = if let Some(chunk) = self.chunks.get(&chunk_pos) {
-                    let local_x = hit.block_pos.x.rem_euclid(16) as usize;
-                    let local_y = hit.block_pos.y as usize;
-                    let local_z = hit.block_pos.z.rem_euclid(16) as usize;
-                    if local_y < 256 {
-                        chunk.voxel(local_x, local_y, local_z).id == BLOCK_CRAFTING_TABLE
-                    } else {
-                        false
+                // First, check if we're holding armor and try to equip it
+                let mut equipped_armor = false;
+                if let Some(stack) = &self.hotbar.slots[self.hotbar.selected] {
+                    if let Some(dropped_type) = item_type_to_armor_dropped(stack.item_type) {
+                        if let Some(armor_piece) = ArmorPiece::from_item(dropped_type) {
+                            // Equip the armor piece
+                            let old_piece = self.player_armor.equip(armor_piece);
+                            // Consume the item from hotbar
+                            self.hotbar.consume_selected();
+                            equipped_armor = true;
+                            tracing::info!("Equipped armor: {:?}", dropped_type);
+                            // If there was already armor in that slot, we don't return it to inventory (simplified)
+                            if old_piece.is_some() {
+                                tracing::info!("Replaced existing armor piece");
+                            }
+                        }
+                    }
+                }
+
+                if equipped_armor {
+                    // Skip other interactions when equipping armor
+                } else if let Some(food_type) = self.hotbar.selected_food() {
+                    // Check if we're holding food and try to eat it
+                    let hunger_restore = food_hunger_restore(food_type);
+                    if self.player_health.eat(hunger_restore) {
+                        self.hotbar.consume_selected();
+                        // Skip other interactions when eating
                     }
                 } else {
-                    false
-                };
+                    // Check if the block is a crafting table or furnace
+                    let chunk_x = hit.block_pos.x.div_euclid(16);
+                    let chunk_z = hit.block_pos.z.div_euclid(16);
+                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                    let block_id = if let Some(chunk) = self.chunks.get(&chunk_pos) {
+                        let local_x = hit.block_pos.x.rem_euclid(16) as usize;
+                        let local_y = hit.block_pos.y as usize;
+                        let local_z = hit.block_pos.z.rem_euclid(16) as usize;
+                        if local_y < 256 {
+                            Some(chunk.voxel(local_x, local_y, local_z).id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
 
-                if is_crafting_table {
-                    self.open_crafting();
-                } else {
-                    self.handle_block_placement(hit);
+                    match block_id {
+                        Some(BLOCK_CRAFTING_TABLE) => {
+                            self.open_crafting();
+                        }
+                        Some(BLOCK_FURNACE) | Some(BLOCK_FURNACE_LIT) => {
+                            self.open_furnace(hit.block_pos);
+                        }
+                        _ => {
+                            self.handle_block_placement(hit);
+                        }
+                    }
                 }
             }
         } else {
@@ -1683,6 +2021,8 @@ impl GameWorld {
     fn render(&mut self) {
         let mut close_inventory_requested = false;
         let mut close_crafting_requested = false;
+        let mut close_furnace_requested = false;
+        let mut crafted_item: Option<ItemStack> = None;
 
         if let Some(frame) = self.renderer.begin_frame() {
             let weather_intensity = self.weather_intensity();
@@ -1826,6 +2166,7 @@ impl GameWorld {
             let death_msg = self.death_message.clone();
             let inventory_open = self.inventory_open;
             let crafting_open = self.crafting_open;
+            let furnace_open = self.furnace_open;
             let mut respawn_clicked = false;
             let mut menu_clicked = false;
 
@@ -1848,6 +2189,9 @@ impl GameWorld {
                         self.debug_hud.render(ctx);
                         render_hotbar(ctx, &self.hotbar);
                         render_health_bar(ctx, &self.player_health);
+                        render_hunger_bar(ctx, &self.player_health);
+                        render_armor_bar(ctx, &self.player_armor);
+                        render_tool_durability(ctx, &self.hotbar);
 
                         // Show inventory if open
                         if inventory_open {
@@ -1857,8 +2201,20 @@ impl GameWorld {
 
                         // Show crafting if open
                         if crafting_open {
-                            close_crafting_requested =
-                                render_crafting(ctx, &self.crafting_grid);
+                            let (close, item) =
+                                render_crafting(ctx, &mut self.crafting_grid, &mut self.hotbar);
+                            close_crafting_requested = close;
+                            crafted_item = item;
+                        }
+
+                        // Show furnace if open
+                        if furnace_open {
+                            if let Some(pos) = self.open_furnace_pos {
+                                if let Some(furnace) = self.furnaces.get_mut(&pos) {
+                                    close_furnace_requested =
+                                        render_furnace(ctx, furnace);
+                                }
+                            }
                         }
 
                         // Show death screen if player is dead
@@ -1891,6 +2247,38 @@ impl GameWorld {
         // Handle crafting close
         if close_crafting_requested {
             self.close_crafting();
+        }
+
+        // Handle crafted item - add to hotbar
+        if let Some(stack) = crafted_item {
+            // Try to add to hotbar
+            let mut added = false;
+            for slot in &mut self.hotbar.slots {
+                if let Some(existing) = slot {
+                    if existing.item_type == stack.item_type && existing.can_add(stack.count) {
+                        existing.count += stack.count;
+                        added = true;
+                        break;
+                    }
+                }
+            }
+            if !added {
+                for slot in &mut self.hotbar.slots {
+                    if slot.is_none() {
+                        *slot = Some(stack);
+                        added = true;
+                        break;
+                    }
+                }
+            }
+            if added {
+                tracing::info!("Crafted item added to hotbar");
+            }
+        }
+
+        // Handle furnace close
+        if close_furnace_requested {
+            self.close_furnace();
         }
 
         self.input.reset_frame();
@@ -2049,10 +2437,495 @@ impl GameWorld {
         // TODO: Use proper SimTick for multiplayer sync
         let tick = self.frame_count;
 
-        // Update each mob
+        // Get player position for hostile mob targeting
+        let player_pos = self.renderer.camera().position;
+        let player_x = player_pos.x as f64;
+        let player_y = player_pos.y as f64;
+        let player_z = player_pos.z as f64;
+
+        // Check if it's night time (hostile mobs spawn at night)
+        // Time: 0.0-0.25 Night→Dawn, 0.75-1.0 Dusk→Night
+        let time = self.time_of_day.time();
+        let is_night = time < 0.25 || time > 0.75;
+
+        // Update each mob and track damage to player
+        let mut total_damage = 0.0f32;
+        let mut exploded_creeper = false;
+        let mut explosion_positions: Vec<(f64, f64, f64, f32)> = Vec::new();
         for mob in &mut self.mobs {
-            mob.update(tick);
+            // Spiders are only hostile at night, other hostile mobs always attack
+            if mob.mob_type.is_hostile_at_time(is_night) {
+                // Update hostile mob with player targeting
+                let dealt_damage =
+                    mob.update_with_target(tick, player_x, player_y, player_z);
+                if dealt_damage {
+                    // Check if this was a creeper explosion
+                    if mob.mob_type.explodes() && mob.dead {
+                        // Creeper explosion - high damage!
+                        total_damage += mob.mob_type.explosion_damage();
+                        exploded_creeper = true;
+                        // Record explosion position for block destruction
+                        explosion_positions.push((
+                            mob.x,
+                            mob.y,
+                            mob.z,
+                            mob.mob_type.explosion_radius(),
+                        ));
+                        tracing::info!("Creeper exploded!");
+                    } else {
+                        // Normal attack damage
+                        total_damage += mob.mob_type.attack_damage();
+                    }
+                }
+            } else {
+                // Update passive mob (or spider in daylight)
+                mob.update(tick);
+            }
         }
+
+        // Handle creeper explosion block destruction
+        for (ex, ey, ez, radius) in explosion_positions {
+            self.destroy_blocks_in_radius(ex, ey, ez, radius);
+        }
+
+        // Apply accumulated damage to player (reduced by armor)
+        if total_damage > 0.0 && self.player_state == PlayerState::Alive {
+            // Armor reduces damage and takes durability hit
+            let actual_damage = self.player_armor.take_damage(total_damage);
+            self.player_health.damage(actual_damage);
+
+            // Log armor reduction
+            if actual_damage < total_damage {
+                tracing::debug!(
+                    "Armor reduced damage from {:.1} to {:.1}",
+                    total_damage,
+                    actual_damage
+                );
+            }
+
+            // Determine damage source for potential death message
+            let source = if exploded_creeper {
+                "Creeper"
+            } else if self.mobs.iter().any(|m| m.mob_type == MobType::Spider) {
+                "Spider"
+            } else if self.mobs.iter().any(|m| m.mob_type == MobType::Zombie) {
+                "Zombie"
+            } else {
+                "Skeleton"
+            };
+
+            // Check for death
+            if self.player_health.is_dead() {
+                if exploded_creeper {
+                    self.handle_death("Blown up by Creeper");
+                } else {
+                    self.handle_death(&format!("Slain by {}", source));
+                }
+            }
+        }
+
+        // Remove dead mobs and drop loot
+        let mut loot_drops: Vec<(f64, f64, f64, DroppedItemType, u32)> = Vec::new();
+        self.mobs.retain(|mob| {
+            if mob.dead {
+                // Drop loot based on mob type
+                match mob.mob_type {
+                    MobType::Zombie => {
+                        // Zombies drop 0-2 rotten flesh
+                        let count = (tick % 3) as u32;
+                        if count > 0 {
+                            loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::RottenFlesh, count));
+                        }
+                    }
+                    MobType::Skeleton => {
+                        // Skeletons drop 0-2 bones
+                        let bone_count = (tick % 3) as u32;
+                        if bone_count > 0 {
+                            loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::Bone, bone_count));
+                        }
+                    }
+                    MobType::Pig => {
+                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::RawPork, 1 + (tick % 3) as u32));
+                    }
+                    MobType::Cow => {
+                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::RawBeef, 1 + (tick % 3) as u32));
+                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::Leather, (tick % 2) as u32 + 1));
+                    }
+                    MobType::Sheep => {
+                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::Wool, 1));
+                    }
+                    MobType::Chicken => {
+                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::Feather, 1 + (tick % 2) as u32));
+                    }
+                    MobType::Spider => {
+                        // Spiders drop 0-2 string
+                        let count = (tick % 3) as u32;
+                        if count > 0 {
+                            loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::String, count));
+                        }
+                    }
+                    MobType::Creeper => {
+                        // Creepers drop 0-2 gunpowder
+                        let count = (tick % 3) as u32;
+                        if count > 0 {
+                            loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::Gunpowder, count));
+                        }
+                    }
+                }
+                false // Remove dead mob
+            } else {
+                true // Keep alive mob
+            }
+        });
+
+        // Spawn loot drops
+        for (x, y, z, item_type, count) in loot_drops {
+            if count > 0 {
+                self.item_manager.spawn_item(x, y, z, item_type, count);
+            }
+        }
+
+        // Spawn hostile mobs at night (every ~100 frames, max 10 hostile mobs)
+        if is_night && tick % 100 == 0 {
+            let hostile_count = self.mobs.iter().filter(|m| m.is_hostile()).count();
+            if hostile_count < 10 {
+                // Spawn at random position around player (16-32 blocks away)
+                let angle = ((tick * 7) % 360) as f64 * std::f64::consts::PI / 180.0;
+                let distance = 16.0 + ((tick * 13) % 16) as f64;
+                let spawn_x = player_x + angle.cos() * distance;
+                let spawn_z = player_z + angle.sin() * distance;
+
+                // Get ground height at spawn position
+                let chunk_x = (spawn_x as i32).div_euclid(CHUNK_SIZE_X as i32);
+                let chunk_z = (spawn_z as i32).div_euclid(CHUNK_SIZE_Z as i32);
+                let local_x = (spawn_x as i32).rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = (spawn_z as i32).rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
+                    // Find ground level
+                    let mut ground_y = 64;
+                    for y in (0..CHUNK_SIZE_Y).rev() {
+                        if chunk.voxel(local_x, y, local_z).id != BLOCK_AIR {
+                            ground_y = y + 1;
+                            break;
+                        }
+                    }
+
+                    // Choose mob type (zombie, skeleton, spider, or creeper)
+                    let mob_type = match tick % 4 {
+                        0 => MobType::Zombie,
+                        1 => MobType::Skeleton,
+                        2 => MobType::Spider,
+                        _ => MobType::Creeper,
+                    };
+
+                    let mob = Mob::new(spawn_x, ground_y as f64 + 0.5, spawn_z, mob_type);
+                    self.mobs.push(mob);
+                    tracing::debug!("Spawned {:?} at ({:.1}, {}, {:.1})", mob_type, spawn_x, ground_y, spawn_z);
+                }
+            }
+        }
+
+        // Despawn hostile mobs during the day (too far from player or day time)
+        if !is_night {
+            self.mobs.retain(|mob| {
+                if mob.is_hostile() {
+                    // Despawn hostile mobs during the day
+                    let dist = ((mob.x - player_x).powi(2) + (mob.z - player_z).powi(2)).sqrt();
+                    dist < 48.0 // Keep if within 48 blocks during day transition
+                } else {
+                    true
+                }
+            });
+        }
+    }
+
+    /// Update all projectiles - physics, collisions, and damage
+    fn update_projectiles(&mut self) {
+        // Update projectile physics
+        self.projectiles.update();
+
+        // Check for block collisions (stick arrows)
+        for projectile in &mut self.projectiles.projectiles {
+            if projectile.stuck || projectile.dead {
+                continue;
+            }
+
+            // Check if projectile is inside a solid block
+            let block_x = projectile.x.floor() as i32;
+            let block_y = projectile.y.floor() as i32;
+            let block_z = projectile.z.floor() as i32;
+
+            if block_y < 0 || block_y >= 256 {
+                projectile.stick();
+                continue;
+            }
+
+            let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+            let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+            let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_y = block_y as usize;
+            let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+            if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
+                let voxel = chunk.voxel(local_x, local_y, local_z);
+                if voxel.id != BLOCK_AIR {
+                    // Hit a block, stick the arrow
+                    projectile.stick();
+                }
+            }
+        }
+
+        // Check for mob collisions
+        for projectile in &mut self.projectiles.projectiles {
+            if projectile.stuck || projectile.dead {
+                continue;
+            }
+
+            for mob in &mut self.mobs {
+                if mob.dead {
+                    continue;
+                }
+
+                // Simple distance-based hit detection
+                let mob_radius = mob.mob_type.size() as f64;
+                let mob_height = mob_radius * 2.0;
+
+                // Check if projectile is within mob bounds
+                let dx = projectile.x - mob.x;
+                let dy = projectile.y - (mob.y + mob_height / 2.0);
+                let dz = projectile.z - mob.z;
+
+                let horizontal_dist = (dx * dx + dz * dz).sqrt();
+                let vertical_dist = dy.abs();
+
+                if horizontal_dist < mob_radius + 0.3 && vertical_dist < mob_height / 2.0 + 0.3 {
+                    // Hit the mob!
+                    let damage = projectile.damage();
+                    mob.damage(damage);
+                    projectile.hit();
+
+                    // Apply knockback from arrow direction
+                    let knock_dir_x = projectile.vel_x;
+                    let knock_dir_z = projectile.vel_z;
+                    let knock_len = (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
+                    if knock_len > 0.001 {
+                        mob.apply_knockback(
+                            knock_dir_x / knock_len,
+                            knock_dir_z / knock_len,
+                            0.3,
+                        );
+                    }
+
+                    tracing::debug!(
+                        "Arrow hit {:?} for {:.1} damage",
+                        mob.mob_type,
+                        damage
+                    );
+                    break; // Only hit one mob per projectile
+                }
+            }
+        }
+
+        // Check for player picking up stuck arrows
+        let player_pos = self.renderer.camera().position;
+        let pickup_radius = 1.5_f64;
+        let mut arrows_to_pickup = 0u32;
+
+        self.projectiles.projectiles.retain(|projectile| {
+            if projectile.stuck && !projectile.dead {
+                // Check distance to player
+                let dx = projectile.x - player_pos.x as f64;
+                let dy = projectile.y - player_pos.y as f64;
+                let dz = projectile.z - player_pos.z as f64;
+                let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+                if dist < pickup_radius {
+                    arrows_to_pickup += 1;
+                    return false; // Remove from projectiles
+                }
+            }
+            true
+        });
+
+        // Add picked up arrows to hotbar
+        if arrows_to_pickup > 0 {
+            let arrow_type = ItemType::Item(2); // Arrow
+            let mut added = false;
+
+            // Try to add to existing stack
+            for slot in &mut self.hotbar.slots {
+                if let Some(existing) = slot {
+                    if existing.item_type == arrow_type && existing.can_add(arrows_to_pickup) {
+                        existing.count += arrows_to_pickup;
+                        added = true;
+                        break;
+                    }
+                }
+            }
+
+            // Try empty slot
+            if !added {
+                for slot in &mut self.hotbar.slots {
+                    if slot.is_none() {
+                        *slot = Some(ItemStack::new(arrow_type, arrows_to_pickup));
+                        added = true;
+                        break;
+                    }
+                }
+            }
+
+            if added {
+                tracing::debug!("Picked up {} arrow(s)", arrows_to_pickup);
+            }
+        }
+    }
+
+    /// Destroy blocks in a radius (for creeper explosions)
+    fn destroy_blocks_in_radius(&mut self, cx: f64, cy: f64, cz: f64, radius: f32) {
+        let radius_i = radius.ceil() as i32;
+        let mut affected_chunks: std::collections::HashSet<ChunkPos> =
+            std::collections::HashSet::new();
+
+        // Iterate over all blocks in the explosion radius
+        for dx in -radius_i..=radius_i {
+            for dy in -radius_i..=radius_i {
+                for dz in -radius_i..=radius_i {
+                    // Check if block is within spherical radius
+                    let dist =
+                        ((dx * dx + dy * dy + dz * dz) as f32).sqrt();
+                    if dist > radius {
+                        continue;
+                    }
+
+                    let block_x = cx.floor() as i32 + dx;
+                    let block_y = cy.floor() as i32 + dy;
+                    let block_z = cz.floor() as i32 + dz;
+
+                    // Skip if out of world bounds
+                    if block_y < 1 || block_y >= 255 {
+                        continue; // Don't destroy bedrock layer or above world
+                    }
+
+                    let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+                    let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+                    let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let local_y = block_y as usize;
+                    let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                    if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                        let voxel = chunk.voxel(local_x, local_y, local_z);
+                        // Don't destroy bedrock (block 10) or air
+                        if voxel.id != BLOCK_AIR && voxel.id != 10 {
+                            chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                            affected_chunks.insert(chunk_pos);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update lighting and meshes for affected chunks
+        for chunk_pos in affected_chunks {
+            self.recompute_chunk_lighting(chunk_pos);
+            if let Some(chunk) = self.chunks.get(&chunk_pos) {
+                let mesh = mesh_chunk(chunk, &self.registry, self.renderer.atlas_metadata());
+                if let Some(resources) = self.renderer.render_resources() {
+                    let chunk_bind_group = resources
+                        .pipeline
+                        .create_chunk_bind_group(resources.device, chunk_pos);
+                    self.chunk_manager.add_chunk(
+                        resources.device,
+                        &mesh,
+                        chunk_pos,
+                        chunk_bind_group,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Try to attack a mob that the player is looking at.
+    /// Returns true if a mob was attacked.
+    fn try_attack_mob(&mut self) -> bool {
+        // Get camera position and direction
+        let camera = self.renderer.camera();
+        let origin = camera.position;
+        let dir = camera.forward();
+
+        // Attack reach (slightly more than block reach for mobs)
+        const ATTACK_REACH: f32 = 4.0;
+
+        // Check each mob to see if the ray hits it
+        let mut closest_hit: Option<(usize, f32)> = None;
+
+        for (idx, mob) in self.mobs.iter().enumerate() {
+            // Simple AABB collision for mob
+            let mob_size = mob.mob_type.size();
+            let mob_height = mob_size * 2.0; // Approximate height
+
+            let mob_min = glam::Vec3::new(
+                mob.x as f32 - mob_size,
+                mob.y as f32,
+                mob.z as f32 - mob_size,
+            );
+            let mob_max = glam::Vec3::new(
+                mob.x as f32 + mob_size,
+                mob.y as f32 + mob_height,
+                mob.z as f32 + mob_size,
+            );
+
+            // Simple ray-AABB intersection
+            if let Some(t) = ray_aabb_intersect(origin, dir, mob_min, mob_max) {
+                if t > 0.0 && t < ATTACK_REACH
+                    && (closest_hit.is_none() || t < closest_hit.unwrap().1)
+                {
+                    closest_hit = Some((idx, t));
+                }
+            }
+        }
+
+        // Attack the closest mob
+        if let Some((idx, _distance)) = closest_hit {
+            let tool = self.hotbar.selected_tool();
+            let damage = calculate_attack_damage(tool);
+
+            // Calculate knockback direction
+            let mob = &self.mobs[idx];
+            let dx = mob.x - origin.x as f64;
+            let dz = mob.z - origin.z as f64;
+
+            // Apply damage and knockback
+            let mob = &mut self.mobs[idx];
+            let _died = mob.damage(damage);
+            mob.apply_knockback(dx, dz, 0.5);
+
+            tracing::info!(
+                "Attacked {:?} for {:.1} damage (health: {:.1})",
+                mob.mob_type,
+                damage,
+                mob.health
+            );
+
+            // Use tool durability if we have a tool
+            if let Some(item) = self.hotbar.selected_item_mut() {
+                if let ItemType::Tool(_, _) = item.item_type {
+                    if let Some(durability) = item.durability.as_mut() {
+                        *durability = durability.saturating_sub(1);
+                        if *durability == 0 {
+                            // Tool broke
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                            tracing::info!("Tool broke!");
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        false
     }
 
     /// Toggle inventory UI open/closed
@@ -2091,6 +2964,61 @@ impl GameWorld {
         // Capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
         tracing::info!("Crafting closed");
+    }
+
+    /// Open furnace UI at the given position
+    fn open_furnace(&mut self, block_pos: IVec3) {
+        self.furnace_open = true;
+        self.open_furnace_pos = Some(block_pos);
+        self.inventory_open = false;
+        self.crafting_open = false;
+        // Create furnace state if it doesn't exist
+        self.furnaces.entry(block_pos).or_insert_with(FurnaceState::new);
+        // Release cursor for UI interaction
+        let _ = self.input.enter_ui_overlay(&self.window);
+        tracing::info!("Furnace opened at {:?}", block_pos);
+    }
+
+    /// Close furnace UI
+    fn close_furnace(&mut self) {
+        self.furnace_open = false;
+        self.open_furnace_pos = None;
+        // Capture cursor for gameplay
+        let _ = self.input.enter_gameplay(&self.window);
+        tracing::info!("Furnace closed");
+    }
+
+    /// Update all furnaces in the world
+    fn update_furnaces(&mut self, dt: f32) {
+        let mut lit_changes: Vec<(IVec3, bool)> = Vec::new();
+
+        for (pos, furnace) in &mut self.furnaces {
+            let was_lit = furnace.is_lit;
+            furnace.update(dt);
+            if was_lit != furnace.is_lit {
+                lit_changes.push((*pos, furnace.is_lit));
+            }
+        }
+
+        // Update furnace block states (lit/unlit)
+        for (pos, is_lit) in lit_changes {
+            let chunk_x = pos.x.div_euclid(16);
+            let chunk_z = pos.z.div_euclid(16);
+            let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+            if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                let local_x = pos.x.rem_euclid(16) as usize;
+                let local_y = pos.y as usize;
+                let local_z = pos.z.rem_euclid(16) as usize;
+
+                if local_y < 256 {
+                    let new_id = if is_lit { BLOCK_FURNACE_LIT } else { BLOCK_FURNACE };
+                    let mut voxel = chunk.voxel(local_x, local_y, local_z);
+                    voxel.id = new_id;
+                    chunk.set_voxel(local_x, local_y, local_z, voxel);
+                }
+            }
+        }
     }
 
     /// Convert dropped item type to core item type
@@ -2243,6 +3171,217 @@ fn render_health_bar(ctx: &egui::Context, health: &PlayerHealth) {
                 );
             });
         });
+}
+
+/// Render the hunger bar (10 shanks on the right side)
+fn render_hunger_bar(ctx: &egui::Context, health: &PlayerHealth) {
+    egui::Area::new(egui::Id::new("hunger_bar"))
+        .anchor(egui::Align2::RIGHT_BOTTOM, [-10.0, -70.0])
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // Show numerical hunger
+                let hunger_text = format!("{:.1}/{:.0}", health.hunger, health.max_hunger);
+                let text_color = if health.hunger < 6.0 {
+                    egui::Color32::RED
+                } else if health.hunger < 10.0 {
+                    egui::Color32::YELLOW
+                } else {
+                    egui::Color32::WHITE
+                };
+                ui.label(
+                    egui::RichText::new(hunger_text)
+                        .size(14.0)
+                        .color(text_color),
+                );
+
+                ui.add_space(10.0);
+
+                // Draw shanks (drumsticks)
+                let max_shanks = (health.max_hunger / 2.0) as i32; // 20 hunger = 10 shanks
+                let current_shanks = health.hunger / 2.0;
+
+                for i in 0..max_shanks {
+                    let shank_value = current_shanks - i as f32;
+                    let (symbol, color) = if shank_value >= 1.0 {
+                        ("🍖", egui::Color32::from_rgb(200, 150, 100)) // Full shank - brown
+                    } else if shank_value >= 0.5 {
+                        ("🍖", egui::Color32::from_rgb(150, 100, 50)) // Half shank - darker
+                    } else {
+                        ("🦴", egui::Color32::from_rgb(100, 100, 100)) // Empty - bone/gray
+                    };
+
+                    ui.label(egui::RichText::new(symbol).size(18.0).color(color));
+                }
+            });
+        });
+}
+
+/// Render the armor bar (above health bar)
+fn render_armor_bar(ctx: &egui::Context, armor: &PlayerArmor) {
+    let defense = armor.total_defense();
+
+    // Only show if player has armor equipped
+    if defense > 0 {
+        egui::Area::new(egui::Id::new("armor_bar"))
+            .anchor(egui::Align2::LEFT_BOTTOM, [10.0, -100.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    // Draw armor icons (10 max, each represents 2 defense)
+                    let max_icons = 10;
+                    let filled_icons = (defense as f32 / 2.0).ceil() as u32;
+
+                    for i in 0..max_icons {
+                        let icon_value = defense.saturating_sub(i * 2);
+                        let (symbol, color) = if icon_value >= 2 {
+                            ("🛡️", egui::Color32::from_rgb(220, 220, 220)) // Full armor
+                        } else if icon_value >= 1 {
+                            ("🛡️", egui::Color32::from_rgb(150, 150, 150)) // Half armor
+                        } else {
+                            ("🛡️", egui::Color32::from_rgb(60, 60, 60)) // Empty
+                        };
+
+                        if i < filled_icons || icon_value > 0 {
+                            ui.label(egui::RichText::new(symbol).size(16.0).color(color));
+                        }
+                    }
+
+                    ui.add_space(5.0);
+
+                    // Show defense value
+                    ui.label(
+                        egui::RichText::new(format!("{} defense", defense))
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(180, 180, 180)),
+                    );
+                });
+
+                // Show individual armor pieces with durability
+                ui.horizontal(|ui| {
+                    if let Some(piece) = armor.get(ArmorSlot::Helmet) {
+                        render_armor_piece_icon(ui, "H", piece.durability_ratio());
+                    }
+                    if let Some(piece) = armor.get(ArmorSlot::Chestplate) {
+                        render_armor_piece_icon(ui, "C", piece.durability_ratio());
+                    }
+                    if let Some(piece) = armor.get(ArmorSlot::Leggings) {
+                        render_armor_piece_icon(ui, "L", piece.durability_ratio());
+                    }
+                    if let Some(piece) = armor.get(ArmorSlot::Boots) {
+                        render_armor_piece_icon(ui, "B", piece.durability_ratio());
+                    }
+                });
+            });
+    }
+}
+
+/// Render a small armor piece icon with durability indicator
+fn render_armor_piece_icon(ui: &mut egui::Ui, label: &str, durability_ratio: f32) {
+    let color = if durability_ratio > 0.5 {
+        egui::Color32::from_rgb(100, 200, 100) // Green
+    } else if durability_ratio > 0.25 {
+        egui::Color32::from_rgb(200, 200, 100) // Yellow
+    } else {
+        egui::Color32::from_rgb(200, 100, 100) // Red
+    };
+
+    let frame = egui::Frame::none()
+        .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180))
+        .stroke(egui::Stroke::new(1.0, color))
+        .inner_margin(2.0);
+
+    frame.show(ui, |ui| {
+        ui.label(
+            egui::RichText::new(label)
+                .size(10.0)
+                .color(color),
+        );
+    });
+}
+
+/// Render tool durability bar (only shows when a tool is selected)
+fn render_tool_durability(ctx: &egui::Context, hotbar: &Hotbar) {
+    // Check if selected item is a tool with durability
+    if let Some(item) = hotbar.selected_item() {
+        if let ItemType::Tool(tool_type, material) = item.item_type {
+            if let Some(durability) = item.durability {
+                let max_durability = item.max_durability().unwrap_or(1);
+                let percent = (durability as f32 / max_durability as f32 * 100.0) as u32;
+
+                egui::Area::new(egui::Id::new("tool_durability"))
+                    .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -90.0])
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            // Tool icon/name
+                            let tool_name = match tool_type {
+                                ToolType::Pickaxe => "⛏",
+                                ToolType::Axe => "🪓",
+                                ToolType::Shovel => "🪏",
+                                ToolType::Sword => "⚔",
+                                ToolType::Hoe => "🌾",
+                            };
+                            let material_name = match material {
+                                ToolMaterial::Wood => "Wood",
+                                ToolMaterial::Stone => "Stone",
+                                ToolMaterial::Iron => "Iron",
+                                ToolMaterial::Gold => "Gold",
+                                ToolMaterial::Diamond => "Diamond",
+                            };
+
+                            ui.label(
+                                egui::RichText::new(format!("{} {} ", tool_name, material_name))
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            );
+
+                            // Durability bar
+                            let bar_width = 80.0;
+                            let bar_height = 8.0;
+                            let bar_color = if percent > 50 {
+                                egui::Color32::GREEN
+                            } else if percent > 20 {
+                                egui::Color32::YELLOW
+                            } else {
+                                egui::Color32::RED
+                            };
+
+                            let (response, painter) = ui.allocate_painter(
+                                egui::vec2(bar_width, bar_height),
+                                egui::Sense::hover(),
+                            );
+                            let rect = response.rect;
+
+                            // Background
+                            painter.rect_filled(
+                                rect,
+                                2.0,
+                                egui::Color32::from_rgb(40, 40, 40),
+                            );
+
+                            // Foreground (durability)
+                            let fill_width = bar_width * (percent as f32 / 100.0);
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(
+                                    rect.min,
+                                    egui::vec2(fill_width, bar_height),
+                                ),
+                                2.0,
+                                bar_color,
+                            );
+
+                            // Border
+                            painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY));
+
+                            // Percentage text
+                            ui.label(
+                                egui::RichText::new(format!(" {}%", percent))
+                                    .size(10.0)
+                                    .color(bar_color),
+                            );
+                        });
+                    });
+            }
+        }
+    }
 }
 
 /// Render the death screen overlay
@@ -2489,10 +3628,110 @@ fn render_inventory_slot_world(
     });
 }
 
+/// Get available crafting recipes as (inputs, output, output_count)
+/// Inputs are a list of (ItemType, count) required
+fn get_crafting_recipes() -> Vec<(Vec<(ItemType, u32)>, ItemType, u32)> {
+    vec![
+        // Furnace: 8 cobblestone → furnace
+        (vec![(ItemType::Block(6), 8)], ItemType::Block(18), 1),
+        // Planks: 1 log → 4 planks
+        (vec![(ItemType::Block(3), 1)], ItemType::Block(7), 4),
+        // Sticks: 2 planks → 4 sticks
+        (vec![(ItemType::Block(7), 2)], ItemType::Item(3), 4), // Item(3) = Stick
+        // Bow: 3 sticks + 3 string
+        (vec![(ItemType::Item(3), 3), (ItemType::Item(4), 3)], ItemType::Item(1), 1), // Item(4) = String
+        // Arrow: 1 flint + 1 stick + 1 feather
+        (vec![(ItemType::Item(5), 1), (ItemType::Item(3), 1), (ItemType::Item(6), 1)], ItemType::Item(2), 4), // Item(5) = Flint, Item(6) = Feather
+        // Leather armor (Item(102) = Leather)
+        // Leather Helmet: 5 leather
+        (vec![(ItemType::Item(102), 5)], ItemType::Item(20), 1), // Item(20) = LeatherHelmet
+        // Leather Chestplate: 8 leather
+        (vec![(ItemType::Item(102), 8)], ItemType::Item(21), 1), // Item(21) = LeatherChestplate
+        // Leather Leggings: 7 leather
+        (vec![(ItemType::Item(102), 7)], ItemType::Item(22), 1), // Item(22) = LeatherLeggings
+        // Leather Boots: 4 leather
+        (vec![(ItemType::Item(102), 4)], ItemType::Item(23), 1), // Item(23) = LeatherBoots
+        // Iron armor (Item(7) = IronIngot)
+        // Iron Helmet: 5 iron ingots
+        (vec![(ItemType::Item(7), 5)], ItemType::Item(10), 1), // Item(10) = IronHelmet
+        // Iron Chestplate: 8 iron ingots
+        (vec![(ItemType::Item(7), 8)], ItemType::Item(11), 1), // Item(11) = IronChestplate
+        // Iron Leggings: 7 iron ingots
+        (vec![(ItemType::Item(7), 7)], ItemType::Item(12), 1), // Item(12) = IronLeggings
+        // Iron Boots: 4 iron ingots
+        (vec![(ItemType::Item(7), 4)], ItemType::Item(13), 1), // Item(13) = IronBoots
+        // Diamond armor (Item(14) = Diamond)
+        // Diamond Helmet: 5 diamonds
+        (vec![(ItemType::Item(14), 5)], ItemType::Item(30), 1), // Item(30) = DiamondHelmet
+        // Diamond Chestplate: 8 diamonds
+        (vec![(ItemType::Item(14), 8)], ItemType::Item(31), 1), // Item(31) = DiamondChestplate
+        // Diamond Leggings: 7 diamonds
+        (vec![(ItemType::Item(14), 7)], ItemType::Item(32), 1), // Item(32) = DiamondLeggings
+        // Diamond Boots: 4 diamonds
+        (vec![(ItemType::Item(14), 4)], ItemType::Item(33), 1), // Item(33) = DiamondBoots
+    ]
+}
+
+/// Check if the crafting grid matches a recipe
+fn check_crafting_recipe(crafting_grid: &[[Option<ItemStack>; 3]; 3]) -> Option<(ItemType, u32)> {
+    // Gather items from grid
+    let mut grid_items: std::collections::HashMap<ItemType, u32> = std::collections::HashMap::new();
+    for row in crafting_grid {
+        for slot in row {
+            if let Some(stack) = slot {
+                *grid_items.entry(stack.item_type).or_insert(0) += stack.count;
+            }
+        }
+    }
+
+    // Check each recipe
+    for (inputs, output, count) in get_crafting_recipes() {
+        let mut matches = true;
+        let mut required: std::collections::HashMap<ItemType, u32> = std::collections::HashMap::new();
+        for (item_type, needed) in &inputs {
+            *required.entry(*item_type).or_insert(0) += needed;
+        }
+
+        // Check if grid has exactly the required items
+        for (item_type, needed) in &required {
+            match grid_items.get(item_type) {
+                Some(have) if *have >= *needed => {}
+                _ => {
+                    matches = false;
+                    break;
+                }
+            }
+        }
+
+        // Also check no extra item types
+        if matches {
+            for item_type in grid_items.keys() {
+                if !required.contains_key(item_type) {
+                    matches = false;
+                    break;
+                }
+            }
+        }
+
+        if matches {
+            return Some((output, count));
+        }
+    }
+    None
+}
+
 /// Render the crafting table UI
-/// Returns true if the close button was clicked
-fn render_crafting(ctx: &egui::Context, crafting_grid: &[[Option<ItemStack>; 3]; 3]) -> bool {
+/// Returns (close_clicked, crafted_item)
+fn render_crafting(
+    ctx: &egui::Context,
+    crafting_grid: &mut [[Option<ItemStack>; 3]; 3],
+    hotbar: &mut Hotbar,
+) -> (bool, Option<ItemStack>) {
     let mut close_clicked = false;
+    let mut crafted_item = None;
+
+    // Check for matching recipe
+    let recipe_result = check_crafting_recipe(crafting_grid);
 
     // Semi-transparent dark overlay
     egui::Area::new(egui::Id::new("crafting_overlay"))
@@ -2512,7 +3751,7 @@ fn render_crafting(ctx: &egui::Context, crafting_grid: &[[Option<ItemStack>; 3];
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.set_min_width(350.0);
+            ui.set_min_width(400.0);
 
             // Close button
             ui.horizontal(|ui| {
@@ -2526,14 +3765,77 @@ fn render_crafting(ctx: &egui::Context, crafting_grid: &[[Option<ItemStack>; 3];
 
             ui.separator();
 
+            // Show hotbar for material selection
+            ui.label("Hotbar (click to add to grid):");
+            let mut clicked_slot: Option<usize> = None;
             ui.horizontal(|ui| {
-                // 3x3 Crafting grid
+                for i in 0..9 {
+                    if let Some(stack) = &hotbar.slots[i] {
+                        let btn_text = format!("{}", i + 1);
+                        if ui.button(&btn_text).clicked() {
+                            clicked_slot = Some(i);
+                        }
+                        ui.label(format!("{:?}", stack.item_type).chars().take(6).collect::<String>());
+                    }
+                }
+            });
+
+            // Handle adding item to crafting grid (after UI drawing to avoid borrow issues)
+            if let Some(i) = clicked_slot {
+                if let Some(stack) = &hotbar.slots[i] {
+                    let item_type = stack.item_type;
+                    // Find first empty grid slot
+                    let mut added = false;
+                    for row in crafting_grid.iter_mut() {
+                        for slot in row.iter_mut() {
+                            if slot.is_none() {
+                                *slot = Some(ItemStack::new(item_type, 1));
+                                added = true;
+                                break;
+                            }
+                        }
+                        if added { break; }
+                    }
+                    if added {
+                        // Reduce hotbar count
+                        if let Some(hotbar_stack) = &mut hotbar.slots[i] {
+                            if hotbar_stack.count > 1 {
+                                hotbar_stack.count -= 1;
+                            } else {
+                                hotbar.slots[i] = None;
+                            }
+                        }
+                    }
+                }
+            }
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                // 3x3 Crafting grid with clickable slots
                 ui.vertical(|ui| {
-                    ui.label("Crafting Grid");
-                    for row in 0..3 {
+                    ui.label("Crafting Grid (click to remove)");
+                    for row_idx in 0..3 {
                         ui.horizontal(|ui| {
-                            for col in 0..3 {
-                                render_crafting_slot(ui, crafting_grid[row][col].as_ref());
+                            for col_idx in 0..3 {
+                                let slot = &crafting_grid[row_idx][col_idx];
+                                if render_crafting_slot_clickable(ui, slot.as_ref()) {
+                                    // Return item to hotbar
+                                    if let Some(stack) = crafting_grid[row_idx][col_idx].take() {
+                                        // Try to add back to hotbar
+                                        for hotbar_slot in &mut hotbar.slots {
+                                            if let Some(existing) = hotbar_slot {
+                                                if existing.item_type == stack.item_type {
+                                                    existing.count += stack.count;
+                                                    break;
+                                                }
+                                            } else {
+                                                *hotbar_slot = Some(stack);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         });
                     }
@@ -2553,11 +3855,26 @@ fn render_crafting(ctx: &egui::Context, crafting_grid: &[[Option<ItemStack>; 3];
 
                 ui.add_space(20.0);
 
-                // Result slot
+                // Result slot with craft button
                 ui.vertical(|ui| {
                     ui.label("Result");
-                    ui.add_space(30.0);
-                    render_crafting_slot(ui, None); // TODO: Show actual result
+                    ui.add_space(10.0);
+                    if let Some((output, count)) = &recipe_result {
+                        let result_stack = ItemStack::new(*output, *count);
+                        render_crafting_slot(ui, Some(&result_stack));
+                        if ui.button("Craft").clicked() {
+                            // Clear crafting grid and produce output
+                            for row in crafting_grid.iter_mut() {
+                                for slot in row.iter_mut() {
+                                    *slot = None;
+                                }
+                            }
+                            crafted_item = Some(result_stack);
+                        }
+                    } else {
+                        render_crafting_slot(ui, None);
+                        ui.label(egui::RichText::new("No recipe").size(10.0).color(egui::Color32::GRAY));
+                    }
                 });
             });
 
@@ -2565,13 +3882,13 @@ fn render_crafting(ctx: &egui::Context, crafting_grid: &[[Option<ItemStack>; 3];
             ui.separator();
 
             ui.label(
-                egui::RichText::new("Right-click crafting table to open, Escape or X to close")
+                egui::RichText::new("Click hotbar items to add, click grid slots to remove")
                     .size(12.0)
                     .color(egui::Color32::GRAY),
             );
         });
 
-    close_clicked
+    (close_clicked, crafted_item)
 }
 
 /// Render a single crafting slot
@@ -2609,4 +3926,267 @@ fn render_crafting_slot(ui: &mut egui::Ui, item: Option<&ItemStack>) {
             });
         }
     });
+}
+
+/// Render a clickable crafting slot, returns true if clicked
+fn render_crafting_slot_clickable(ui: &mut egui::Ui, item: Option<&ItemStack>) -> bool {
+    let mut clicked = false;
+    let fill = if item.is_some() {
+        egui::Color32::from_rgba_unmultiplied(80, 80, 80, 200)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(40, 40, 40, 200)
+    };
+
+    let response = ui.allocate_response(egui::vec2(40.0, 40.0), egui::Sense::click());
+    let rect = response.rect;
+
+    if response.clicked() && item.is_some() {
+        clicked = true;
+    }
+
+    ui.painter().rect(
+        rect,
+        2.0,
+        fill,
+        egui::Stroke::new(1.0, egui::Color32::GRAY),
+    );
+
+    if let Some(stack) = item {
+        let name = match stack.item_type {
+            mdminecraft_core::ItemType::Tool(tool, _) => format!("{:?}", tool),
+            mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
+            mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
+            mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
+        };
+
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &name[..name.len().min(4)],
+            egui::FontId::proportional(10.0),
+            egui::Color32::WHITE,
+        );
+
+        if stack.count > 1 {
+            ui.painter().text(
+                rect.right_bottom() - egui::vec2(4.0, 4.0),
+                egui::Align2::RIGHT_BOTTOM,
+                format!("{}", stack.count),
+                egui::FontId::proportional(9.0),
+                egui::Color32::YELLOW,
+            );
+        }
+    }
+
+    clicked
+}
+
+/// Render the furnace UI
+/// Returns true if the close button was clicked
+fn render_furnace(ctx: &egui::Context, furnace: &mut FurnaceState) -> bool {
+    let mut close_clicked = false;
+
+    // Semi-transparent dark overlay
+    egui::Area::new(egui::Id::new("furnace_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    // Furnace window
+    egui::Window::new("Furnace")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(300.0);
+
+            // Close button
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Furnace").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                // Input and Fuel slots column
+                ui.vertical(|ui| {
+                    ui.label("Input (smeltable)");
+                    render_furnace_slot(ui, furnace.input.as_ref(), "input");
+
+                    ui.add_space(10.0);
+
+                    ui.label("Fuel");
+                    render_furnace_slot(ui, furnace.fuel.as_ref(), "fuel");
+                });
+
+                ui.add_space(20.0);
+
+                // Arrow and progress
+                ui.vertical(|ui| {
+                    ui.add_space(20.0);
+
+                    // Progress bar
+                    let progress = furnace.smelt_progress;
+                    let progress_bar = egui::ProgressBar::new(progress)
+                        .desired_width(60.0)
+                        .text(format!("{:.0}%", progress * 100.0));
+                    ui.add(progress_bar);
+
+                    ui.add_space(5.0);
+
+                    // Fire indicator
+                    let fire_color = if furnace.is_lit {
+                        egui::Color32::from_rgb(255, 128, 0)
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    };
+                    ui.label(
+                        egui::RichText::new("🔥")
+                            .size(24.0)
+                            .color(fire_color),
+                    );
+
+                    // Fuel remaining indicator
+                    if furnace.fuel_remaining > 0.0 {
+                        ui.label(
+                            egui::RichText::new(format!("{:.1}", furnace.fuel_remaining))
+                                .size(10.0)
+                                .color(egui::Color32::YELLOW),
+                        );
+                    }
+                });
+
+                ui.add_space(20.0);
+
+                // Output slot
+                ui.vertical(|ui| {
+                    ui.label("Output");
+                    render_furnace_slot(ui, furnace.output.as_ref(), "output");
+                });
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+
+            // Status text
+            let status = if furnace.is_lit {
+                "Smelting..."
+            } else if furnace.input.is_some() && furnace.fuel.is_none() {
+                "Need fuel"
+            } else if furnace.input.is_none() {
+                "Add smeltable item"
+            } else {
+                "Ready"
+            };
+            ui.label(
+                egui::RichText::new(status)
+                    .size(12.0)
+                    .color(if furnace.is_lit {
+                        egui::Color32::from_rgb(255, 200, 100)
+                    } else {
+                        egui::Color32::GRAY
+                    }),
+            );
+
+            ui.add_space(5.0);
+
+            // Quick-add buttons (temporary, for testing)
+            ui.horizontal(|ui| {
+                if ui.button("+ Iron Ore").clicked() {
+                    furnace.add_input(DroppedItemType::IronOre, 1);
+                }
+                if ui.button("+ Coal").clicked() {
+                    furnace.add_fuel(DroppedItemType::Coal, 1);
+                }
+                if ui.button("Take Output").clicked() {
+                    let _ = furnace.take_output();
+                }
+            });
+
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
+}
+
+/// Render a single furnace slot
+fn render_furnace_slot(ui: &mut egui::Ui, item: Option<&(DroppedItemType, u32)>, _slot_id: &str) {
+    let frame = egui::Frame::none()
+        .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+        .inner_margin(4.0);
+
+    frame.show(ui, |ui| {
+        ui.set_min_size(egui::vec2(48.0, 48.0));
+        ui.set_max_size(egui::vec2(48.0, 48.0));
+
+        if let Some((item_type, count)) = item {
+            ui.vertical_centered(|ui| {
+                // Show item name
+                let name = format!("{:?}", item_type);
+                // Truncate to fit
+                let display_name = if name.len() > 6 {
+                    &name[..6]
+                } else {
+                    &name
+                };
+                ui.label(
+                    egui::RichText::new(display_name)
+                        .size(10.0)
+                        .color(egui::Color32::WHITE),
+                );
+
+                // Count
+                if *count > 1 {
+                    ui.label(
+                        egui::RichText::new(format!("{}", count))
+                            .size(11.0)
+                            .color(egui::Color32::YELLOW),
+                    );
+                }
+            });
+        }
+    });
+}
+
+/// Convert an ItemType to DroppedItemType for armor pieces
+/// Returns the DroppedItemType if the item is armor, None otherwise
+fn item_type_to_armor_dropped(item_type: ItemType) -> Option<DroppedItemType> {
+    if let ItemType::Item(id) = item_type {
+        match id {
+            // Leather armor
+            20 => Some(DroppedItemType::LeatherHelmet),
+            21 => Some(DroppedItemType::LeatherChestplate),
+            22 => Some(DroppedItemType::LeatherLeggings),
+            23 => Some(DroppedItemType::LeatherBoots),
+            // Iron armor
+            10 => Some(DroppedItemType::IronHelmet),
+            11 => Some(DroppedItemType::IronChestplate),
+            12 => Some(DroppedItemType::IronLeggings),
+            13 => Some(DroppedItemType::IronBoots),
+            // Diamond armor
+            30 => Some(DroppedItemType::DiamondHelmet),
+            31 => Some(DroppedItemType::DiamondChestplate),
+            32 => Some(DroppedItemType::DiamondLeggings),
+            33 => Some(DroppedItemType::DiamondBoots),
+            _ => None,
+        }
+    } else {
+        None
+    }
 }

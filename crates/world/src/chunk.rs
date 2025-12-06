@@ -17,8 +17,29 @@ pub type BlockState = u16;
 /// Reserved ID for air.
 pub const BLOCK_AIR: BlockId = 0;
 
+/// ID for stone block.
+pub const BLOCK_STONE: BlockId = 1;
+
 /// ID for crafting table (from blocks.json index).
 pub const BLOCK_CRAFTING_TABLE: BlockId = 13;
+
+/// ID for coal ore (spawns y: 0-128).
+pub const BLOCK_COAL_ORE: BlockId = 14;
+
+/// ID for iron ore (spawns y: 0-64).
+pub const BLOCK_IRON_ORE: BlockId = 15;
+
+/// ID for gold ore (spawns y: 0-32).
+pub const BLOCK_GOLD_ORE: BlockId = 16;
+
+/// ID for diamond ore (spawns y: 0-16).
+pub const BLOCK_DIAMOND_ORE: BlockId = 17;
+
+/// ID for furnace block.
+pub const BLOCK_FURNACE: BlockId = 18;
+
+/// ID for lit furnace block.
+pub const BLOCK_FURNACE_LIT: BlockId = 19;
 
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

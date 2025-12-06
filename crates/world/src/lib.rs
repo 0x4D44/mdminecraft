@@ -1,36 +1,44 @@
+mod armor;
 mod biome;
 mod block_properties;
 mod caves;
 mod chunk;
 mod crafting;
 mod drop_item;
+mod furnace;
 mod heightmap;
 mod inventory;
 pub mod lighting;
 mod mob;
 mod noise;
 mod persist;
+mod projectile;
 mod storage;
 mod terrain;
 mod time;
 mod trees;
 mod weather;
 
+pub use armor::*;
 pub use biome::*;
 pub use block_properties::*;
 pub use caves::*;
 pub use chunk::{
     BlockId, BlockState, Chunk, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR,
-    BLOCK_CRAFTING_TABLE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    BLOCK_COAL_ORE, BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
+    BLOCK_GOLD_ORE, BLOCK_IRON_ORE, BLOCK_STONE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    CHUNK_VOLUME,
 };
 pub use crafting::*;
 pub use drop_item::*;
+pub use furnace::*;
 pub use heightmap::*;
 pub use inventory::*;
 pub use lighting::*;
 pub use mob::*;
 pub use noise::*;
 pub use persist::*;
+pub use projectile::*;
 pub use storage::*;
 pub use terrain::*;
 pub use time::*;

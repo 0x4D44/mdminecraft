@@ -3,6 +3,7 @@
 //! Provides data-driven crafting with recipe validation and
 //! crafting station management.
 
+use crate::drop_item::ItemType;
 use crate::inventory::{Inventory, ItemId, ItemStack};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -138,6 +139,165 @@ impl RecipeRegistry {
     /// Count total number of recipes.
     pub fn recipe_count(&self) -> usize {
         self.recipes.len()
+    }
+
+    /// Create a recipe registry with all default recipes.
+    ///
+    /// Includes recipes for:
+    /// - Furnace (8 cobblestone)
+    /// - Bow (3 sticks + 3 string)
+    /// - Arrow (1 flint + 1 stick + 1 feather)
+    /// - All armor pieces (leather, iron, gold, diamond)
+    pub fn with_defaults() -> Self {
+        let mut registry = Self::new();
+
+        // Helper to create a recipe
+        let recipe = |id: &str, inputs: Vec<(ItemType, u8)>, output: ItemType, count: u8| Recipe {
+            id: id.to_string(),
+            inputs: inputs
+                .into_iter()
+                .map(|(item, cnt)| RecipeInput {
+                    item_id: item.id(),
+                    count: cnt,
+                })
+                .collect(),
+            output_item: output.id(),
+            output_count: count,
+        };
+
+        // Furnace: 8 cobblestone
+        registry.add_recipe(recipe(
+            "furnace",
+            vec![(ItemType::Cobblestone, 8)],
+            ItemType::Furnace,
+            1,
+        ));
+
+        // Bow: 3 sticks + 3 string
+        registry.add_recipe(recipe(
+            "bow",
+            vec![(ItemType::Stick, 3), (ItemType::String, 3)],
+            ItemType::Bow,
+            1,
+        ));
+
+        // Arrow: 1 flint + 1 stick + 1 feather
+        registry.add_recipe(recipe(
+            "arrow",
+            vec![
+                (ItemType::Flint, 1),
+                (ItemType::Stick, 1),
+                (ItemType::Feather, 1),
+            ],
+            ItemType::Arrow,
+            4,
+        ));
+
+        // === Leather Armor ===
+        registry.add_recipe(recipe(
+            "leather_helmet",
+            vec![(ItemType::Leather, 5)],
+            ItemType::LeatherHelmet,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "leather_chestplate",
+            vec![(ItemType::Leather, 8)],
+            ItemType::LeatherChestplate,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "leather_leggings",
+            vec![(ItemType::Leather, 7)],
+            ItemType::LeatherLeggings,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "leather_boots",
+            vec![(ItemType::Leather, 4)],
+            ItemType::LeatherBoots,
+            1,
+        ));
+
+        // === Iron Armor ===
+        registry.add_recipe(recipe(
+            "iron_helmet",
+            vec![(ItemType::IronIngot, 5)],
+            ItemType::IronHelmet,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "iron_chestplate",
+            vec![(ItemType::IronIngot, 8)],
+            ItemType::IronChestplate,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "iron_leggings",
+            vec![(ItemType::IronIngot, 7)],
+            ItemType::IronLeggings,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "iron_boots",
+            vec![(ItemType::IronIngot, 4)],
+            ItemType::IronBoots,
+            1,
+        ));
+
+        // === Gold Armor ===
+        registry.add_recipe(recipe(
+            "gold_helmet",
+            vec![(ItemType::GoldIngot, 5)],
+            ItemType::GoldHelmet,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "gold_chestplate",
+            vec![(ItemType::GoldIngot, 8)],
+            ItemType::GoldChestplate,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "gold_leggings",
+            vec![(ItemType::GoldIngot, 7)],
+            ItemType::GoldLeggings,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "gold_boots",
+            vec![(ItemType::GoldIngot, 4)],
+            ItemType::GoldBoots,
+            1,
+        ));
+
+        // === Diamond Armor ===
+        registry.add_recipe(recipe(
+            "diamond_helmet",
+            vec![(ItemType::Diamond, 5)],
+            ItemType::DiamondHelmet,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "diamond_chestplate",
+            vec![(ItemType::Diamond, 8)],
+            ItemType::DiamondChestplate,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "diamond_leggings",
+            vec![(ItemType::Diamond, 7)],
+            ItemType::DiamondLeggings,
+            1,
+        ));
+        registry.add_recipe(recipe(
+            "diamond_boots",
+            vec![(ItemType::Diamond, 4)],
+            ItemType::DiamondBoots,
+            1,
+        ));
+
+        registry
     }
 }
 
@@ -405,5 +565,38 @@ mod tests {
         // Verify inputs were consumed
         assert_eq!(inv.count_item(1), 3); // 5 - 2 = 3
         assert_eq!(inv.count_item(2), 2); // 3 - 1 = 2
+    }
+
+    #[test]
+    fn default_recipes_exist() {
+        let registry = RecipeRegistry::with_defaults();
+
+        // Should have 19 recipes: furnace + bow + arrow + 16 armor pieces
+        assert_eq!(registry.recipe_count(), 19);
+
+        // Verify key recipes exist
+        assert!(registry.get_recipe("furnace").is_some());
+        assert!(registry.get_recipe("bow").is_some());
+        assert!(registry.get_recipe("arrow").is_some());
+        assert!(registry.get_recipe("leather_helmet").is_some());
+        assert!(registry.get_recipe("iron_chestplate").is_some());
+        assert!(registry.get_recipe("gold_leggings").is_some());
+        assert!(registry.get_recipe("diamond_boots").is_some());
+
+        // Verify furnace recipe details
+        let furnace = registry.get_recipe("furnace").unwrap();
+        assert_eq!(furnace.inputs.len(), 1);
+        assert_eq!(furnace.inputs[0].count, 8); // 8 cobblestone
+        assert_eq!(furnace.output_count, 1);
+
+        // Verify bow recipe details
+        let bow = registry.get_recipe("bow").unwrap();
+        assert_eq!(bow.inputs.len(), 2); // stick + string
+        assert_eq!(bow.output_count, 1);
+
+        // Verify arrow recipe details
+        let arrow = registry.get_recipe("arrow").unwrap();
+        assert_eq!(arrow.inputs.len(), 3); // flint + stick + feather
+        assert_eq!(arrow.output_count, 4);
     }
 }
