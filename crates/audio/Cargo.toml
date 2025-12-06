@@ -1,0 +1,20 @@
+[package]
+name = "mdminecraft-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Audio system for mdminecraft with positional 3D sound"
+
+[features]
+default = []
+# Enable actual audio playback (requires system audio libraries)
+rodio_backend = ["rodio"]
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+glam = { workspace = true }
+rodio = { version = "0.19", default-features = false, features = ["wav", "vorbis"], optional = true }
+
+[dev-dependencies]

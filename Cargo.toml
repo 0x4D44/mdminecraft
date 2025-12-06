@@ -33,6 +33,7 @@ mdminecraft-render = { path = "crates/render" }
 mdminecraft-assets = { path = "crates/assets" }
 mdminecraft-physics = { path = "crates/physics" }
 mdminecraft-ui3d = { path = "crates/ui3d" }
+mdminecraft-audio = { path = "crates/audio" }
 
 [dev-dependencies]
 mdminecraft-testkit = { path = "crates/testkit" }
@@ -54,10 +55,13 @@ members = [
     "crates/server",
     "crates/client",
     "crates/assets",
+    "crates/audio",
     "crates/scripting",
     "crates/testkit",
-    "crates/cli"
-, "tools/atlas_packer", "tools/ecs_compare"]
+    "crates/cli",
+    "tools/atlas_packer",
+    "tools/ecs_compare",
+]
 resolver = "2"
 
 [workspace.package]

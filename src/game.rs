@@ -527,6 +527,68 @@ fn food_hunger_restore(food_type: mdminecraft_core::item::FoodType) -> f32 {
     }
 }
 
+/// Player experience points (visual only - XP not functional yet)
+struct PlayerXP {
+    /// Current XP points
+    current: u32,
+    /// Current level
+    level: u32,
+    /// XP needed to reach next level
+    next_level_xp: u32,
+}
+
+impl PlayerXP {
+    fn new() -> Self {
+        Self {
+            current: 0,
+            level: 0,
+            next_level_xp: 7, // First level needs 7 XP
+        }
+    }
+
+    /// Add XP and handle level ups
+    fn add_xp(&mut self, amount: u32) {
+        self.current += amount;
+        while self.current >= self.next_level_xp {
+            self.current -= self.next_level_xp;
+            self.level += 1;
+            // XP curve: increases with level
+            self.next_level_xp = if self.level < 16 {
+                2 * self.level + 7
+            } else if self.level < 31 {
+                5 * self.level - 38
+            } else {
+                9 * self.level - 158
+            };
+        }
+    }
+
+    /// Get progress to next level (0.0 to 1.0)
+    fn progress(&self) -> f32 {
+        if self.next_level_xp == 0 {
+            0.0
+        } else {
+            self.current as f32 / self.next_level_xp as f32
+        }
+    }
+
+    /// Reset XP on death (loses some levels)
+    #[allow(dead_code)]
+    fn reset(&mut self) {
+        // Lose 3 levels on death (minimum 0)
+        self.level = self.level.saturating_sub(3);
+        self.current = 0;
+        // Recalculate next level XP
+        self.next_level_xp = if self.level < 16 {
+            2 * self.level + 7
+        } else if self.level < 31 {
+            5 * self.level - 38
+        } else {
+            9 * self.level - 158
+        };
+    }
+}
+
 /// Ray-AABB intersection test
 /// Returns Some(t) where t is the distance along the ray, or None if no intersection
 fn ray_aabb_intersect(
@@ -708,6 +770,8 @@ pub struct GameWorld {
     bow_charge: f32,
     /// Whether the bow is currently being drawn
     bow_drawing: bool,
+    /// Player experience points (visual only)
+    player_xp: PlayerXP,
 }
 
 impl GameWorld {
@@ -930,6 +994,7 @@ impl GameWorld {
             projectiles: ProjectileManager::new(),
             bow_charge: 0.0,
             bow_drawing: false,
+            player_xp: PlayerXP::new(),
         };
 
         world.player_physics.last_ground_y = spawn_feet.y;
@@ -2188,6 +2253,7 @@ impl GameWorld {
                     |ctx| {
                         self.debug_hud.render(ctx);
                         render_hotbar(ctx, &self.hotbar);
+                        render_xp_bar(ctx, &self.player_xp);
                         render_health_bar(ctx, &self.player_health);
                         render_hunger_bar(ctx, &self.player_health);
                         render_armor_bar(ctx, &self.player_armor);
@@ -2518,10 +2584,17 @@ impl GameWorld {
             }
         }
 
-        // Remove dead mobs and drop loot
+        // Remove dead mobs and drop loot (and XP)
         let mut loot_drops: Vec<(f64, f64, f64, DroppedItemType, u32)> = Vec::new();
+        let mut xp_gained: u32 = 0;
         self.mobs.retain(|mob| {
             if mob.dead {
+                // Award XP based on mob type
+                xp_gained += match mob.mob_type {
+                    MobType::Zombie | MobType::Skeleton | MobType::Spider => 5,
+                    MobType::Creeper => 5,
+                    MobType::Pig | MobType::Cow | MobType::Sheep | MobType::Chicken => 1,
+                };
                 // Drop loot based on mob type
                 match mob.mob_type {
                     MobType::Zombie => {
@@ -2625,6 +2698,11 @@ impl GameWorld {
             if count > 0 {
                 self.item_manager.spawn_item(x, y, z, item_type, count);
             }
+        }
+
+        // Add XP from killed mobs
+        if xp_gained > 0 {
+            self.player_xp.add_xp(xp_gained);
         }
 
         // Spawn hostile mobs at night (every ~100 frames, max 10 hostile mobs)
@@ -3420,6 +3498,55 @@ fn render_tool_durability(ctx: &egui::Context, hotbar: &Hotbar) {
             }
         }
     }
+}
+
+/// Render the XP bar above the hotbar
+fn render_xp_bar(ctx: &egui::Context, xp: &PlayerXP) {
+    egui::Area::new(egui::Id::new("xp_bar"))
+        .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -85.0])
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                // XP bar background and foreground
+                let bar_width = 182.0; // Match hotbar width roughly
+                let bar_height = 5.0;
+
+                let (response, painter) =
+                    ui.allocate_painter(egui::vec2(bar_width, bar_height), egui::Sense::hover());
+                let rect = response.rect;
+
+                // Background (dark)
+                painter.rect_filled(rect, 2.0, egui::Color32::from_rgb(20, 20, 20));
+
+                // Foreground (green XP progress)
+                let fill_width = bar_width * xp.progress();
+                if fill_width > 0.0 {
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(rect.min, egui::vec2(fill_width, bar_height)),
+                        2.0,
+                        egui::Color32::from_rgb(128, 255, 32), // Bright green
+                    );
+                }
+
+                // Border
+                painter.rect_stroke(
+                    rect,
+                    2.0,
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60)),
+                );
+            });
+
+            // Level number centered above the bar
+            if xp.level > 0 {
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{}", xp.level))
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(128, 255, 32))
+                            .strong(),
+                    );
+                });
+            }
+        });
 }
 
 /// Render the death screen overlay
