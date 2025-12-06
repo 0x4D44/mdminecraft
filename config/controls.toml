@@ -1,0 +1,14 @@
+# mdminecraft Controls Configuration
+
+mouse_sensitivity = 0.006
+invert_y = false
+
+# Key bindings can be customized below
+[bindings.base]
+# Example: toggle_cursor = ["Tab"]
+
+[bindings.gameplay]
+# Example: forward = ["W", "Up"]
+
+[bindings.ui]
+# Example: close = ["Escape"]

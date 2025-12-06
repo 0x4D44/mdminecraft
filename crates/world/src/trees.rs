@@ -10,12 +10,12 @@ use crate::terrain::blocks;
 pub mod tree_blocks {
     use crate::chunk::BlockId;
 
-    pub const LOG: BlockId = 11;
-    pub const LEAVES: BlockId = 12;
-    pub const BIRCH_LOG: BlockId = 13;
-    pub const BIRCH_LEAVES: BlockId = 14;
-    pub const PINE_LOG: BlockId = 15;
-    pub const PINE_LEAVES: BlockId = 16;
+    pub const LOG: BlockId = 11; // oak_log
+    pub const LEAVES: BlockId = 70; // oak_leaves
+    pub const BIRCH_LOG: BlockId = 71; // birch_log
+    pub const BIRCH_LEAVES: BlockId = 72; // birch_leaves
+    pub const PINE_LOG: BlockId = 73; // spruce_log
+    pub const PINE_LEAVES: BlockId = 74; // spruce_leaves
 }
 
 /// Tree type variations.
