@@ -160,8 +160,12 @@ mod tests {
             println!(
                 "{:>8.0} | ({:>6.3}, {:>6.3}, {:>6.3}) | ({:>6.3}, {:>6.3}, {:>6.3})",
                 yaw_deg,
-                forward.x, forward.y, forward.z,
-                camera_look_dir.x, camera_look_dir.y, camera_look_dir.z
+                forward.x,
+                forward.y,
+                forward.z,
+                camera_look_dir.x,
+                camera_look_dir.y,
+                camera_look_dir.z
             );
         }
 

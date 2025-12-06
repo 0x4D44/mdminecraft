@@ -24,10 +24,9 @@ pub use biome::*;
 pub use block_properties::*;
 pub use caves::*;
 pub use chunk::{
-    BlockId, BlockState, Chunk, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR,
-    BLOCK_COAL_ORE, BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
-    BLOCK_GOLD_ORE, BLOCK_IRON_ORE, BLOCK_STONE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
-    CHUNK_VOLUME,
+    BlockId, BlockState, Chunk, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR, BLOCK_COAL_ORE,
+    BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_GOLD_ORE,
+    BLOCK_IRON_ORE, BLOCK_STONE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, CHUNK_VOLUME,
 };
 pub use crafting::*;
 pub use drop_item::*;

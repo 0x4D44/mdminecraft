@@ -310,10 +310,22 @@ mod tests {
 
     #[test]
     fn test_smelt_recipes() {
-        assert_eq!(get_smelt_output(ItemType::IronOre), Some(ItemType::IronIngot));
-        assert_eq!(get_smelt_output(ItemType::GoldOre), Some(ItemType::GoldIngot));
-        assert_eq!(get_smelt_output(ItemType::RawPork), Some(ItemType::CookedPork));
-        assert_eq!(get_smelt_output(ItemType::RawBeef), Some(ItemType::CookedBeef));
+        assert_eq!(
+            get_smelt_output(ItemType::IronOre),
+            Some(ItemType::IronIngot)
+        );
+        assert_eq!(
+            get_smelt_output(ItemType::GoldOre),
+            Some(ItemType::GoldIngot)
+        );
+        assert_eq!(
+            get_smelt_output(ItemType::RawPork),
+            Some(ItemType::CookedPork)
+        );
+        assert_eq!(
+            get_smelt_output(ItemType::RawBeef),
+            Some(ItemType::CookedBeef)
+        );
         assert_eq!(get_smelt_output(ItemType::Stone), None);
     }
 

@@ -2,10 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bevy_ecs::{
-    component::Component,
-    prelude::IntoSystemConfigs,
-    schedule::Schedule,
-    system::Query,
+    component::Component, prelude::IntoSystemConfigs, schedule::Schedule, system::Query,
     world::World,
 };
 use clap::Parser;

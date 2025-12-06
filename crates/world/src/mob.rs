@@ -66,8 +66,8 @@ impl MobType {
             MobType::Chicken => 0.4,
             MobType::Zombie => 0.23,
             MobType::Skeleton => 0.25,
-            MobType::Spider => 0.35,  // Spiders are fast
-            MobType::Creeper => 0.2,  // Creepers are slow but sneaky
+            MobType::Spider => 0.35, // Spiders are fast
+            MobType::Creeper => 0.2, // Creepers are slow but sneaky
         }
     }
 
@@ -80,8 +80,8 @@ impl MobType {
             MobType::Chicken => 0.3,
             MobType::Zombie => 0.6,
             MobType::Skeleton => 0.6,
-            MobType::Spider => 0.7,   // Spiders are wide
-            MobType::Creeper => 0.5,  // Creepers are medium sized
+            MobType::Spider => 0.7,  // Spiders are wide
+            MobType::Creeper => 0.5, // Creepers are medium sized
         }
     }
 
@@ -114,7 +114,7 @@ impl MobType {
             MobType::Skeleton => 2.0,
             MobType::Spider => 2.0,
             MobType::Creeper => 0.0, // Creepers explode instead of attacking
-            _ => 0.0, // Passive mobs don't attack
+            _ => 0.0,                // Passive mobs don't attack
         }
     }
 
@@ -124,7 +124,7 @@ impl MobType {
             MobType::Zombie | MobType::Skeleton => 16.0,
             MobType::Spider => 16.0,
             MobType::Creeper => 12.0, // Creepers detect at shorter range
-            _ => 0.0, // Passive mobs don't detect players
+            _ => 0.0,                 // Passive mobs don't detect players
         }
     }
 

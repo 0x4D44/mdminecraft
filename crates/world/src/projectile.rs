@@ -78,6 +78,7 @@ pub struct Projectile {
 
 impl Projectile {
     /// Create a new projectile
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         x: f64,
         y: f64,
@@ -328,7 +329,8 @@ mod tests {
 
     #[test]
     fn test_projectile_lifetime() {
-        let mut projectile = Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+        let mut projectile =
+            Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
         projectile.age = 1198;
 
         assert!(!projectile.update()); // age becomes 1199, not dead yet
