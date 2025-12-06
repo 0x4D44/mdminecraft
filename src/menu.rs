@@ -34,6 +34,11 @@ pub struct GameSettings {
     pub vsync: bool,
     pub show_fps: bool,
     pub fov: f32,
+    // Audio settings
+    pub master_volume: f32,
+    pub music_volume: f32,
+    pub sfx_volume: f32,
+    pub ambient_volume: f32,
 }
 
 impl Default for GameSettings {
@@ -45,6 +50,10 @@ impl Default for GameSettings {
             vsync: true,
             show_fps: true,
             fov: 70.0,
+            master_volume: 1.0,
+            music_volume: 0.5,
+            sfx_volume: 1.0,
+            ambient_volume: 0.7,
         }
     }
 }
@@ -601,6 +610,99 @@ fn render_settings_menu_ui(
                     );
                     ui.add_space(20.0);
                     if ui.checkbox(&mut settings.show_fps, "").changed() {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(20.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Audio section
+                ui.heading(
+                    egui::RichText::new("Audio")
+                        .size(20.0)
+                        .color(egui::Color32::WHITE),
+                );
+                ui.add_space(10.0);
+
+                // Master volume
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Master Volume:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.master_volume, 0.0..=1.0)
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // Music volume
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Music Volume:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.music_volume, 0.0..=1.0)
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // SFX volume
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Sound Effects:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.sfx_volume, 0.0..=1.0).show_value(true),
+                        )
+                        .changed()
+                    {
+                        *settings_dirty = true;
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // Ambient volume
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Ambient Sounds:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.ambient_volume, 0.0..=1.0)
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
                         *settings_dirty = true;
                     }
                 });
