@@ -274,9 +274,6 @@ impl GreedyMesher {
         origin[u_axis] = u as f32;
         origin[v_axis] = v as f32;
         origin[axis] = slice as f32;
-        if cell.normal[axis] < 0 {
-            origin[axis] -= 1.0;
-        }
 
         let mut du = [0f32; 3];
         du[u_axis] = quad_width as f32;
