@@ -1,6 +1,7 @@
 //! Item system - Tools, blocks, and other inventory items
 
 use serde::{Deserialize, Serialize};
+use crate::enchantment::Enchantment;
 
 /// Item type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -186,6 +187,8 @@ pub struct ItemStack {
     pub count: u32,
     /// Durability for tools (None for non-tools)
     pub durability: Option<u32>,
+    /// Enchantments applied to this item (None for non-enchantable items)
+    pub enchantments: Option<Vec<Enchantment>>,
 }
 
 impl ItemStack {
@@ -200,6 +203,7 @@ impl ItemStack {
             item_type,
             count,
             durability,
+            enchantments: None,
         }
     }
 
