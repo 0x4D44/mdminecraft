@@ -236,6 +236,24 @@ impl ItemStack {
             _ => None,
         }
     }
+
+    /// Get the harvest tier for this tool (0-3).
+    /// Returns None if this item is not a tool.
+    /// The harvest tier determines which blocks this tool can successfully mine.
+    pub fn harvest_tier(&self) -> Option<u8> {
+        match self.item_type {
+            ItemType::Tool(_, material) => Some(material.harvest_tier()),
+            _ => None,
+        }
+    }
+
+    /// Check if this tool can harvest blocks requiring a specific tier.
+    /// Returns false if this item is not a tool.
+    pub fn can_harvest_tier(&self, required_tier: u8) -> bool {
+        self.harvest_tier()
+            .map(|tier| tier >= required_tier)
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(test)]
@@ -343,5 +361,75 @@ mod tests {
         // Gold has same mining capability as wood
         assert!(ToolMaterial::Gold.can_mine_tier(ToolMaterial::Wood));
         assert!(!ToolMaterial::Gold.can_mine_tier(ToolMaterial::Stone));
+    }
+
+    #[test]
+    fn test_item_stack_harvest_tier() {
+        // Tool items return their harvest tier
+        let wood_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1);
+        assert_eq!(wood_pick.harvest_tier(), Some(0));
+
+        let stone_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone), 1);
+        assert_eq!(stone_pick.harvest_tier(), Some(1));
+
+        let iron_axe = ItemStack::new(ItemType::Tool(ToolType::Axe, ToolMaterial::Iron), 1);
+        assert_eq!(iron_axe.harvest_tier(), Some(2));
+
+        let diamond_sword = ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond), 1);
+        assert_eq!(diamond_sword.harvest_tier(), Some(3));
+
+        // Gold has same tier as wood
+        let gold_shovel = ItemStack::new(ItemType::Tool(ToolType::Shovel, ToolMaterial::Gold), 1);
+        assert_eq!(gold_shovel.harvest_tier(), Some(0));
+
+        // Non-tool items return None
+        let block_stack = ItemStack::new(ItemType::Block(1), 64);
+        assert_eq!(block_stack.harvest_tier(), None);
+
+        let food_stack = ItemStack::new(ItemType::Food(FoodType::Apple), 16);
+        assert_eq!(food_stack.harvest_tier(), None);
+    }
+
+    #[test]
+    fn test_item_stack_can_harvest_tier() {
+        // Wooden pickaxe can harvest wood-tier (0) blocks
+        let wood_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1);
+        assert!(wood_pick.can_harvest_tier(0)); // Wood tier
+        assert!(!wood_pick.can_harvest_tier(1)); // Stone tier
+        assert!(!wood_pick.can_harvest_tier(2)); // Iron tier
+        assert!(!wood_pick.can_harvest_tier(3)); // Diamond tier
+
+        // Stone pickaxe can harvest wood and stone tiers
+        let stone_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone), 1);
+        assert!(stone_pick.can_harvest_tier(0));
+        assert!(stone_pick.can_harvest_tier(1));
+        assert!(!stone_pick.can_harvest_tier(2));
+        assert!(!stone_pick.can_harvest_tier(3));
+
+        // Iron pickaxe can harvest up to iron tier
+        let iron_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1);
+        assert!(iron_pick.can_harvest_tier(0));
+        assert!(iron_pick.can_harvest_tier(1));
+        assert!(iron_pick.can_harvest_tier(2));
+        assert!(!iron_pick.can_harvest_tier(3));
+
+        // Diamond pickaxe can harvest all tiers
+        let diamond_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+        assert!(diamond_pick.can_harvest_tier(0));
+        assert!(diamond_pick.can_harvest_tier(1));
+        assert!(diamond_pick.can_harvest_tier(2));
+        assert!(diamond_pick.can_harvest_tier(3));
+
+        // Gold has same capability as wood
+        let gold_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Gold), 1);
+        assert!(gold_pick.can_harvest_tier(0));
+        assert!(!gold_pick.can_harvest_tier(1));
+
+        // Non-tool items cannot harvest any tier
+        let block_stack = ItemStack::new(ItemType::Block(1), 64);
+        assert!(!block_stack.can_harvest_tier(0));
+        assert!(!block_stack.can_harvest_tier(1));
+        assert!(!block_stack.can_harvest_tier(2));
+        assert!(!block_stack.can_harvest_tier(3));
     }
 }
