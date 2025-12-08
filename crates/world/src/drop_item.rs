@@ -103,6 +103,7 @@ pub enum ItemType {
 
     // Resources
     Diamond,
+    LapisLazuli,
 }
 
 impl ItemType {
@@ -152,7 +153,8 @@ impl ItemType {
             | ItemType::Furnace
             | ItemType::Sapling
             | ItemType::Flint
-            | ItemType::Arrow => 64,
+            | ItemType::Arrow
+            | ItemType::LapisLazuli => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -234,7 +236,10 @@ impl ItemType {
             18 => Some((ItemType::Furnace, 1)),
             19 => Some((ItemType::Furnace, 1)), // Lit furnace also drops furnace
 
-            // No drops: Air (0), Water (6), Bedrock (10), Crafting Table (13)
+            // Lapis ore (drops 4-9 lapis, using 6 as average for now)
+            98 => Some((ItemType::LapisLazuli, 6)),
+
+            // No drops: Air (0), Water (6), Bedrock (10), Crafting Table (13), Enchanting Table (99)
             _ => None,
         }
     }

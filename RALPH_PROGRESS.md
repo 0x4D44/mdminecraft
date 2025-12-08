@@ -1,10 +1,10 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 21 - Updated: 2025-12-08
+## Iteration 24 - Updated: 2025-12-08
 
-### TRANSFORMATIVE DISCOVERY: Phase 1 is ~70% Complete Already! 🎯
+### EXPERIENCE SYSTEM NOW FUNCTIONAL! 🎯
 
-**Iteration 21 revealed** through comprehensive exploration that the codebase already has most Phase 1 features fully implemented. This changes everything.
+**Iteration 24 completed** the XP orb collection system, advancing Experience from 40% (struct only) to ~70% (functional). Combined with iterations 22-23 combat enhancements, Phase 1 is now ~75% complete.
 
 ---
 
@@ -69,37 +69,36 @@
 
 ### ⚠️ PARTIALLY IMPLEMENTED (40-70%)
 
-#### Experience System (40% complete)
-**Location**: `src/game.rs` (Experience struct)
+#### Experience System (~70% complete)
+**Location**: `src/game.rs` (PlayerXP struct + XPOrb struct)
 - ✅ Experience struct with level/total XP tracking
-- ✅ `add_experience()` and `current_level()` methods
+- ✅ `add_xp()` and `current_level()` methods
 - ✅ Level progression calculations (XP required per level)
-- ❌ **No XP orb entities** (can't see/collect XP)
-- ❌ **No XP drops from mobs/mining** (XP system non-functional)
-- ❌ **No XP bar in UI** (player can't see XP progress)
-- ❌ **Not integrated with enchanting** (XP has no use)
+- ✅ **XP orb entities** (iteration 24: XPOrb struct with physics)
+- ✅ **XP drops from mobs** (iteration 24: 5 XP hostile, 1 XP passive)
+- ✅ **XP collection on proximity** (iteration 24: 0.5 block radius)
+- ✅ **Magnetic attraction** (iteration 24: 8 blocks/sec within 2 blocks)
+- ✅ **Collection feedback** (iteration 24: log messages with level/progress)
+- ❌ **No XP bar in UI** (player can't see XP bar visually)
+- ❌ **Not integrated with enchanting** (XP has no use yet)
 
 **Missing for completion**:
-1. XP orb entity type (`crates/world/src/drop_item.rs` or new `xp_orb.rs`)
-2. XP drop on mob death
-3. XP collection on player collision
-4. XP bar UI rendering
+1. XP bar UI rendering (would advance to 80%)
+2. Integration with enchanting system (requires enchanting implementation)
 
-#### Combat Mechanics (70% complete)
+#### Combat Mechanics (95% complete)
 **Location**: `src/game.rs:2966-3045`
 - ✅ Melee combat with tool damage
 - ✅ Mob AI with attack behaviors
 - ✅ Projectile system (arrows, fireballs)
 - ✅ Knockback on hit
 - ✅ Damage calculation with armor reduction
-- ❌ **No player attack cooldown timer** (instant attacks feel wrong)
-- ❌ **No critical hit detection** (airborne attacks should deal 50% bonus)
+- ✅ **Attack cooldown timer** (iteration 22: 0.6 seconds between attacks)
+- ✅ **Critical hit detection** (iteration 23: 1.5x damage when falling)
 - ❌ **No sweep attacks** (swords should hit multiple targets)
 
 **Missing for completion**:
-1. Attack cooldown timer (0.6 seconds between attacks)
-2. Critical hit when player is airborne (1.5x damage)
-3. Sword sweep attack (hit multiple entities in arc)
+1. Sword sweep attack (hit multiple entities in arc when using sword)
 
 ### ❌ NOT IMPLEMENTED (0%)
 
@@ -172,39 +171,44 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ### 🎯 Priority 1: Complete Partial Systems (Highest ROI)
 
-1. **Player Attack Cooldown Timer** (Combat: 70% → 90%)
-   - **Effort**: LOW (1-2 hours, single iteration)
-   - **Impact**: HIGH (transforms combat feel)
-   - **Where**: `src/game.rs` combat handling
-   - **What**: Add 0.6-second cooldown between attacks
+1. ✅ **Player Attack Cooldown Timer** (Combat: 70% → 90%) - COMPLETED ITERATION 22
+   - Added attack_cooldown: f32 field to GameWorld
+   - 0.6-second cooldown between attacks
+   - Prevents spam-clicking attacks
 
-2. **Critical Hit Detection** (Combat: 70% → 85%)
-   - **Effort**: LOW (1-2 hours, single iteration)
-   - **Impact**: MEDIUM (adds combat depth)
-   - **Where**: `src/game.rs` damage calculation
-   - **What**: 50% bonus damage when player airborne
+2. ✅ **Critical Hit Detection** (Combat: 90% → 95%) - COMPLETED ITERATION 23
+   - Checks player velocity.y < -0.1 (falling)
+   - 1.5x damage multiplier for airborne attacks
+   - Visual feedback with "CRITICAL HIT!" logging
 
-3. **XP Orb Collection** (Experience: 40% → 80%)
-   - **Effort**: MEDIUM (4-6 hours, 2-3 iterations)
-   - **Impact**: HIGH (makes XP system functional)
-   - **Where**: New `xp_orb.rs` + mob death handlers
-   - **What**: Spawn XP orbs, player collision collects them
+3. ✅ **XP Orb Collection** (Experience: 40% → 70%) - COMPLETED ITERATION 24
+   - Added XPOrb struct with physics and magnetic attraction
+   - Modified mob death to spawn XP orbs (5 XP hostile, 1 XP passive)
+   - Player collection with 0.5 block radius
+   - Magnetic attraction: 8 blocks/sec within 2 blocks
+   - Log feedback showing level and progress
+
+4. **XP Bar UI** (Experience: 70% → 80%) - NEXT TARGET
+   - **Effort**: LOW-MEDIUM (2-3 hours, single iteration)
+   - **Impact**: MEDIUM (completes Experience UI)
+   - **Where**: UI rendering code
+   - **What**: Visual XP bar showing current level and progress percentage
 
 ### 🎯 Priority 2: Major Missing Features
 
-4. **Enchanting Table Block** (Enchanting: 0% → 60%)
+5. **Enchanting Table Block** (Enchanting: 0% → 60%)
    - **Effort**: HIGH (8-12 hours, 4-5 iterations)
    - **Impact**: VERY HIGH (major Phase 1 requirement)
    - **What**: Enchanting table with lapis consumption, random enchantments
 
-5. **Brewing Stand Block** (Brewing: 0% → 50%)
+6. **Brewing Stand Block** (Brewing: 0% → 50%)
    - **Effort**: VERY HIGH (12-16 hours, 5-7 iterations)
    - **Impact**: VERY HIGH (major Phase 1 requirement)
    - **What**: Brewing stand with blaze powder fuel, potion recipes, status effects
 
 ---
 
-## Commits Made (11 total)
+## Commits Made (14 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -217,6 +221,9 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 9. Iteration 13: Added JSON loading for recipes
 10. Iteration 15: Created initial config/recipes.json
 11. Iteration 16: Expanded to all 25 tool recipes
+12. **Iteration 22: Added player attack cooldown timer (commit 2462e87)**
+13. **Iteration 23: Added critical hit detection (commit b5ddb5d)**
+14. **Iteration 24: Added XP orb collection system (commit 90c7dac)**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -241,14 +248,19 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~15% of total roadmap complete
-- Phase 1 (Critical): ~70% complete
+**Overall Progress**: ~17% of total roadmap complete (up from ~16% after iterations 22-23)
+- Phase 1 (Critical): ~75% complete (up from ~72%)
+  - Combat: 95% (iterations 22-23)
+  - Experience: ~70% (iteration 24, up from 40%)
+  - Tools, Hunger, Health, Crafting, Armor: 85-98%
+  - Enchanting: 0%
+  - Brewing: 0%
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
 - Phase 5 (Advanced): 0% complete
 
-**Estimated Time to Completion**: 20-28 weeks remaining (per roadmap estimate of 22-30 weeks total)
+**Estimated Time to Completion**: 19-27 weeks remaining (per roadmap estimate of 22-30 weeks total)
 
 ---
 
@@ -256,19 +268,22 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **Recommended Next Steps**:
 
-1. **Iterations 22-23**: Complete combat mechanics (attack cooldown + critical hits)
-   - Small, focused implementations
-   - High value-to-effort ratio
-   - Completes 70%-done system
+1. ✅ **Iterations 22-23**: Complete combat mechanics (attack cooldown + critical hits) - DONE
+   - ✅ Iteration 22: Attack cooldown timer (Combat: 70% → 90%)
+   - ✅ Iteration 23: Critical hit detection (Combat: 90% → 95%)
+   - Result: High-quality combat system in just 2 focused iterations
 
-2. **Iterations 24-26**: Make XP system functional (orbs, collection, UI)
-   - Moderate effort
-   - High impact
-   - Completes 40%-done system
+2. ✅ **Iteration 24**: Make XP system functional (orbs, collection) - DONE
+   - ✅ Iteration 24: XP orb entities with magnetic attraction (Experience: 40% → 70%)
+   - Result: Experience system now functional with player-visible feedback
 
-3. **Iterations 27-35+**: Begin enchanting or brewing system
-   - Large undertaking
+3. **Iteration 25**: Add XP Bar UI or Begin Enchanting System - NEXT TARGET
+   - Option A: XP Bar UI (Experience: 70% → 80%, low-medium effort)
+   - Option B: Enchanting System (Enchanting: 0% → 60%, high effort, 4-5 iterations)
+
+4. **Iterations 26-35+**: Complete enchanting and begin brewing system
+   - Large undertaking (5-10 iterations)
    - Major Phase 1 requirement
    - Enables progression features
 
-**Focus**: Complete partial implementations before starting new systems. Infrastructure without integration provides zero player value.
+**Focus**: Iteration 24 advanced Experience from 40% to 70%. Phase 1 now 75% complete. Next: Either complete Experience UI (80%) or tackle major missing systems (Enchanting/Brewing at 0%).
