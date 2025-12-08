@@ -1,3 +1,4 @@
+mod aquifer;
 mod armor;
 mod biome;
 mod block_properties;
@@ -8,6 +9,7 @@ mod drop_item;
 mod farming;
 mod fluid;
 mod furnace;
+mod geode;
 mod heightmap;
 mod interaction;
 mod inventory;
@@ -23,6 +25,7 @@ mod time;
 mod trees;
 mod weather;
 
+pub use aquifer::*;
 pub use armor::*;
 pub use biome::*;
 pub use block_properties::*;
@@ -37,6 +40,7 @@ pub use drop_item::*;
 pub use farming::*;
 pub use fluid::*;
 pub use furnace::*;
+pub use geode::*;
 pub use heightmap::*;
 pub use interaction::*;
 pub use inventory::*;
