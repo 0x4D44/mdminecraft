@@ -4,6 +4,32 @@ use mdminecraft_world::BlockOpacityProvider;
 
 use crate::BlockTextureConfig;
 
+/// Minimum tool tier required to successfully harvest a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum HarvestLevel {
+    /// Wooden tools or better
+    Wood = 0,
+    /// Stone tools or better
+    Stone = 1,
+    /// Iron tools or better
+    Iron = 2,
+    /// Diamond tools required
+    Diamond = 3,
+}
+
+impl HarvestLevel {
+    /// Parse a harvest level from a string (e.g., "wood", "stone", "iron", "diamond").
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "wood" => Some(HarvestLevel::Wood),
+            "stone" => Some(HarvestLevel::Stone),
+            "iron" => Some(HarvestLevel::Iron),
+            "diamond" => Some(HarvestLevel::Diamond),
+            _ => None,
+        }
+    }
+}
+
 /// Block metadata loaded from packs.
 #[derive(Debug, Clone)]
 pub struct BlockDescriptor {
@@ -12,6 +38,8 @@ pub struct BlockDescriptor {
     /// Whether the block blocks light/vision.
     pub opaque: bool,
     textures: BlockTextures,
+    /// Required tool tier to harvest this block (None = no tool required).
+    pub harvest_level: Option<HarvestLevel>,
 }
 
 impl BlockDescriptor {
@@ -25,10 +53,12 @@ impl BlockDescriptor {
         let base_name = def.texture.clone().unwrap_or_else(|| def.name.clone());
         let textures = BlockTextures::from_config(&base_name, def.textures);
         let name = def.name;
+        let harvest_level = def.harvest_level.and_then(|s| HarvestLevel::parse(&s));
         Self {
             name,
             opaque: def.opaque,
             textures,
+            harvest_level,
         }
     }
 
@@ -39,6 +69,7 @@ impl BlockDescriptor {
             opaque,
             texture: None,
             textures: None,
+            harvest_level: None,
         })
     }
 }
@@ -70,6 +101,11 @@ impl BlockRegistry {
     /// Resolve a block id by its name.
     pub fn id_by_name(&self, name: &str) -> Option<u16> {
         self.name_to_id.get(name).copied()
+    }
+
+    /// Get the harvest level required for a block (None = no tool required).
+    pub fn harvest_level(&self, block_id: u16) -> Option<HarvestLevel> {
+        self.descriptor(block_id).and_then(|d| d.harvest_level)
     }
 }
 

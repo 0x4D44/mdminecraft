@@ -1,6 +1,6 @@
 [
   { "name": "air", "opaque": false },
-  { "name": "stone", "opaque": true, "texture": "blocks/stone" },
+  { "name": "stone", "opaque": true, "texture": "blocks/stone", "harvest_level": "wood" },
   { "name": "dirt", "opaque": true, "texture": "blocks/dirt" },
   {
     "name": "grass",
@@ -29,10 +29,10 @@
       "side": "blocks/planks"
     }
   },
-  { "name": "coal_ore", "opaque": true, "texture": "blocks/stone" },
-  { "name": "iron_ore", "opaque": true, "texture": "blocks/stone" },
-  { "name": "gold_ore", "opaque": true, "texture": "blocks/stone" },
-  { "name": "diamond_ore", "opaque": true, "texture": "blocks/stone" },
+  { "name": "coal_ore", "opaque": true, "texture": "blocks/stone", "harvest_level": "wood" },
+  { "name": "iron_ore", "opaque": true, "texture": "blocks/stone", "harvest_level": "stone" },
+  { "name": "gold_ore", "opaque": true, "texture": "blocks/stone", "harvest_level": "iron" },
+  { "name": "diamond_ore", "opaque": true, "texture": "blocks/stone", "harvest_level": "iron" },
   {
     "name": "furnace",
     "opaque": true,
@@ -46,8 +46,8 @@
   { "name": "lava", "opaque": false, "texture": "blocks/water", "emissive": true },
   { "name": "water_flowing", "opaque": false, "texture": "blocks/water" },
   { "name": "lava_flowing", "opaque": false, "texture": "blocks/water", "emissive": true },
-  { "name": "obsidian", "opaque": true, "texture": "blocks/bedrock" },
-  { "name": "cobblestone", "opaque": true, "texture": "blocks/gravel" },
+  { "name": "obsidian", "opaque": true, "texture": "blocks/bedrock", "harvest_level": "diamond" },
+  { "name": "cobblestone", "opaque": true, "texture": "blocks/gravel", "harvest_level": "wood" },
   { "name": "glass", "opaque": false, "texture": "blocks/glass" },
   { "name": "oak_door_lower", "opaque": false, "texture": "blocks/planks" },
   { "name": "oak_door_upper", "opaque": false, "texture": "blocks/planks" },
