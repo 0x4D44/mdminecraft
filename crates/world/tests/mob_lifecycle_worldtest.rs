@@ -439,8 +439,16 @@ fn mob_lifecycle_worldtest() {
         "Update time must be under 1μs per mob per tick"
     );
     // At 20 TPS, we have 50ms per tick budget. With ~80k mobs, P99 should be well under that.
+    // Different thresholds for debug vs release builds
+    let p99_threshold = if cfg!(debug_assertions) {
+        10_000_000 // 10ms for debug builds
+    } else {
+        5_000_000 // 5ms for release builds
+    };
     assert!(
-        p99_update_ns < 5_000_000,
-        "P99 tick time must be under 5ms for scalability"
+        p99_update_ns < p99_threshold,
+        "P99 tick time must be under {}ms for scalability (was {:.2}ms)",
+        p99_threshold / 1_000_000,
+        p99_update_ns as f64 / 1_000_000.0
     );
 }

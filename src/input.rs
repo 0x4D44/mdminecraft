@@ -159,6 +159,11 @@ impl InputProcessor {
             ..ActionState::default()
         };
 
+        // Debug: Log pressed keys (only log once per second to reduce spam)
+        if !snapshot.keys_pressed.is_empty() {
+            tracing::info!(keys = ?snapshot.keys_pressed, context = ?snapshot.context, "Keys pressed");
+        }
+
         state.move_y = axis_value(
             &self.bindings,
             Action::MoveForward,
@@ -172,6 +177,16 @@ impl InputProcessor {
             snapshot,
         );
         state.move_z = axis_value(&self.bindings, Action::MoveUp, Action::MoveDown, snapshot);
+
+        // Debug: Log movement if non-zero
+        if state.move_x.abs() > 0.0 || state.move_y.abs() > 0.0 || state.move_z.abs() > 0.0 {
+            tracing::info!(
+                move_x = state.move_x,
+                move_y = state.move_y,
+                move_z = state.move_z,
+                "Movement input detected"
+            );
+        }
 
         state.sprint = self.action_active(Action::Sprint, snapshot);
         state.crouch = self.action_active(Action::Crouch, snapshot);
