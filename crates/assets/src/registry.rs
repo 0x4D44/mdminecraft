@@ -28,6 +28,18 @@ impl HarvestLevel {
             _ => None,
         }
     }
+
+    /// Get the numeric tier value (0-3).
+    /// This matches the values returned by ToolMaterial::harvest_tier() in the core crate.
+    pub fn tier(self) -> u8 {
+        self as u8
+    }
+
+    /// Check if a tool harvest tier can successfully harvest blocks with this requirement.
+    /// Returns true if tool_tier >= required tier.
+    pub fn can_harvest_with_tier(self, tool_tier: u8) -> bool {
+        tool_tier >= self.tier()
+    }
 }
 
 /// Block metadata loaded from packs.
@@ -212,5 +224,71 @@ impl BlockTextures {
         self.south = val.clone();
         self.east = val.clone();
         self.west = val;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_harvest_level_tier() {
+        // Verify tier values match enum discriminants
+        assert_eq!(HarvestLevel::Wood.tier(), 0);
+        assert_eq!(HarvestLevel::Stone.tier(), 1);
+        assert_eq!(HarvestLevel::Iron.tier(), 2);
+        assert_eq!(HarvestLevel::Diamond.tier(), 3);
+    }
+
+    #[test]
+    fn test_harvest_level_parse() {
+        // Test parsing from strings
+        assert_eq!(HarvestLevel::parse("wood"), Some(HarvestLevel::Wood));
+        assert_eq!(HarvestLevel::parse("stone"), Some(HarvestLevel::Stone));
+        assert_eq!(HarvestLevel::parse("iron"), Some(HarvestLevel::Iron));
+        assert_eq!(HarvestLevel::parse("diamond"), Some(HarvestLevel::Diamond));
+
+        // Test case insensitivity
+        assert_eq!(HarvestLevel::parse("WOOD"), Some(HarvestLevel::Wood));
+        assert_eq!(HarvestLevel::parse("Stone"), Some(HarvestLevel::Stone));
+
+        // Test invalid input
+        assert_eq!(HarvestLevel::parse("invalid"), None);
+        assert_eq!(HarvestLevel::parse(""), None);
+    }
+
+    #[test]
+    fn test_can_harvest_with_tier() {
+        // Wood tier (0) can harvest wood-level blocks
+        assert!(HarvestLevel::Wood.can_harvest_with_tier(0));
+        assert!(HarvestLevel::Wood.can_harvest_with_tier(1));
+        assert!(HarvestLevel::Wood.can_harvest_with_tier(2));
+        assert!(HarvestLevel::Wood.can_harvest_with_tier(3));
+
+        // Stone tier (1) requires stone tools or better
+        assert!(!HarvestLevel::Stone.can_harvest_with_tier(0));
+        assert!(HarvestLevel::Stone.can_harvest_with_tier(1));
+        assert!(HarvestLevel::Stone.can_harvest_with_tier(2));
+        assert!(HarvestLevel::Stone.can_harvest_with_tier(3));
+
+        // Iron tier (2) requires iron tools or better
+        assert!(!HarvestLevel::Iron.can_harvest_with_tier(0));
+        assert!(!HarvestLevel::Iron.can_harvest_with_tier(1));
+        assert!(HarvestLevel::Iron.can_harvest_with_tier(2));
+        assert!(HarvestLevel::Iron.can_harvest_with_tier(3));
+
+        // Diamond tier (3) requires diamond tools
+        assert!(!HarvestLevel::Diamond.can_harvest_with_tier(0));
+        assert!(!HarvestLevel::Diamond.can_harvest_with_tier(1));
+        assert!(!HarvestLevel::Diamond.can_harvest_with_tier(2));
+        assert!(HarvestLevel::Diamond.can_harvest_with_tier(3));
+    }
+
+    #[test]
+    fn test_harvest_level_ordering() {
+        // Verify enum ordering matches tier progression
+        assert!(HarvestLevel::Diamond > HarvestLevel::Iron);
+        assert!(HarvestLevel::Iron > HarvestLevel::Stone);
+        assert!(HarvestLevel::Stone > HarvestLevel::Wood);
     }
 }
