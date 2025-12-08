@@ -770,6 +770,8 @@ pub struct GameWorld {
     bow_charge: f32,
     /// Whether the bow is currently being drawn
     bow_drawing: bool,
+    /// Attack cooldown timer (seconds remaining until next attack allowed)
+    attack_cooldown: f32,
     /// Player experience points (visual only)
     player_xp: PlayerXP,
 }
@@ -994,6 +996,7 @@ impl GameWorld {
             projectiles: ProjectileManager::new(),
             bow_charge: 0.0,
             bow_drawing: false,
+            attack_cooldown: 0.0,
             player_xp: PlayerXP::new(),
         };
 
@@ -1739,11 +1742,19 @@ impl GameWorld {
             self.bow_charge = 0.0;
         }
 
+        // Update attack cooldown timer (counts down to 0)
+        self.attack_cooldown = (self.attack_cooldown - dt).max(0.0);
+
         // Left click: try to attack a mob first (on click, not hold)
-        if self.input.is_mouse_clicked(MouseButton::Left) && self.try_attack_mob() {
-            // Attacked a mob, don't mine
-            self.mining_progress = None;
-            return;
+        // Only attack if cooldown has reached 0
+        if self.input.is_mouse_clicked(MouseButton::Left) && self.attack_cooldown <= 0.0 {
+            if self.try_attack_mob() {
+                // Attacked a mob successfully - set cooldown to 0.6 seconds
+                self.attack_cooldown = 0.6;
+                // Don't mine
+                self.mining_progress = None;
+                return;
+            }
         }
 
         if let Some(hit) = self.selected_block {
