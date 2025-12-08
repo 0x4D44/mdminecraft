@@ -88,18 +88,21 @@ impl ToolMaterial {
         }
     }
 
+    /// Get the harvest tier of this material (0=Wood, 1=Stone, 2=Iron, 3=Diamond).
+    /// Gold has the same harvest tier as Wood (0) despite being valuable.
+    /// This matches the HarvestLevel enum values in the assets crate.
+    pub fn harvest_tier(self) -> u8 {
+        match self {
+            ToolMaterial::Wood | ToolMaterial::Gold => 0,
+            ToolMaterial::Stone => 1,
+            ToolMaterial::Iron => 2,
+            ToolMaterial::Diamond => 3,
+        }
+    }
+
     /// Check if this material can mine blocks requiring a certain tier
     pub fn can_mine_tier(self, required: ToolMaterial) -> bool {
-        // Gold has same mining tier as Wood (tier 0) despite having higher enum value
-        let self_tier = match self {
-            ToolMaterial::Gold => 0,
-            _ => self as i32,
-        };
-        let required_tier = match required {
-            ToolMaterial::Gold => 0,
-            _ => required as i32,
-        };
-        self_tier >= required_tier
+        self.harvest_tier() >= required.harvest_tier()
     }
 
     /// Get the attack damage for this material and tool type
@@ -309,5 +312,36 @@ mod tests {
         assert_eq!(ToolType::Pickaxe.attack_speed(), 1.2);
         assert_eq!(ToolType::Shovel.attack_speed(), 1.0);
         assert_eq!(ToolType::Hoe.attack_speed(), 1.0);
+    }
+
+    #[test]
+    fn test_harvest_tier() {
+        // Verify tier values match HarvestLevel enum
+        assert_eq!(ToolMaterial::Wood.harvest_tier(), 0);
+        assert_eq!(ToolMaterial::Stone.harvest_tier(), 1);
+        assert_eq!(ToolMaterial::Iron.harvest_tier(), 2);
+        assert_eq!(ToolMaterial::Diamond.harvest_tier(), 3);
+
+        // Gold has same harvest tier as Wood
+        assert_eq!(ToolMaterial::Gold.harvest_tier(), 0);
+        assert_eq!(ToolMaterial::Gold.harvest_tier(), ToolMaterial::Wood.harvest_tier());
+    }
+
+    #[test]
+    fn test_can_mine_tier_with_harvest_tier() {
+        // Wood tools can mine wood-tier blocks
+        assert!(ToolMaterial::Wood.can_mine_tier(ToolMaterial::Wood));
+
+        // Iron tools can mine stone-tier blocks
+        assert!(ToolMaterial::Iron.can_mine_tier(ToolMaterial::Stone));
+        assert!(ToolMaterial::Iron.can_mine_tier(ToolMaterial::Wood));
+
+        // Wood tools cannot mine iron-tier blocks
+        assert!(!ToolMaterial::Wood.can_mine_tier(ToolMaterial::Iron));
+        assert!(!ToolMaterial::Stone.can_mine_tier(ToolMaterial::Diamond));
+
+        // Gold has same mining capability as wood
+        assert!(ToolMaterial::Gold.can_mine_tier(ToolMaterial::Wood));
+        assert!(!ToolMaterial::Gold.can_mine_tier(ToolMaterial::Stone));
     }
 }
