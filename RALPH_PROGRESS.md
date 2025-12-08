@@ -1,9 +1,16 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 24 - Updated: 2025-12-08
+## Iteration 25 - Updated: 2025-12-08
 
-### EXPERIENCE SYSTEM NOW FUNCTIONAL! 🎯
+### ENCHANTING SYSTEM FOUNDATION COMPLETE! 🔮
 
+**Iteration 25 completed** the enchantment data structures, advancing Enchanting from 0% to ~15% (foundation). Combined with lapis lazuli items and blocks (added in previous session), the groundwork for the enchanting system is now in place.
+
+---
+
+## Previous Iterations Summary
+
+### Iteration 24: EXPERIENCE SYSTEM NOW FUNCTIONAL! 🎯
 **Iteration 24 completed** the XP orb collection system, advancing Experience from 40% (struct only) to ~70% (functional). Combined with iterations 22-23 combat enhancements, Phase 1 is now ~75% complete.
 
 ---
@@ -100,14 +107,29 @@
 **Missing for completion**:
 1. Sword sweep attack (hit multiple entities in arc when using sword)
 
-### ❌ NOT IMPLEMENTED (0%)
+### ⚠️ PARTIALLY IMPLEMENTED (15% complete)
 
-#### Enchanting System (0% complete)
-- ❌ No enchanting table block
-- ❌ No enchantment types (Sharpness, Protection, etc.)
-- ❌ No lapis lazuli consumption
-- ❌ No enchantment UI with level costs
-- ❌ No enchanted tool/armor effects
+#### Enchanting System (~15% complete)
+**Location**: `crates/core/src/enchantment.rs`, `crates/core/src/item.rs`, `config/blocks.json`
+- ✅ **Lapis lazuli item type** (iteration 25: LapisLazuli in ItemType enum)
+- ✅ **Lapis ore block** (iteration 25: ID 98, drops 6 lapis, requires stone pickaxe)
+- ✅ **Enchanting table block** (iteration 25: ID 99 in blocks.json)
+- ✅ **EnchantmentType enum** (iteration 25: 12 types covering tools, weapons, armor)
+- ✅ **Enchantment struct** (iteration 25: with level clamping and compatibility checking)
+- ✅ **ItemStack enchantments field** (iteration 25: Option<Vec<Enchantment>>)
+- ✅ **Compatibility rules** (iteration 25: Silk Touch vs Fortune, Protection variants)
+- ✅ **Unit tests** (iteration 25: 4 tests for max_level, compatibility, clamping)
+- ❌ **No enchanting table state management** (no fuel/lapis tracking)
+- ❌ **No enchanting UI** (no level selection, cost display)
+- ❌ **No enchantment mechanics** (no actual effect on tools/weapons/armor)
+
+**Missing for completion**:
+1. Enchanting table block entity with state management
+2. Enchanting UI with level selection and XP/lapis costs
+3. Enchantment application mechanics (apply to items)
+4. Enchantment effect implementations (Efficiency speeds mining, Sharpness adds damage, etc.)
+
+### ❌ NOT IMPLEMENTED (0%)
 
 #### Brewing System (0% complete)
 - ❌ No brewing stand block
@@ -188,18 +210,37 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - Magnetic attraction: 8 blocks/sec within 2 blocks
    - Log feedback showing level and progress
 
-4. **XP Bar UI** (Experience: 70% → 80%) - NEXT TARGET
+4. ✅ **Enchanting System Foundation** (Enchanting: 0% → 15%) - COMPLETED ITERATION 25
+   - ✅ Added lapis lazuli item and ore block
+   - ✅ Created EnchantmentType enum with 12 types
+   - ✅ Created Enchantment struct with compatibility rules
+   - ✅ Extended ItemStack with enchantments field
+   - Result: Foundation in place for enchanting implementation
+
+### 🎯 Priority 2: Complete Enchanting System
+
+5. **Enchanting Table State Management** (Enchanting: 15% → 40%) - NEXT TARGET
+   - **Effort**: MEDIUM-HIGH (6-8 hours, 2-3 iterations)
+   - **Impact**: VERY HIGH (major Phase 1 requirement)
+   - **What**: Block entity for enchanting table, lapis tracking, XP cost calculations
+
+6. **Enchanting UI and Mechanics** (Enchanting: 40% → 70%)
+   - **Effort**: HIGH (8-10 hours, 3-4 iterations)
+   - **Impact**: VERY HIGH (major Phase 1 requirement)
+   - **What**: Enchanting UI with level selection, apply enchantments to items, random enchantment selection
+
+7. **Enchantment Effect Implementations** (Enchanting: 70% → 95%)
+   - **Effort**: VERY HIGH (10-12 hours, 4-5 iterations)
+   - **Impact**: VERY HIGH (makes enchantments functional)
+   - **What**: Efficiency mining speed, Sharpness damage, Protection armor reduction, etc.
+
+### 🎯 Priority 3: Other Missing Features
+
+8. **XP Bar UI** (Experience: 70% → 80%)
    - **Effort**: LOW-MEDIUM (2-3 hours, single iteration)
    - **Impact**: MEDIUM (completes Experience UI)
    - **Where**: UI rendering code
    - **What**: Visual XP bar showing current level and progress percentage
-
-### 🎯 Priority 2: Major Missing Features
-
-5. **Enchanting Table Block** (Enchanting: 0% → 60%)
-   - **Effort**: HIGH (8-12 hours, 4-5 iterations)
-   - **Impact**: VERY HIGH (major Phase 1 requirement)
-   - **What**: Enchanting table with lapis consumption, random enchantments
 
 6. **Brewing Stand Block** (Brewing: 0% → 50%)
    - **Effort**: VERY HIGH (12-16 hours, 5-7 iterations)
@@ -208,7 +249,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (14 total)
+## Commits Made (15 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -221,9 +262,10 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 9. Iteration 13: Added JSON loading for recipes
 10. Iteration 15: Created initial config/recipes.json
 11. Iteration 16: Expanded to all 25 tool recipes
-12. **Iteration 22: Added player attack cooldown timer (commit 2462e87)**
-13. **Iteration 23: Added critical hit detection (commit b5ddb5d)**
-14. **Iteration 24: Added XP orb collection system (commit 90c7dac)**
+12. Iteration 22: Added player attack cooldown timer (commit 2462e87)
+13. Iteration 23: Added critical hit detection (commit b5ddb5d)
+14. Iteration 24: Added XP orb collection system (commit 90c7dac)
+15. **Iteration 25: Added enchantment system foundation (commit 305892c)**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -248,12 +290,12 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~17% of total roadmap complete (up from ~16% after iterations 22-23)
-- Phase 1 (Critical): ~75% complete (up from ~72%)
+**Overall Progress**: ~18% of total roadmap complete (up from ~17% after iteration 24)
+- Phase 1 (Critical): ~77% complete (up from ~75%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24, up from 40%)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
-  - Enchanting: 0%
+  - Enchanting: ~15% (iteration 25, up from 0%)
   - Brewing: 0%
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
@@ -277,13 +319,20 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Iteration 24: XP orb entities with magnetic attraction (Experience: 40% → 70%)
    - Result: Experience system now functional with player-visible feedback
 
-3. **Iteration 25**: Add XP Bar UI or Begin Enchanting System - NEXT TARGET
-   - Option A: XP Bar UI (Experience: 70% → 80%, low-medium effort)
-   - Option B: Enchanting System (Enchanting: 0% → 60%, high effort, 4-5 iterations)
+3. ✅ **Iteration 25**: Begin enchanting system foundation - DONE
+   - ✅ Iteration 25: Enchantment data structures, lapis items/blocks (Enchanting: 0% → 15%)
+   - Result: Foundation complete for enchanting implementation
 
-4. **Iterations 26-35+**: Complete enchanting and begin brewing system
-   - Large undertaking (5-10 iterations)
+4. **Iterations 26-30**: Complete enchanting system - NEXT TARGET
+   - Iteration 26-27: Enchanting table state management (Enchanting: 15% → 40%)
+   - Iteration 28-29: Enchanting UI and mechanics (Enchanting: 40% → 70%)
+   - Iteration 30-32: Enchantment effect implementations (Enchanting: 70% → 95%)
+   - Large undertaking (5-7 iterations)
    - Major Phase 1 requirement
    - Enables progression features
 
-**Focus**: Iteration 24 advanced Experience from 40% to 70%. Phase 1 now 75% complete. Next: Either complete Experience UI (80%) or tackle major missing systems (Enchanting/Brewing at 0%).
+5. **Iterations 33+**: Begin brewing system or other Phase 1 gaps
+   - Brewing: 0% complete (major Phase 1 requirement)
+   - XP Bar UI: Experience 70% → 80% (polish)
+
+**Focus**: Iteration 25 laid enchantment foundation (0% → 15%). Phase 1 now 77% complete. Next: Build enchanting table state management and UI (15% → 40%+).
