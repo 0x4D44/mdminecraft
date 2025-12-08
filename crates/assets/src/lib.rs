@@ -7,7 +7,7 @@ mod registry;
 
 pub use atlas::{AtlasEntry, AtlasError, TextureAtlasMetadata};
 pub use loader::{registry_from_file, registry_from_str};
-pub use registry::{BlockDescriptor, BlockFace, BlockRegistry};
+pub use registry::{BlockDescriptor, BlockFace, BlockRegistry, HarvestLevel};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -26,6 +26,14 @@ pub struct BlockDefinition {
     /// Optional per-face textures.
     #[serde(default)]
     pub textures: Option<BlockTextureConfig>,
+    /// Required tool tier to successfully harvest this block.
+    /// None = no tool required (hand is fine)
+    /// "wood" = wooden tool or better
+    /// "stone" = stone tool or better
+    /// "iron" = iron tool or better
+    /// "diamond" = diamond tool required
+    #[serde(default)]
+    pub harvest_level: Option<String>,
 }
 
 /// Errors emitted during pack loading.
