@@ -4,10 +4,12 @@
 mod atlas;
 mod loader;
 mod registry;
+mod recipe_registry;
 
 pub use atlas::{AtlasEntry, AtlasError, TextureAtlasMetadata};
 pub use loader::{registry_from_file, registry_from_str};
 pub use registry::{BlockDescriptor, BlockFace, BlockRegistry, HarvestLevel};
+pub use recipe_registry::RecipeRegistry;
 
 use serde::Deserialize;
 use thiserror::Error;
