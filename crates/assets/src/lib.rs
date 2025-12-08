@@ -7,7 +7,7 @@ mod registry;
 mod recipe_registry;
 
 pub use atlas::{AtlasEntry, AtlasError, TextureAtlasMetadata};
-pub use loader::{registry_from_file, registry_from_str};
+pub use loader::{recipe_registry_from_file, recipe_registry_from_str, registry_from_file, registry_from_str};
 pub use registry::{BlockDescriptor, BlockFace, BlockRegistry, HarvestLevel};
 pub use recipe_registry::RecipeRegistry;
 
@@ -51,6 +51,45 @@ pub enum AssetError {
 
 /// Parse a JSON string into a list of blocks.
 pub fn load_blocks_from_str(input: &str) -> Result<Vec<BlockDefinition>, AssetError> {
+    Ok(serde_json::from_str(input)?)
+}
+
+/// Recipe definition loaded from JSON config.
+#[derive(Debug, Deserialize)]
+pub struct RecipeDefinition {
+    /// Unique identifier for this recipe (e.g., "wooden_pickaxe")
+    pub name: String,
+    /// List of input items required (item type string + count)
+    pub inputs: Vec<RecipeInput>,
+    /// Output item produced
+    pub output: RecipeOutput,
+}
+
+/// Input item for a recipe.
+#[derive(Debug, Deserialize)]
+pub struct RecipeInput {
+    /// Item type identifier (e.g., "block:planks", "item:stick", "tool:pickaxe:wood")
+    pub item: String,
+    /// Number of items required
+    pub count: u32,
+}
+
+/// Output item from a recipe.
+#[derive(Debug, Deserialize)]
+pub struct RecipeOutput {
+    /// Item type identifier
+    pub item: String,
+    /// Number of items produced (default 1)
+    #[serde(default = "default_output_count")]
+    pub count: u32,
+}
+
+fn default_output_count() -> u32 {
+    1
+}
+
+/// Parse a JSON string into a list of recipes.
+pub fn load_recipes_from_str(input: &str) -> Result<Vec<RecipeDefinition>, AssetError> {
     Ok(serde_json::from_str(input)?)
 }
 

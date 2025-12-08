@@ -1,6 +1,6 @@
 //! Recipe registry for managing crafting recipes loaded from JSON config.
 
-use mdminecraft_core::Recipe;
+use mdminecraft_core::{ItemType, Recipe, ToolMaterial, ToolType};
 use std::collections::HashMap;
 
 /// Registry of crafting recipes indexed by output item name.
@@ -44,6 +44,52 @@ impl RecipeRegistry {
             .iter()
             .filter(|(_, recipe)| recipe.can_craft(available))
             .collect()
+    }
+}
+
+/// Parse an item string into an ItemType.
+///
+/// Format:
+/// - "block:id" -> ItemType::Block(id)
+/// - "item:id" -> ItemType::Item(id)
+/// - "tool:type:material" -> ItemType::Tool(ToolType, ToolMaterial)
+pub fn parse_item_type(s: &str) -> Option<ItemType> {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts.as_slice() {
+        ["block", id_str] => {
+            id_str.parse::<u16>().ok().map(ItemType::Block)
+        }
+        ["item", id_str] => {
+            id_str.parse::<u16>().ok().map(ItemType::Item)
+        }
+        ["tool", tool_str, material_str] => {
+            let tool = parse_tool_type(tool_str)?;
+            let material = parse_tool_material(material_str)?;
+            Some(ItemType::Tool(tool, material))
+        }
+        _ => None,
+    }
+}
+
+fn parse_tool_type(s: &str) -> Option<ToolType> {
+    match s {
+        "pickaxe" => Some(ToolType::Pickaxe),
+        "axe" => Some(ToolType::Axe),
+        "shovel" => Some(ToolType::Shovel),
+        "sword" => Some(ToolType::Sword),
+        "hoe" => Some(ToolType::Hoe),
+        _ => None,
+    }
+}
+
+fn parse_tool_material(s: &str) -> Option<ToolMaterial> {
+    match s {
+        "wood" => Some(ToolMaterial::Wood),
+        "stone" => Some(ToolMaterial::Stone),
+        "iron" => Some(ToolMaterial::Iron),
+        "diamond" => Some(ToolMaterial::Diamond),
+        "gold" => Some(ToolMaterial::Gold),
+        _ => None,
     }
 }
 
@@ -115,5 +161,31 @@ mod tests {
 
         assert_eq!(craftable.len(), 1);
         assert_eq!(craftable[0].0, "planks");
+    }
+
+    #[test]
+    fn test_parse_item_type() {
+        // Test block parsing
+        assert_eq!(parse_item_type("block:1"), Some(ItemType::Block(1)));
+        assert_eq!(parse_item_type("block:100"), Some(ItemType::Block(100)));
+
+        // Test item parsing
+        assert_eq!(parse_item_type("item:5"), Some(ItemType::Item(5)));
+        assert_eq!(parse_item_type("item:42"), Some(ItemType::Item(42)));
+
+        // Test tool parsing
+        assert_eq!(
+            parse_item_type("tool:pickaxe:wood"),
+            Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood))
+        );
+        assert_eq!(
+            parse_item_type("tool:sword:diamond"),
+            Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond))
+        );
+
+        // Test invalid formats
+        assert_eq!(parse_item_type("invalid"), None);
+        assert_eq!(parse_item_type("block:abc"), None);
+        assert_eq!(parse_item_type("tool:invalid:wood"), None);
     }
 }
