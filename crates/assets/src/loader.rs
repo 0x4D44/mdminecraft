@@ -90,4 +90,26 @@ mod tests {
         assert_eq!(stone_sword.inputs.len(), 2);
         assert_eq!(stone_sword.output_count, 1); // Default value
     }
+
+    #[test]
+    fn test_load_recipes_from_config_file() {
+        // Test loading the actual config/recipes.json file
+        let config_path = std::path::Path::new("../../config/recipes.json");
+
+        if config_path.exists() {
+            let registry = recipe_registry_from_file(config_path).unwrap();
+
+            // Should have at least some recipes
+            assert!(registry.len() > 0, "Recipe registry should contain recipes");
+
+            // Check that wooden_pickaxe exists
+            let wooden_pickaxe = registry.get("wooden_pickaxe");
+            assert!(wooden_pickaxe.is_some(), "Should have wooden_pickaxe recipe");
+
+            if let Some(recipe) = wooden_pickaxe {
+                assert_eq!(recipe.inputs.len(), 2, "Wooden pickaxe should have 2 input types");
+                assert_eq!(recipe.output_count, 1, "Should produce 1 pickaxe");
+            }
+        }
+    }
 }
