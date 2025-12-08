@@ -1,0 +1,50 @@
+[
+  {
+    "name": "wooden_pickaxe",
+    "inputs": [
+      {"item": "block:2", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:pickaxe:wood", "count": 1}
+  },
+  {
+    "name": "wooden_axe",
+    "inputs": [
+      {"item": "block:2", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:axe:wood", "count": 1}
+  },
+  {
+    "name": "wooden_shovel",
+    "inputs": [
+      {"item": "block:2", "count": 1},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:shovel:wood", "count": 1}
+  },
+  {
+    "name": "stone_pickaxe",
+    "inputs": [
+      {"item": "block:3", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:pickaxe:stone", "count": 1}
+  },
+  {
+    "name": "iron_pickaxe",
+    "inputs": [
+      {"item": "item:10", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:pickaxe:iron", "count": 1}
+  },
+  {
+    "name": "diamond_pickaxe",
+    "inputs": [
+      {"item": "item:11", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:pickaxe:diamond", "count": 1}
+  }
+]
