@@ -303,8 +303,8 @@ impl TerrainGenerator {
         let chunk_x = chunk_origin_x / CHUNK_SIZE_X as i32;
         let chunk_z = chunk_origin_z / CHUNK_SIZE_Z as i32;
 
-        // Original cave carver (keep for compatibility)
-        self.cave_carver.carve_chunk(chunk, chunk_x, chunk_z);
+        // Original cave carver disabled - replaced by Minecraft 1.18+ system
+        // self.cave_carver.carve_chunk(chunk, chunk_x, chunk_z);
 
         // Minecraft 1.18+ cave carvers
         self.cheese_carver.carve_chunk(chunk, chunk_x, chunk_z);

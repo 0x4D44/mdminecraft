@@ -3016,7 +3016,14 @@ impl GameWorld {
         // Attack the closest mob
         if let Some((idx, _distance)) = closest_hit {
             let tool = self.hotbar.selected_tool();
-            let damage = calculate_attack_damage(tool);
+            let mut damage = calculate_attack_damage(tool);
+
+            // Critical hit detection: 1.5x damage if player is falling
+            // Check if player has significant downward velocity
+            let is_critical = self.player_physics.velocity.y < -0.1;
+            if is_critical {
+                damage *= 1.5;
+            }
 
             // Calculate knockback direction
             let mob = &self.mobs[idx];
@@ -3028,12 +3035,21 @@ impl GameWorld {
             let _died = mob.damage(damage);
             mob.apply_knockback(dx, dz, 0.5);
 
-            tracing::info!(
-                "Attacked {:?} for {:.1} damage (health: {:.1})",
-                mob.mob_type,
-                damage,
-                mob.health
-            );
+            if is_critical {
+                tracing::info!(
+                    "CRITICAL HIT! Attacked {:?} for {:.1} damage (health: {:.1})",
+                    mob.mob_type,
+                    damage,
+                    mob.health
+                );
+            } else {
+                tracing::info!(
+                    "Attacked {:?} for {:.1} damage (health: {:.1})",
+                    mob.mob_type,
+                    damage,
+                    mob.health
+                );
+            }
 
             // Use tool durability if we have a tool
             if let Some(item) = self.hotbar.selected_item_mut() {

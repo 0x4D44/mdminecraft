@@ -163,7 +163,7 @@ impl CheeseCaveCarver {
                 frequency: 0.03,
                 threshold: 0.5,
                 min_y: 5,
-                max_y: 120,
+                max_y: 80, // Limit to y=80 to prevent surface floating terrain
                 vertical_squash: 1.5,
             },
         }
@@ -200,17 +200,7 @@ impl CheeseCaveCarver {
             z as f64 * self.params.frequency,
         );
         let normalized = (noise_val + 1.0) / 2.0;
-
-        // Surface protection: reduce carving near surface to prevent floating terrain
-        let surface_protection = if y > 80 {
-            // Gradually reduce carving from y=80 to y=120
-            let distance_from_surface = (120 - y).max(0) as f64;
-            (distance_from_surface / 40.0).min(1.0)
-        } else {
-            1.0
-        };
-
-        normalized > self.params.threshold && surface_protection > 0.3
+        normalized > self.params.threshold
     }
 }
 
@@ -275,17 +265,7 @@ impl SpaghettiCaveCarver {
                 .sample_3d(x as f64 * 0.15, y as f64 * 0.15, z as f64 * 0.15);
 
         let threshold = 0.15 + thickness.abs() * 0.1;
-
-        // Surface protection: reduce carving near surface to prevent floating terrain
-        let surface_protection = if y > 80 {
-            // Gradually reduce carving from y=80 to y=120
-            let distance_from_surface = (120 - y).max(0) as f64;
-            (distance_from_surface / 40.0).min(1.0)
-        } else {
-            1.0
-        };
-
-        path_noise.abs() < threshold && surface_protection > 0.3
+        path_noise.abs() < threshold
     }
 }
 
@@ -335,17 +315,7 @@ impl NoodleCaveCarver {
         let noise_val = self
             .noise
             .sample_3d(x as f64 * 0.12, y as f64 * 0.12, z as f64 * 0.12);
-
-        // Surface protection: reduce carving near surface to prevent floating terrain
-        let surface_protection = if y > 80 {
-            // Gradually reduce carving from y=80 to y=120
-            let distance_from_surface = (120 - y).max(0) as f64;
-            (distance_from_surface / 40.0).min(1.0)
-        } else {
-            1.0
-        };
-
-        noise_val.abs() < 0.08 && surface_protection > 0.3
+        noise_val.abs() < 0.08
     }
 }
 

@@ -1991,6 +1991,7 @@ dependencies = [
 name = "mdminecraft-assets"
 version = "0.1.0"
 dependencies = [
+ "mdminecraft-core",
  "mdminecraft-world",
  "serde",
  "serde_json",
