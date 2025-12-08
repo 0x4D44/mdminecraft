@@ -3,6 +3,7 @@
 
 pub mod item;
 pub mod crafting;
+pub mod enchantment;
 
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 // Re-export commonly used types
 pub use item::{ItemStack, ItemType, ToolMaterial, ToolType};
 pub use crafting::{Recipe, ToolRecipes};
+pub use enchantment::{Enchantment, EnchantmentType};
 
 /// Fixed tick type (20 TPS => 50 ms per tick).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
