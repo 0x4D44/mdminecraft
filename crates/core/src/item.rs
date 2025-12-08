@@ -160,6 +160,21 @@ impl ToolType {
             ToolType::Hoe => 1.0,
         }
     }
+
+    /// Get the mining speed multiplier when this tool is used on its preferred block types.
+    /// Returns 1.0 for tools used on non-preferred blocks (no bonus or penalty).
+    /// The actual mining speed also depends on the tool material's speed_multiplier().
+    pub fn effectiveness_multiplier(self) -> f32 {
+        match self {
+            // Tools get a 1.5x effectiveness bonus on their preferred blocks
+            // This is in addition to the material's base speed multiplier
+            ToolType::Pickaxe => 1.5,  // Effective on stone, ores
+            ToolType::Axe => 1.5,      // Effective on wood
+            ToolType::Shovel => 1.5,   // Effective on dirt, sand, gravel
+            ToolType::Sword => 1.0,    // No mining bonus (combat tool)
+            ToolType::Hoe => 1.0,      // No mining bonus (farming tool)
+        }
+    }
 }
 
 /// An item stack in inventory
@@ -253,6 +268,18 @@ impl ItemStack {
         self.harvest_tier()
             .map(|tier| tier >= required_tier)
             .unwrap_or(false)
+    }
+
+    /// Get the mining speed multiplier for this tool.
+    /// Returns the material speed multiplier * tool effectiveness multiplier.
+    /// Returns 1.0 for non-tools (hand mining speed).
+    pub fn mining_speed_multiplier(&self) -> f32 {
+        match self.item_type {
+            ItemType::Tool(tool_type, material) => {
+                material.speed_multiplier() * tool_type.effectiveness_multiplier()
+            }
+            _ => 1.0, // Hand mining
+        }
     }
 }
 
@@ -431,5 +458,46 @@ mod tests {
         assert!(!block_stack.can_harvest_tier(1));
         assert!(!block_stack.can_harvest_tier(2));
         assert!(!block_stack.can_harvest_tier(3));
+    }
+
+    #[test]
+    fn test_tool_effectiveness_multiplier() {
+        // Mining tools have 1.5x effectiveness on their preferred blocks
+        assert_eq!(ToolType::Pickaxe.effectiveness_multiplier(), 1.5);
+        assert_eq!(ToolType::Axe.effectiveness_multiplier(), 1.5);
+        assert_eq!(ToolType::Shovel.effectiveness_multiplier(), 1.5);
+
+        // Non-mining tools have no effectiveness bonus
+        assert_eq!(ToolType::Sword.effectiveness_multiplier(), 1.0);
+        assert_eq!(ToolType::Hoe.effectiveness_multiplier(), 1.0);
+    }
+
+    #[test]
+    fn test_mining_speed_multiplier() {
+        // Test pickaxe mining speeds (material * effectiveness)
+        let wood_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1);
+        assert_eq!(wood_pick.mining_speed_multiplier(), 2.0 * 1.5); // 3.0
+
+        let stone_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone), 1);
+        assert_eq!(stone_pick.mining_speed_multiplier(), 4.0 * 1.5); // 6.0
+
+        let iron_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1);
+        assert_eq!(iron_pick.mining_speed_multiplier(), 6.0 * 1.5); // 9.0
+
+        let diamond_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+        assert_eq!(diamond_pick.mining_speed_multiplier(), 8.0 * 1.5); // 12.0
+
+        // Gold is fastest but weakest tier
+        let gold_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Gold), 1);
+        assert_eq!(gold_pick.mining_speed_multiplier(), 12.0 * 1.5); // 18.0
+        assert!(gold_pick.mining_speed_multiplier() > diamond_pick.mining_speed_multiplier());
+
+        // Test sword (no effectiveness bonus)
+        let diamond_sword = ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond), 1);
+        assert_eq!(diamond_sword.mining_speed_multiplier(), 8.0 * 1.0); // 8.0
+
+        // Non-tool items use hand speed
+        let block_stack = ItemStack::new(ItemType::Block(1), 64);
+        assert_eq!(block_stack.mining_speed_multiplier(), 1.0);
     }
 }
