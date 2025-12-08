@@ -101,6 +101,62 @@ impl ToolMaterial {
         };
         self_tier >= required_tier
     }
+
+    /// Get the attack damage for this material and tool type
+    /// Returns base damage (fist = 1.0, so values are added to 1.0)
+    pub fn attack_damage(self, tool_type: ToolType) -> f32 {
+        match tool_type {
+            ToolType::Sword => match self {
+                ToolMaterial::Wood => 4.0,
+                ToolMaterial::Stone => 5.0,
+                ToolMaterial::Iron => 6.0,
+                ToolMaterial::Diamond => 7.0,
+                ToolMaterial::Gold => 4.0,
+            },
+            ToolType::Axe => match self {
+                ToolMaterial::Wood => 7.0,
+                ToolMaterial::Stone => 9.0,
+                ToolMaterial::Iron => 9.0,
+                ToolMaterial::Diamond => 9.0,
+                ToolMaterial::Gold => 7.0,
+            },
+            ToolType::Pickaxe => match self {
+                ToolMaterial::Wood => 2.0,
+                ToolMaterial::Stone => 3.0,
+                ToolMaterial::Iron => 4.0,
+                ToolMaterial::Diamond => 5.0,
+                ToolMaterial::Gold => 2.0,
+            },
+            ToolType::Shovel => match self {
+                ToolMaterial::Wood => 2.5,
+                ToolMaterial::Stone => 3.5,
+                ToolMaterial::Iron => 4.5,
+                ToolMaterial::Diamond => 5.5,
+                ToolMaterial::Gold => 2.5,
+            },
+            ToolType::Hoe => match self {
+                ToolMaterial::Wood => 1.0,
+                ToolMaterial::Stone => 1.0,
+                ToolMaterial::Iron => 1.0,
+                ToolMaterial::Diamond => 1.0,
+                ToolMaterial::Gold => 1.0,
+            },
+        }
+    }
+}
+
+impl ToolType {
+    /// Get the attack speed for this tool type
+    /// Returns attacks per second
+    pub fn attack_speed(self) -> f32 {
+        match self {
+            ToolType::Sword => 1.6,
+            ToolType::Axe => 0.8,
+            ToolType::Pickaxe => 1.2,
+            ToolType::Shovel => 1.0,
+            ToolType::Hoe => 1.0,
+        }
+    }
 }
 
 /// An item stack in inventory
@@ -221,5 +277,37 @@ mod tests {
         assert_eq!(stack.count, 64);
         assert_eq!(stack.max_stack_size(), 64);
         assert!(stack.durability.is_none());
+    }
+
+    #[test]
+    fn test_attack_damage() {
+        // Test sword damage progression
+        assert_eq!(ToolMaterial::Wood.attack_damage(ToolType::Sword), 4.0);
+        assert_eq!(ToolMaterial::Stone.attack_damage(ToolType::Sword), 5.0);
+        assert_eq!(ToolMaterial::Iron.attack_damage(ToolType::Sword), 6.0);
+        assert_eq!(ToolMaterial::Diamond.attack_damage(ToolType::Sword), 7.0);
+        assert_eq!(ToolMaterial::Gold.attack_damage(ToolType::Sword), 4.0);
+
+        // Test axe damage (higher than swords)
+        assert_eq!(ToolMaterial::Diamond.attack_damage(ToolType::Axe), 9.0);
+        assert!(ToolMaterial::Diamond.attack_damage(ToolType::Axe) > ToolMaterial::Diamond.attack_damage(ToolType::Sword));
+
+        // Test hoe damage (minimal)
+        assert_eq!(ToolMaterial::Diamond.attack_damage(ToolType::Hoe), 1.0);
+        assert_eq!(ToolMaterial::Wood.attack_damage(ToolType::Hoe), 1.0);
+    }
+
+    #[test]
+    fn test_attack_speed() {
+        // Swords are fastest
+        assert_eq!(ToolType::Sword.attack_speed(), 1.6);
+
+        // Axes are slowest
+        assert_eq!(ToolType::Axe.attack_speed(), 0.8);
+
+        // Others in between
+        assert_eq!(ToolType::Pickaxe.attack_speed(), 1.2);
+        assert_eq!(ToolType::Shovel.attack_speed(), 1.0);
+        assert_eq!(ToolType::Hoe.attack_speed(), 1.0);
     }
 }
