@@ -1,0 +1,39 @@
+# Repo-Wide Code Review Plan (2025-11-20)
+
+## Objectives & Constraints
+- Provide a thorough, correctness-focused review of all Rust crates/binaries/tools in the workspace.
+- Identify defects, determinism leaks, safety/security issues, performance regressions, API/UX pitfalls, and test gaps.
+- Do **not** modify production behavior; produce findings and concrete recommendations.
+- Deliver final report as `YYYY.MM.DD - CR - <desc>.md` in `wrk_docs/`.
+
+## Scope (code inventory)
+- Root crate (`src/`): app entry, menu/input/game wrappers.
+- Crates: `core`, `ecs`, `world`, `physics`, `render`, `ui3d`, `net`, `server`, `client`, `assets`, `scripting`, `testkit`, `cli` (bins `metrics-diff`, `debug-world`).
+- Tools: `atlas_packer`, `ecs_compare`.
+- Integration tests under `tests/`, worldtests under `crates/world/tests`, net tests.
+
+## Review Priorities (risk-based)
+1) Determinism & persistence correctness (`world`, `core`, `net/replay`, `drop_item`, `lighting`).
+2) Networking safety & replay consistency (`net`, `server`, `client`).
+3) Rendering / GPU safety (`render`, `ui3d`, shaders).
+4) Gameplay input/menu glue (`src/`, `assets` registry load path handling).
+5) Tooling outputs & metrics correctness (`cli` binaries, `tools/`).
+6) Test coverage & remaining TODOs with user-facing risk.
+
+## Methodology & Sequence
+1. **Workspace configuration pass**: check `Cargo.toml` for feature flags, dependency versions, bin exposure; ensure workspace members aligned.
+2. **Root binary review**: `main.rs`, `config.rs`, `input.rs`, `menu.rs`, `game.rs`, `scripted_input.rs` – look for panic/unwraps, event-loop flow, config fallbacks.
+3. **Core abstractions**: review `crates/core` (coordinate types, items, tick definitions) for invariant safety.
+4. **World systems**: traverse `crates/world` (generation, lighting, inventory, crafting, mobs, weather, persistence, chunk seams) and worldtests for determinism/compression edge cases.
+5. **Physics**: check collision/raycast math for NaN/precision issues.
+6. **Rendering/UI3D**: review pipelines, shader invariants, atlas usage, text pipeline stubs; assess safety of wgpu buffer lifetimes.
+7. **Networking & multiplayer**: inspect `net`, `server`, `client` for protocol correctness, replay/logging, message handling TODOs.
+8. **Assets & loaders**: validate registry parsing, error handling, default fallbacks; config file expectations.
+9. **CLI & tools**: verify metrics-diff/debug-world/atlas_packer/ecs_compare correctness, argument validation, I/O safety.
+10. **Tests**: scan integration/world/property tests for coverage; note missing edge cases; confirm determinism assertions.
+11. **Cross-cutting concerns**: logging levels, error surfaces, panic/unwrap usage, concurrency handling, perf hotspots, unsafe code (if any).
+12. **Report**: Compile findings (severity, file/line, impact, fix suggestions), residual risks, and recommended follow-ups.
+
+## Deliverables
+- This plan (saved).
+- Comprehensive code review report following the structure above, saved under `wrk_docs/2025.11.20 - CR - <desc>.md`.

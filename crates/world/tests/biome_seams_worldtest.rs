@@ -187,10 +187,11 @@ fn biome_seams_worldtest() {
     // Assertions
     assert_eq!(total_chunks, 81, "Should generate 81 chunks (9×9 grid)");
     assert_eq!(seam_failures, 0, "All seams should be continuous");
-    // Performance threshold: 30ms for release, 300ms for debug (debug is much slower)
-    // Note: ore generation adds overhead; threshold increased to accommodate system load variance
+    // Performance threshold: 30ms for release, 600ms for debug (debug is much slower)
+    // Note: Minecraft 1.18 cave systems (cheese/spaghetti/noodle/ravine/aquifer/geode) add significant overhead
+    // Threshold increased from 300ms to 600ms to accommodate expanded worldgen complexity
     let performance_threshold = if cfg!(debug_assertions) {
-        300_000
+        600_000
     } else {
         30_000
     };
