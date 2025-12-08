@@ -589,6 +589,86 @@ impl PlayerXP {
     }
 }
 
+/// Experience orb that drops from mobs and is collected by the player
+struct XPOrb {
+    /// World position
+    pos: glam::Vec3,
+    /// Velocity
+    vel: glam::Vec3,
+    /// XP value
+    value: u32,
+    /// Lifetime in seconds (despawns after 5 minutes)
+    lifetime: f32,
+    /// Whether orb is on ground
+    on_ground: bool,
+}
+
+impl XPOrb {
+    /// Create a new XP orb at the given position
+    fn new(pos: glam::Vec3, value: u32) -> Self {
+        // Small random upward and outward velocity for visual scatter
+        let angle = rand::random::<f32>() * std::f32::consts::TAU;
+        let speed = 0.1 + rand::random::<f32>() * 0.1;
+        let vel = glam::Vec3::new(
+            angle.cos() * speed,
+            0.3, // Upward pop
+            angle.sin() * speed,
+        );
+
+        Self {
+            pos,
+            vel,
+            value,
+            lifetime: 300.0, // 5 minutes
+            on_ground: false,
+        }
+    }
+
+    /// Update physics and magnetic attraction to player
+    /// Returns true if orb should be removed (despawned or collected)
+    fn update(&mut self, dt: f32, player_pos: glam::Vec3) -> bool {
+        // Decrement lifetime
+        self.lifetime -= dt;
+        if self.lifetime <= 0.0 {
+            return true; // Despawn
+        }
+
+        // Calculate distance to player
+        let to_player = player_pos - self.pos;
+        let distance = to_player.length();
+
+        // Magnetic attraction when within 2 blocks
+        if distance < 2.0 && distance > 0.01 {
+            let attraction_strength = 8.0; // Blocks per second
+            let attraction = to_player.normalize() * attraction_strength * dt;
+            self.vel += attraction;
+        }
+
+        // Apply gravity
+        if !self.on_ground {
+            self.vel.y -= 9.8 * dt; // Gravity
+        }
+
+        // Apply velocity
+        self.pos += self.vel * dt;
+
+        // Simple ground check (if Y velocity is near zero and position is low)
+        if self.vel.y.abs() < 0.1 && self.pos.y < player_pos.y + 1.0 {
+            self.on_ground = true;
+            self.vel.y = 0.0;
+            self.vel *= 0.9; // Friction
+        }
+
+        false // Keep orb
+    }
+
+    /// Check if player should collect this orb
+    fn should_collect(&self, player_pos: glam::Vec3) -> bool {
+        let distance = (self.pos - player_pos).length();
+        distance < 0.5 // Collection radius
+    }
+}
+
 /// Ray-AABB intersection test
 /// Returns Some(t) where t is the distance along the ray, or None if no intersection
 fn ray_aabb_intersect(
@@ -772,8 +852,10 @@ pub struct GameWorld {
     bow_drawing: bool,
     /// Attack cooldown timer (seconds remaining until next attack allowed)
     attack_cooldown: f32,
-    /// Player experience points (visual only)
+    /// Player experience points
     player_xp: PlayerXP,
+    /// Experience orbs in the world
+    xp_orbs: Vec<XPOrb>,
 }
 
 impl GameWorld {
@@ -998,6 +1080,7 @@ impl GameWorld {
             bow_drawing: false,
             attack_cooldown: 0.0,
             player_xp: PlayerXP::new(),
+            xp_orbs: Vec::new(),
         };
 
         world.player_physics.last_ground_y = spawn_feet.y;
@@ -1615,6 +1698,30 @@ impl GameWorld {
 
         // Update projectiles (arrows)
         self.update_projectiles();
+
+        // Update XP orbs (physics, magnetic attraction, collection)
+        let player_pos = self.renderer.camera().position;
+        let mut xp_collected = 0u32;
+        self.xp_orbs.retain_mut(|orb| {
+            // Check if player should collect this orb
+            if orb.should_collect(player_pos) {
+                xp_collected += orb.value;
+                return false; // Remove collected orb
+            }
+
+            // Update orb physics
+            !orb.update(dt, player_pos) // Remove if update returns true (despawned)
+        });
+
+        // Add collected XP to player
+        if xp_collected > 0 {
+            self.player_xp.add_xp(xp_collected);
+            tracing::info!("Collected {} XP (Level: {}, Progress: {:.1}%)",
+                xp_collected,
+                self.player_xp.level,
+                self.player_xp.progress() * 100.0
+            );
+        }
 
         self.frame_count = self.frame_count.wrapping_add(1);
 
@@ -2597,15 +2704,16 @@ impl GameWorld {
 
         // Remove dead mobs and drop loot (and XP)
         let mut loot_drops: Vec<(f64, f64, f64, DroppedItemType, u32)> = Vec::new();
-        let mut xp_gained: u32 = 0;
+        let mut xp_orb_spawns: Vec<(f64, f64, f64, u32)> = Vec::new();
         self.mobs.retain(|mob| {
             if mob.dead {
-                // Award XP based on mob type
-                xp_gained += match mob.mob_type {
+                // Spawn XP orb based on mob type
+                let xp_value = match mob.mob_type {
                     MobType::Zombie | MobType::Skeleton | MobType::Spider => 5,
                     MobType::Creeper => 5,
                     MobType::Pig | MobType::Cow | MobType::Sheep | MobType::Chicken => 1,
                 };
+                xp_orb_spawns.push((mob.x, mob.y + 0.5, mob.z, xp_value));
                 // Drop loot based on mob type
                 match mob.mob_type {
                     MobType::Zombie => {
@@ -2711,9 +2819,10 @@ impl GameWorld {
             }
         }
 
-        // Add XP from killed mobs
-        if xp_gained > 0 {
-            self.player_xp.add_xp(xp_gained);
+        // Spawn XP orbs from killed mobs
+        for (x, y, z, xp_value) in xp_orb_spawns {
+            let pos = glam::Vec3::new(x as f32, y as f32, z as f32);
+            self.xp_orbs.push(XPOrb::new(pos, xp_value));
         }
 
         // Spawn hostile mobs at night (every ~100 frames, max 10 hostile mobs)
