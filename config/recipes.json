@@ -24,12 +24,60 @@
     "output": {"item": "tool:shovel:wood", "count": 1}
   },
   {
+    "name": "wooden_sword",
+    "inputs": [
+      {"item": "block:2", "count": 2},
+      {"item": "item:1", "count": 1}
+    ],
+    "output": {"item": "tool:sword:wood", "count": 1}
+  },
+  {
+    "name": "wooden_hoe",
+    "inputs": [
+      {"item": "block:2", "count": 2},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:hoe:wood", "count": 1}
+  },
+  {
     "name": "stone_pickaxe",
     "inputs": [
       {"item": "block:3", "count": 3},
       {"item": "item:1", "count": 2}
     ],
     "output": {"item": "tool:pickaxe:stone", "count": 1}
+  },
+  {
+    "name": "stone_axe",
+    "inputs": [
+      {"item": "block:3", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:axe:stone", "count": 1}
+  },
+  {
+    "name": "stone_shovel",
+    "inputs": [
+      {"item": "block:3", "count": 1},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:shovel:stone", "count": 1}
+  },
+  {
+    "name": "stone_sword",
+    "inputs": [
+      {"item": "block:3", "count": 2},
+      {"item": "item:1", "count": 1}
+    ],
+    "output": {"item": "tool:sword:stone", "count": 1}
+  },
+  {
+    "name": "stone_hoe",
+    "inputs": [
+      {"item": "block:3", "count": 2},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:hoe:stone", "count": 1}
   },
   {
     "name": "iron_pickaxe",
@@ -40,11 +88,115 @@
     "output": {"item": "tool:pickaxe:iron", "count": 1}
   },
   {
+    "name": "iron_axe",
+    "inputs": [
+      {"item": "item:10", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:axe:iron", "count": 1}
+  },
+  {
+    "name": "iron_shovel",
+    "inputs": [
+      {"item": "item:10", "count": 1},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:shovel:iron", "count": 1}
+  },
+  {
+    "name": "iron_sword",
+    "inputs": [
+      {"item": "item:10", "count": 2},
+      {"item": "item:1", "count": 1}
+    ],
+    "output": {"item": "tool:sword:iron", "count": 1}
+  },
+  {
+    "name": "iron_hoe",
+    "inputs": [
+      {"item": "item:10", "count": 2},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:hoe:iron", "count": 1}
+  },
+  {
     "name": "diamond_pickaxe",
     "inputs": [
       {"item": "item:11", "count": 3},
       {"item": "item:1", "count": 2}
     ],
     "output": {"item": "tool:pickaxe:diamond", "count": 1}
+  },
+  {
+    "name": "diamond_axe",
+    "inputs": [
+      {"item": "item:11", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:axe:diamond", "count": 1}
+  },
+  {
+    "name": "diamond_shovel",
+    "inputs": [
+      {"item": "item:11", "count": 1},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:shovel:diamond", "count": 1}
+  },
+  {
+    "name": "diamond_sword",
+    "inputs": [
+      {"item": "item:11", "count": 2},
+      {"item": "item:1", "count": 1}
+    ],
+    "output": {"item": "tool:sword:diamond", "count": 1}
+  },
+  {
+    "name": "diamond_hoe",
+    "inputs": [
+      {"item": "item:11", "count": 2},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:hoe:diamond", "count": 1}
+  },
+  {
+    "name": "golden_pickaxe",
+    "inputs": [
+      {"item": "item:12", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:pickaxe:gold", "count": 1}
+  },
+  {
+    "name": "golden_axe",
+    "inputs": [
+      {"item": "item:12", "count": 3},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:axe:gold", "count": 1}
+  },
+  {
+    "name": "golden_shovel",
+    "inputs": [
+      {"item": "item:12", "count": 1},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:shovel:gold", "count": 1}
+  },
+  {
+    "name": "golden_sword",
+    "inputs": [
+      {"item": "item:12", "count": 2},
+      {"item": "item:1", "count": 1}
+    ],
+    "output": {"item": "tool:sword:gold", "count": 1}
+  },
+  {
+    "name": "golden_hoe",
+    "inputs": [
+      {"item": "item:12", "count": 2},
+      {"item": "item:1", "count": 2}
+    ],
+    "output": {"item": "tool:hoe:gold", "count": 1}
   }
 ]

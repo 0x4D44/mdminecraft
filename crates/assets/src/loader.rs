@@ -99,16 +99,47 @@ mod tests {
         if config_path.exists() {
             let registry = recipe_registry_from_file(config_path).unwrap();
 
-            // Should have at least some recipes
-            assert!(registry.len() > 0, "Recipe registry should contain recipes");
+            // Should have all 25 tool recipes (5 tools × 5 materials)
+            assert_eq!(registry.len(), 25, "Recipe registry should contain 25 recipes");
 
-            // Check that wooden_pickaxe exists
-            let wooden_pickaxe = registry.get("wooden_pickaxe");
-            assert!(wooden_pickaxe.is_some(), "Should have wooden_pickaxe recipe");
+            // Test a sample from each material tier
+            let test_recipes = vec![
+                ("wooden_pickaxe", 2),
+                ("stone_sword", 2),
+                ("iron_axe", 2),
+                ("diamond_shovel", 2),
+                ("golden_hoe", 2),
+            ];
 
-            if let Some(recipe) = wooden_pickaxe {
-                assert_eq!(recipe.inputs.len(), 2, "Wooden pickaxe should have 2 input types");
-                assert_eq!(recipe.output_count, 1, "Should produce 1 pickaxe");
+            for (recipe_name, expected_inputs) in test_recipes {
+                let recipe = registry.get(recipe_name);
+                assert!(recipe.is_some(), "Should have {} recipe", recipe_name);
+
+                if let Some(recipe) = recipe {
+                    assert_eq!(
+                        recipe.inputs.len(),
+                        expected_inputs,
+                        "{} should have {} input types",
+                        recipe_name,
+                        expected_inputs
+                    );
+                    assert_eq!(recipe.output_count, 1, "{} should produce 1 tool", recipe_name);
+                }
+            }
+
+            // Verify we have all tool types for each material
+            let materials = vec!["wooden", "stone", "iron", "diamond", "golden"];
+            let tools = vec!["pickaxe", "axe", "shovel", "sword", "hoe"];
+
+            for material in &materials {
+                for tool in &tools {
+                    let recipe_name = format!("{}_{}", material, tool);
+                    assert!(
+                        registry.get(&recipe_name).is_some(),
+                        "Missing recipe: {}",
+                        recipe_name
+                    );
+                }
             }
         }
     }
