@@ -3596,6 +3596,65 @@ impl GameWorld {
                 );
             }
 
+            // Sword sweep attack: if using a sword, nearby mobs take 1 + enchantment bonus damage
+            // Sweep attacks hit mobs within 1 block of the primary target horizontally
+            let is_sword = matches!(tool, Some((ToolType::Sword, _)));
+            if is_sword {
+                let target_x = mob.x;
+                let target_z = mob.z;
+                let sweep_damage = 1.0 + if sharpness_level > 0 {
+                    0.5 + 0.5 * sharpness_level as f32
+                } else {
+                    0.0
+                };
+                let sweep_range = 1.0; // 1 block radius for sweep
+
+                // Collect indices of mobs to sweep (excluding the primary target)
+                let sweep_targets: Vec<usize> = self
+                    .mobs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, m)| {
+                        if i == idx {
+                            return None; // Skip primary target
+                        }
+                        let dx = m.x - target_x;
+                        let dz = m.z - target_z;
+                        let dist_sq = dx * dx + dz * dz;
+                        if dist_sq <= sweep_range * sweep_range {
+                            Some(i)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                // Apply sweep damage to nearby mobs
+                let sweep_count = sweep_targets.len();
+                for sweep_idx in sweep_targets {
+                    let sweep_mob = &mut self.mobs[sweep_idx];
+                    sweep_mob.damage(sweep_damage);
+                    // Small knockback for sweep targets
+                    let sdx = sweep_mob.x - origin.x as f64;
+                    let sdz = sweep_mob.z - origin.z as f64;
+                    sweep_mob.apply_knockback(sdx, sdz, 0.3);
+
+                    // Fire Aspect also applies to sweep targets
+                    if fire_aspect_level > 0 {
+                        let fire_ticks = 80 * fire_aspect_level as u32;
+                        sweep_mob.set_on_fire(fire_ticks);
+                    }
+                }
+
+                if sweep_count > 0 {
+                    tracing::info!(
+                        "SWEEP ATTACK! Hit {} additional mobs for {:.1} damage each",
+                        sweep_count,
+                        sweep_damage
+                    );
+                }
+            }
+
             // Use tool durability if we have a tool
             // (damage_durability handles Unbreaking enchantment internally)
             if let Some(item) = self.hotbar.selected_item_mut() {
