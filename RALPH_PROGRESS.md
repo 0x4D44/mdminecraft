@@ -1,14 +1,17 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 25 - Updated: 2025-12-08
+## Iteration 26 - Updated: 2025-12-09
 
-### ENCHANTING SYSTEM FOUNDATION COMPLETE! 🔮
+### ENCHANTING TABLE STATE MANAGEMENT COMPLETE! 🔮
 
-**Iteration 25 completed** the enchantment data structures, advancing Enchanting from 0% to ~15% (foundation). Combined with lapis lazuli items and blocks (added in previous session), the groundwork for the enchanting system is now in place.
+**Iteration 26 completed** the enchanting table state management system, advancing Enchanting from ~15% to ~30%. The EnchantingTableState block entity now handles item/lapis slots, bookshelf counting, XP cost calculations, and enchantment option generation.
 
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 25: ENCHANTING SYSTEM FOUNDATION COMPLETE! 🔮
+**Iteration 25 completed** the enchantment data structures, advancing Enchanting from 0% to ~15% (foundation). Combined with lapis lazuli items and blocks, the groundwork for the enchanting system is in place.
 
 ### Iteration 24: EXPERIENCE SYSTEM NOW FUNCTIONAL! 🎯
 **Iteration 24 completed** the XP orb collection system, advancing Experience from 40% (struct only) to ~70% (functional). Combined with iterations 22-23 combat enhancements, Phase 1 is now ~75% complete.
@@ -107,10 +110,10 @@
 **Missing for completion**:
 1. Sword sweep attack (hit multiple entities in arc when using sword)
 
-### ⚠️ PARTIALLY IMPLEMENTED (15% complete)
+### ⚠️ PARTIALLY IMPLEMENTED (~30% complete)
 
-#### Enchanting System (~15% complete)
-**Location**: `crates/core/src/enchantment.rs`, `crates/core/src/item.rs`, `config/blocks.json`
+#### Enchanting System (~30% complete)
+**Location**: `crates/core/src/enchantment.rs`, `crates/world/src/enchanting.rs`, `config/blocks.json`
 - ✅ **Lapis lazuli item type** (iteration 25: LapisLazuli in ItemType enum)
 - ✅ **Lapis ore block** (iteration 25: ID 98, drops 6 lapis, requires stone pickaxe)
 - ✅ **Enchanting table block** (iteration 25: ID 99 in blocks.json)
@@ -118,13 +121,18 @@
 - ✅ **Enchantment struct** (iteration 25: with level clamping and compatibility checking)
 - ✅ **ItemStack enchantments field** (iteration 25: Option<Vec<Enchantment>>)
 - ✅ **Compatibility rules** (iteration 25: Silk Touch vs Fortune, Protection variants)
-- ✅ **Unit tests** (iteration 25: 4 tests for max_level, compatibility, clamping)
-- ❌ **No enchanting table state management** (no fuel/lapis tracking)
+- ✅ **EnchantingTableState** (iteration 26: block entity with item/lapis slots)
+- ✅ **Bookshelf detection** (iteration 26: 0-15 bookshelves affect level)
+- ✅ **XP cost calculations** (iteration 26: base + bookshelf modifier)
+- ✅ **Enchantment option generation** (iteration 26: deterministic from seed)
+- ✅ **Lapis consumption** (iteration 26: 1/2/3 per slot)
+- ✅ **Unit tests** (iteration 26: 12 tests covering all functionality)
+- ❌ **No world storage integration** (HashMap not yet in GameWorld)
 - ❌ **No enchanting UI** (no level selection, cost display)
 - ❌ **No enchantment mechanics** (no actual effect on tools/weapons/armor)
 
 **Missing for completion**:
-1. Enchanting table block entity with state management
+1. Add enchanting table HashMap to GameWorld (like furnaces)
 2. Enchanting UI with level selection and XP/lapis costs
 3. Enchantment application mechanics (apply to items)
 4. Enchantment effect implementations (Efficiency speeds mining, Sharpness adds damage, etc.)
@@ -219,37 +227,46 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ### 🎯 Priority 2: Complete Enchanting System
 
-5. **Enchanting Table State Management** (Enchanting: 15% → 40%) - NEXT TARGET
-   - **Effort**: MEDIUM-HIGH (6-8 hours, 2-3 iterations)
-   - **Impact**: VERY HIGH (major Phase 1 requirement)
-   - **What**: Block entity for enchanting table, lapis tracking, XP cost calculations
+5. ✅ **Enchanting Table State Management** (Enchanting: 15% → 30%) - COMPLETED ITERATION 26
+   - ✅ Created EnchantingTableState block entity with item/lapis slots
+   - ✅ Bookshelf detection (0-15 bookshelves affect level)
+   - ✅ XP cost calculations (base + bookshelf modifier)
+   - ✅ Enchantment option generation (deterministic from seed)
+   - ✅ Lapis consumption (1/2/3 per slot)
+   - ✅ 12 unit tests covering all functionality
+   - Result: Block entity state management complete, needs world integration
 
-6. **Enchanting UI and Mechanics** (Enchanting: 40% → 70%)
+6. **World Storage Integration** (Enchanting: 30% → 40%) - NEXT TARGET
+   - **Effort**: LOW-MEDIUM (2-3 hours, 1 iteration)
+   - **Impact**: HIGH (enables enchanting table placement)
+   - **What**: Add HashMap<BlockPos, EnchantingTableState> to GameWorld (like furnaces)
+
+7. **Enchanting UI and Mechanics** (Enchanting: 40% → 70%)
    - **Effort**: HIGH (8-10 hours, 3-4 iterations)
    - **Impact**: VERY HIGH (major Phase 1 requirement)
    - **What**: Enchanting UI with level selection, apply enchantments to items, random enchantment selection
 
-7. **Enchantment Effect Implementations** (Enchanting: 70% → 95%)
+8. **Enchantment Effect Implementations** (Enchanting: 70% → 95%)
    - **Effort**: VERY HIGH (10-12 hours, 4-5 iterations)
    - **Impact**: VERY HIGH (makes enchantments functional)
    - **What**: Efficiency mining speed, Sharpness damage, Protection armor reduction, etc.
 
 ### 🎯 Priority 3: Other Missing Features
 
-8. **XP Bar UI** (Experience: 70% → 80%)
+9. **XP Bar UI** (Experience: 70% → 80%)
    - **Effort**: LOW-MEDIUM (2-3 hours, single iteration)
    - **Impact**: MEDIUM (completes Experience UI)
    - **Where**: UI rendering code
    - **What**: Visual XP bar showing current level and progress percentage
 
-6. **Brewing Stand Block** (Brewing: 0% → 50%)
+10. **Brewing Stand Block** (Brewing: 0% → 50%)
    - **Effort**: VERY HIGH (12-16 hours, 5-7 iterations)
    - **Impact**: VERY HIGH (major Phase 1 requirement)
    - **What**: Brewing stand with blaze powder fuel, potion recipes, status effects
 
 ---
 
-## Commits Made (15 total)
+## Commits Made (16 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -265,7 +282,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 12. Iteration 22: Added player attack cooldown timer (commit 2462e87)
 13. Iteration 23: Added critical hit detection (commit b5ddb5d)
 14. Iteration 24: Added XP orb collection system (commit 90c7dac)
-15. **Iteration 25: Added enchantment system foundation (commit 305892c)**
+15. Iteration 25: Added enchantment system foundation (commit 305892c)
+16. **Iteration 26: Added enchanting table state management (commit 2cba62a)**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -290,12 +308,12 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~18% of total roadmap complete (up from ~17% after iteration 24)
-- Phase 1 (Critical): ~77% complete (up from ~75%)
+**Overall Progress**: ~19% of total roadmap complete (up from ~18% after iteration 25)
+- Phase 1 (Critical): ~79% complete (up from ~77%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24, up from 40%)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
-  - Enchanting: ~15% (iteration 25, up from 0%)
+  - Enchanting: ~30% (iteration 26, up from 15%)
   - Brewing: 0%
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
@@ -323,16 +341,20 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Iteration 25: Enchantment data structures, lapis items/blocks (Enchanting: 0% → 15%)
    - Result: Foundation complete for enchanting implementation
 
-4. **Iterations 26-30**: Complete enchanting system - NEXT TARGET
-   - Iteration 26-27: Enchanting table state management (Enchanting: 15% → 40%)
+4. ✅ **Iteration 26**: Enchanting table state management - DONE
+   - ✅ Iteration 26: EnchantingTableState block entity (Enchanting: 15% → 30%)
+   - Result: Block entity with item/lapis slots, bookshelf detection, XP costs, option generation
+
+5. **Iterations 27-31**: Complete enchanting system - IN PROGRESS
+   - Iteration 27: World storage integration (Enchanting: 30% → 40%)
    - Iteration 28-29: Enchanting UI and mechanics (Enchanting: 40% → 70%)
-   - Iteration 30-32: Enchantment effect implementations (Enchanting: 70% → 95%)
-   - Large undertaking (5-7 iterations)
+   - Iteration 30-31: Enchantment effect implementations (Enchanting: 70% → 95%)
+   - Remaining: ~5 iterations
    - Major Phase 1 requirement
    - Enables progression features
 
-5. **Iterations 33+**: Begin brewing system or other Phase 1 gaps
+6. **Iterations 32+**: Begin brewing system or other Phase 1 gaps
    - Brewing: 0% complete (major Phase 1 requirement)
    - XP Bar UI: Experience 70% → 80% (polish)
 
-**Focus**: Iteration 25 laid enchantment foundation (0% → 15%). Phase 1 now 77% complete. Next: Build enchanting table state management and UI (15% → 40%+).
+**Focus**: Iteration 26 completed enchanting table state management (15% → 30%). Phase 1 now 79% complete. Next: Integrate EnchantingTableState into GameWorld (30% → 40%).
