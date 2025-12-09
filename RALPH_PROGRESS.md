@@ -1,8 +1,24 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 36 - Updated: 2025-12-09
+## Iteration 37 - Updated: 2025-12-09
 
-### SPLASH POTION THROWING COMPLETE! 🧪💥
+### EXPERIENCE UI VERIFICATION COMPLETE! ✨
+
+**Iteration 37 verified** that the XP Bar UI already exists and is fully functional. The Experience system is actually ~95% complete (not 70% as previously documented):
+
+- **XP Bar UI**: Already implemented at `render_xp_bar()` (lines 4323-4369)
+- **Progress bar**: Green fill showing XP progress to next level (182px width)
+- **Level display**: Level number shown above bar when > 0
+- **Enchanting integration**: `consume_levels()` properly integrated (line 2745)
+- **Mending integration**: XP used for tool repair when applicable
+
+The Experience system was more complete than documented. Updating progress tracking accordingly.
+
+---
+
+## Previous Iteration: Splash Potion Throwing
+
+### Iteration 36: SPLASH POTION THROWING COMPLETE! 🧪💥
 
 **Iteration 36 completed** splash potion throwing mechanics, advancing Brewing from ~75% to ~90%. Players can now throw splash potions that apply area-of-effect status effects:
 
@@ -159,8 +175,8 @@
 
 ### ⚠️ PARTIALLY IMPLEMENTED (40-70%)
 
-#### Experience System (~70% complete)
-**Location**: `src/game.rs` (PlayerXP struct + XPOrb struct)
+#### Experience System (~95% complete)
+**Location**: `src/game.rs` (PlayerXP struct + XPOrb struct + render_xp_bar)
 - ✅ Experience struct with level/total XP tracking
 - ✅ `add_xp()` and `current_level()` methods
 - ✅ Level progression calculations (XP required per level)
@@ -169,12 +185,14 @@
 - ✅ **XP collection on proximity** (iteration 24: 0.5 block radius)
 - ✅ **Magnetic attraction** (iteration 24: 8 blocks/sec within 2 blocks)
 - ✅ **Collection feedback** (iteration 24: log messages with level/progress)
-- ❌ **No XP bar in UI** (player can't see XP bar visually)
-- ❌ **Not integrated with enchanting** (XP has no use yet)
+- ✅ **XP Bar UI** (iteration 37 discovery: render_xp_bar at lines 4323-4369)
+- ✅ **Level display** (shown above XP bar when level > 0)
+- ✅ **Enchanting integration** (consume_levels() used at line 2745)
+- ✅ **Mending integration** (XP repairs tools with Mending enchantment)
 
 **Missing for completion**:
-1. XP bar UI rendering (would advance to 80%)
-2. Integration with enchanting system (requires enchanting implementation)
+1. XP from mining certain ores (minor, optional)
+2. XP bottles as throwable items (minor, optional)
 
 #### Combat Mechanics (95% complete)
 **Location**: `src/game.rs:2966-3045`
@@ -371,11 +389,10 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ### 🎯 Priority 3: Other Missing Features
 
-10. **XP Bar UI** (Experience: 70% → 80%)
-   - **Effort**: LOW-MEDIUM (2-3 hours, single iteration)
-   - **Impact**: MEDIUM (completes Experience UI)
-   - **Where**: UI rendering code
-   - **What**: Visual XP bar showing current level and progress percentage
+10. ✅ **XP Bar UI** (Experience: was actually already complete!) - VERIFIED ITERATION 37
+   - XP bar already existed at render_xp_bar() (lines 4323-4369)
+   - Level display above bar when > 0
+   - Experience system updated to ~95% complete
 
 11. **Brewing Stand Block** (Brewing: 0% → 50%)
    - **Effort**: VERY HIGH (12-16 hours, 5-7 iterations)
@@ -411,9 +428,10 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 23. Iteration 33: Integrated brewing stands and status effects into game world (commit 5031968)
 24. Iteration 34: Added brewing stand UI with bottle/ingredient/fuel slots (commit ab1e454)
 25. Iteration 35: Added potion drinking mechanics with status effect application (commit 130d69d)
-26. **Iteration 36: Added splash potion throwing with AoE effects**
+26. Iteration 36: Added splash potion throwing with AoE effects (commit 9e544f2)
 
 **Iteration 21**: Documentation only, no code changes
+**Iteration 37**: Documentation only - verified XP Bar UI already existed
 
 ---
 
@@ -436,10 +454,10 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~32% of total roadmap complete (up from ~30% after iteration 35)
-- Phase 1 (Critical): ~98% complete (up from ~97%)
+**Overall Progress**: ~33% of total roadmap complete (up from ~32% after iteration 36)
+- Phase 1 (Critical): ~99% complete (up from ~98%)
   - Combat: 95% (iterations 22-23)
-  - Experience: ~70% (iteration 24)
+  - Experience: ~95% (iteration 37 discovery: XP Bar UI already existed!)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
   - Brewing: ~90% (iteration 36 - splash potions complete)
@@ -536,8 +554,13 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Player and mob effect application
    - Result: Splash potions complete (Brewing: ~75% → ~90%)
 
-13. **Iterations 37+**: Finish Phase 1
-   - XP Bar UI: Experience 70% → 80% (polish)
-   - Lingering potions (optional)
+13. ✅ **Iteration 37**: XP Bar UI verification - DONE
+   - Discovered XP Bar UI already existed at render_xp_bar() (lines 4323-4369)
+   - Experience system updated from ~70% to ~95% (was underreported)
+   - Phase 1 now ~99% complete!
 
-**Focus**: Iteration 36 completed splash potion throwing. Phase 1 now ~98% complete. Brewing system nearly complete at 90%.
+14. **Iterations 38+**: Finish Phase 1
+   - Lingering potions (optional)
+   - Minor polish
+
+**Focus**: Iteration 37 discovered XP Bar UI was already implemented. Phase 1 now ~99% complete. Experience system nearly complete at 95%.
