@@ -1,8 +1,29 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 34 - Updated: 2025-12-09
+## Iteration 35 - Updated: 2025-12-09
 
-### BREWING STAND UI COMPLETE! 🧪
+### POTION DRINKING MECHANICS COMPLETE! 🧪
+
+**Iteration 35 completed** potion drinking mechanics, advancing Brewing from ~65% to ~75%. Players can now consume potions to gain status effects:
+
+- **Potion item types**: Added 14 potion variants to ItemType enum (Awkward, Night Vision, etc.)
+- **Core Potion variant**: Added ItemType::Potion(u16) to core item system
+- **potion_ids module**: Constants mapping potion IDs to PotionType
+- **Hotbar integration**: selected_potion() method detects held potions
+- **drink_potion()**: Applies status effects when consuming potions
+- **Right-click consume**: Potions consumed on right-click like food
+- **UI display**: Potions show proper names in inventory/hotbar
+
+**Files modified**:
+- Modified `crates/core/src/item.rs` (added Potion variant, potion_ids module)
+- Modified `crates/world/src/drop_item.rs` (added 14 potion item types with helpers)
+- Modified `src/game.rs` (added drink_potion, selected_potion, right-click handling)
+
+---
+
+## Previous Iteration: Brewing Stand UI
+
+### Iteration 34: BREWING STAND UI COMPLETE! 🧪
 
 **Iteration 34 completed** the brewing stand user interface, advancing Brewing from ~50% to ~65%. Players can now see and interact with brewing stands:
 
@@ -21,6 +42,9 @@
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 34: BREWING STAND UI COMPLETE! 🧪
+**Iteration 34 completed** the brewing stand UI, advancing Brewing from ~50% to ~65%. Added render_brewing_stand() with bottle/ingredient/fuel slots, potion_type_display() for 19 potion types, and UI controls.
 
 ### Iteration 33: BREWING & STATUS EFFECTS WORLD INTEGRATION COMPLETE! 🧪
 **Iteration 33 continued** the brewing system, advancing Brewing from ~35% to ~50%. Integrated brewing stands and status effects into GameWorld (status_effects field, brewing_stands HashMap, block interaction, update functions).
@@ -183,7 +207,7 @@
 
 ### 🚧 IN PROGRESS (10-40%)
 
-#### Brewing System (~65% complete)
+#### Brewing System (~75% complete)
 **Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`, `crates/world/src/chunk.rs`, `src/game.rs`
 - ✅ **StatusEffectType enum** (iteration 31: 26 effect types - positive and negative)
 - ✅ **StatusEffect struct** (iteration 31: amplifier, duration, tick logic)
@@ -202,8 +226,10 @@
 - ✅ **Update functions** (iteration 33: update_brewing_stands(), update_status_effects())
 - ✅ **Brewing stand UI** (iteration 34: render_brewing_stand with bottle/ingredient/fuel slots)
 - ✅ **Potion display** (iteration 34: potion_type_display with 19 types, names, colors)
-- ❌ No potion drinking/throwing mechanics
-- ❌ No status effect application from potions
+- ✅ **Potion item types** (iteration 35: 14 potion variants in ItemType enum)
+- ✅ **Potion drinking** (iteration 35: drink_potion() applies status effects)
+- ✅ **Right-click consume** (iteration 35: potions consumed like food items)
+- ❌ No potion throwing mechanics (splash potions)
 
 ---
 
@@ -334,7 +360,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (24 total)
+## Commits Made (25 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -359,7 +385,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 21. Iteration 31: Added brewing system foundation (commit 504b5cc)
 22. Iteration 32: Added BrewingStandState block entity + brewing recipes (commit 2dab2de)
 23. Iteration 33: Integrated brewing stands and status effects into game world (commit 5031968)
-24. **Iteration 34: Added brewing stand UI with bottle/ingredient/fuel slots**
+24. Iteration 34: Added brewing stand UI with bottle/ingredient/fuel slots (commit ab1e454)
+25. **Iteration 35: Added potion drinking mechanics with status effect application**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -384,13 +411,13 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~29% of total roadmap complete (up from ~28% after iteration 33)
-- Phase 1 (Critical): ~96% complete (up from ~95%)
+**Overall Progress**: ~30% of total roadmap complete (up from ~29% after iteration 34)
+- Phase 1 (Critical): ~97% complete (up from ~96%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
-  - Brewing: ~65% (iteration 34 - UI complete)
+  - Brewing: ~75% (iteration 35 - potion drinking complete)
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
@@ -464,9 +491,17 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ potion_type_display() mapping 19 types to names/colors
    - Result: Brewing UI complete (Brewing: ~50% → ~65%)
 
-11. **Iterations 35+**: Continue brewing system
-   - Potion drinking mechanics (apply status effects to player)
+11. ✅ **Iteration 35**: Potion drinking mechanics - DONE
+   - ✅ Added Potion(u16) variant to core ItemType enum
+   - ✅ Added potion_ids module with 14 potion type constants
+   - ✅ Added 14 potion item types to world ItemType enum
+   - ✅ Added selected_potion() method to Hotbar
+   - ✅ Added drink_potion() method with status effect application
+   - ✅ Added right-click consume handling for potions
+   - Result: Potion drinking complete (Brewing: ~65% → ~75%)
+
+12. **Iterations 36+**: Continue brewing system
    - Potion throwing mechanics (splash potions)
    - XP Bar UI: Experience 70% → 80% (polish)
 
-**Focus**: Iteration 34 completed brewing stand UI. Phase 1 now ~96% complete. Next: Potion drinking and throwing mechanics.
+**Focus**: Iteration 35 completed potion drinking. Phase 1 now ~97% complete. Next: Splash potion throwing mechanics or XP bar UI.

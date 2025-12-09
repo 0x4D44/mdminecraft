@@ -12,8 +12,29 @@ pub enum ItemType {
     Block(u16), // BlockId
     /// Food item
     Food(FoodType),
+    /// Potion item (potion ID maps to PotionType in world crate)
+    Potion(u16),
     /// Generic item
     Item(u16),
+}
+
+/// Potion IDs for ItemType::Potion variant
+#[allow(missing_docs)]
+pub mod potion_ids {
+    pub const AWKWARD: u16 = 0;
+    pub const NIGHT_VISION: u16 = 1;
+    pub const INVISIBILITY: u16 = 2;
+    pub const LEAPING: u16 = 3;
+    pub const FIRE_RESISTANCE: u16 = 4;
+    pub const SWIFTNESS: u16 = 5;
+    pub const SLOWNESS: u16 = 6;
+    pub const WATER_BREATHING: u16 = 7;
+    pub const HEALING: u16 = 8;
+    pub const HARMING: u16 = 9;
+    pub const POISON: u16 = 10;
+    pub const REGENERATION: u16 = 11;
+    pub const STRENGTH: u16 = 12;
+    pub const WEAKNESS: u16 = 13;
 }
 
 /// Tool types
@@ -280,6 +301,7 @@ impl ItemStack {
             ItemType::Tool(_, _) => 1, // Tools don't stack
             ItemType::Block(_) => 64,
             ItemType::Food(_) => 64,
+            ItemType::Potion(_) => 1, // Potions don't stack
             ItemType::Item(_) => 64,
         }
     }

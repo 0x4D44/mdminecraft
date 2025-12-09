@@ -105,6 +105,28 @@ pub enum ItemType {
     // Resources
     Diamond,
     LapisLazuli,
+
+    // Brewing items
+    GlassBottle,
+    WaterBottle,
+    NetherWart,
+    BlazePowder,
+
+    // Potions
+    PotionAwkward,
+    PotionNightVision,
+    PotionInvisibility,
+    PotionLeaping,
+    PotionFireResistance,
+    PotionSwiftness,
+    PotionSlowness,
+    PotionWaterBreathing,
+    PotionHealing,
+    PotionHarming,
+    PotionPoison,
+    PotionRegeneration,
+    PotionStrength,
+    PotionWeakness,
 }
 
 impl ItemType {
@@ -168,7 +190,7 @@ impl ItemType {
             | ItemType::Apple
             | ItemType::Diamond => 16,
 
-            // Non-stackable items (weapons and armor)
+            // Non-stackable items (weapons, armor, potions)
             ItemType::Bow
             | ItemType::LeatherHelmet
             | ItemType::LeatherChestplate
@@ -185,7 +207,27 @@ impl ItemType {
             | ItemType::DiamondHelmet
             | ItemType::DiamondChestplate
             | ItemType::DiamondLeggings
-            | ItemType::DiamondBoots => 1,
+            | ItemType::DiamondBoots
+            | ItemType::PotionAwkward
+            | ItemType::PotionNightVision
+            | ItemType::PotionInvisibility
+            | ItemType::PotionLeaping
+            | ItemType::PotionFireResistance
+            | ItemType::PotionSwiftness
+            | ItemType::PotionSlowness
+            | ItemType::PotionWaterBreathing
+            | ItemType::PotionHealing
+            | ItemType::PotionHarming
+            | ItemType::PotionPoison
+            | ItemType::PotionRegeneration
+            | ItemType::PotionStrength
+            | ItemType::PotionWeakness => 1,
+
+            // Brewing ingredients stack to 64
+            ItemType::GlassBottle
+            | ItemType::WaterBottle
+            | ItemType::NetherWart
+            | ItemType::BlazePowder => 64,
         }
     }
 
@@ -361,6 +403,73 @@ impl ItemType {
             ItemType::LapisOre => Some(98),
             // Non-placeable items (leaves, mob drops, food, crafted items)
             _ => None,
+        }
+    }
+
+    /// Check if this item is a drinkable potion.
+    pub fn is_potion(&self) -> bool {
+        matches!(
+            self,
+            ItemType::PotionAwkward
+                | ItemType::PotionNightVision
+                | ItemType::PotionInvisibility
+                | ItemType::PotionLeaping
+                | ItemType::PotionFireResistance
+                | ItemType::PotionSwiftness
+                | ItemType::PotionSlowness
+                | ItemType::PotionWaterBreathing
+                | ItemType::PotionHealing
+                | ItemType::PotionHarming
+                | ItemType::PotionPoison
+                | ItemType::PotionRegeneration
+                | ItemType::PotionStrength
+                | ItemType::PotionWeakness
+        )
+    }
+
+    /// Convert a potion item type to its PotionType.
+    /// Returns None if not a potion item.
+    pub fn to_potion_type(&self) -> Option<crate::PotionType> {
+        match self {
+            ItemType::PotionAwkward => Some(crate::PotionType::Awkward),
+            ItemType::PotionNightVision => Some(crate::PotionType::NightVision),
+            ItemType::PotionInvisibility => Some(crate::PotionType::Invisibility),
+            ItemType::PotionLeaping => Some(crate::PotionType::Leaping),
+            ItemType::PotionFireResistance => Some(crate::PotionType::FireResistance),
+            ItemType::PotionSwiftness => Some(crate::PotionType::Swiftness),
+            ItemType::PotionSlowness => Some(crate::PotionType::Slowness),
+            ItemType::PotionWaterBreathing => Some(crate::PotionType::WaterBreathing),
+            ItemType::PotionHealing => Some(crate::PotionType::Healing),
+            ItemType::PotionHarming => Some(crate::PotionType::Harming),
+            ItemType::PotionPoison => Some(crate::PotionType::Poison),
+            ItemType::PotionRegeneration => Some(crate::PotionType::Regeneration),
+            ItemType::PotionStrength => Some(crate::PotionType::Strength),
+            ItemType::PotionWeakness => Some(crate::PotionType::Weakness),
+            _ => None,
+        }
+    }
+
+    /// Create a potion item type from a PotionType.
+    pub fn from_potion_type(potion: crate::PotionType) -> Option<ItemType> {
+        match potion {
+            crate::PotionType::Awkward => Some(ItemType::PotionAwkward),
+            crate::PotionType::NightVision => Some(ItemType::PotionNightVision),
+            crate::PotionType::Invisibility => Some(ItemType::PotionInvisibility),
+            crate::PotionType::Leaping => Some(ItemType::PotionLeaping),
+            crate::PotionType::FireResistance => Some(ItemType::PotionFireResistance),
+            crate::PotionType::Swiftness => Some(ItemType::PotionSwiftness),
+            crate::PotionType::Slowness => Some(ItemType::PotionSlowness),
+            crate::PotionType::WaterBreathing => Some(ItemType::PotionWaterBreathing),
+            crate::PotionType::Healing => Some(ItemType::PotionHealing),
+            crate::PotionType::Harming => Some(ItemType::PotionHarming),
+            crate::PotionType::Poison => Some(ItemType::PotionPoison),
+            crate::PotionType::Regeneration => Some(ItemType::PotionRegeneration),
+            crate::PotionType::Strength => Some(ItemType::PotionStrength),
+            crate::PotionType::Weakness => Some(ItemType::PotionWeakness),
+            // Base potions without effects - no item representation
+            crate::PotionType::Water | crate::PotionType::Mundane | crate::PotionType::Thick => None,
+            // Potions not yet implemented as items
+            crate::PotionType::Luck | crate::PotionType::SlowFalling => None,
         }
     }
 }
