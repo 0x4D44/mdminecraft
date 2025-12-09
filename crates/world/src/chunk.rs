@@ -41,6 +41,12 @@ pub const BLOCK_FURNACE: BlockId = 18;
 /// ID for lit furnace block.
 pub const BLOCK_FURNACE_LIT: BlockId = 19;
 
+/// ID for lapis ore (spawns y: 0-32).
+pub const BLOCK_LAPIS_ORE: BlockId = 98;
+
+/// ID for enchanting table.
+pub const BLOCK_ENCHANTING_TABLE: BlockId = 99;
+
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {
