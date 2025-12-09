@@ -3,6 +3,7 @@
 
 pub mod item;
 pub mod crafting;
+/// Enchantment types and data structures for the enchanting system.
 pub mod enchantment;
 
 use rand::{rngs::StdRng, SeedableRng};
