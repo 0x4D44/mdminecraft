@@ -122,5 +122,8 @@
   { "name": "reinforced_deepslate", "opaque": true, "texture": "blocks/reinforced_deepslate" },
   { "name": "dripstone_block", "opaque": true, "texture": "blocks/dripstone_block" },
   { "name": "lapis_ore", "opaque": true, "texture": "blocks/stone", "harvest_level": "stone" },
-  { "name": "enchanting_table", "opaque": true, "texture": "blocks/stone" }
+  { "name": "enchanting_table", "opaque": true, "texture": "blocks/stone" },
+  { "name": "brewing_stand", "opaque": false, "texture": "blocks/stone" },
+  { "name": "nether_wart_block", "opaque": true, "texture": "blocks/stone" },
+  { "name": "soul_sand", "opaque": true, "texture": "blocks/sand" }
 ]

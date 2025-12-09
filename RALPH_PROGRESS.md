@@ -1,26 +1,30 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 31 - Updated: 2025-12-09
+## Iteration 32 - Updated: 2025-12-09
 
-### BREWING SYSTEM FOUNDATION STARTED! 🧪
+### BREWING STAND BLOCK ENTITY COMPLETE! 🧪
 
-**Iteration 31 began** the brewing system implementation, advancing Brewing from 0% to ~15% (foundation). Created the core status effect and potion type infrastructure:
+**Iteration 32 continued** the brewing system implementation, advancing Brewing from ~15% to ~35%. Created the BrewingStandState block entity following the FurnaceState pattern:
 
-- **StatusEffectType enum**: 26 effect types (Speed, Haste, Strength, Regeneration, Resistance, FireResistance, WaterBreathing, Invisibility, NightVision, Absorption, JumpBoost, Saturation, SlowFalling, Luck, InstantHealth + negative effects)
-- **StatusEffect struct**: Amplifier levels, duration tracking (ticks), particle visibility, tick logic
-- **StatusEffects collection**: Add/remove effects, tick updates, modifier calculations (speed_multiplier, attack_damage_modifier, damage_reduction)
-- **PotionType enum**: 19 potion types (Water, Awkward, Mundane, Thick + 15 effect potions)
-- **item_ids module**: 60+ item constants for brewing ingredients, potions, splash potions, lingering potions
-- **9 unit tests** covering status effects, potions, and modifier calculations
+- **BrewingStandState**: Complete block entity with 3 bottle slots, ingredient slot, fuel (blaze powder)
+- **BrewRecipe system**: 15 brewing recipes covering water→awkward→effect potions and corruption recipes
+- **get_brew_result()**: Recipe lookup function for brewing
+- **Brewing mechanics**: 20-second brew time, fuel consumption, progress tracking
+- **Block constants**: BLOCK_BREWING_STAND (ID 100), BLOCK_NETHER_WART_BLOCK (101), BLOCK_SOUL_SAND (102)
+- **8 new unit tests** covering brewing stand operations, recipes, and edge cases
 
-**Files created/modified**:
-- Created `crates/world/src/potion.rs` (525 lines)
-- Modified `crates/world/src/lib.rs` (added potion module)
-- Modified `crates/core/src/item.rs` (added item_ids module with brewing items)
+**Files modified**:
+- Extended `crates/world/src/potion.rs` (added ~300 lines for BrewingStandState)
+- Modified `crates/world/src/chunk.rs` (added block constants)
+- Modified `crates/world/src/lib.rs` (exported new constants)
+- Modified `config/blocks.json` (added brewing_stand, nether_wart_block, soul_sand)
 
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 31: BREWING SYSTEM FOUNDATION STARTED! 🧪
+**Iteration 31 began** the brewing system, advancing Brewing from 0% to ~15%. Created StatusEffectType enum (26 effects), StatusEffect struct, StatusEffects collection, PotionType enum (19 types), item_ids module (60+ constants).
 
 ### Iteration 30: ENCHANTING SYSTEM COMPLETE! 100% 🎉
 **Iteration 30 completed** the remaining enchantment implementations: Protection (armor damage reduction), Silk Touch (blocks drop themselves), Fortune (increased ore drops), Mending (XP repairs tools). Also added LapisOre ItemType and armor enchantment support.
@@ -174,19 +178,21 @@
 
 ### 🚧 IN PROGRESS (10-40%)
 
-#### Brewing System (~15% complete)
-**Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`
+#### Brewing System (~35% complete)
+**Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`, `crates/world/src/chunk.rs`
 - ✅ **StatusEffectType enum** (iteration 31: 26 effect types - positive and negative)
 - ✅ **StatusEffect struct** (iteration 31: amplifier, duration, tick logic)
 - ✅ **StatusEffects collection** (iteration 31: add/remove, tick updates, modifiers)
 - ✅ **PotionType enum** (iteration 31: 19 potion types with effect mapping)
 - ✅ **item_ids module** (iteration 31: 60+ brewing item constants)
 - ✅ **Effect modifiers** (iteration 31: speed_multiplier, attack_damage_modifier, damage_reduction)
-- ✅ **9 unit tests** (iteration 31: full coverage of status effects and potions)
-- ❌ No brewing stand block entity
-- ❌ No brewing recipes
-- ❌ No player StatusEffects integration
-- ❌ No blaze powder fuel mechanic
+- ✅ **BrewingStandState** (iteration 32: block entity with 3 bottles, ingredient, fuel)
+- ✅ **BrewRecipe system** (iteration 32: 15 recipes - water→awkward→effects + corruption)
+- ✅ **Brewing mechanics** (iteration 32: 20-sec brew time, fuel consumption, progress)
+- ✅ **Block constants** (iteration 32: BLOCK_BREWING_STAND, BLOCK_NETHER_WART_BLOCK, BLOCK_SOUL_SAND)
+- ✅ **17 unit tests** (iteration 31+32: status effects, potions, brewing stand)
+- ❌ No player StatusEffects integration (GameWorld)
+- ❌ No brewing stand world integration (UI, interaction)
 - ❌ No potion drinking/throwing mechanics
 
 ---
@@ -318,7 +324,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (21 total)
+## Commits Made (22 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -340,7 +346,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 18. Iteration 28: Added enchantment application mechanics (commit 659e16b)
 19. Iteration 29: Implemented enchantment effects (commit 55037a4)
 20. Iteration 30: Completed enchanting system (commit fb29b52)
-21. **Iteration 31: Added brewing system foundation (StatusEffect, PotionType, item_ids)**
+21. Iteration 31: Added brewing system foundation (commit 504b5cc)
+22. **Iteration 32: Added BrewingStandState block entity + brewing recipes**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -365,19 +372,19 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~26% of total roadmap complete (up from ~25% after iteration 30)
-- Phase 1 (Critical): ~93% complete (up from ~92%)
+**Overall Progress**: ~27% of total roadmap complete (up from ~26% after iteration 31)
+- Phase 1 (Critical): ~94% complete (up from ~93%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
-  - Brewing: ~15% (iteration 31 - foundation started)
+  - Brewing: ~35% (iteration 32 - BrewingStandState complete)
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
 - Phase 5 (Advanced): 0% complete
 
-**Estimated Time to Completion**: 15-23 weeks remaining (per roadmap estimate of 22-30 weeks total)
+**Estimated Time to Completion**: 14-22 weeks remaining (per roadmap estimate of 22-30 weeks total)
 
 ---
 
@@ -423,11 +430,18 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ item_ids module (60+ brewing item constants)
    - Result: Brewing foundation complete (Brewing: 0% → ~15%)
 
-8. **Iterations 32+**: Continue brewing system
-   - BrewingStandState block entity (following FurnaceState pattern)
-   - Brewing recipes
-   - Player StatusEffects integration
-   - Potion drinking/throwing mechanics
+8. ✅ **Iteration 32**: BrewingStandState block entity - DONE
+   - ✅ BrewingStandState with 3 bottles, ingredient slot, fuel
+   - ✅ 15 brewing recipes (water→awkward→effects + corruption)
+   - ✅ 20-second brew time, fuel consumption, progress tracking
+   - ✅ Block constants (BLOCK_BREWING_STAND, etc.)
+   - Result: Brewing block entity complete (Brewing: ~15% → ~35%)
+
+9. **Iterations 33+**: Continue brewing system
+   - Player StatusEffects integration (GameWorld field)
+   - Brewing stand world integration (UI, interaction)
+   - Potion drinking mechanics
+   - Potion throwing mechanics
    - XP Bar UI: Experience 70% → 80% (polish)
 
-**Focus**: Iteration 31 started the brewing system foundation. Phase 1 now ~93% complete. Next: BrewingStandState block entity and player status effect integration.
+**Focus**: Iteration 32 completed BrewingStandState block entity. Phase 1 now ~94% complete. Next: Player StatusEffects integration and brewing stand world integration.

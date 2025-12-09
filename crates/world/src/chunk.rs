@@ -47,6 +47,15 @@ pub const BLOCK_LAPIS_ORE: BlockId = 98;
 /// ID for enchanting table.
 pub const BLOCK_ENCHANTING_TABLE: BlockId = 99;
 
+/// ID for brewing stand.
+pub const BLOCK_BREWING_STAND: BlockId = 100;
+
+/// ID for nether wart block.
+pub const BLOCK_NETHER_WART_BLOCK: BlockId = 101;
+
+/// ID for soul sand.
+pub const BLOCK_SOUL_SAND: BlockId = 102;
+
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {
