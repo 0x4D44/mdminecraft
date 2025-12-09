@@ -6,6 +6,7 @@ mod caves;
 mod chunk;
 mod crafting;
 mod drop_item;
+mod enchanting;
 mod farming;
 mod fluid;
 mod furnace;
@@ -37,6 +38,7 @@ pub use chunk::{
 };
 pub use crafting::*;
 pub use drop_item::*;
+pub use enchanting::*;
 pub use farming::*;
 pub use fluid::*;
 pub use furnace::*;
