@@ -22,8 +22,8 @@ use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
     EnchantingTableState, FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob,
-    MobSpawner, MobType, PlayerArmor, Projectile, ProjectileManager, StatusEffects, TerrainGenerator,
-    Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
+    MobSpawner, MobType, PlayerArmor, PotionType, Projectile, ProjectileManager, StatusEffects,
+    TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
     BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
     CHUNK_SIZE_Z,
 };
@@ -2373,6 +2373,7 @@ impl GameWorld {
         let mut close_crafting_requested = false;
         let mut close_furnace_requested = false;
         let mut close_enchanting_requested = false;
+        let mut close_brewing_requested = false;
         let mut enchanting_result: Option<EnchantingResult> = None;
         let mut crafted_item: Option<ItemStack> = None;
 
@@ -2595,6 +2596,15 @@ impl GameWorld {
                             }
                         }
 
+                        // Show brewing stand if open
+                        if self.brewing_open {
+                            if let Some(pos) = self.open_brewing_pos {
+                                if let Some(stand) = self.brewing_stands.get_mut(&pos) {
+                                    close_brewing_requested = render_brewing_stand(ctx, stand);
+                                }
+                            }
+                        }
+
                         // Show death screen if player is dead
                         if is_dead {
                             let (respawn, menu) = render_death_screen(ctx, &death_msg);
@@ -2662,7 +2672,10 @@ impl GameWorld {
             self.close_enchanting_table();
         }
 
-        // Note: Brewing stand close is handled in handle_keyboard_input (Escape key)
+        // Handle brewing stand close
+        if close_brewing_requested {
+            self.close_brewing_stand();
+        }
 
         // Handle enchanting result - apply enchantment to selected item
         if let Some(result) = enchanting_result {
@@ -5072,6 +5085,281 @@ fn render_enchanting_table(
         });
 
     result
+}
+
+/// Render the brewing stand UI
+/// Returns true if close was requested
+fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> bool {
+    let mut close_clicked = false;
+
+    // Semi-transparent dark overlay
+    egui::Area::new(egui::Id::new("brewing_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    // Brewing stand window
+    egui::Window::new("Brewing Stand")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(350.0);
+
+            // Close button
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Brewing Stand").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            // Fuel and status info
+            ui.horizontal(|ui| {
+                // Fuel indicator
+                let fuel_color = if stand.fuel > 0 {
+                    egui::Color32::from_rgb(255, 200, 50)
+                } else {
+                    egui::Color32::DARK_GRAY
+                };
+                ui.label(
+                    egui::RichText::new(format!("Fuel: {}", stand.fuel))
+                        .size(14.0)
+                        .color(fuel_color),
+                );
+
+                ui.add_space(20.0);
+
+                // Brewing status
+                if stand.is_brewing {
+                    ui.label(
+                        egui::RichText::new("Brewing...")
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                    );
+                }
+            });
+
+            ui.add_space(10.0);
+
+            // Main brewing layout
+            ui.horizontal(|ui| {
+                // Left side: Ingredient slot
+                ui.vertical(|ui| {
+                    ui.label("Ingredient");
+                    render_brewing_ingredient_slot(ui, stand.ingredient.as_ref());
+                });
+
+                ui.add_space(20.0);
+
+                // Middle: Progress arrow
+                ui.vertical(|ui| {
+                    ui.add_space(15.0);
+
+                    // Progress bar
+                    let progress_bar = egui::ProgressBar::new(stand.brew_progress)
+                        .desired_width(60.0)
+                        .text(format!("{:.0}%", stand.brew_progress * 100.0));
+                    ui.add(progress_bar);
+
+                    ui.add_space(5.0);
+
+                    // Brewing icon
+                    let brew_color = if stand.is_brewing {
+                        egui::Color32::from_rgb(100, 200, 255)
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    };
+                    ui.label(egui::RichText::new("⚗").size(24.0).color(brew_color));
+                });
+
+                ui.add_space(20.0);
+
+                // Right side: Bottle slots (3 bottles in a row)
+                ui.vertical(|ui| {
+                    ui.label("Bottles");
+                    ui.horizontal(|ui| {
+                        for (i, bottle) in stand.bottles.iter().enumerate() {
+                            render_brewing_bottle_slot(ui, bottle.as_ref(), i);
+                            if i < 2 {
+                                ui.add_space(4.0);
+                            }
+                        }
+                    });
+                });
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+
+            // Status text
+            let status = if stand.is_brewing {
+                "Brewing in progress..."
+            } else if stand.fuel == 0 {
+                "Need blaze powder for fuel"
+            } else if !stand.bottles.iter().any(|b| b.is_some()) {
+                "Add potions to brew"
+            } else if stand.ingredient.is_none() {
+                "Add ingredient to brew"
+            } else {
+                "Ready to brew"
+            };
+            ui.label(
+                egui::RichText::new(status)
+                    .size(12.0)
+                    .color(if stand.is_brewing {
+                        egui::Color32::from_rgb(100, 200, 255)
+                    } else {
+                        egui::Color32::GRAY
+                    }),
+            );
+
+            ui.add_space(5.0);
+
+            // Quick-add buttons (for testing)
+            ui.horizontal(|ui| {
+                if ui.button("+ Water Bottle").clicked() {
+                    // Add water bottle to first empty slot
+                    for bottle in &mut stand.bottles {
+                        if bottle.is_none() {
+                            *bottle = Some(PotionType::Water);
+                            break;
+                        }
+                    }
+                }
+                if ui.button("+ Nether Wart").clicked() {
+                    stand.add_ingredient(102, 1); // Nether wart item ID
+                }
+                if ui.button("+ Fuel").clicked() {
+                    stand.add_fuel(1);
+                }
+            });
+
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
+}
+
+/// Render a brewing ingredient slot
+fn render_brewing_ingredient_slot(ui: &mut egui::Ui, ingredient: Option<&(u16, u32)>) {
+    let frame = egui::Frame::none()
+        .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+        .inner_margin(4.0);
+
+    frame.show(ui, |ui| {
+        ui.set_min_size(egui::vec2(48.0, 48.0));
+        ui.set_max_size(egui::vec2(48.0, 48.0));
+
+        if let Some((item_id, count)) = ingredient {
+            ui.vertical_centered(|ui| {
+                // Item name based on ID
+                let name = match *item_id {
+                    102 => "Nether Wart",
+                    103 => "Blaze Powder",
+                    104 => "Ghast Tear",
+                    105 => "Magma Cream",
+                    106 => "Spider Eye",
+                    107 => "Fermented Eye",
+                    108 => "Glistering Melon",
+                    109 => "Golden Carrot",
+                    110 => "Pufferfish",
+                    111 => "Rabbit Foot",
+                    112 => "Phantom Membrane",
+                    113 => "Redstone",
+                    114 => "Glowstone Dust",
+                    115 => "Gunpowder",
+                    116 => "Dragon Breath",
+                    117 => "Sugar",
+                    _ => "Unknown",
+                };
+                ui.label(egui::RichText::new(name).size(10.0).color(egui::Color32::WHITE));
+                ui.label(
+                    egui::RichText::new(format!("x{}", count))
+                        .size(10.0)
+                        .color(egui::Color32::YELLOW),
+                );
+            });
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.label(egui::RichText::new("-").size(14.0).color(egui::Color32::DARK_GRAY));
+            });
+        }
+    });
+}
+
+/// Render a brewing bottle slot
+fn render_brewing_bottle_slot(ui: &mut egui::Ui, potion: Option<&PotionType>, _slot_idx: usize) {
+    let frame = egui::Frame::none()
+        .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 60, 200))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 120)))
+        .inner_margin(4.0);
+
+    frame.show(ui, |ui| {
+        ui.set_min_size(egui::vec2(52.0, 52.0));
+        ui.set_max_size(egui::vec2(52.0, 52.0));
+
+        if let Some(potion_type) = potion {
+            ui.vertical_centered(|ui| {
+                // Potion color based on type
+                let (name, color) = potion_type_display(*potion_type);
+                ui.label(egui::RichText::new("🧪").size(18.0).color(color));
+                ui.label(
+                    egui::RichText::new(name)
+                        .size(9.0)
+                        .color(egui::Color32::WHITE),
+                );
+            });
+        } else {
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    egui::RichText::new("🫙")
+                        .size(18.0)
+                        .color(egui::Color32::DARK_GRAY),
+                );
+            });
+        }
+    });
+}
+
+/// Get display name and color for a potion type
+fn potion_type_display(potion: PotionType) -> (&'static str, egui::Color32) {
+    match potion {
+        PotionType::Water => ("Water", egui::Color32::from_rgb(64, 64, 255)),
+        PotionType::Awkward => ("Awkward", egui::Color32::from_rgb(128, 128, 200)),
+        PotionType::Mundane => ("Mundane", egui::Color32::from_rgb(128, 128, 128)),
+        PotionType::Thick => ("Thick", egui::Color32::from_rgb(100, 100, 150)),
+        PotionType::NightVision => ("Night Vis", egui::Color32::from_rgb(30, 30, 160)),
+        PotionType::Invisibility => ("Invis", egui::Color32::from_rgb(200, 200, 200)),
+        PotionType::Leaping => ("Leaping", egui::Color32::from_rgb(80, 200, 80)),
+        PotionType::FireResistance => ("Fire Res", egui::Color32::from_rgb(255, 128, 0)),
+        PotionType::Swiftness => ("Speed", egui::Color32::from_rgb(100, 200, 255)),
+        PotionType::Slowness => ("Slow", egui::Color32::from_rgb(100, 100, 140)),
+        PotionType::WaterBreathing => ("Water Br", egui::Color32::from_rgb(50, 150, 200)),
+        PotionType::Healing => ("Healing", egui::Color32::from_rgb(255, 50, 50)),
+        PotionType::Harming => ("Harming", egui::Color32::from_rgb(100, 0, 0)),
+        PotionType::Poison => ("Poison", egui::Color32::from_rgb(80, 150, 50)),
+        PotionType::Regeneration => ("Regen", egui::Color32::from_rgb(200, 100, 200)),
+        PotionType::Strength => ("Strength", egui::Color32::from_rgb(150, 50, 50)),
+        PotionType::Weakness => ("Weakness", egui::Color32::from_rgb(100, 100, 100)),
+        PotionType::Luck => ("Luck", egui::Color32::from_rgb(50, 200, 50)),
+        PotionType::SlowFalling => ("Slow Fall", egui::Color32::from_rgb(200, 200, 255)),
+    }
 }
 
 /// Convert an ItemType to DroppedItemType for armor pieces

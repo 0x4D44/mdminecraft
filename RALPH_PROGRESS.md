@@ -1,24 +1,29 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 33 - Updated: 2025-12-09
+## Iteration 34 - Updated: 2025-12-09
 
-### BREWING & STATUS EFFECTS WORLD INTEGRATION COMPLETE! 🧪
+### BREWING STAND UI COMPLETE! 🧪
 
-**Iteration 33 continued** the brewing system implementation, advancing Brewing from ~35% to ~50%. Integrated brewing stands and status effects into the game world:
+**Iteration 34 completed** the brewing stand user interface, advancing Brewing from ~50% to ~65%. Players can now see and interact with brewing stands:
 
-- **StatusEffects in player**: `status_effects: StatusEffects` field in GameWorld for tracking active potion effects
-- **Brewing stand storage**: `brewing_stands: HashMap<IVec3, BrewingStandState>` in GameWorld
-- **Block interaction**: Right-click on brewing stand opens UI (BLOCK_BREWING_STAND handling)
-- **Update functions**: `update_brewing_stands()` and `update_status_effects()` called each frame
-- **Escape handling**: Pressing Escape closes brewing stand UI
-- **Open/close methods**: `open_brewing_stand()` and `close_brewing_stand()` with proper state management
+- **render_brewing_stand()**: Full UI with dark overlay, window, and close button
+- **Bottle slots**: 3 bottle slots showing potion type with colored icons and names
+- **Ingredient slot**: Shows brewing ingredient name and count
+- **Fuel display**: Shows blaze powder count with colored indicator
+- **Progress bar**: Shows brewing progress percentage
+- **Status messages**: Context-aware messages (need fuel, add potions, brewing...)
+- **Test buttons**: Quick-add buttons for water bottles, nether wart, fuel
+- **potion_type_display()**: Maps all 19 potion types to display names and colors
 
 **Files modified**:
-- Modified `src/game.rs` (added StatusEffects, brewing_stands, interaction, update functions)
+- Modified `src/game.rs` (added render_brewing_stand, render_brewing_ingredient_slot, render_brewing_bottle_slot, potion_type_display)
 
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 33: BREWING & STATUS EFFECTS WORLD INTEGRATION COMPLETE! 🧪
+**Iteration 33 continued** the brewing system, advancing Brewing from ~35% to ~50%. Integrated brewing stands and status effects into GameWorld (status_effects field, brewing_stands HashMap, block interaction, update functions).
 
 ### Iteration 32: BREWING STAND BLOCK ENTITY COMPLETE! 🧪
 **Iteration 32 created** BrewingStandState block entity with 3 bottle slots, ingredient slot, fuel (blaze powder), 15 brewing recipes, 20-second brew time, and block constants (BLOCK_BREWING_STAND, etc.).
@@ -178,7 +183,7 @@
 
 ### 🚧 IN PROGRESS (10-40%)
 
-#### Brewing System (~50% complete)
+#### Brewing System (~65% complete)
 **Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`, `crates/world/src/chunk.rs`, `src/game.rs`
 - ✅ **StatusEffectType enum** (iteration 31: 26 effect types - positive and negative)
 - ✅ **StatusEffect struct** (iteration 31: amplifier, duration, tick logic)
@@ -195,8 +200,10 @@
 - ✅ **Brewing stand world storage** (iteration 33: HashMap<IVec3, BrewingStandState>)
 - ✅ **Block interaction** (iteration 33: right-click opens brewing stand UI)
 - ✅ **Update functions** (iteration 33: update_brewing_stands(), update_status_effects())
-- ❌ No brewing stand UI rendering
+- ✅ **Brewing stand UI** (iteration 34: render_brewing_stand with bottle/ingredient/fuel slots)
+- ✅ **Potion display** (iteration 34: potion_type_display with 19 types, names, colors)
 - ❌ No potion drinking/throwing mechanics
+- ❌ No status effect application from potions
 
 ---
 
@@ -327,7 +334,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (23 total)
+## Commits Made (24 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -351,7 +358,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 20. Iteration 30: Completed enchanting system (commit fb29b52)
 21. Iteration 31: Added brewing system foundation (commit 504b5cc)
 22. Iteration 32: Added BrewingStandState block entity + brewing recipes (commit 2dab2de)
-23. **Iteration 33: Integrated brewing stands and status effects into game world**
+23. Iteration 33: Integrated brewing stands and status effects into game world (commit 5031968)
+24. **Iteration 34: Added brewing stand UI with bottle/ingredient/fuel slots**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -376,13 +384,13 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~28% of total roadmap complete (up from ~27% after iteration 32)
-- Phase 1 (Critical): ~95% complete (up from ~94%)
+**Overall Progress**: ~29% of total roadmap complete (up from ~28% after iteration 33)
+- Phase 1 (Critical): ~96% complete (up from ~95%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
-  - Brewing: ~50% (iteration 33 - world integration complete)
+  - Brewing: ~65% (iteration 34 - UI complete)
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
@@ -448,10 +456,17 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Update functions (update_brewing_stands(), update_status_effects())
    - Result: Brewing world integration complete (Brewing: ~35% → ~50%)
 
-10. **Iterations 34+**: Continue brewing system
-   - Brewing stand UI rendering
-   - Potion drinking mechanics
-   - Potion throwing mechanics
+10. ✅ **Iteration 34**: Brewing stand UI - DONE
+   - ✅ render_brewing_stand() with full UI (overlay, window, close button)
+   - ✅ Bottle slot rendering with potion type icons and colors
+   - ✅ Ingredient slot with item name display
+   - ✅ Fuel indicator and progress bar
+   - ✅ potion_type_display() mapping 19 types to names/colors
+   - Result: Brewing UI complete (Brewing: ~50% → ~65%)
+
+11. **Iterations 35+**: Continue brewing system
+   - Potion drinking mechanics (apply status effects to player)
+   - Potion throwing mechanics (splash potions)
    - XP Bar UI: Experience 70% → 80% (polish)
 
-**Focus**: Iteration 33 completed brewing world integration. Phase 1 now ~95% complete. Next: Brewing stand UI and potion mechanics.
+**Focus**: Iteration 34 completed brewing stand UI. Phase 1 now ~96% complete. Next: Potion drinking and throwing mechanics.
