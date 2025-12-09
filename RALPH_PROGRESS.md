@@ -1,8 +1,25 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 37 - Updated: 2025-12-09
+## Iteration 38 - Updated: 2025-12-09
 
-### EXPERIENCE UI VERIFICATION COMPLETE! ✨
+### SWORD SWEEP ATTACK COMPLETE! ⚔️
+
+**Iteration 38 completed** sword sweep attack mechanics, advancing Combat from ~95% to ~98%. Swords now hit multiple mobs in an area:
+
+- **Sweep detection**: When attacking with sword, nearby mobs within 1 block of target take damage
+- **Sweep damage**: 1.0 base damage + Sharpness enchantment bonus
+- **Sweep knockback**: Small knockback (0.3) applied to swept mobs
+- **Fire Aspect**: Fire Aspect enchantment also applies to swept targets
+- **Log feedback**: "SWEEP ATTACK! Hit N additional mobs for X damage each"
+
+**Files modified**:
+- Modified `src/game.rs` (added sweep attack logic to try_attack_mob at lines 3599-3656)
+
+---
+
+## Previous Iteration: Experience UI Verification
+
+### Iteration 37: EXPERIENCE UI VERIFICATION COMPLETE! ✨
 
 **Iteration 37 verified** that the XP Bar UI already exists and is fully functional. The Experience system is actually ~95% complete (not 70% as previously documented):
 
@@ -11,8 +28,6 @@
 - **Level display**: Level number shown above bar when > 0
 - **Enchanting integration**: `consume_levels()` properly integrated (line 2745)
 - **Mending integration**: XP used for tool repair when applicable
-
-The Experience system was more complete than documented. Updating progress tracking accordingly.
 
 ---
 
@@ -194,8 +209,8 @@ The Experience system was more complete than documented. Updating progress track
 1. XP from mining certain ores (minor, optional)
 2. XP bottles as throwable items (minor, optional)
 
-#### Combat Mechanics (95% complete)
-**Location**: `src/game.rs:2966-3045`
+#### Combat Mechanics (~98% complete)
+**Location**: `src/game.rs:2966-3045`, `try_attack_mob` at 3485
 - ✅ Melee combat with tool damage
 - ✅ Mob AI with attack behaviors
 - ✅ Projectile system (arrows, fireballs)
@@ -203,10 +218,10 @@ The Experience system was more complete than documented. Updating progress track
 - ✅ Damage calculation with armor reduction
 - ✅ **Attack cooldown timer** (iteration 22: 0.6 seconds between attacks)
 - ✅ **Critical hit detection** (iteration 23: 1.5x damage when falling)
-- ❌ **No sweep attacks** (swords should hit multiple targets)
+- ✅ **Sword sweep attack** (iteration 38: hits mobs within 1 block of target)
 
 **Missing for completion**:
-1. Sword sweep attack (hit multiple entities in arc when using sword)
+1. Sweep Edge enchantment (minor, optional - increases sweep damage)
 
 #### Enchanting System (100% complete) ✅
 **Location**: `crates/core/src/enchantment.rs`, `crates/core/src/item.rs`, `crates/world/src/enchanting.rs`, `crates/world/src/armor.rs`, `crates/world/src/drop_item.rs`, `src/game.rs`
@@ -401,7 +416,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (27 total)
+## Commits Made (28 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -429,9 +444,10 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 24. Iteration 34: Added brewing stand UI with bottle/ingredient/fuel slots (commit ab1e454)
 25. Iteration 35: Added potion drinking mechanics with status effect application (commit 130d69d)
 26. Iteration 36: Added splash potion throwing with AoE effects (commit 9e544f2)
+27. Iteration 37: Documentation update - verified XP Bar UI already existed (commit 6961f67)
+28. **Iteration 38: Added sword sweep attack mechanics**
 
 **Iteration 21**: Documentation only, no code changes
-**Iteration 37**: Documentation only - verified XP Bar UI already existed
 
 ---
 
@@ -454,9 +470,9 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~33% of total roadmap complete (up from ~32% after iteration 36)
-- Phase 1 (Critical): ~99% complete (up from ~98%)
-  - Combat: 95% (iterations 22-23)
+**Overall Progress**: ~34% of total roadmap complete (up from ~33% after iteration 37)
+- Phase 1 (Critical): ~99.5% complete (up from ~99%)
+  - Combat: ~98% (iteration 38: added sword sweep attack)
   - Experience: ~95% (iteration 37 discovery: XP Bar UI already existed!)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
@@ -559,8 +575,14 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - Experience system updated from ~70% to ~95% (was underreported)
    - Phase 1 now ~99% complete!
 
-14. **Iterations 38+**: Finish Phase 1
-   - Lingering potions (optional)
-   - Minor polish
+14. ✅ **Iteration 38**: Sword sweep attack - DONE
+   - Added sweep attack logic to try_attack_mob() (lines 3599-3656)
+   - Mobs within 1 block of target take 1.0 + enchantment damage
+   - Fire Aspect also applies to sweep targets
+   - Combat updated from ~95% to ~98%
 
-**Focus**: Iteration 37 discovered XP Bar UI was already implemented. Phase 1 now ~99% complete. Experience system nearly complete at 95%.
+15. **Iterations 39+**: Finish Phase 1 & Begin Phase 2
+   - Lingering potions (optional)
+   - Begin village generation (Phase 2)
+
+**Focus**: Iteration 38 completed sword sweep attack. Phase 1 now ~99.5% complete! Ready to begin Phase 2 (Villages & Trading).
