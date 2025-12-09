@@ -1,8 +1,30 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 35 - Updated: 2025-12-09
+## Iteration 36 - Updated: 2025-12-09
 
-### POTION DRINKING MECHANICS COMPLETE! 🧪
+### SPLASH POTION THROWING COMPLETE! 🧪💥
+
+**Iteration 36 completed** splash potion throwing mechanics, advancing Brewing from ~75% to ~90%. Players can now throw splash potions that apply area-of-effect status effects:
+
+- **SplashPotion item type**: Added ItemType::SplashPotion(u16) to core item system
+- **ProjectileType::SplashPotion**: Extended projectile system with splash potion variant
+- **throw_splash_potion()**: Creates splash potion projectile from player position/direction
+- **Impact detection**: Splash potions break on block or mob collision (don't stick like arrows)
+- **AoE effect system**: 4-block radius splash effect with distance-based effectiveness
+- **Player effects**: Splash potions apply status effects to player if in range
+- **Mob effects**: Healing, Harming, and Poison potions affect nearby mobs
+- **Right-click throw**: Holding splash potion + right-click throws it
+
+**Files modified**:
+- Modified `crates/core/src/item.rs` (added SplashPotion variant, updated max_stack_size)
+- Modified `crates/world/src/projectile.rs` (added SplashPotion type, throw method, effect_radius)
+- Modified `src/game.rs` (added throw_splash_potion, splash AoE handling, UI support)
+
+---
+
+## Previous Iteration: Potion Drinking
+
+### Iteration 35: POTION DRINKING MECHANICS COMPLETE! 🧪
 
 **Iteration 35 completed** potion drinking mechanics, advancing Brewing from ~65% to ~75%. Players can now consume potions to gain status effects:
 
@@ -13,11 +35,6 @@
 - **drink_potion()**: Applies status effects when consuming potions
 - **Right-click consume**: Potions consumed on right-click like food
 - **UI display**: Potions show proper names in inventory/hotbar
-
-**Files modified**:
-- Modified `crates/core/src/item.rs` (added Potion variant, potion_ids module)
-- Modified `crates/world/src/drop_item.rs` (added 14 potion item types with helpers)
-- Modified `src/game.rs` (added drink_potion, selected_potion, right-click handling)
 
 ---
 
@@ -42,6 +59,9 @@
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 35: POTION DRINKING MECHANICS COMPLETE! 🧪
+**Iteration 35 completed** potion drinking mechanics, advancing Brewing from ~65% to ~75%. Added Potion(u16) ItemType, potion_ids module, drink_potion() with status effect application, right-click consume handling.
 
 ### Iteration 34: BREWING STAND UI COMPLETE! 🧪
 **Iteration 34 completed** the brewing stand UI, advancing Brewing from ~50% to ~65%. Added render_brewing_stand() with bottle/ingredient/fuel slots, potion_type_display() for 19 potion types, and UI controls.
@@ -207,8 +227,8 @@
 
 ### 🚧 IN PROGRESS (10-40%)
 
-#### Brewing System (~75% complete)
-**Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`, `crates/world/src/chunk.rs`, `src/game.rs`
+#### Brewing System (~90% complete)
+**Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`, `crates/world/src/projectile.rs`, `src/game.rs`
 - ✅ **StatusEffectType enum** (iteration 31: 26 effect types - positive and negative)
 - ✅ **StatusEffect struct** (iteration 31: amplifier, duration, tick logic)
 - ✅ **StatusEffects collection** (iteration 31: add/remove, tick updates, modifiers)
@@ -229,7 +249,11 @@
 - ✅ **Potion item types** (iteration 35: 14 potion variants in ItemType enum)
 - ✅ **Potion drinking** (iteration 35: drink_potion() applies status effects)
 - ✅ **Right-click consume** (iteration 35: potions consumed like food items)
-- ❌ No potion throwing mechanics (splash potions)
+- ✅ **SplashPotion item type** (iteration 36: throwable splash potion variant)
+- ✅ **Splash potion projectile** (iteration 36: ProjectileType::SplashPotion with physics)
+- ✅ **Potion throwing** (iteration 36: throw_splash_potion() creates projectile)
+- ✅ **AoE splash effect** (iteration 36: 4-block radius, distance-based effectiveness)
+- ❌ Lingering potions (not yet implemented)
 
 ---
 
@@ -360,7 +384,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (25 total)
+## Commits Made (27 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -386,7 +410,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 22. Iteration 32: Added BrewingStandState block entity + brewing recipes (commit 2dab2de)
 23. Iteration 33: Integrated brewing stands and status effects into game world (commit 5031968)
 24. Iteration 34: Added brewing stand UI with bottle/ingredient/fuel slots (commit ab1e454)
-25. **Iteration 35: Added potion drinking mechanics with status effect application**
+25. Iteration 35: Added potion drinking mechanics with status effect application (commit 130d69d)
+26. **Iteration 36: Added splash potion throwing with AoE effects**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -411,13 +436,13 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~30% of total roadmap complete (up from ~29% after iteration 34)
-- Phase 1 (Critical): ~97% complete (up from ~96%)
+**Overall Progress**: ~32% of total roadmap complete (up from ~30% after iteration 35)
+- Phase 1 (Critical): ~98% complete (up from ~97%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
-  - Brewing: ~75% (iteration 35 - potion drinking complete)
+  - Brewing: ~90% (iteration 36 - splash potions complete)
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
@@ -500,8 +525,19 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Added right-click consume handling for potions
    - Result: Potion drinking complete (Brewing: ~65% → ~75%)
 
-12. **Iterations 36+**: Continue brewing system
-   - Potion throwing mechanics (splash potions)
-   - XP Bar UI: Experience 70% → 80% (polish)
+12. ✅ **Iteration 36**: Splash potion throwing - DONE
+   - ✅ Added SplashPotion(u16) variant to core ItemType enum
+   - ✅ Added ProjectileType::SplashPotion to projectile system
+   - ✅ Added throw_splash_potion() to create splash projectiles
+   - ✅ Added selected_splash_potion() method to Hotbar
+   - ✅ Splash potions break on impact (don't stick like arrows)
+   - ✅ AoE effect system with 4-block radius
+   - ✅ Distance-based effectiveness (closer = stronger effect)
+   - ✅ Player and mob effect application
+   - Result: Splash potions complete (Brewing: ~75% → ~90%)
 
-**Focus**: Iteration 35 completed potion drinking. Phase 1 now ~97% complete. Next: Splash potion throwing mechanics or XP bar UI.
+13. **Iterations 37+**: Finish Phase 1
+   - XP Bar UI: Experience 70% → 80% (polish)
+   - Lingering potions (optional)
+
+**Focus**: Iteration 36 completed splash potion throwing. Phase 1 now ~98% complete. Brewing system nearly complete at 90%.

@@ -167,6 +167,18 @@ impl Hotbar {
         }
     }
 
+    /// Get the splash potion ID if the selected item is a splash potion
+    fn selected_splash_potion(&self) -> Option<u16> {
+        if let Some(item) = self.selected_item() {
+            match item.item_type {
+                ItemType::SplashPotion(potion_id) => Some(potion_id),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     /// Consume one of the selected item (for eating food)
     /// Returns true if item was consumed
     fn consume_selected(&mut self) -> bool {
@@ -263,6 +275,7 @@ impl Hotbar {
                     _ => format!("Item({})", id),
                 },
                 ItemType::Potion(id) => potion_name(id),
+                ItemType::SplashPotion(id) => format!("Splash {}", potion_name(id)),
             }
         } else {
             "Empty".to_string()
@@ -2058,6 +2071,11 @@ impl GameWorld {
                         self.hotbar.consume_selected();
                         // Skip other interactions when drinking
                     }
+                } else if let Some(potion_id) = self.hotbar.selected_splash_potion() {
+                    // Check if we're holding a splash potion and throw it
+                    self.throw_splash_potion(potion_id);
+                    self.hotbar.consume_selected();
+                    // Skip other interactions when throwing
                 } else {
                     // Check if the block is a crafting table or furnace
                     let chunk_x = hit.block_pos.x.div_euclid(16);
@@ -3196,13 +3214,19 @@ impl GameWorld {
             if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
                 let voxel = chunk.voxel(local_x, local_y, local_z);
                 if voxel.id != BLOCK_AIR {
-                    // Hit a block, stick the arrow
-                    projectile.stick();
+                    // Hit a block
+                    if projectile.projectile_type.is_splash_potion() {
+                        // Splash potion breaks and marks for AoE effect
+                        projectile.hit();
+                    } else {
+                        // Arrow sticks
+                        projectile.stick();
+                    }
                 }
             }
         }
 
-        // Check for mob collisions
+        // Check for mob collisions (arrows deal damage, splash potions trigger on hit)
         for projectile in &mut self.projectiles.projectiles {
             if projectile.stuck || projectile.dead {
                 continue;
@@ -3226,23 +3250,118 @@ impl GameWorld {
                 let vertical_dist = dy.abs();
 
                 if horizontal_dist < mob_radius + 0.3 && vertical_dist < mob_height / 2.0 + 0.3 {
-                    // Hit the mob!
-                    let damage = projectile.damage();
-                    mob.damage(damage);
-                    projectile.hit();
+                    if projectile.projectile_type.is_splash_potion() {
+                        // Splash potion breaks on mob hit (AoE handled below)
+                        projectile.hit();
+                        tracing::debug!("Splash potion hit {:?}", mob.mob_type);
+                    } else {
+                        // Arrow deals damage
+                        let damage = projectile.damage();
+                        mob.damage(damage);
+                        projectile.hit();
 
-                    // Apply knockback from arrow direction
-                    let knock_dir_x = projectile.vel_x;
-                    let knock_dir_z = projectile.vel_z;
-                    let knock_len = (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
-                    if knock_len > 0.001 {
-                        mob.apply_knockback(knock_dir_x / knock_len, knock_dir_z / knock_len, 0.3);
+                        // Apply knockback from arrow direction
+                        let knock_dir_x = projectile.vel_x;
+                        let knock_dir_z = projectile.vel_z;
+                        let knock_len = (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
+                        if knock_len > 0.001 {
+                            mob.apply_knockback(knock_dir_x / knock_len, knock_dir_z / knock_len, 0.3);
+                        }
+
+                        tracing::debug!("Arrow hit {:?} for {:.1} damage", mob.mob_type, damage);
                     }
-
-                    tracing::debug!("Arrow hit {:?} for {:.1} damage", mob.mob_type, damage);
                     break; // Only hit one mob per projectile
                 }
             }
+        }
+
+        // Handle splash potion AoE effects for projectiles that just broke
+        // Collect splash potion impact data before applying (to avoid borrow conflicts)
+        let mut splash_impacts: Vec<(f64, f64, f64, u16)> = Vec::new();
+        for projectile in &self.projectiles.projectiles {
+            if projectile.dead && projectile.hit_entity {
+                if let Some(potion_id) = projectile.projectile_type.potion_id() {
+                    splash_impacts.push((projectile.x, projectile.y, projectile.z, potion_id));
+                }
+            }
+        }
+
+        // Apply splash potion AoE effects
+        for (splash_x, splash_y, splash_z, potion_id) in splash_impacts {
+            let effect_radius = 4.0; // 4 block radius for splash effect
+
+            // Apply effect to player if in range
+            let player_pos = self.renderer.camera().position;
+            let player_dist = ((player_pos.x as f64 - splash_x).powi(2)
+                + (player_pos.y as f64 - splash_y).powi(2)
+                + (player_pos.z as f64 - splash_z).powi(2))
+            .sqrt();
+
+            if player_dist < effect_radius {
+                // Apply potion effect to player (reduced by distance)
+                let effectiveness = 1.0 - (player_dist / effect_radius);
+                self.apply_splash_potion_to_player(potion_id, effectiveness);
+            }
+
+            // Apply effect to mobs in range
+            for mob in &mut self.mobs {
+                if mob.dead {
+                    continue;
+                }
+
+                let mob_dist = ((mob.x - splash_x).powi(2)
+                    + (mob.y - splash_y).powi(2)
+                    + (mob.z - splash_z).powi(2))
+                .sqrt();
+
+                if mob_dist < effect_radius {
+                    let effectiveness = 1.0 - (mob_dist / effect_radius);
+                    // Apply splash potion effect to mob (inlined to avoid borrow issues)
+                    match potion_id {
+                        id if id == potion_ids::HEALING => {
+                            // Healing heals living mobs - add health directly
+                            let heal_amount = (4.0 * effectiveness) as f32;
+                            mob.health = (mob.health + heal_amount).min(mob.mob_type.max_health());
+                            tracing::debug!(
+                                "Splash healing on {:?}: +{:.1} HP",
+                                mob.mob_type,
+                                heal_amount
+                            );
+                        }
+                        id if id == potion_ids::HARMING => {
+                            // Harming damages living mobs
+                            let damage = (6.0 * effectiveness) as f32;
+                            mob.damage(damage);
+                            tracing::debug!(
+                                "Splash harming on {:?}: -{:.1} HP",
+                                mob.mob_type,
+                                damage
+                            );
+                        }
+                        id if id == potion_ids::POISON => {
+                            // Poison does damage over time - simplified to instant damage
+                            let damage = (2.0 * effectiveness) as f32;
+                            mob.damage(damage);
+                            tracing::debug!(
+                                "Splash poison on {:?}: -{:.1} HP",
+                                mob.mob_type,
+                                damage
+                            );
+                        }
+                        _ => {
+                            // Other effects don't affect mobs in this implementation
+                        }
+                    }
+                }
+            }
+
+            tracing::info!(
+                "Splash potion (ID: {}) exploded at ({:.1}, {:.1}, {:.1})",
+                potion_id,
+                splash_x,
+                splash_y,
+                splash_z
+            );
         }
 
         // Check for player picking up stuck arrows
@@ -3657,6 +3776,84 @@ impl GameWorld {
         }
     }
 
+    /// Throw a splash potion
+    fn throw_splash_potion(&mut self, potion_id: u16) {
+        use mdminecraft_world::Projectile;
+
+        // Get player position and look direction from camera
+        let camera = self.renderer.camera();
+        let player_pos = camera.position;
+        let yaw = camera.yaw;
+        let pitch = camera.pitch;
+
+        // Create the splash potion projectile
+        let projectile = Projectile::throw_splash_potion(
+            player_pos.x as f64,
+            player_pos.y as f64,
+            player_pos.z as f64,
+            yaw,
+            pitch,
+            potion_id,
+        );
+
+        // Add to projectile manager
+        self.projectiles.spawn(projectile);
+
+        tracing::info!("Threw splash potion (ID: {})", potion_id);
+    }
+
+    /// Apply splash potion effect to the player
+    fn apply_splash_potion_to_player(&mut self, potion_id: u16, effectiveness: f64) {
+        // Convert potion ID to PotionType
+        let potion_type = match potion_id {
+            potion_ids::AWKWARD => PotionType::Awkward,
+            potion_ids::NIGHT_VISION => PotionType::NightVision,
+            potion_ids::INVISIBILITY => PotionType::Invisibility,
+            potion_ids::LEAPING => PotionType::Leaping,
+            potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
+            potion_ids::SWIFTNESS => PotionType::Swiftness,
+            potion_ids::SLOWNESS => PotionType::Slowness,
+            potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
+            potion_ids::HEALING => PotionType::Healing,
+            potion_ids::HARMING => PotionType::Harming,
+            potion_ids::POISON => PotionType::Poison,
+            potion_ids::REGENERATION => PotionType::Regeneration,
+            potion_ids::STRENGTH => PotionType::Strength,
+            potion_ids::WEAKNESS => PotionType::Weakness,
+            _ => return,
+        };
+
+        // Instant effects (Healing/Harming) apply immediately
+        match potion_type {
+            PotionType::Healing => {
+                let heal_amount = (4.0 * effectiveness) as f32;
+                self.player_health.heal(heal_amount);
+                tracing::info!("Splash healing: +{:.1} HP", heal_amount);
+            }
+            PotionType::Harming => {
+                let damage = (6.0 * effectiveness) as f32;
+                self.player_health.damage(damage);
+                tracing::info!("Splash harming: -{:.1} HP", damage);
+            }
+            _ => {
+                // Duration effects - apply with reduced duration based on distance
+                if let Some(effect_type) = potion_type.effect() {
+                    let base_duration = potion_type.base_duration_ticks();
+                    let duration = (base_duration as f64 * effectiveness) as u32;
+                    if duration > 0 {
+                        let effect = StatusEffect::new(effect_type, 0, duration);
+                        self.status_effects.add(effect);
+                        tracing::info!(
+                            "Splash {:?} applied to player for {} ticks",
+                            effect_type,
+                            duration
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Count bookshelves within 2 blocks of the enchanting table (vanilla mechanics)
     fn count_nearby_bookshelves(&self, table_pos: IVec3) -> u32 {
         // Vanilla: bookshelves must be 2 blocks away, 1 block higher, with air in between
@@ -3856,7 +4053,7 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                                             );
                                         }
                                     }
-                                    ItemType::Block(_) | ItemType::Item(_) | ItemType::Food(_) | ItemType::Potion(_) => {
+                                    ItemType::Block(_) | ItemType::Item(_) | ItemType::Food(_) | ItemType::Potion(_) | ItemType::SplashPotion(_) => {
                                         if stack.count > 1 {
                                             ui.label(
                                                 egui::RichText::new(format!("x{}", stack.count))
@@ -4351,6 +4548,7 @@ fn render_inventory_slot_core(
                     mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
                     mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
                     mdminecraft_core::ItemType::Potion(id) => format!("P{}", id),
+                    mdminecraft_core::ItemType::SplashPotion(id) => format!("SP{}", id),
                     mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
                 };
                 ui.label(
@@ -4724,6 +4922,7 @@ fn render_crafting_slot(ui: &mut egui::Ui, item: Option<&ItemStack>) {
                     mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
                     mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
                     mdminecraft_core::ItemType::Potion(id) => format!("P{}", id),
+                    mdminecraft_core::ItemType::SplashPotion(id) => format!("SP{}", id),
                     mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
                 };
                 ui.label(
@@ -4769,6 +4968,7 @@ fn render_crafting_slot_clickable(ui: &mut egui::Ui, item: Option<&ItemStack>) -
             mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
             mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
             mdminecraft_core::ItemType::Potion(id) => format!("P{}", id),
+            mdminecraft_core::ItemType::SplashPotion(id) => format!("SP{}", id),
             mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
         };
 
