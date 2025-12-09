@@ -14,6 +14,8 @@ pub enum ItemType {
     Food(FoodType),
     /// Potion item (potion ID maps to PotionType in world crate)
     Potion(u16),
+    /// Splash potion item (throwable, applies AoE effect)
+    SplashPotion(u16),
     /// Generic item
     Item(u16),
 }
@@ -302,6 +304,7 @@ impl ItemStack {
             ItemType::Block(_) => 64,
             ItemType::Food(_) => 64,
             ItemType::Potion(_) => 1, // Potions don't stack
+            ItemType::SplashPotion(_) => 1, // Splash potions don't stack
             ItemType::Item(_) => 64,
         }
     }

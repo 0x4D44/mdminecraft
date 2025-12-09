@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProjectileType {
     Arrow,
+    /// Splash potion - breaks on impact and applies area effect
+    /// The u16 is the potion_id (maps to PotionType via potion_ids module)
+    SplashPotion(u16),
 }
 
 impl ProjectileType {
@@ -15,6 +18,7 @@ impl ProjectileType {
     pub fn base_damage(&self) -> f32 {
         match self {
             ProjectileType::Arrow => 2.0,
+            ProjectileType::SplashPotion(_) => 0.0, // Splash potions don't deal direct damage
         }
     }
 
@@ -22,6 +26,7 @@ impl ProjectileType {
     pub fn gravity(&self) -> f64 {
         match self {
             ProjectileType::Arrow => 0.05,
+            ProjectileType::SplashPotion(_) => 0.06, // Slightly higher gravity for potions
         }
     }
 
@@ -29,6 +34,7 @@ impl ProjectileType {
     pub fn drag(&self) -> f64 {
         match self {
             ProjectileType::Arrow => 0.99,
+            ProjectileType::SplashPotion(_) => 0.98, // Slightly more drag
         }
     }
 
@@ -36,6 +42,7 @@ impl ProjectileType {
     pub fn hitbox_radius(&self) -> f64 {
         match self {
             ProjectileType::Arrow => 0.3,
+            ProjectileType::SplashPotion(_) => 0.25,
         }
     }
 
@@ -43,6 +50,28 @@ impl ProjectileType {
     pub fn lifetime_ticks(&self) -> u32 {
         match self {
             ProjectileType::Arrow => 1200, // 60 seconds
+            ProjectileType::SplashPotion(_) => 600, // 30 seconds (should break on impact much sooner)
+        }
+    }
+
+    /// Check if this projectile is a splash potion
+    pub fn is_splash_potion(&self) -> bool {
+        matches!(self, ProjectileType::SplashPotion(_))
+    }
+
+    /// Get the potion ID if this is a splash potion
+    pub fn potion_id(&self) -> Option<u16> {
+        match self {
+            ProjectileType::SplashPotion(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Get the effect radius for area-of-effect projectiles
+    pub fn effect_radius(&self) -> f64 {
+        match self {
+            ProjectileType::Arrow => 0.0,
+            ProjectileType::SplashPotion(_) => 4.0, // 4 block radius for splash effect
         }
     }
 }
@@ -145,6 +174,49 @@ impl Projectile {
             dir_z * speed,
             ProjectileType::Arrow,
             charge,
+        )
+    }
+
+    /// Create a thrown splash potion from player position and look direction
+    pub fn throw_splash_potion(
+        player_x: f64,
+        player_y: f64,
+        player_z: f64,
+        yaw: f32,
+        pitch: f32,
+        potion_id: u16,
+    ) -> Self {
+        // Calculate direction from yaw/pitch
+        let pitch_rad = pitch as f64;
+        let yaw_rad = yaw as f64;
+
+        let cos_pitch = pitch_rad.cos();
+        let sin_pitch = pitch_rad.sin();
+        let cos_yaw = yaw_rad.cos();
+        let sin_yaw = yaw_rad.sin();
+
+        // Direction vector (looking direction)
+        let dir_x = cos_pitch * cos_yaw;
+        let dir_y = -sin_pitch;
+        let dir_z = cos_pitch * sin_yaw;
+
+        // Potion throw speed (fixed, not charged like arrows)
+        let speed = 0.8;
+
+        // Spawn slightly in front of player and at eye level
+        let spawn_x = player_x + dir_x * 0.5;
+        let spawn_y = player_y + 1.5 + dir_y * 0.5; // Eye level
+        let spawn_z = player_z + dir_z * 0.5;
+
+        Self::new(
+            spawn_x,
+            spawn_y,
+            spawn_z,
+            dir_x * speed,
+            dir_y * speed + 0.2, // Add slight upward arc
+            dir_z * speed,
+            ProjectileType::SplashPotion(potion_id),
+            1.0, // Full "charge" for potions (doesn't affect effect)
         )
     }
 
