@@ -8,7 +8,7 @@ use crate::{
 use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
-use mdminecraft_core::{EnchantmentType, ItemStack, ItemType, ToolMaterial, ToolType};
+use mdminecraft_core::{item::potion_ids, EnchantmentType, ItemStack, ItemType, ToolMaterial, ToolType};
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, ControlMode, DebugHud, Frustum, InputContext, InputState,
     ParticleEmitter, ParticleSystem, ParticleVertex, RaycastHit, Renderer, RendererConfig,
@@ -22,8 +22,8 @@ use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
     EnchantingTableState, FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob,
-    MobSpawner, MobType, PlayerArmor, PotionType, Projectile, ProjectileManager, StatusEffects,
-    TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
+    MobSpawner, MobType, PlayerArmor, PotionType, Projectile, ProjectileManager, StatusEffect,
+    StatusEffects, TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
     BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
     CHUNK_SIZE_Z,
 };
@@ -155,6 +155,18 @@ impl Hotbar {
         }
     }
 
+    /// Get the potion ID if selected item is a potion
+    fn selected_potion(&self) -> Option<u16> {
+        if let Some(item) = self.selected_item() {
+            match item.item_type {
+                ItemType::Potion(potion_id) => Some(potion_id),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     /// Consume one of the selected item (for eating food)
     /// Returns true if item was consumed
     fn consume_selected(&mut self) -> bool {
@@ -250,6 +262,7 @@ impl Hotbar {
                     105 => "Sapling".to_string(),
                     _ => format!("Item({})", id),
                 },
+                ItemType::Potion(id) => potion_name(id),
             }
         } else {
             "Empty".to_string()
@@ -525,6 +538,27 @@ fn food_hunger_restore(food_type: mdminecraft_core::item::FoodType) -> f32 {
         FoodType::Bread => 5.0,
         FoodType::RawMeat => 3.0,
         FoodType::CookedMeat => 8.0,
+    }
+}
+
+/// Get the display name for a potion ID
+fn potion_name(potion_id: u16) -> String {
+    match potion_id {
+        potion_ids::AWKWARD => "Awkward Potion".to_string(),
+        potion_ids::NIGHT_VISION => "Potion of Night Vision".to_string(),
+        potion_ids::INVISIBILITY => "Potion of Invisibility".to_string(),
+        potion_ids::LEAPING => "Potion of Leaping".to_string(),
+        potion_ids::FIRE_RESISTANCE => "Potion of Fire Resistance".to_string(),
+        potion_ids::SWIFTNESS => "Potion of Swiftness".to_string(),
+        potion_ids::SLOWNESS => "Potion of Slowness".to_string(),
+        potion_ids::WATER_BREATHING => "Potion of Water Breathing".to_string(),
+        potion_ids::HEALING => "Potion of Healing".to_string(),
+        potion_ids::HARMING => "Potion of Harming".to_string(),
+        potion_ids::POISON => "Potion of Poison".to_string(),
+        potion_ids::REGENERATION => "Potion of Regeneration".to_string(),
+        potion_ids::STRENGTH => "Potion of Strength".to_string(),
+        potion_ids::WEAKNESS => "Potion of Weakness".to_string(),
+        _ => format!("Potion({})", potion_id),
     }
 }
 
@@ -2017,6 +2051,12 @@ impl GameWorld {
                     if self.player_health.eat(hunger_restore) {
                         self.hotbar.consume_selected();
                         // Skip other interactions when eating
+                    }
+                } else if let Some(potion_id) = self.hotbar.selected_potion() {
+                    // Check if we're holding a potion and try to drink it
+                    if self.drink_potion(potion_id) {
+                        self.hotbar.consume_selected();
+                        // Skip other interactions when drinking
                     }
                 } else {
                     // Check if the block is a crafting table or furnace
@@ -3570,6 +3610,53 @@ impl GameWorld {
         tracing::info!("Brewing stand closed");
     }
 
+    /// Drink a potion and apply its status effect
+    /// Returns true if the potion was successfully drunk
+    fn drink_potion(&mut self, potion_id: u16) -> bool {
+        // Convert potion ID to PotionType
+        let potion_type = match potion_id {
+            potion_ids::AWKWARD => PotionType::Awkward,
+            potion_ids::NIGHT_VISION => PotionType::NightVision,
+            potion_ids::INVISIBILITY => PotionType::Invisibility,
+            potion_ids::LEAPING => PotionType::Leaping,
+            potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
+            potion_ids::SWIFTNESS => PotionType::Swiftness,
+            potion_ids::SLOWNESS => PotionType::Slowness,
+            potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
+            potion_ids::HEALING => PotionType::Healing,
+            potion_ids::HARMING => PotionType::Harming,
+            potion_ids::POISON => PotionType::Poison,
+            potion_ids::REGENERATION => PotionType::Regeneration,
+            potion_ids::STRENGTH => PotionType::Strength,
+            potion_ids::WEAKNESS => PotionType::Weakness,
+            _ => {
+                tracing::warn!("Unknown potion ID: {}", potion_id);
+                return false;
+            }
+        };
+
+        // Get the status effect from the potion type
+        if let Some(effect_type) = potion_type.effect() {
+            let duration = potion_type.base_duration_ticks();
+            let amplifier = 0; // Level I
+
+            // Apply the effect
+            let effect = StatusEffect::new(effect_type, amplifier, duration);
+            self.status_effects.add(effect);
+            tracing::info!(
+                "Drank {:?} potion - applied {:?} for {} ticks",
+                potion_type,
+                effect_type,
+                duration
+            );
+            true
+        } else {
+            // Awkward, Mundane, Thick potions have no effect
+            tracing::info!("Drank {:?} potion (no effect)", potion_type);
+            true
+        }
+    }
+
     /// Count bookshelves within 2 blocks of the enchanting table (vanilla mechanics)
     fn count_nearby_bookshelves(&self, table_pos: IVec3) -> u32 {
         // Vanilla: bookshelves must be 2 blocks away, 1 block higher, with air in between
@@ -3769,7 +3856,7 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                                             );
                                         }
                                     }
-                                    ItemType::Block(_) | ItemType::Item(_) | ItemType::Food(_) => {
+                                    ItemType::Block(_) | ItemType::Item(_) | ItemType::Food(_) | ItemType::Potion(_) => {
                                         if stack.count > 1 {
                                             ui.label(
                                                 egui::RichText::new(format!("x{}", stack.count))
@@ -4263,6 +4350,7 @@ fn render_inventory_slot_core(
                     mdminecraft_core::ItemType::Tool(tool, _) => format!("{:?}", tool),
                     mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
                     mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
+                    mdminecraft_core::ItemType::Potion(id) => format!("P{}", id),
                     mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
                 };
                 ui.label(
@@ -4635,6 +4723,7 @@ fn render_crafting_slot(ui: &mut egui::Ui, item: Option<&ItemStack>) {
                     mdminecraft_core::ItemType::Tool(tool, _) => format!("{:?}", tool),
                     mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
                     mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
+                    mdminecraft_core::ItemType::Potion(id) => format!("P{}", id),
                     mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
                 };
                 ui.label(
@@ -4679,6 +4768,7 @@ fn render_crafting_slot_clickable(ui: &mut egui::Ui, item: Option<&ItemStack>) -
             mdminecraft_core::ItemType::Tool(tool, _) => format!("{:?}", tool),
             mdminecraft_core::ItemType::Block(id) => format!("B{}", id),
             mdminecraft_core::ItemType::Food(food) => format!("{:?}", food),
+            mdminecraft_core::ItemType::Potion(id) => format!("P{}", id),
             mdminecraft_core::ItemType::Item(id) => format!("I{}", id),
         };
 
