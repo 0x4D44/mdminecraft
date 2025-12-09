@@ -237,8 +237,27 @@ impl ItemStack {
     }
 
     /// Damage durability by a given amount (for tools)
+    /// Unbreaking enchantment reduces the chance of durability loss:
+    /// - Unbreaking I: 50% chance to ignore damage
+    /// - Unbreaking II: 67% chance to ignore damage
+    /// - Unbreaking III: 75% chance to ignore damage
+    /// Formula: 1 / (unbreaking_level + 1) chance to take damage
     pub fn damage_durability(&mut self, amount: u32) {
+        // Check for Unbreaking enchantment before borrowing durability mutably
+        let unbreaking_level = self.enchantment_level(EnchantmentType::Unbreaking);
+
         if let Some(ref mut durability) = self.durability {
+            if unbreaking_level > 0 {
+                // Use a simple deterministic check based on durability value
+                // In a real game you'd use RNG, but for determinism we use current durability
+                // This gives probabilistic behavior over many uses
+                let chance_denominator = (unbreaking_level as u32) + 1;
+                // Take damage only if durability % denominator == 0
+                // This means: Unbreaking I = 1/2 damage, II = 1/3, III = 1/4
+                if *durability % chance_denominator != 0 {
+                    return; // Durability damage negated by Unbreaking
+                }
+            }
             *durability = durability.saturating_sub(amount);
         }
     }

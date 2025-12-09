@@ -8,7 +8,7 @@ use crate::{
 use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
-use mdminecraft_core::{ItemStack, ItemType, ToolMaterial, ToolType};
+use mdminecraft_core::{EnchantmentType, ItemStack, ItemType, ToolMaterial, ToolType};
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, ControlMode, DebugHud, Frustum, InputContext, InputState,
     ParticleEmitter, ParticleSystem, ParticleVertex, RaycastHit, Renderer, RendererConfig,
@@ -2006,7 +2006,23 @@ impl GameWorld {
         if mining_new_block {
             // Calculate mining time based on tool and block properties
             let tool = self.hotbar.selected_tool();
-            let mining_time = block_props.calculate_mining_time(tool, false);
+            let mut mining_time = block_props.calculate_mining_time(tool, false);
+
+            // Apply Efficiency enchantment bonus
+            // Each level of Efficiency adds 26% mining speed (Minecraft formula: (level^2 + 1) bonus)
+            // Simplified: multiply speed by 1 + (0.26 * level)
+            if let Some(item) = self.hotbar.selected_item() {
+                let efficiency_level = item.enchantment_level(EnchantmentType::Efficiency);
+                if efficiency_level > 0 {
+                    let speed_bonus = 1.0 + 0.26 * efficiency_level as f32;
+                    mining_time /= speed_bonus;
+                    tracing::debug!(
+                        "Efficiency {} applied: speed bonus {:.0}%",
+                        efficiency_level,
+                        (speed_bonus - 1.0) * 100.0
+                    );
+                }
+            }
 
             self.mining_progress = Some(MiningProgress {
                 block_pos: hit.block_pos,
@@ -2720,6 +2736,9 @@ impl GameWorld {
         let mut exploded_creeper = false;
         let mut explosion_positions: Vec<(f64, f64, f64, f32)> = Vec::new();
         for mob in &mut self.mobs {
+            // Update fire damage (from Fire Aspect enchantment)
+            mob.update_fire();
+
             // Spiders are only hostile at night, other hostile mobs always attack
             if mob.mob_type.is_hostile_at_time(is_night) {
                 // Update hostile mob with player targeting
@@ -3215,6 +3234,27 @@ impl GameWorld {
             let tool = self.hotbar.selected_tool();
             let mut damage = calculate_attack_damage(tool);
 
+            // Get enchantment levels from selected item
+            let (sharpness_level, knockback_level, fire_aspect_level) =
+                if let Some(item) = self.hotbar.selected_item() {
+                    (
+                        item.enchantment_level(EnchantmentType::Sharpness),
+                        item.enchantment_level(EnchantmentType::Knockback),
+                        item.enchantment_level(EnchantmentType::FireAspect),
+                    )
+                } else {
+                    (0, 0, 0)
+                };
+
+            // Apply Sharpness enchantment bonus
+            // Sharpness I: +1 damage, each additional level: +0.5 damage
+            // (Minecraft Java: 0.5 + 0.5 * level extra damage)
+            if sharpness_level > 0 {
+                let bonus = 0.5 + 0.5 * sharpness_level as f32;
+                damage += bonus;
+                tracing::debug!("Sharpness {} adds {:.1} damage", sharpness_level, bonus);
+            }
+
             // Critical hit detection: 1.5x damage if player is falling
             // Check if player has significant downward velocity
             let is_critical = self.player_physics.velocity.y < -0.1;
@@ -3227,10 +3267,26 @@ impl GameWorld {
             let dx = mob.x - origin.x as f64;
             let dz = mob.z - origin.z as f64;
 
+            // Calculate knockback strength with Knockback enchantment bonus
+            // Base knockback: 0.5, each level adds 0.4
+            let knockback_strength = 0.5 + 0.4 * knockback_level as f64;
+
             // Apply damage and knockback
             let mob = &mut self.mobs[idx];
             let _died = mob.damage(damage);
-            mob.apply_knockback(dx, dz, 0.5);
+            mob.apply_knockback(dx, dz, knockback_strength);
+
+            // Apply Fire Aspect: set target on fire
+            // Fire Aspect I: 4 seconds (80 ticks), Fire Aspect II: 8 seconds (160 ticks)
+            if fire_aspect_level > 0 {
+                let fire_ticks = 80 * fire_aspect_level as u32;
+                mob.set_on_fire(fire_ticks);
+                tracing::debug!(
+                    "Fire Aspect {} sets mob on fire for {} ticks",
+                    fire_aspect_level,
+                    fire_ticks
+                );
+            }
 
             if is_critical {
                 tracing::info!(
@@ -3249,15 +3305,14 @@ impl GameWorld {
             }
 
             // Use tool durability if we have a tool
+            // (damage_durability handles Unbreaking enchantment internally)
             if let Some(item) = self.hotbar.selected_item_mut() {
-                if let ItemType::Tool(_, _) = item.item_type {
-                    if let Some(durability) = item.durability.as_mut() {
-                        *durability = durability.saturating_sub(1);
-                        if *durability == 0 {
-                            // Tool broke
-                            self.hotbar.slots[self.hotbar.selected] = None;
-                            tracing::info!("Tool broke!");
-                        }
+                if matches!(item.item_type, ItemType::Tool(_, _)) {
+                    item.damage_durability(1);
+                    if item.is_broken() {
+                        // Tool broke
+                        self.hotbar.slots[self.hotbar.selected] = None;
+                        tracing::info!("Tool broke!");
                     }
                 }
             }
