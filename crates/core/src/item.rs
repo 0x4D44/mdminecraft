@@ -59,6 +59,73 @@ pub enum FoodType {
     CookedMeat,
 }
 
+/// Generic item IDs for non-tool, non-block items.
+/// These constants define item types used with `ItemType::Item(u16)`.
+#[allow(missing_docs)]
+pub mod item_ids {
+    // Brewing ingredients (100-199)
+    pub const GLASS_BOTTLE: u16 = 100;
+    pub const WATER_BOTTLE: u16 = 101;
+    pub const NETHER_WART: u16 = 102;
+    pub const BLAZE_POWDER: u16 = 103;
+    pub const BLAZE_ROD: u16 = 104;
+    pub const GHAST_TEAR: u16 = 105;
+    pub const MAGMA_CREAM: u16 = 106;
+    pub const FERMENTED_SPIDER_EYE: u16 = 107;
+    pub const SPIDER_EYE: u16 = 108;
+    pub const SUGAR: u16 = 109;
+    pub const GLISTERING_MELON: u16 = 110;
+    pub const GOLDEN_CARROT: u16 = 111;
+    pub const RABBIT_FOOT: u16 = 112;
+    pub const PHANTOM_MEMBRANE: u16 = 113;
+    pub const REDSTONE_DUST: u16 = 114;
+    pub const GLOWSTONE_DUST: u16 = 115;
+    pub const GUNPOWDER: u16 = 116;
+    pub const DRAGON_BREATH: u16 = 117;
+
+    // Potions (200-299) - stored as base potion ID, extended/splash/lingering determined by variant
+    pub const POTION_WATER: u16 = 200;
+    pub const POTION_AWKWARD: u16 = 201;
+    pub const POTION_MUNDANE: u16 = 202;
+    pub const POTION_THICK: u16 = 203;
+    pub const POTION_NIGHT_VISION: u16 = 204;
+    pub const POTION_INVISIBILITY: u16 = 205;
+    pub const POTION_LEAPING: u16 = 206;
+    pub const POTION_FIRE_RESISTANCE: u16 = 207;
+    pub const POTION_SWIFTNESS: u16 = 208;
+    pub const POTION_SLOWNESS: u16 = 209;
+    pub const POTION_WATER_BREATHING: u16 = 210;
+    pub const POTION_HEALING: u16 = 211;
+    pub const POTION_HARMING: u16 = 212;
+    pub const POTION_POISON: u16 = 213;
+    pub const POTION_REGENERATION: u16 = 214;
+    pub const POTION_STRENGTH: u16 = 215;
+    pub const POTION_WEAKNESS: u16 = 216;
+    pub const POTION_LUCK: u16 = 217;
+    pub const POTION_SLOW_FALLING: u16 = 218;
+
+    // Splash potions (300-399)
+    pub const SPLASH_POTION_BASE: u16 = 300;
+
+    // Lingering potions (400-499)
+    pub const LINGERING_POTION_BASE: u16 = 400;
+
+    // Other items (500+)
+    pub const COAL: u16 = 500;
+    pub const IRON_INGOT: u16 = 501;
+    pub const GOLD_INGOT: u16 = 502;
+    pub const DIAMOND: u16 = 503;
+    pub const LAPIS_LAZULI: u16 = 504;
+    pub const EMERALD: u16 = 505;
+    pub const STICK: u16 = 506;
+    pub const BONE: u16 = 507;
+    pub const STRING: u16 = 508;
+    pub const FEATHER: u16 = 509;
+    pub const LEATHER: u16 = 510;
+    pub const SLIME_BALL: u16 = 511;
+    pub const ENDER_PEARL: u16 = 512;
+}
+
 impl ToolMaterial {
     /// Get the mining speed multiplier for this material
     pub fn speed_multiplier(self) -> f32 {

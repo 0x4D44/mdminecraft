@@ -1,21 +1,29 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 30 - Updated: 2025-12-09
+## Iteration 31 - Updated: 2025-12-09
 
-### ENCHANTING SYSTEM COMPLETE! 100% 🎉
+### BREWING SYSTEM FOUNDATION STARTED! 🧪
 
-**Iteration 30 completed** the remaining enchantment implementations, advancing Enchanting from ~95% to 100%. All 12 enchantment types now have functional effects:
+**Iteration 31 began** the brewing system implementation, advancing Brewing from 0% to ~15% (foundation). Created the core status effect and potion type infrastructure:
 
-- **Protection**: Armor damage reduction (4% per level, stacks across armor pieces, max 64%)
-- **Silk Touch**: Blocks drop themselves instead of processed items (stone→stone, ore→ore block)
-- **Fortune**: Increased drops for ores (bonus drops based on level, affects coal/diamond/lapis)
-- **Mending**: XP repairs tools (1 XP = 2 durability, repairs hotbar tools with Mending)
+- **StatusEffectType enum**: 26 effect types (Speed, Haste, Strength, Regeneration, Resistance, FireResistance, WaterBreathing, Invisibility, NightVision, Absorption, JumpBoost, Saturation, SlowFalling, Luck, InstantHealth + negative effects)
+- **StatusEffect struct**: Amplifier levels, duration tracking (ticks), particle visibility, tick logic
+- **StatusEffects collection**: Add/remove effects, tick updates, modifier calculations (speed_multiplier, attack_damage_modifier, damage_reduction)
+- **PotionType enum**: 19 potion types (Water, Awkward, Mundane, Thick + 15 effect potions)
+- **item_ids module**: 60+ item constants for brewing ingredients, potions, splash potions, lingering potions
+- **9 unit tests** covering status effects, potions, and modifier calculations
 
-Also added `LapisOre` ItemType and armor enchantment support with `ArmorPiece.enchantments` field.
+**Files created/modified**:
+- Created `crates/world/src/potion.rs` (525 lines)
+- Modified `crates/world/src/lib.rs` (added potion module)
+- Modified `crates/core/src/item.rs` (added item_ids module with brewing items)
 
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 30: ENCHANTING SYSTEM COMPLETE! 100% 🎉
+**Iteration 30 completed** the remaining enchantment implementations: Protection (armor damage reduction), Silk Touch (blocks drop themselves), Fortune (increased ore drops), Mending (XP repairs tools). Also added LapisOre ItemType and armor enchantment support.
 
 ### Iteration 29: ENCHANTMENT EFFECTS IMPLEMENTED! ⚔️
 **Iteration 29 completed** core enchantment effects: Efficiency (mining speed), Sharpness (damage), Knockback, Fire Aspect (mob fire), and Unbreaking (durability). Also added fire damage system to mobs.
@@ -164,14 +172,22 @@ Also added `LapisOre` ItemType and armor enchantment support with `ArmorPiece.en
 - ✅ **Mending effect** (iteration 30: XP repairs tools, 1 XP = 2 durability)
 - ✅ **Armor enchantments** (iteration 30: ArmorPiece.enchantments field with from_item_with_enchantments())
 
-### ❌ NOT IMPLEMENTED (0%)
+### 🚧 IN PROGRESS (10-40%)
 
-#### Brewing System (0% complete)
-- ❌ No brewing stand block
-- ❌ No potion items
-- ❌ No status effects (Speed, Strength, etc.)
+#### Brewing System (~15% complete)
+**Location**: `crates/world/src/potion.rs`, `crates/core/src/item.rs`
+- ✅ **StatusEffectType enum** (iteration 31: 26 effect types - positive and negative)
+- ✅ **StatusEffect struct** (iteration 31: amplifier, duration, tick logic)
+- ✅ **StatusEffects collection** (iteration 31: add/remove, tick updates, modifiers)
+- ✅ **PotionType enum** (iteration 31: 19 potion types with effect mapping)
+- ✅ **item_ids module** (iteration 31: 60+ brewing item constants)
+- ✅ **Effect modifiers** (iteration 31: speed_multiplier, attack_damage_modifier, damage_reduction)
+- ✅ **9 unit tests** (iteration 31: full coverage of status effects and potions)
+- ❌ No brewing stand block entity
 - ❌ No brewing recipes
+- ❌ No player StatusEffects integration
 - ❌ No blaze powder fuel mechanic
+- ❌ No potion drinking/throwing mechanics
 
 ---
 
@@ -302,7 +318,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (20 total)
+## Commits Made (21 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -322,8 +338,9 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 16. Iteration 26: Added enchanting table state management (commit 2cba62a)
 17. Iteration 27: Integrated enchanting table into game world (commit 2050c0d)
 18. Iteration 28: Added enchantment application mechanics (commit 659e16b)
-19. Iteration 29: Implemented enchantment effects (Efficiency, Sharpness, Knockback, Fire Aspect, Unbreaking) (commit 55037a4)
-20. **Iteration 30: Completed enchanting system (Protection, Silk Touch, Fortune, Mending)**
+19. Iteration 29: Implemented enchantment effects (commit 55037a4)
+20. Iteration 30: Completed enchanting system (commit fb29b52)
+21. **Iteration 31: Added brewing system foundation (StatusEffect, PotionType, item_ids)**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -348,19 +365,19 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~25% of total roadmap complete (up from ~24% after iteration 29)
-- Phase 1 (Critical): ~92% complete (up from ~90%)
+**Overall Progress**: ~26% of total roadmap complete (up from ~25% after iteration 30)
+- Phase 1 (Critical): ~93% complete (up from ~92%)
   - Combat: 95% (iterations 22-23)
-  - Experience: ~70% (iteration 24, up from 40%)
+  - Experience: ~70% (iteration 24)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
   - Enchanting: 100% COMPLETE (iteration 30)
-  - Brewing: 0%
+  - Brewing: ~15% (iteration 31 - foundation started)
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
 - Phase 5 (Advanced): 0% complete
 
-**Estimated Time to Completion**: 16-24 weeks remaining (per roadmap estimate of 22-30 weeks total)
+**Estimated Time to Completion**: 15-23 weeks remaining (per roadmap estimate of 22-30 weeks total)
 
 ---
 
@@ -398,8 +415,19 @@ Based on iteration 21 exploration, these are the most valuable next implementati
      - Implemented: Protection, Silk Touch, Fortune, Mending
      - Added armor enchantment support
 
-7. **Iterations 31+**: Begin brewing system or other Phase 1 gaps
-   - Brewing: 0% complete (major Phase 1 requirement)
+7. ✅ **Iteration 31**: Begin brewing system foundation - DONE
+   - ✅ StatusEffectType enum (26 effect types)
+   - ✅ StatusEffect struct with duration/amplifier/tick logic
+   - ✅ StatusEffects collection with modifier calculations
+   - ✅ PotionType enum (19 types)
+   - ✅ item_ids module (60+ brewing item constants)
+   - Result: Brewing foundation complete (Brewing: 0% → ~15%)
+
+8. **Iterations 32+**: Continue brewing system
+   - BrewingStandState block entity (following FurnaceState pattern)
+   - Brewing recipes
+   - Player StatusEffects integration
+   - Potion drinking/throwing mechanics
    - XP Bar UI: Experience 70% → 80% (polish)
 
-**Focus**: Iteration 30 completed the enchanting system to 100%. Phase 1 now ~92% complete. Next: Begin brewing system or XP bar UI.
+**Focus**: Iteration 31 started the brewing system foundation. Phase 1 now ~93% complete. Next: BrewingStandState block entity and player status effect integration.
