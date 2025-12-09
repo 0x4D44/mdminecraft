@@ -204,6 +204,8 @@ pub struct Mob {
     pub fuse_timer: f32,
     /// Whether the creeper is about to explode
     pub exploding: bool,
+    /// Fire ticks remaining (mob takes fire damage while > 0)
+    pub fire_ticks: u32,
 }
 
 /// AI state for mob behavior.
@@ -240,6 +242,7 @@ impl Mob {
             damage_flash: 0.0,
             fuse_timer: 0.0,
             exploding: false,
+            fire_ticks: 0,
         }
     }
 
@@ -264,6 +267,34 @@ impl Mob {
             self.vel_z = (dz / dist) * strength;
             self.vel_y = 0.3; // Small upward knockback
         }
+    }
+
+    /// Set the mob on fire for a number of ticks.
+    /// Each 20 ticks = 1 second, fire deals 1 damage per second.
+    pub fn set_on_fire(&mut self, ticks: u32) {
+        // Only extend fire duration, don't shorten it
+        if ticks > self.fire_ticks {
+            self.fire_ticks = ticks;
+        }
+    }
+
+    /// Update fire damage (call once per game tick).
+    /// Returns true if fire damage was dealt this tick.
+    pub fn update_fire(&mut self) -> bool {
+        if self.fire_ticks > 0 {
+            self.fire_ticks -= 1;
+            // Deal 1 damage every 20 ticks (1 second)
+            if self.fire_ticks % 20 == 0 {
+                self.damage(1.0);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if mob is on fire.
+    pub fn is_on_fire(&self) -> bool {
+        self.fire_ticks > 0
     }
 
     /// Calculate distance to a point.
