@@ -3,6 +3,7 @@
 //! Provides armor slots, defense values, and damage reduction calculation.
 
 use crate::drop_item::ItemType;
+use mdminecraft_core::{Enchantment, EnchantmentType};
 use serde::{Deserialize, Serialize};
 
 /// Armor slot types
@@ -24,18 +25,28 @@ pub enum ArmorMaterial {
 }
 
 /// A piece of armor with durability
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArmorPiece {
     pub item_type: ItemType,
     pub slot: ArmorSlot,
     pub material: ArmorMaterial,
     pub durability: u32,
     pub max_durability: u32,
+    /// Enchantments on this armor piece
+    pub enchantments: Vec<Enchantment>,
 }
 
 impl ArmorPiece {
-    /// Create a new armor piece from an item type
+    /// Create a new armor piece from an item type (no enchantments)
     pub fn from_item(item_type: ItemType) -> Option<Self> {
+        Self::from_item_with_enchantments(item_type, Vec::new())
+    }
+
+    /// Create a new armor piece from an item type with enchantments
+    pub fn from_item_with_enchantments(
+        item_type: ItemType,
+        enchantments: Vec<Enchantment>,
+    ) -> Option<Self> {
         let (slot, material) = match item_type {
             // Leather
             ItemType::LeatherHelmet => (ArmorSlot::Helmet, ArmorMaterial::Leather),
@@ -67,7 +78,17 @@ impl ArmorPiece {
             material,
             durability: max_durability,
             max_durability,
+            enchantments,
         })
+    }
+
+    /// Get the Protection enchantment level if present
+    pub fn protection_level(&self) -> u8 {
+        self.enchantments
+            .iter()
+            .find(|e| e.enchantment_type == EnchantmentType::Protection)
+            .map(|e| e.level)
+            .unwrap_or(0)
     }
 
     /// Get the defense points provided by this armor piece
@@ -177,15 +198,42 @@ impl PlayerArmor {
         total
     }
 
+    /// Get total Protection enchantment levels from all armor pieces
+    pub fn total_protection(&self) -> u8 {
+        let mut total: u8 = 0;
+        if let Some(piece) = &self.helmet {
+            total = total.saturating_add(piece.protection_level());
+        }
+        if let Some(piece) = &self.chestplate {
+            total = total.saturating_add(piece.protection_level());
+        }
+        if let Some(piece) = &self.leggings {
+            total = total.saturating_add(piece.protection_level());
+        }
+        if let Some(piece) = &self.boots {
+            total = total.saturating_add(piece.protection_level());
+        }
+        total
+    }
+
     /// Calculate damage reduction multiplier (0.0 to 1.0)
     /// Returns the fraction of damage that gets through armor
-    /// Formula: damage * (1 - defense/25) as per spec
+    /// Formula: damage * (1 - defense/25) * (1 - protection*0.04)
     pub fn damage_multiplier(&self) -> f32 {
         let defense = self.total_defense();
-        // Formula: 1 - defense/25
+        // Base armor reduction: 1 - defense/25
         // Max defense is 10 (full diamond = 2+3+3+2 = 10), which reduces by 40%
-        let reduction = (defense as f32 / 25.0).min(0.8);
-        1.0 - reduction
+        let armor_reduction = (defense as f32 / 25.0).min(0.8);
+        let armor_multiplier = 1.0 - armor_reduction;
+
+        // Protection enchantment: 4% reduction per level, max 16 levels (64% max)
+        // In vanilla MC: EPF = sum of protection levels, damage_mult = 1 - EPF*0.04
+        let protection = self.total_protection();
+        let protection_reduction = (protection as f32 * 0.04).min(0.64);
+        let protection_multiplier = 1.0 - protection_reduction;
+
+        // Combine both reductions multiplicatively
+        armor_multiplier * protection_multiplier
     }
 
     /// Equip armor piece, returning the previously equipped piece if any
@@ -343,5 +391,71 @@ mod tests {
         assert!(is_armor(ItemType::DiamondBoots));
         assert!(!is_armor(ItemType::Coal));
         assert!(!is_armor(ItemType::Bow));
+    }
+
+    #[test]
+    fn test_protection_enchantment() {
+        let mut armor = PlayerArmor::new();
+
+        // Create armor with Protection IV enchantment
+        let protection_enchant = Enchantment::new(EnchantmentType::Protection, 4);
+        let chestplate = ArmorPiece::from_item_with_enchantments(
+            ItemType::DiamondChestplate,
+            vec![protection_enchant],
+        )
+        .unwrap();
+
+        armor.equip(chestplate);
+
+        // Diamond chestplate: 3 defense = 3/25 = 12% armor reduction
+        // Protection IV: 4 * 4% = 16% protection reduction
+        // Total: (1 - 0.12) * (1 - 0.16) = 0.88 * 0.84 = 0.7392
+        assert_eq!(armor.total_protection(), 4);
+        let multiplier = armor.damage_multiplier();
+        assert!((multiplier - 0.7392).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_full_protection_armor() {
+        let mut armor = PlayerArmor::new();
+
+        // Equip full diamond armor with Protection IV on each piece
+        let protection_enchant = Enchantment::new(EnchantmentType::Protection, 4);
+        armor.equip(
+            ArmorPiece::from_item_with_enchantments(
+                ItemType::DiamondHelmet,
+                vec![protection_enchant],
+            )
+            .unwrap(),
+        );
+        armor.equip(
+            ArmorPiece::from_item_with_enchantments(
+                ItemType::DiamondChestplate,
+                vec![protection_enchant],
+            )
+            .unwrap(),
+        );
+        armor.equip(
+            ArmorPiece::from_item_with_enchantments(
+                ItemType::DiamondLeggings,
+                vec![protection_enchant],
+            )
+            .unwrap(),
+        );
+        armor.equip(
+            ArmorPiece::from_item_with_enchantments(
+                ItemType::DiamondBoots,
+                vec![protection_enchant],
+            )
+            .unwrap(),
+        );
+
+        // Total protection: 4 * 4 = 16 levels (capped at 64% reduction)
+        assert_eq!(armor.total_protection(), 16);
+        // Diamond armor: 10 defense = 10/25 = 40% armor reduction
+        // Protection: 16 * 4% = 64% (max)
+        // Total: (1 - 0.40) * (1 - 0.64) = 0.60 * 0.36 = 0.216
+        let multiplier = armor.damage_multiplier();
+        assert!((multiplier - 0.216).abs() < 0.01);
     }
 }

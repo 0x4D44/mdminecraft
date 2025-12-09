@@ -40,6 +40,7 @@ pub enum ItemType {
     IronOre,
     GoldOre,
     DiamondOre,
+    LapisOre,
 
     // Mob drops
     RawPork,
@@ -136,6 +137,7 @@ impl ItemType {
             | ItemType::IronOre
             | ItemType::GoldOre
             | ItemType::DiamondOre
+            | ItemType::LapisOre
             | ItemType::Wool
             | ItemType::Feather
             | ItemType::Bone
@@ -279,6 +281,61 @@ impl ItemType {
         }
     }
 
+    /// Get the silk touch drop for a block (drops the block itself).
+    ///
+    /// When using Silk Touch, blocks drop themselves instead of their
+    /// normal drops (e.g., stone drops stone instead of cobblestone).
+    ///
+    /// # Arguments
+    /// * `block_id` - The block ID being broken
+    ///
+    /// # Returns
+    /// Some((item_type, count)) for the block itself, None if not applicable.
+    pub fn silk_touch_drop(block_id: u16) -> Option<(ItemType, u32)> {
+        match block_id {
+            // Blocks that normally drop something else
+            1 => Some((ItemType::Stone, 1)),       // Stone drops stone instead of cobblestone
+            3 => Some((ItemType::Grass, 1)),       // Grass drops grass block instead of dirt
+            14 => Some((ItemType::CoalOre, 1)),    // Coal ore drops ore block instead of coal
+            98 => Some((ItemType::LapisOre, 1)),   // Lapis ore drops ore block instead of lapis
+            17 => Some((ItemType::DiamondOre, 1)), // Diamond ore drops ore block
+            // Blocks that already drop themselves can use normal drops
+            _ => ItemType::from_block(block_id),
+        }
+    }
+
+    /// Get the fortune-modified drop for a block.
+    ///
+    /// Fortune increases drop counts for certain blocks like ores.
+    /// Each level gives a chance for bonus drops.
+    ///
+    /// # Arguments
+    /// * `block_id` - The block ID being broken
+    /// * `fortune_level` - The Fortune enchantment level (1-3)
+    /// * `random_value` - A random value from 0.0 to 1.0
+    ///
+    /// # Returns
+    /// Some((item_type, count)) with potentially increased count.
+    pub fn fortune_drop(block_id: u16, fortune_level: u8, random_value: f64) -> Option<(ItemType, u32)> {
+        let base_drop = ItemType::from_block(block_id)?;
+        let (item_type, base_count) = base_drop;
+
+        // Fortune affects coal, diamond, and lapis ores
+        let affected_blocks = [14, 17, 98]; // coal, diamond, lapis
+        if !affected_blocks.contains(&block_id) {
+            return Some((item_type, base_count));
+        }
+
+        // Fortune formula: base_count + random(0, fortune_level + 1) bonus items
+        // Using random_value to determine bonus (simplified formula)
+        // Fortune I: 0-2 bonus, Fortune II: 0-3 bonus, Fortune III: 0-4 bonus
+        let max_bonus = fortune_level as u32 + 1;
+        let bonus = (random_value * max_bonus as f64).floor() as u32;
+        let final_count = base_count + bonus;
+
+        Some((item_type, final_count))
+    }
+
     /// Get the block ID that this item places (if applicable).
     ///
     /// # Returns
@@ -301,6 +358,7 @@ impl ItemType {
             ItemType::GoldOre => Some(16),
             ItemType::DiamondOre => Some(17),
             ItemType::Furnace => Some(18),
+            ItemType::LapisOre => Some(98),
             // Non-placeable items (leaves, mob drops, food, crafted items)
             _ => None,
         }
