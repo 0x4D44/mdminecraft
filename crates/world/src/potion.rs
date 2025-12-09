@@ -422,6 +422,299 @@ impl PotionType {
     }
 }
 
+/// Brewing time per operation in seconds.
+pub const BREW_TIME_SECONDS: f32 = 20.0;
+
+/// A brewing recipe: base potion + ingredient -> result potion.
+#[derive(Debug, Clone, Copy)]
+pub struct BrewRecipe {
+    /// The base potion (water bottle, awkward potion, etc.)
+    pub base: PotionType,
+    /// The ingredient item ID (from item_ids)
+    pub ingredient: u16,
+    /// The resulting potion type
+    pub result: PotionType,
+}
+
+/// All available brewing recipes.
+/// Organized by brewing stage: Water -> Awkward -> Effect Potions
+pub const BREW_RECIPES: &[BrewRecipe] = &[
+    // Stage 1: Water bottles -> base potions
+    BrewRecipe {
+        base: PotionType::Water,
+        ingredient: 102, // NETHER_WART
+        result: PotionType::Awkward,
+    },
+    // Stage 2: Awkward potions -> effect potions
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 109, // SUGAR
+        result: PotionType::Swiftness,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 112, // RABBIT_FOOT
+        result: PotionType::Leaping,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 110, // GLISTERING_MELON
+        result: PotionType::Healing,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 108, // SPIDER_EYE
+        result: PotionType::Poison,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 105, // GHAST_TEAR
+        result: PotionType::Regeneration,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 103, // BLAZE_POWDER
+        result: PotionType::Strength,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 111, // GOLDEN_CARROT
+        result: PotionType::NightVision,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 106, // MAGMA_CREAM
+        result: PotionType::FireResistance,
+    },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: 113, // PHANTOM_MEMBRANE
+        result: PotionType::SlowFalling,
+    },
+    // Corruption recipes: effect potion + fermented spider eye -> negative version
+    BrewRecipe {
+        base: PotionType::Swiftness,
+        ingredient: 107, // FERMENTED_SPIDER_EYE
+        result: PotionType::Slowness,
+    },
+    BrewRecipe {
+        base: PotionType::NightVision,
+        ingredient: 107, // FERMENTED_SPIDER_EYE
+        result: PotionType::Invisibility,
+    },
+    BrewRecipe {
+        base: PotionType::Healing,
+        ingredient: 107, // FERMENTED_SPIDER_EYE
+        result: PotionType::Harming,
+    },
+    BrewRecipe {
+        base: PotionType::Poison,
+        ingredient: 107, // FERMENTED_SPIDER_EYE
+        result: PotionType::Harming,
+    },
+    // Water breathing from pufferfish (not in item_ids yet, use placeholder)
+    // Weakness from water bottle + fermented spider eye
+    BrewRecipe {
+        base: PotionType::Water,
+        ingredient: 107, // FERMENTED_SPIDER_EYE
+        result: PotionType::Weakness,
+    },
+];
+
+/// Get the brewing result for a base potion and ingredient.
+pub fn get_brew_result(base: PotionType, ingredient: u16) -> Option<PotionType> {
+    BREW_RECIPES
+        .iter()
+        .find(|r| r.base == base && r.ingredient == ingredient)
+        .map(|r| r.result)
+}
+
+/// State of a brewing stand in the world.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrewingStandState {
+    /// Potion slots (3 bottles). Each slot stores (potion_type, is_extended, amplifier).
+    /// None = empty slot, Some = bottle with potion
+    pub bottles: [Option<PotionType>; 3],
+    /// Ingredient slot (item_id, count).
+    pub ingredient: Option<(u16, u32)>,
+    /// Fuel slot (blaze powder count).
+    pub fuel: u32,
+    /// Current brewing progress (0.0 to 1.0).
+    pub brew_progress: f32,
+    /// Whether the brewing stand is currently active.
+    pub is_brewing: bool,
+}
+
+impl Default for BrewingStandState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BrewingStandState {
+    /// Create a new empty brewing stand.
+    pub fn new() -> Self {
+        Self {
+            bottles: [None, None, None],
+            ingredient: None,
+            fuel: 0,
+            brew_progress: 0.0,
+            is_brewing: false,
+        }
+    }
+
+    /// Update the brewing stand state (call once per tick/frame).
+    ///
+    /// # Arguments
+    /// * `dt` - Delta time in seconds.
+    ///
+    /// # Returns
+    /// `true` if brewing completed this update.
+    pub fn update(&mut self, dt: f32) -> bool {
+        // If already brewing, continue until complete
+        if self.is_brewing {
+            // Progress brewing
+            let progress_per_second = 1.0 / BREW_TIME_SECONDS;
+            self.brew_progress += progress_per_second * dt;
+
+            // Check if brewing is complete
+            if self.brew_progress >= 1.0 {
+                self.complete_brew();
+                self.brew_progress = 0.0;
+                self.is_brewing = false;
+                return true;
+            }
+            return false;
+        }
+
+        // Not currently brewing - check if we can start
+        if self.can_brew() && self.fuel > 0 {
+            // Start brewing - consume fuel
+            self.fuel -= 1;
+            self.is_brewing = true;
+        } else {
+            // Can't brew
+            self.brew_progress = 0.0;
+        }
+
+        false
+    }
+
+    /// Check if the brewing stand can brew (has valid ingredient and at least one bottle).
+    fn can_brew(&self) -> bool {
+        if let Some((ingredient_id, _)) = &self.ingredient {
+            // Check if any bottle can be brewed with this ingredient
+            for bottle in &self.bottles {
+                if let Some(potion_type) = bottle {
+                    if get_brew_result(*potion_type, *ingredient_id).is_some() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Complete a brewing operation.
+    fn complete_brew(&mut self) {
+        if let Some((ingredient_id, ingredient_count)) = &mut self.ingredient {
+            let ing_id = *ingredient_id;
+
+            // Transform each bottle that has a valid recipe
+            for bottle in &mut self.bottles {
+                if let Some(potion_type) = bottle {
+                    if let Some(result) = get_brew_result(*potion_type, ing_id) {
+                        *bottle = Some(result);
+                    }
+                }
+            }
+
+            // Consume one ingredient
+            *ingredient_count -= 1;
+            if *ingredient_count == 0 {
+                self.ingredient = None;
+            }
+        }
+    }
+
+    /// Add fuel (blaze powder) to the brewing stand.
+    ///
+    /// # Returns
+    /// Number of items that couldn't be added (0 if all added).
+    pub fn add_fuel(&mut self, count: u32) -> u32 {
+        // Max 64 blaze powder
+        let space = 64_u32.saturating_sub(self.fuel);
+        let add = count.min(space);
+        self.fuel += add;
+        count - add
+    }
+
+    /// Add an ingredient to the brewing stand.
+    ///
+    /// # Returns
+    /// Number of items that couldn't be added (0 if all added).
+    pub fn add_ingredient(&mut self, item_id: u16, count: u32) -> u32 {
+        match &mut self.ingredient {
+            None => {
+                let add = count.min(64);
+                self.ingredient = Some((item_id, add));
+                count - add
+            }
+            Some((existing_id, existing_count)) => {
+                if *existing_id == item_id {
+                    let space = 64_u32.saturating_sub(*existing_count);
+                    let add = count.min(space);
+                    *existing_count += add;
+                    count - add
+                } else {
+                    count // Slot occupied with different item
+                }
+            }
+        }
+    }
+
+    /// Add a potion bottle to a specific slot (0, 1, or 2).
+    ///
+    /// # Returns
+    /// `true` if the bottle was added, `false` if slot was occupied.
+    pub fn add_bottle(&mut self, slot: usize, potion_type: PotionType) -> bool {
+        if slot >= 3 {
+            return false;
+        }
+        if self.bottles[slot].is_some() {
+            return false;
+        }
+        self.bottles[slot] = Some(potion_type);
+        true
+    }
+
+    /// Take a potion bottle from a specific slot.
+    ///
+    /// # Returns
+    /// The potion type, or None if slot was empty.
+    pub fn take_bottle(&mut self, slot: usize) -> Option<PotionType> {
+        if slot >= 3 {
+            return None;
+        }
+        self.bottles[slot].take()
+    }
+
+    /// Take the ingredient from the brewing stand.
+    pub fn take_ingredient(&mut self) -> Option<(u16, u32)> {
+        self.ingredient.take()
+    }
+
+    /// Get the number of filled bottle slots.
+    pub fn bottle_count(&self) -> usize {
+        self.bottles.iter().filter(|b| b.is_some()).count()
+    }
+
+    /// Check if the brewing stand has any bottles.
+    pub fn has_bottles(&self) -> bool {
+        self.bottles.iter().any(|b| b.is_some())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,5 +813,134 @@ mod tests {
         assert!(!StatusEffectType::Slowness.is_positive());
         assert!(StatusEffectType::InstantHealth.is_instant());
         assert!(!StatusEffectType::Speed.is_instant());
+    }
+
+    #[test]
+    fn test_brew_recipes() {
+        // Water + Nether Wart = Awkward
+        assert_eq!(
+            get_brew_result(PotionType::Water, 102),
+            Some(PotionType::Awkward)
+        );
+        // Awkward + Sugar = Swiftness
+        assert_eq!(
+            get_brew_result(PotionType::Awkward, 109),
+            Some(PotionType::Swiftness)
+        );
+        // Swiftness + Fermented Spider Eye = Slowness
+        assert_eq!(
+            get_brew_result(PotionType::Swiftness, 107),
+            Some(PotionType::Slowness)
+        );
+        // Invalid recipe
+        assert_eq!(get_brew_result(PotionType::Thick, 109), None);
+    }
+
+    #[test]
+    fn test_brewing_stand_new() {
+        let stand = BrewingStandState::new();
+        assert_eq!(stand.bottles, [None, None, None]);
+        assert!(stand.ingredient.is_none());
+        assert_eq!(stand.fuel, 0);
+        assert_eq!(stand.brew_progress, 0.0);
+        assert!(!stand.is_brewing);
+    }
+
+    #[test]
+    fn test_brewing_stand_add_fuel() {
+        let mut stand = BrewingStandState::new();
+        assert_eq!(stand.add_fuel(10), 0);
+        assert_eq!(stand.fuel, 10);
+
+        // Add more fuel
+        assert_eq!(stand.add_fuel(60), 6); // Only 54 more fit
+        assert_eq!(stand.fuel, 64);
+    }
+
+    #[test]
+    fn test_brewing_stand_add_bottles() {
+        let mut stand = BrewingStandState::new();
+
+        assert!(stand.add_bottle(0, PotionType::Water));
+        assert!(stand.add_bottle(1, PotionType::Water));
+        assert!(stand.add_bottle(2, PotionType::Water));
+
+        // Can't add to occupied slot
+        assert!(!stand.add_bottle(0, PotionType::Awkward));
+
+        // Invalid slot
+        assert!(!stand.add_bottle(3, PotionType::Water));
+
+        assert_eq!(stand.bottle_count(), 3);
+    }
+
+    #[test]
+    fn test_brewing_stand_take_bottle() {
+        let mut stand = BrewingStandState::new();
+        stand.add_bottle(0, PotionType::Swiftness);
+
+        assert_eq!(stand.take_bottle(0), Some(PotionType::Swiftness));
+        assert_eq!(stand.take_bottle(0), None); // Already taken
+        assert_eq!(stand.take_bottle(3), None); // Invalid slot
+    }
+
+    #[test]
+    fn test_brewing_stand_brewing() {
+        let mut stand = BrewingStandState::new();
+
+        // Add water bottles
+        stand.add_bottle(0, PotionType::Water);
+        stand.add_bottle(1, PotionType::Water);
+
+        // Add nether wart ingredient
+        assert_eq!(stand.add_ingredient(102, 1), 0);
+
+        // Add fuel
+        stand.add_fuel(1);
+
+        // Simulate brewing for 21 seconds
+        let mut completed = false;
+        for _ in 0..420 {
+            if stand.update(0.05) {
+                completed = true;
+            }
+        }
+
+        assert!(completed);
+
+        // Bottles should be awkward potions
+        assert_eq!(stand.bottles[0], Some(PotionType::Awkward));
+        assert_eq!(stand.bottles[1], Some(PotionType::Awkward));
+
+        // Ingredient consumed
+        assert!(stand.ingredient.is_none());
+
+        // Fuel consumed
+        assert_eq!(stand.fuel, 0);
+    }
+
+    #[test]
+    fn test_brewing_stand_no_fuel() {
+        let mut stand = BrewingStandState::new();
+        stand.add_bottle(0, PotionType::Water);
+        stand.add_ingredient(102, 1);
+
+        // No fuel - can't brew
+        stand.update(1.0);
+        assert!(!stand.is_brewing);
+        assert_eq!(stand.brew_progress, 0.0);
+        assert_eq!(stand.bottles[0], Some(PotionType::Water)); // Unchanged
+    }
+
+    #[test]
+    fn test_brewing_stand_no_valid_recipe() {
+        let mut stand = BrewingStandState::new();
+        stand.add_bottle(0, PotionType::Thick); // No recipes for Thick
+        stand.add_ingredient(109, 1); // Sugar
+        stand.add_fuel(1);
+
+        stand.update(1.0);
+        assert!(!stand.is_brewing);
+        assert_eq!(stand.fuel, 1); // Fuel not consumed
     }
 }
