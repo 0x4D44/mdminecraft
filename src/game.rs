@@ -587,6 +587,27 @@ impl PlayerXP {
             9 * self.level - 158
         };
     }
+
+    /// Consume XP levels (for enchanting)
+    /// Returns true if levels were successfully consumed
+    fn consume_levels(&mut self, levels: u32) -> bool {
+        if self.level >= levels {
+            self.level -= levels;
+            // Recalculate next level XP for current level
+            self.next_level_xp = if self.level < 16 {
+                2 * self.level + 7
+            } else if self.level < 31 {
+                5 * self.level - 38
+            } else {
+                9 * self.level - 158
+            };
+            // Reset progress within the current level
+            self.current = 0;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Experience orb that drops from mobs and is collected by the player
@@ -2218,6 +2239,7 @@ impl GameWorld {
         let mut close_crafting_requested = false;
         let mut close_furnace_requested = false;
         let mut close_enchanting_requested = false;
+        let mut enchanting_result: Option<EnchantingResult> = None;
         let mut crafted_item: Option<ItemStack> = None;
 
         if let Some(frame) = self.renderer.begin_frame() {
@@ -2418,8 +2440,23 @@ impl GameWorld {
                         if enchanting_open {
                             if let Some(pos) = self.open_enchanting_pos {
                                 if let Some(table) = self.enchanting_tables.get_mut(&pos) {
-                                    close_enchanting_requested =
-                                        render_enchanting_table(ctx, table, &self.player_xp);
+                                    // Check if selected hotbar item is enchantable
+                                    let selected_enchantable = self
+                                        .hotbar
+                                        .selected_item()
+                                        .map(|item| item.is_enchantable())
+                                        .unwrap_or(false);
+
+                                    let result = render_enchanting_table(
+                                        ctx,
+                                        table,
+                                        &self.player_xp,
+                                        selected_enchantable,
+                                    );
+                                    close_enchanting_requested = result.close_requested;
+                                    if result.enchantment_applied.is_some() {
+                                        enchanting_result = Some(result);
+                                    }
                                 }
                             }
                         }
@@ -2489,6 +2526,28 @@ impl GameWorld {
         // Handle enchanting table close
         if close_enchanting_requested {
             self.close_enchanting_table();
+        }
+
+        // Handle enchanting result - apply enchantment to selected item
+        if let Some(result) = enchanting_result {
+            if let Some(enchantment) = result.enchantment_applied {
+                // Apply enchantment to selected hotbar item
+                if let Some(item) = self.hotbar.selected_item_mut() {
+                    if item.add_enchantment(enchantment) {
+                        // Consume XP levels
+                        if self.player_xp.consume_levels(result.xp_to_consume) {
+                            tracing::info!(
+                                "Enchanted item with {:?} level {} (consumed {} XP levels)",
+                                enchantment.enchantment_type,
+                                enchantment.level,
+                                result.xp_to_consume
+                            );
+                        }
+                    } else {
+                        tracing::warn!("Failed to apply enchantment to item");
+                    }
+                }
+            }
         }
 
         self.input.reset_frame();
@@ -4590,16 +4649,31 @@ fn render_furnace_slot(ui: &mut egui::Ui, item: Option<&(DroppedItemType, u32)>,
     });
 }
 
+/// Result of enchanting table interaction
+struct EnchantingResult {
+    /// Whether close was requested
+    close_requested: bool,
+    /// Enchantment to apply (if any)
+    enchantment_applied: Option<mdminecraft_core::Enchantment>,
+    /// XP levels to consume (if enchantment applied)
+    xp_to_consume: u32,
+}
+
 /// Render the enchanting table UI
-/// Returns true if the close button was clicked
+/// Returns close state and any enchantment result
 fn render_enchanting_table(
     ctx: &egui::Context,
     table: &mut EnchantingTableState,
     player_xp: &PlayerXP,
-) -> bool {
+    selected_item_enchantable: bool,
+) -> EnchantingResult {
     use mdminecraft_world::LAPIS_COSTS;
 
-    let mut close_clicked = false;
+    let mut result = EnchantingResult {
+        close_requested: false,
+        enchantment_applied: None,
+        xp_to_consume: 0,
+    };
 
     // Semi-transparent dark overlay
     egui::Area::new(egui::Id::new("enchanting_overlay"))
@@ -4626,7 +4700,7 @@ fn render_enchanting_table(
                 ui.label(egui::RichText::new("Enchanting Table").size(18.0).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("X").clicked() {
-                        close_clicked = true;
+                        result.close_requested = true;
                     }
                 });
             });
@@ -4644,31 +4718,19 @@ fn render_enchanting_table(
 
             ui.add_space(10.0);
 
-            // Item slot
+            // Item status
             ui.horizontal(|ui| {
-                ui.label("Item to Enchant:");
-                let frame = egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
-                    .inner_margin(4.0);
-
-                frame.show(ui, |ui| {
-                    ui.set_min_size(egui::vec2(40.0, 40.0));
-                    if let Some((item_id, count)) = &table.item {
-                        ui.vertical(|ui| {
-                            ui.label(format!("Item #{}", item_id));
-                            if *count > 1 {
-                                ui.label(
-                                    egui::RichText::new(format!("x{}", count))
-                                        .size(11.0)
-                                        .color(egui::Color32::YELLOW),
-                                );
-                            }
-                        });
-                    } else {
-                        ui.label("Empty");
-                    }
-                });
+                if selected_item_enchantable {
+                    ui.label(
+                        egui::RichText::new("Selected hotbar item can be enchanted")
+                            .color(egui::Color32::GREEN),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("Select an enchantable tool in your hotbar")
+                            .color(egui::Color32::YELLOW),
+                    );
+                }
             });
 
             ui.add_space(10.0);
@@ -4692,8 +4754,10 @@ fn render_enchanting_table(
 
             for (slot_idx, (option, lapis_cost)) in options_copy.iter().enumerate() {
                 if let Some(offer) = option {
-                    let can_afford =
-                        player_xp.level >= offer.level_cost && lapis_count >= *lapis_cost;
+                    // Can only enchant if player has enough XP, lapis, AND has an enchantable item
+                    let can_afford = player_xp.level >= offer.level_cost
+                        && lapis_count >= *lapis_cost
+                        && selected_item_enchantable;
 
                     let text_color = if can_afford {
                         egui::Color32::WHITE
@@ -4736,7 +4800,7 @@ fn render_enchanting_table(
                             }),
                         );
 
-                        // Enchant button (disabled if can't afford)
+                        // Enchant button (disabled if can't afford or no enchantable item)
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let button = egui::Button::new("Enchant").sense(if can_afford {
                                 egui::Sense::click()
@@ -4761,24 +4825,25 @@ fn render_enchanting_table(
 
             // Apply enchantment after the loop (now we can mutably borrow table)
             if let Some(slot_idx) = apply_slot {
-                if let Some((_enchantment, _levels_consumed)) = table.apply_enchantment(slot_idx) {
-                    tracing::info!("Applied enchantment from slot {}!", slot_idx + 1);
+                if let Some((enchantment, levels_consumed)) = table.apply_enchantment(slot_idx) {
+                    result.enchantment_applied = Some(enchantment);
+                    result.xp_to_consume = levels_consumed;
+                    tracing::info!(
+                        "Enchanting: {:?} level {} (costs {} XP levels)",
+                        enchantment.enchantment_type,
+                        enchantment.level,
+                        levels_consumed
+                    );
                 }
             }
 
             ui.add_space(10.0);
             ui.separator();
 
-            // Test buttons (temporary, for testing)
+            // Test buttons for lapis (keep for testing)
             ui.horizontal(|ui| {
-                if ui.button("+ Test Item").clicked() {
-                    table.add_item(1000, 1); // Add a pickaxe
-                }
                 if ui.button("+ Lapis").clicked() {
                     table.add_lapis(3);
-                }
-                if ui.button("Take Item").clicked() {
-                    let _ = table.take_item();
                 }
             });
 
@@ -4789,7 +4854,7 @@ fn render_enchanting_table(
             );
         });
 
-    close_clicked
+    result
 }
 
 /// Convert an ItemType to DroppedItemType for armor pieces
