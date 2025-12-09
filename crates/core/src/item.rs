@@ -1,7 +1,7 @@
 //! Item system - Tools, blocks, and other inventory items
 
 use serde::{Deserialize, Serialize};
-use crate::enchantment::Enchantment;
+use crate::enchantment::{Enchantment, EnchantmentType};
 
 /// Item type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -285,6 +285,72 @@ impl ItemStack {
             _ => 1.0, // Hand mining
         }
     }
+
+    /// Check if this item can be enchanted
+    pub fn is_enchantable(&self) -> bool {
+        matches!(self.item_type, ItemType::Tool(_, _))
+    }
+
+    /// Add an enchantment to this item
+    /// Returns true if the enchantment was added successfully
+    pub fn add_enchantment(&mut self, enchantment: Enchantment) -> bool {
+        // Only tools can be enchanted for now
+        if !self.is_enchantable() {
+            return false;
+        }
+
+        // Initialize enchantments vec if needed
+        if self.enchantments.is_none() {
+            self.enchantments = Some(Vec::new());
+        }
+
+        if let Some(ref mut enchants) = self.enchantments {
+            // Check compatibility with existing enchantments
+            for existing in enchants.iter() {
+                if !existing.enchantment_type.is_compatible_with(&enchantment.enchantment_type) {
+                    return false; // Incompatible enchantment
+                }
+            }
+
+            // Check if we already have this enchantment type (upgrade level if so)
+            for existing in enchants.iter_mut() {
+                if existing.enchantment_type == enchantment.enchantment_type {
+                    // Upgrade to higher level
+                    if enchantment.level > existing.level {
+                        existing.level = enchantment.level;
+                    }
+                    return true;
+                }
+            }
+
+            // Add new enchantment
+            enchants.push(enchantment);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get all enchantments on this item
+    pub fn get_enchantments(&self) -> &[Enchantment] {
+        self.enchantments.as_deref().unwrap_or(&[])
+    }
+
+    /// Check if this item has a specific enchantment type
+    pub fn has_enchantment(&self, enchant_type: EnchantmentType) -> bool {
+        self.get_enchantments()
+            .iter()
+            .any(|e| e.enchantment_type == enchant_type)
+    }
+
+    /// Get the level of a specific enchantment, or 0 if not present
+    pub fn enchantment_level(&self, enchant_type: EnchantmentType) -> u8 {
+        self.get_enchantments()
+            .iter()
+            .find(|e| e.enchantment_type == enchant_type)
+            .map(|e| e.level)
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -503,5 +569,75 @@ mod tests {
         // Non-tool items use hand speed
         let block_stack = ItemStack::new(ItemType::Block(1), 64);
         assert_eq!(block_stack.mining_speed_multiplier(), 1.0);
+    }
+
+    #[test]
+    fn test_enchantment_application() {
+        let mut pickaxe = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+
+        // Initially no enchantments
+        assert!(pickaxe.get_enchantments().is_empty());
+        assert!(!pickaxe.has_enchantment(EnchantmentType::Efficiency));
+
+        // Add Efficiency enchantment
+        let efficiency = Enchantment::new(EnchantmentType::Efficiency, 3);
+        assert!(pickaxe.add_enchantment(efficiency));
+
+        // Verify enchantment was added
+        assert_eq!(pickaxe.get_enchantments().len(), 1);
+        assert!(pickaxe.has_enchantment(EnchantmentType::Efficiency));
+        assert_eq!(pickaxe.enchantment_level(EnchantmentType::Efficiency), 3);
+
+        // Add another compatible enchantment
+        let unbreaking = Enchantment::new(EnchantmentType::Unbreaking, 2);
+        assert!(pickaxe.add_enchantment(unbreaking));
+        assert_eq!(pickaxe.get_enchantments().len(), 2);
+    }
+
+    #[test]
+    fn test_enchantment_upgrade() {
+        let mut sword = ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Iron), 1);
+
+        // Add Sharpness I
+        let sharpness1 = Enchantment::new(EnchantmentType::Sharpness, 1);
+        assert!(sword.add_enchantment(sharpness1));
+        assert_eq!(sword.enchantment_level(EnchantmentType::Sharpness), 1);
+
+        // Upgrade to Sharpness III
+        let sharpness3 = Enchantment::new(EnchantmentType::Sharpness, 3);
+        assert!(sword.add_enchantment(sharpness3));
+        assert_eq!(sword.enchantment_level(EnchantmentType::Sharpness), 3);
+
+        // Still only one enchantment (upgraded, not duplicated)
+        assert_eq!(sword.get_enchantments().len(), 1);
+    }
+
+    #[test]
+    fn test_enchantment_incompatibility() {
+        let mut pickaxe = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+
+        // Add Silk Touch
+        let silk_touch = Enchantment::new(EnchantmentType::SilkTouch, 1);
+        assert!(pickaxe.add_enchantment(silk_touch));
+
+        // Try to add Fortune (incompatible with Silk Touch)
+        let fortune = Enchantment::new(EnchantmentType::Fortune, 3);
+        assert!(!pickaxe.add_enchantment(fortune)); // Should fail
+
+        // Still only Silk Touch
+        assert_eq!(pickaxe.get_enchantments().len(), 1);
+        assert!(pickaxe.has_enchantment(EnchantmentType::SilkTouch));
+        assert!(!pickaxe.has_enchantment(EnchantmentType::Fortune));
+    }
+
+    #[test]
+    fn test_non_tool_not_enchantable() {
+        let mut block = ItemStack::new(ItemType::Block(1), 64);
+
+        // Blocks cannot be enchanted
+        assert!(!block.is_enchantable());
+
+        let efficiency = Enchantment::new(EnchantmentType::Efficiency, 1);
+        assert!(!block.add_enchantment(efficiency));
     }
 }
