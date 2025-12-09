@@ -1,14 +1,17 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 27 - Updated: 2025-12-09
+## Iteration 28 - Updated: 2025-12-09
 
-### ENCHANTING TABLE WORLD INTEGRATION COMPLETE! 🔮
+### ENCHANTMENT APPLICATION MECHANICS COMPLETE! 🔮
 
-**Iteration 27 completed** the enchanting table world integration, advancing Enchanting from ~30% to ~40%. Enchanting tables now work in-game with full UI, bookshelf detection, and enchantment option display.
+**Iteration 28 completed** enchantment application mechanics, advancing Enchanting from ~40% to ~55%. Players can now actually enchant their tools - enchantments are applied to items, XP is consumed, and the UI shows whether the selected item is enchantable.
 
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 27: ENCHANTING TABLE WORLD INTEGRATION COMPLETE! 🔮
+**Iteration 27 completed** the enchanting table world integration, advancing Enchanting from ~30% to ~40%. Enchanting tables work in-game with full UI, bookshelf detection, and enchantment option display.
 
 ### Iteration 26: ENCHANTING TABLE STATE MANAGEMENT COMPLETE! 🔮
 **Iteration 26 completed** the enchanting table state management system, advancing Enchanting from ~15% to ~30%. The EnchantingTableState block entity handles item/lapis slots, bookshelf counting, XP cost calculations, and enchantment option generation.
@@ -113,10 +116,10 @@
 **Missing for completion**:
 1. Sword sweep attack (hit multiple entities in arc when using sword)
 
-### ⚠️ PARTIALLY IMPLEMENTED (~40% complete)
+### ⚠️ PARTIALLY IMPLEMENTED (~55% complete)
 
-#### Enchanting System (~40% complete)
-**Location**: `crates/core/src/enchantment.rs`, `crates/world/src/enchanting.rs`, `src/game.rs`
+#### Enchanting System (~55% complete)
+**Location**: `crates/core/src/enchantment.rs`, `crates/core/src/item.rs`, `crates/world/src/enchanting.rs`, `src/game.rs`
 - ✅ **Lapis lazuli item type** (iteration 25: LapisLazuli in ItemType enum)
 - ✅ **Lapis ore block** (iteration 25: ID 98, drops 6 lapis, requires stone pickaxe)
 - ✅ **Enchanting table block** (iteration 25: ID 99 in blocks.json)
@@ -134,14 +137,14 @@
 - ✅ **Enchanting UI** (iteration 27: shows item slot, lapis, bookshelf count, enchant options)
 - ✅ **Block interaction** (iteration 27: right-click enchanting table opens UI)
 - ✅ **Bookshelf counting** (iteration 27: count_nearby_bookshelves() in 5x5x2 area)
-- ❌ **No enchantment application** (clicking enchant doesn't apply to item)
-- ❌ **No XP consumption** (enchanting doesn't consume player XP)
-- ❌ **No enchantment effects** (no actual effect on tools/weapons/armor)
+- ✅ **Enchantment application** (iteration 28: ItemStack.add_enchantment() with compatibility)
+- ✅ **XP consumption** (iteration 28: PlayerXP.consume_levels() when enchanting)
+- ✅ **UI-hotbar integration** (iteration 28: enchants selected hotbar item)
+- ✅ **Enchantment queries** (iteration 28: has_enchantment(), enchantment_level())
+- ❌ **No enchantment effects** (enchantments don't modify gameplay yet)
 
 **Missing for completion**:
-1. Enchantment application mechanics (apply enchantments to items in inventory)
-2. XP consumption when enchanting (subtract levels from player)
-3. Enchantment effect implementations (Efficiency speeds mining, Sharpness adds damage, etc.)
+1. Enchantment effect implementations (Efficiency speeds mining, Sharpness adds damage, etc.)
 
 ### ❌ NOT IMPLEMENTED (0%)
 
@@ -250,12 +253,13 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Block interaction (right-click to open)
    - Result: Enchanting tables now work in-game with full UI
 
-7. **Enchantment Application** (Enchanting: 40% → 60%) - NEXT TARGET
-   - **Effort**: MEDIUM (4-6 hours, 2 iterations)
-   - **Impact**: HIGH (makes enchanting functional)
-   - **What**: Apply enchantments to items, consume XP on enchant
+7. ✅ **Enchantment Application** (Enchanting: 40% → 55%) - COMPLETED ITERATION 28
+   - ✅ ItemStack.add_enchantment() with compatibility checking and level upgrades
+   - ✅ PlayerXP.consume_levels() for XP consumption when enchanting
+   - ✅ UI-hotbar integration: enchants selected hotbar item
+   - ✅ Enchantment query methods: has_enchantment(), enchantment_level()
 
-8. **Enchantment Effect Implementations** (Enchanting: 60% → 95%)
+8. **Enchantment Effect Implementations** (Enchanting: 55% → 95%) - NEXT TARGET
    - **Effort**: VERY HIGH (10-12 hours, 4-5 iterations)
    - **Impact**: VERY HIGH (makes enchantments functional)
    - **What**: Efficiency mining speed, Sharpness damage, Protection armor reduction, etc.
@@ -275,7 +279,7 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 ---
 
-## Commits Made (17 total)
+## Commits Made (18 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -293,7 +297,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 14. Iteration 24: Added XP orb collection system (commit 90c7dac)
 15. Iteration 25: Added enchantment system foundation (commit 305892c)
 16. Iteration 26: Added enchanting table state management (commit 2cba62a)
-17. **Iteration 27: Integrated enchanting table into game world (commit 2050c0d)**
+17. Iteration 27: Integrated enchanting table into game world (commit 2050c0d)
+18. **Iteration 28: Added enchantment application mechanics (commit 659e16b)**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -318,12 +323,12 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~20% of total roadmap complete (up from ~19% after iteration 26)
-- Phase 1 (Critical): ~81% complete (up from ~79%)
+**Overall Progress**: ~21% of total roadmap complete (up from ~20% after iteration 27)
+- Phase 1 (Critical): ~83% complete (up from ~81%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24, up from 40%)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
-  - Enchanting: ~40% (iteration 27, up from 30%)
+  - Enchanting: ~55% (iteration 28, up from 40%)
   - Brewing: 0%
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
@@ -360,9 +365,9 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - Result: Enchanting tables now work in-game with full UI, bookshelf detection, enchant options
 
 6. **Iterations 28-31**: Complete enchanting system - IN PROGRESS
-   - Iteration 28: Enchantment application (Enchanting: 40% → 60%)
-   - Iteration 29-31: Enchantment effect implementations (Enchanting: 60% → 95%)
-   - Remaining: ~4 iterations
+   - ✅ Iteration 28: Enchantment application (Enchanting: 40% → 55%) - DONE
+   - Iteration 29-31: Enchantment effect implementations (Enchanting: 55% → 95%)
+   - Remaining: ~3 iterations
    - Major Phase 1 requirement
    - Enables progression features
 
@@ -370,4 +375,4 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - Brewing: 0% complete (major Phase 1 requirement)
    - XP Bar UI: Experience 70% → 80% (polish)
 
-**Focus**: Iteration 27 completed world storage integration (30% → 40%). Phase 1 now 81% complete. Next: Enchantment application mechanics (40% → 60%).
+**Focus**: Iteration 28 completed enchantment application mechanics (40% → 55%). Phase 1 now ~83% complete. Next: Enchantment effect implementations (55% → 95%).
