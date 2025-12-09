@@ -20,11 +20,11 @@ use mdminecraft_ui3d::render::{
 };
 use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
-    ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, FurnaceState,
-    Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor,
-    Projectile, ProjectileManager, TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR,
-    BLOCK_CRAFTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
-    CHUNK_SIZE_Z,
+    ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, Chunk, ChunkPos, EnchantingTableState,
+    FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType,
+    PlayerArmor, Projectile, ProjectileManager, TerrainGenerator, Voxel, WeatherState,
+    WeatherToggle, BLOCK_AIR, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE,
+    BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -842,6 +842,12 @@ pub struct GameWorld {
     open_furnace_pos: Option<IVec3>,
     /// Furnace states by position
     furnaces: HashMap<IVec3, FurnaceState>,
+    /// Whether enchanting table UI is open
+    enchanting_open: bool,
+    /// Currently open enchanting table position (if any)
+    open_enchanting_pos: Option<IVec3>,
+    /// Enchanting table states by position
+    enchanting_tables: HashMap<IVec3, EnchantingTableState>,
     /// Player armor (helmet, chestplate, leggings, boots)
     player_armor: PlayerArmor,
     /// Projectile manager for arrows and other projectiles
@@ -1074,6 +1080,9 @@ impl GameWorld {
             furnace_open: false,
             open_furnace_pos: None,
             furnaces: HashMap::new(),
+            enchanting_open: false,
+            open_enchanting_pos: None,
+            enchanting_tables: HashMap::new(),
             player_armor: PlayerArmor::new(),
             projectiles: ProjectileManager::new(),
             bow_charge: 0.0,
@@ -1928,6 +1937,9 @@ impl GameWorld {
                         Some(BLOCK_FURNACE) | Some(BLOCK_FURNACE_LIT) => {
                             self.open_furnace(hit.block_pos);
                         }
+                        Some(BLOCK_ENCHANTING_TABLE) => {
+                            self.open_enchanting_table(hit.block_pos);
+                        }
                         _ => {
                             self.handle_block_placement(hit);
                         }
@@ -2205,6 +2217,7 @@ impl GameWorld {
         let mut close_inventory_requested = false;
         let mut close_crafting_requested = false;
         let mut close_furnace_requested = false;
+        let mut close_enchanting_requested = false;
         let mut crafted_item: Option<ItemStack> = None;
 
         if let Some(frame) = self.renderer.begin_frame() {
@@ -2350,6 +2363,7 @@ impl GameWorld {
             let inventory_open = self.inventory_open;
             let crafting_open = self.crafting_open;
             let furnace_open = self.furnace_open;
+            let enchanting_open = self.enchanting_open;
             let mut respawn_clicked = false;
             let mut menu_clicked = false;
 
@@ -2396,6 +2410,16 @@ impl GameWorld {
                             if let Some(pos) = self.open_furnace_pos {
                                 if let Some(furnace) = self.furnaces.get_mut(&pos) {
                                     close_furnace_requested = render_furnace(ctx, furnace);
+                                }
+                            }
+                        }
+
+                        // Show enchanting table if open
+                        if enchanting_open {
+                            if let Some(pos) = self.open_enchanting_pos {
+                                if let Some(table) = self.enchanting_tables.get_mut(&pos) {
+                                    close_enchanting_requested =
+                                        render_enchanting_table(ctx, table, &self.player_xp);
                                 }
                             }
                         }
@@ -2460,6 +2484,11 @@ impl GameWorld {
         // Handle furnace close
         if close_furnace_requested {
             self.close_furnace();
+        }
+
+        // Handle enchanting table close
+        if close_enchanting_requested {
+            self.close_enchanting_table();
         }
 
         self.input.reset_frame();
@@ -3238,6 +3267,87 @@ impl GameWorld {
         // Capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
         tracing::info!("Furnace closed");
+    }
+
+    /// Open enchanting table UI at the given position
+    fn open_enchanting_table(&mut self, block_pos: IVec3) {
+        self.enchanting_open = true;
+        self.open_enchanting_pos = Some(block_pos);
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        // Count nearby bookshelves first (before borrowing enchanting_tables)
+        let bookshelf_count = self.count_nearby_bookshelves(block_pos);
+        // Create enchanting table state if it doesn't exist and update bookshelf count
+        let table = self.enchanting_tables.entry(block_pos).or_default();
+        table.set_bookshelf_count(bookshelf_count);
+        // Release cursor for UI interaction
+        let _ = self.input.enter_ui_overlay(&self.window);
+        tracing::info!(
+            "Enchanting table opened at {:?} with {} bookshelves",
+            block_pos,
+            bookshelf_count
+        );
+    }
+
+    /// Close enchanting table UI
+    fn close_enchanting_table(&mut self) {
+        self.enchanting_open = false;
+        self.open_enchanting_pos = None;
+        // Capture cursor for gameplay
+        let _ = self.input.enter_gameplay(&self.window);
+        tracing::info!("Enchanting table closed");
+    }
+
+    /// Count bookshelves within 2 blocks of the enchanting table (vanilla mechanics)
+    fn count_nearby_bookshelves(&self, table_pos: IVec3) -> u32 {
+        // Vanilla: bookshelves must be 2 blocks away, 1 block higher, with air in between
+        // Simplified: check 5x5x2 area centered on table, 1 block up
+        let bookshelf_id: BlockId = 47; // Bookshelf block ID from blocks.json
+
+        let mut count = 0u32;
+        for dy in 0..2 {
+            for dx in -2i32..=2 {
+                for dz in -2i32..=2 {
+                    // Skip center 3x3 area (too close to table)
+                    if dx.abs() <= 1 && dz.abs() <= 1 {
+                        continue;
+                    }
+
+                    let check_pos = IVec3::new(
+                        table_pos.x + dx,
+                        table_pos.y + dy,
+                        table_pos.z + dz,
+                    );
+
+                    if let Some(block_id) = self.get_block_at(check_pos) {
+                        if block_id == bookshelf_id {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        count.min(15) // Cap at 15 bookshelves (vanilla limit)
+    }
+
+    /// Get block ID at world position
+    fn get_block_at(&self, pos: IVec3) -> Option<BlockId> {
+        let chunk_x = pos.x.div_euclid(16);
+        let chunk_z = pos.z.div_euclid(16);
+        let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+        if let Some(chunk) = self.chunks.get(&chunk_pos) {
+            let local_x = pos.x.rem_euclid(16) as usize;
+            let local_y = pos.y as usize;
+            let local_z = pos.z.rem_euclid(16) as usize;
+
+            if local_y < 256 {
+                return Some(chunk.voxel(local_x, local_y, local_z).id);
+            }
+        }
+        None
     }
 
     /// Update all furnaces in the world
@@ -4478,6 +4588,208 @@ fn render_furnace_slot(ui: &mut egui::Ui, item: Option<&(DroppedItemType, u32)>,
             });
         }
     });
+}
+
+/// Render the enchanting table UI
+/// Returns true if the close button was clicked
+fn render_enchanting_table(
+    ctx: &egui::Context,
+    table: &mut EnchantingTableState,
+    player_xp: &PlayerXP,
+) -> bool {
+    use mdminecraft_world::LAPIS_COSTS;
+
+    let mut close_clicked = false;
+
+    // Semi-transparent dark overlay
+    egui::Area::new(egui::Id::new("enchanting_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    // Enchanting table window
+    egui::Window::new("Enchanting Table")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(350.0);
+
+            // Close button
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Enchanting Table").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            // Status info
+            ui.horizontal(|ui| {
+                ui.label(format!("Bookshelves: {}", table.bookshelf_count));
+                ui.add_space(20.0);
+                ui.label(format!("Lapis: {}", table.lapis_count));
+                ui.add_space(20.0);
+                ui.label(format!("Your Level: {}", player_xp.level));
+            });
+
+            ui.add_space(10.0);
+
+            // Item slot
+            ui.horizontal(|ui| {
+                ui.label("Item to Enchant:");
+                let frame = egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+                    .inner_margin(4.0);
+
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(40.0, 40.0));
+                    if let Some((item_id, count)) = &table.item {
+                        ui.vertical(|ui| {
+                            ui.label(format!("Item #{}", item_id));
+                            if *count > 1 {
+                                ui.label(
+                                    egui::RichText::new(format!("x{}", count))
+                                        .size(11.0)
+                                        .color(egui::Color32::YELLOW),
+                                );
+                            }
+                        });
+                    } else {
+                        ui.label("Empty");
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(5.0);
+
+            // Enchantment options
+            ui.label(egui::RichText::new("Enchantment Options:").size(14.0).strong());
+            ui.add_space(5.0);
+
+            // Track which slot was clicked (to apply after iteration)
+            let mut apply_slot: Option<usize> = None;
+
+            // Copy data we need to display (avoids borrow issues)
+            let options_copy: [(Option<_>, u32); 3] = [
+                (table.enchant_options[0], LAPIS_COSTS[0]),
+                (table.enchant_options[1], LAPIS_COSTS[1]),
+                (table.enchant_options[2], LAPIS_COSTS[2]),
+            ];
+            let lapis_count = table.lapis_count;
+
+            for (slot_idx, (option, lapis_cost)) in options_copy.iter().enumerate() {
+                if let Some(offer) = option {
+                    let can_afford =
+                        player_xp.level >= offer.level_cost && lapis_count >= *lapis_cost;
+
+                    let text_color = if can_afford {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::DARK_GRAY
+                    };
+
+                    ui.horizontal(|ui| {
+                        // Slot number
+                        ui.label(
+                            egui::RichText::new(format!("{}.", slot_idx + 1))
+                                .size(14.0)
+                                .color(text_color),
+                        );
+
+                        // Enchantment name and level
+                        let enchant_name = format!(
+                            "{:?} {}",
+                            offer.enchantment.enchantment_type, offer.enchantment.level
+                        );
+                        ui.label(
+                            egui::RichText::new(enchant_name)
+                                .size(13.0)
+                                .color(text_color),
+                        );
+
+                        ui.add_space(10.0);
+
+                        // Cost info
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Cost: {} levels, {} lapis",
+                                offer.level_cost, lapis_cost
+                            ))
+                            .size(11.0)
+                            .color(if can_afford {
+                                egui::Color32::GREEN
+                            } else {
+                                egui::Color32::RED
+                            }),
+                        );
+
+                        // Enchant button (disabled if can't afford)
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let button = egui::Button::new("Enchant").sense(if can_afford {
+                                egui::Sense::click()
+                            } else {
+                                egui::Sense::hover()
+                            });
+                            if ui.add(button).clicked() && can_afford {
+                                apply_slot = Some(slot_idx);
+                            }
+                        });
+                    });
+                } else {
+                    ui.label(
+                        egui::RichText::new(format!("{}. ---", slot_idx + 1))
+                            .size(14.0)
+                            .color(egui::Color32::DARK_GRAY),
+                    );
+                }
+
+                ui.add_space(3.0);
+            }
+
+            // Apply enchantment after the loop (now we can mutably borrow table)
+            if let Some(slot_idx) = apply_slot {
+                if let Some((_enchantment, _levels_consumed)) = table.apply_enchantment(slot_idx) {
+                    tracing::info!("Applied enchantment from slot {}!", slot_idx + 1);
+                }
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+
+            // Test buttons (temporary, for testing)
+            ui.horizontal(|ui| {
+                if ui.button("+ Test Item").clicked() {
+                    table.add_item(1000, 1); // Add a pickaxe
+                }
+                if ui.button("+ Lapis").clicked() {
+                    table.add_lapis(3);
+                }
+                if ui.button("Take Item").clicked() {
+                    let _ = table.take_item();
+                }
+            });
+
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
 }
 
 /// Convert an ItemType to DroppedItemType for armor pieces

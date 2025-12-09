@@ -243,14 +243,13 @@ impl EnchantingTableState {
 /// Check if an item ID represents an enchantable item.
 pub fn is_enchantable_id(item_id: ItemId) -> bool {
     // Tools are in range TOOL_ID_START to TOOL_ID_END
-    (item_id >= TOOL_ID_START && item_id <= TOOL_ID_END)
-        || item_id == BOW_ID
+    (TOOL_ID_START..=TOOL_ID_END).contains(&item_id) || item_id == BOW_ID
 }
 
 /// Get the tool category from an item ID.
 /// Returns: 0 = not a tool, 1 = mining tool, 2 = weapon
 fn get_tool_category(item_id: ItemId) -> u8 {
-    if item_id < TOOL_ID_START || item_id > TOOL_ID_END {
+    if !(TOOL_ID_START..=TOOL_ID_END).contains(&item_id) {
         if item_id == BOW_ID {
             return 2; // Bow is a weapon
         }
