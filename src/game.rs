@@ -1454,6 +1454,52 @@ impl GameWorld {
         self.enforce_particle_budget();
     }
 
+    /// Apply Mending enchantment effect: use XP to repair tools with Mending.
+    ///
+    /// Returns the amount of XP that should go to the player (after Mending uses some).
+    /// In vanilla Minecraft, 1 XP restores 2 durability.
+    fn apply_mending(&mut self, xp_amount: u32) -> u32 {
+        let mut remaining_xp = xp_amount;
+
+        // Check each hotbar slot for tools with Mending that need repair
+        for slot in &mut self.hotbar.slots {
+            if remaining_xp == 0 {
+                break;
+            }
+
+            if let Some(stack) = slot {
+                // Only process tools with durability and Mending enchantment
+                if let Some(current_dur) = stack.durability {
+                    if stack.has_enchantment(EnchantmentType::Mending) {
+                        // Calculate max durability for this tool
+                        let max_dur = stack.max_durability().unwrap_or(0);
+
+                        if current_dur < max_dur {
+                            // Each XP restores 2 durability
+                            let missing_dur = max_dur - current_dur;
+                            let xp_needed = (missing_dur + 1) / 2; // Ceiling division
+                            let xp_to_use = remaining_xp.min(xp_needed);
+                            let dur_restored = xp_to_use * 2;
+
+                            // Apply repair
+                            stack.durability = Some((current_dur + dur_restored).min(max_dur));
+                            remaining_xp -= xp_to_use;
+
+                            tracing::debug!(
+                                "Mending restored {} durability to {:?} (used {} XP)",
+                                dur_restored,
+                                stack.item_type,
+                                xp_to_use
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        remaining_xp
+    }
+
     fn spawn_block_break_particles(&mut self, block_center: glam::Vec3, block_id: BlockId) {
         if block_id == BLOCK_AIR {
             return;
@@ -1743,14 +1789,25 @@ impl GameWorld {
             !orb.update(dt, player_pos) // Remove if update returns true (despawned)
         });
 
-        // Add collected XP to player
+        // Add collected XP to player (Mending uses some XP to repair tools first)
         if xp_collected > 0 {
-            self.player_xp.add_xp(xp_collected);
-            tracing::info!("Collected {} XP (Level: {}, Progress: {:.1}%)",
-                xp_collected,
-                self.player_xp.level,
-                self.player_xp.progress() * 100.0
-            );
+            let xp_for_player = self.apply_mending(xp_collected);
+            if xp_for_player > 0 {
+                self.player_xp.add_xp(xp_for_player);
+                tracing::info!(
+                    "Collected {} XP (Level: {}, Progress: {:.1}%){}",
+                    xp_for_player,
+                    self.player_xp.level,
+                    self.player_xp.progress() * 100.0,
+                    if xp_for_player < xp_collected {
+                        format!(" ({} used for Mending)", xp_collected - xp_for_player)
+                    } else {
+                        String::new()
+                    }
+                );
+            } else if xp_collected > 0 {
+                tracing::info!("All {} XP used for Mending", xp_collected);
+            }
         }
 
         self.frame_count = self.frame_count.wrapping_add(1);
@@ -1909,7 +1966,14 @@ impl GameWorld {
                 let mut equipped_armor = false;
                 if let Some(stack) = &self.hotbar.slots[self.hotbar.selected] {
                     if let Some(dropped_type) = item_type_to_armor_dropped(stack.item_type) {
-                        if let Some(armor_piece) = ArmorPiece::from_item(dropped_type) {
+                        // Extract enchantments from the ItemStack
+                        let enchantments = stack
+                            .enchantments
+                            .clone()
+                            .unwrap_or_default();
+                        if let Some(armor_piece) =
+                            ArmorPiece::from_item_with_enchantments(dropped_type, enchantments)
+                        {
                             // Equip the armor piece
                             let old_piece = self.player_armor.equip(armor_piece);
                             // Consume the item from hotbar
@@ -2121,19 +2185,49 @@ impl GameWorld {
                     let tool = self.hotbar.selected_tool();
                     let can_harvest = self.block_properties.get(block_id).can_harvest(tool);
                     if can_harvest {
-                        if let Some((drop_type, count)) = DroppedItemType::from_block(block_id) {
+                        // Check for Silk Touch and Fortune enchantments on the tool
+                        let (has_silk_touch, fortune_level) =
+                            if let Some(stack) = &self.hotbar.slots[self.hotbar.selected] {
+                                let silk_touch = stack.has_enchantment(EnchantmentType::SilkTouch);
+                                let fortune = stack.enchantment_level(EnchantmentType::Fortune);
+                                (silk_touch, fortune)
+                            } else {
+                                (false, 0)
+                            };
+
+                        // Determine what to drop based on enchantments
+                        let drop = if has_silk_touch {
+                            // Silk Touch: drop the block itself
+                            DroppedItemType::silk_touch_drop(block_id)
+                        } else if fortune_level > 0 {
+                            // Fortune: increased drops for ores
+                            let random = (self.frame_count as f64 / 1000.0).fract(); // Simple RNG
+                            DroppedItemType::fortune_drop(block_id, fortune_level, random)
+                        } else {
+                            // Normal drop
+                            DroppedItemType::from_block(block_id)
+                        };
+
+                        if let Some((drop_type, count)) = drop {
                             let drop_x = hit.block_pos.x as f64 + 0.5;
                             let drop_y = hit.block_pos.y as f64 + 0.5;
                             let drop_z = hit.block_pos.z as f64 + 0.5;
                             self.item_manager
                                 .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
                             tracing::debug!(
-                                "Dropped {:?} x{} at ({:.1}, {:.1}, {:.1})",
+                                "Dropped {:?} x{} at ({:.1}, {:.1}, {:.1}){}",
                                 drop_type,
                                 count,
                                 drop_x,
                                 drop_y,
-                                drop_z
+                                drop_z,
+                                if has_silk_touch {
+                                    " (Silk Touch)"
+                                } else if fortune_level > 0 {
+                                    " (Fortune)"
+                                } else {
+                                    ""
+                                }
                             );
                         }
                     }

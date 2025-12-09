@@ -1,22 +1,24 @@
 # Ralph Loop Progress - Minecraft Feature Parity
 
-## Iteration 29 - Updated: 2025-12-09
+## Iteration 30 - Updated: 2025-12-09
 
-### ENCHANTMENT EFFECTS IMPLEMENTED! ⚔️
+### ENCHANTING SYSTEM COMPLETE! 100% 🎉
 
-**Iteration 29 completed** enchantment effect implementations, advancing Enchanting from ~55% to ~95%. Enchantments now actually modify gameplay:
+**Iteration 30 completed** the remaining enchantment implementations, advancing Enchanting from ~95% to 100%. All 12 enchantment types now have functional effects:
 
-- **Efficiency**: Mining speed bonus (26% per level) - faster block breaking
-- **Sharpness**: Attack damage bonus (0.5 + 0.5 * level) - more damage to mobs
-- **Knockback**: Increased knockback (base 0.5 + 0.4 * level) - push mobs back further
-- **Fire Aspect**: Sets mobs on fire (80 ticks * level) - fire damage over time
-- **Unbreaking**: Reduces durability loss (1/(level+1) probability) - tools last longer
+- **Protection**: Armor damage reduction (4% per level, stacks across armor pieces, max 64%)
+- **Silk Touch**: Blocks drop themselves instead of processed items (stone→stone, ore→ore block)
+- **Fortune**: Increased drops for ores (bonus drops based on level, affects coal/diamond/lapis)
+- **Mending**: XP repairs tools (1 XP = 2 durability, repairs hotbar tools with Mending)
 
-Also added fire damage system to mobs with fire_ticks field and update logic.
+Also added `LapisOre` ItemType and armor enchantment support with `ArmorPiece.enchantments` field.
 
 ---
 
 ## Previous Iterations Summary
+
+### Iteration 29: ENCHANTMENT EFFECTS IMPLEMENTED! ⚔️
+**Iteration 29 completed** core enchantment effects: Efficiency (mining speed), Sharpness (damage), Knockback, Fire Aspect (mob fire), and Unbreaking (durability). Also added fire damage system to mobs.
 
 ### Iteration 28: ENCHANTMENT APPLICATION MECHANICS COMPLETE! 🔮
 **Iteration 28 completed** enchantment application mechanics, advancing Enchanting from ~40% to ~55%. Players can now actually enchant their tools - enchantments are applied to items, XP is consumed, and the UI shows whether the selected item is enchantable.
@@ -127,10 +129,8 @@ Also added fire damage system to mobs with fire_ticks field and update logic.
 **Missing for completion**:
 1. Sword sweep attack (hit multiple entities in arc when using sword)
 
-### ✅ NEARLY COMPLETE (~95%)
-
-#### Enchanting System (~95% complete)
-**Location**: `crates/core/src/enchantment.rs`, `crates/core/src/item.rs`, `crates/world/src/enchanting.rs`, `crates/world/src/mob.rs`, `src/game.rs`
+#### Enchanting System (100% complete) ✅
+**Location**: `crates/core/src/enchantment.rs`, `crates/core/src/item.rs`, `crates/world/src/enchanting.rs`, `crates/world/src/armor.rs`, `crates/world/src/drop_item.rs`, `src/game.rs`
 - ✅ **Lapis lazuli item type** (iteration 25: LapisLazuli in ItemType enum)
 - ✅ **Lapis ore block** (iteration 25: ID 98, drops 6 lapis, requires stone pickaxe)
 - ✅ **Enchanting table block** (iteration 25: ID 99 in blocks.json)
@@ -158,13 +158,11 @@ Also added fire damage system to mobs with fire_ticks field and update logic.
 - ✅ **Fire Aspect effect** (iteration 29: sets mobs on fire, 80 ticks * level)
 - ✅ **Unbreaking effect** (iteration 29: 1/(level+1) probability of durability loss)
 - ✅ **Mob fire system** (iteration 29: fire_ticks field, fire damage 1 HP/sec)
-- ❌ **Remaining enchantments** (Protection, Silk Touch, Fortune, Mending not implemented)
-
-**Missing for completion**:
-1. Protection enchantment (armor damage reduction)
-2. Silk Touch enchantment (mine blocks without breaking)
-3. Fortune enchantment (increased drops)
-4. Mending enchantment (XP repairs tools)
+- ✅ **Protection effect** (iteration 30: 4% damage reduction per level, stacks across armor)
+- ✅ **Silk Touch effect** (iteration 30: blocks drop themselves, not processed items)
+- ✅ **Fortune effect** (iteration 30: bonus drops for ores based on level)
+- ✅ **Mending effect** (iteration 30: XP repairs tools, 1 XP = 2 durability)
+- ✅ **Armor enchantments** (iteration 30: ArmorPiece.enchantments field with from_item_with_enchantments())
 
 ### ❌ NOT IMPLEMENTED (0%)
 
@@ -279,27 +277,32 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ UI-hotbar integration: enchants selected hotbar item
    - ✅ Enchantment query methods: has_enchantment(), enchantment_level()
 
-8. **Enchantment Effect Implementations** (Enchanting: 55% → 95%) - NEXT TARGET
-   - **Effort**: VERY HIGH (10-12 hours, 4-5 iterations)
-   - **Impact**: VERY HIGH (makes enchantments functional)
-   - **What**: Efficiency mining speed, Sharpness damage, Protection armor reduction, etc.
+8. ✅ **Enchantment Effect Implementations** (Enchanting: 55% → 95%) - COMPLETED ITERATION 29
+   - ✅ Efficiency, Sharpness, Knockback, Fire Aspect, Unbreaking effects
+   - ✅ Fire damage system for mobs
+
+9. ✅ **Remaining Enchantments** (Enchanting: 95% → 100%) - COMPLETED ITERATION 30
+   - ✅ Protection enchantment (armor damage reduction)
+   - ✅ Silk Touch enchantment (blocks drop themselves)
+   - ✅ Fortune enchantment (increased ore drops)
+   - ✅ Mending enchantment (XP repairs tools)
 
 ### 🎯 Priority 3: Other Missing Features
 
-9. **XP Bar UI** (Experience: 70% → 80%)
+10. **XP Bar UI** (Experience: 70% → 80%)
    - **Effort**: LOW-MEDIUM (2-3 hours, single iteration)
    - **Impact**: MEDIUM (completes Experience UI)
    - **Where**: UI rendering code
    - **What**: Visual XP bar showing current level and progress percentage
 
-10. **Brewing Stand Block** (Brewing: 0% → 50%)
+11. **Brewing Stand Block** (Brewing: 0% → 50%)
    - **Effort**: VERY HIGH (12-16 hours, 5-7 iterations)
    - **Impact**: VERY HIGH (major Phase 1 requirement)
    - **What**: Brewing stand with blaze powder fuel, potion recipes, status effects
 
 ---
 
-## Commits Made (19 total)
+## Commits Made (20 total)
 
 1. Iteration 2: Added attack damage properties to tools
 2. Iteration 3: Added harvest level infrastructure
@@ -319,7 +322,8 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 16. Iteration 26: Added enchanting table state management (commit 2cba62a)
 17. Iteration 27: Integrated enchanting table into game world (commit 2050c0d)
 18. Iteration 28: Added enchantment application mechanics (commit 659e16b)
-19. **Iteration 29: Implemented enchantment effects (Efficiency, Sharpness, Knockback, Fire Aspect, Unbreaking)**
+19. Iteration 29: Implemented enchantment effects (Efficiency, Sharpness, Knockback, Fire Aspect, Unbreaking) (commit 55037a4)
+20. **Iteration 30: Completed enchanting system (Protection, Silk Touch, Fortune, Mending)**
 
 **Iteration 21**: Documentation only, no code changes
 
@@ -344,19 +348,19 @@ Based on iteration 21 exploration, these are the most valuable next implementati
 
 **FALSE** - Significant work remaining across all phases.
 
-**Overall Progress**: ~24% of total roadmap complete (up from ~21% after iteration 28)
-- Phase 1 (Critical): ~90% complete (up from ~83%)
+**Overall Progress**: ~25% of total roadmap complete (up from ~24% after iteration 29)
+- Phase 1 (Critical): ~92% complete (up from ~90%)
   - Combat: 95% (iterations 22-23)
   - Experience: ~70% (iteration 24, up from 40%)
   - Tools, Hunger, Health, Crafting, Armor: 85-98%
-  - Enchanting: ~95% (iteration 29, up from 55%)
+  - Enchanting: 100% COMPLETE (iteration 30)
   - Brewing: 0%
 - Phase 2 (Villages): 0% complete
 - Phase 3 (Structures): 0% complete
 - Phase 4 (Content): ~41% complete (blocks only)
 - Phase 5 (Advanced): 0% complete
 
-**Estimated Time to Completion**: 17-25 weeks remaining (per roadmap estimate of 22-30 weeks total)
+**Estimated Time to Completion**: 16-24 weeks remaining (per roadmap estimate of 22-30 weeks total)
 
 ---
 
@@ -385,15 +389,17 @@ Based on iteration 21 exploration, these are the most valuable next implementati
    - ✅ Iteration 27: Integrated EnchantingTableState into GameWorld (Enchanting: 30% → 40%)
    - Result: Enchanting tables now work in-game with full UI, bookshelf detection, enchant options
 
-6. **Iterations 28-29**: Complete enchanting system - DONE
+6. ✅ **Iterations 28-30**: Complete enchanting system - DONE
    - ✅ Iteration 28: Enchantment application (Enchanting: 40% → 55%) - DONE
-   - ✅ Iteration 29: Enchantment effect implementations (Enchanting: 55% → 95%) - DONE
-   - Implemented: Efficiency, Sharpness, Knockback, Fire Aspect, Unbreaking
-   - Added mob fire damage system
+   - ✅ Iteration 29: Core enchantment effects (Enchanting: 55% → 95%) - DONE
+     - Implemented: Efficiency, Sharpness, Knockback, Fire Aspect, Unbreaking
+     - Added mob fire damage system
+   - ✅ Iteration 30: Remaining enchantments (Enchanting: 95% → 100%) - DONE
+     - Implemented: Protection, Silk Touch, Fortune, Mending
+     - Added armor enchantment support
 
-7. **Iterations 30+**: Begin brewing system or other Phase 1 gaps
+7. **Iterations 31+**: Begin brewing system or other Phase 1 gaps
    - Brewing: 0% complete (major Phase 1 requirement)
    - XP Bar UI: Experience 70% → 80% (polish)
-   - Remaining enchantments: Protection, Silk Touch, Fortune, Mending
 
-**Focus**: Iteration 29 completed enchantment effect implementations (55% → 95%). Phase 1 now ~90% complete. Next: Begin brewing system or implement remaining enchantments.
+**Focus**: Iteration 30 completed the enchanting system to 100%. Phase 1 now ~92% complete. Next: Begin brewing system or XP bar UI.
