@@ -69,13 +69,13 @@ impl StatusEffectType {
     /// Level 1 = amplifier 0, Level 2 = amplifier 1, etc.
     pub fn max_amplifier(&self) -> u8 {
         match self {
-            StatusEffectType::Speed => 2,        // Speed I-III
-            StatusEffectType::Haste => 2,        // Haste I-III
-            StatusEffectType::Strength => 2,     // Strength I-III
-            StatusEffectType::InstantHealth => 1, // Instant Health I-II
-            StatusEffectType::JumpBoost => 1,    // Jump Boost I-II
-            StatusEffectType::Regeneration => 1, // Regen I-II
-            StatusEffectType::Resistance => 3,   // Resistance I-IV
+            StatusEffectType::Speed => 2,          // Speed I-III
+            StatusEffectType::Haste => 2,          // Haste I-III
+            StatusEffectType::Strength => 2,       // Strength I-III
+            StatusEffectType::InstantHealth => 1,  // Instant Health I-II
+            StatusEffectType::JumpBoost => 1,      // Jump Boost I-II
+            StatusEffectType::Regeneration => 1,   // Regen I-II
+            StatusEffectType::Resistance => 3,     // Resistance I-IV
             StatusEffectType::FireResistance => 0, // Fire Resistance (no levels)
             StatusEffectType::WaterBreathing => 0,
             StatusEffectType::Invisibility => 0,
@@ -84,15 +84,15 @@ impl StatusEffectType {
             StatusEffectType::Saturation => 0,
             StatusEffectType::SlowFalling => 0,
             StatusEffectType::Luck => 0,
-            StatusEffectType::Slowness => 3,     // Slowness I-IV
+            StatusEffectType::Slowness => 3, // Slowness I-IV
             StatusEffectType::MiningFatigue => 2,
             StatusEffectType::InstantDamage => 1, // Instant Damage I-II
             StatusEffectType::Nausea => 0,
             StatusEffectType::Blindness => 0,
             StatusEffectType::Hunger => 2,
             StatusEffectType::Weakness => 0,
-            StatusEffectType::Poison => 1,       // Poison I-II
-            StatusEffectType::Wither => 1,       // Wither I-II
+            StatusEffectType::Poison => 1, // Poison I-II
+            StatusEffectType::Wither => 1, // Wither I-II
             StatusEffectType::BadLuck => 0,
         }
     }
@@ -382,9 +382,7 @@ impl PotionType {
             // Instant effects
             PotionType::Healing | PotionType::Harming => 0,
             // 3 minute effects (3600 ticks)
-            PotionType::NightVision | PotionType::Invisibility | PotionType::FireResistance => {
-                3600
-            }
+            PotionType::NightVision | PotionType::Invisibility | PotionType::FireResistance => 3600,
             // 3 minute effects
             PotionType::WaterBreathing => 3600,
             // 3 minute Swiftness
@@ -604,11 +602,9 @@ impl BrewingStandState {
     fn can_brew(&self) -> bool {
         if let Some((ingredient_id, _)) = &self.ingredient {
             // Check if any bottle can be brewed with this ingredient
-            for bottle in &self.bottles {
-                if let Some(potion_type) = bottle {
-                    if get_brew_result(*potion_type, *ingredient_id).is_some() {
-                        return true;
-                    }
+            for potion_type in self.bottles.iter().flatten() {
+                if get_brew_result(*potion_type, *ingredient_id).is_some() {
+                    return true;
                 }
             }
         }
@@ -752,7 +748,10 @@ mod tests {
 
         // Try to add Speed I with shorter duration - should not override
         effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 600));
-        assert_eq!(effects.get(StatusEffectType::Speed).unwrap().duration_ticks, 1200);
+        assert_eq!(
+            effects.get(StatusEffectType::Speed).unwrap().duration_ticks,
+            1200
+        );
 
         // Add Speed II - should override
         effects.add(StatusEffect::new(StatusEffectType::Speed, 1, 400));
@@ -791,8 +790,14 @@ mod tests {
     fn test_potion_type_effect() {
         assert!(PotionType::Water.effect().is_none());
         assert!(PotionType::Awkward.effect().is_none());
-        assert_eq!(PotionType::Swiftness.effect(), Some(StatusEffectType::Speed));
-        assert_eq!(PotionType::Healing.effect(), Some(StatusEffectType::InstantHealth));
+        assert_eq!(
+            PotionType::Swiftness.effect(),
+            Some(StatusEffectType::Speed)
+        );
+        assert_eq!(
+            PotionType::Healing.effect(),
+            Some(StatusEffectType::InstantHealth)
+        );
     }
 
     #[test]

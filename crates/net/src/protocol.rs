@@ -22,6 +22,13 @@ pub type BlockId = u16;
 /// Item identifier.
 pub type ItemId = u16;
 
+/// Maximum length of a chat message (characters).
+pub const MAX_CHAT_LEN: usize = 256;
+
+/// Maximum size of compressed chunk data (bytes).
+/// 16KB is enough for typical chunks (avg ~500 bytes), allows for complex ones.
+pub const MAX_CHUNK_DATA_LEN: usize = 16 * 1024;
+
 /// Messages sent from client to server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ClientMessage {
@@ -50,6 +57,26 @@ pub enum ClientMessage {
         /// Reason for disconnect.
         reason: String,
     },
+}
+
+impl ClientMessage {
+    /// Verify message limits and validity.
+    pub fn verify(&self) -> Result<(), &'static str> {
+        match self {
+            ClientMessage::Chat { text } => {
+                if text.len() > MAX_CHAT_LEN {
+                    return Err("Chat message too long");
+                }
+            }
+            ClientMessage::Disconnect { reason } => {
+                if reason.len() > 256 {
+                    return Err("Disconnect reason too long");
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 /// Messages sent from server to client.
@@ -102,6 +129,41 @@ pub enum ServerMessage {
         /// Reason for disconnect.
         reason: String,
     },
+}
+
+impl ServerMessage {
+    /// Verify message limits and validity.
+    pub fn verify(&self) -> Result<(), &'static str> {
+        match self {
+            ServerMessage::Chat { text, sender } => {
+                if text.len() > MAX_CHAT_LEN {
+                    return Err("Chat message too long");
+                }
+                if sender.len() > 32 {
+                    return Err("Sender name too long");
+                }
+            }
+            ServerMessage::ChunkData(data) => {
+                if data.compressed_data.len() > MAX_CHUNK_DATA_LEN {
+                    return Err("Chunk data too large");
+                }
+            }
+            ServerMessage::HandshakeResponse {
+                reason: Some(r), ..
+            } => {
+                if r.len() > 256 {
+                    return Err("Handshake rejection reason too long");
+                }
+            }
+            ServerMessage::Disconnect { reason } => {
+                if reason.len() > 256 {
+                    return Err("Disconnect reason too long");
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 /// Input bundle containing player actions and tick information.

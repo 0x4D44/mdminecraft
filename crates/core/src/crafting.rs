@@ -1,7 +1,7 @@
 //! Crafting system - Recipes for creating items from materials
 
+use crate::{ItemType, ToolMaterial, ToolType};
 use serde::{Deserialize, Serialize};
-use crate::{ItemType, ToolType, ToolMaterial};
 
 /// A crafting recipe that transforms input items into output items
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,11 +70,11 @@ impl ToolRecipes {
     /// Convert tool material to the corresponding crafting material item
     fn material_to_item(material: ToolMaterial) -> ItemType {
         match material {
-            ToolMaterial::Wood => ItemType::Block(2),    // Placeholder: Planks
-            ToolMaterial::Stone => ItemType::Block(3),   // Placeholder: Cobblestone
-            ToolMaterial::Iron => ItemType::Item(10),    // Placeholder: Iron Ingot
+            ToolMaterial::Wood => ItemType::Block(2), // Placeholder: Planks
+            ToolMaterial::Stone => ItemType::Block(3), // Placeholder: Cobblestone
+            ToolMaterial::Iron => ItemType::Item(10), // Placeholder: Iron Ingot
             ToolMaterial::Diamond => ItemType::Item(11), // Placeholder: Diamond
-            ToolMaterial::Gold => ItemType::Item(12),    // Placeholder: Gold Ingot
+            ToolMaterial::Gold => ItemType::Item(12), // Placeholder: Gold Ingot
         }
     }
 }
@@ -112,7 +112,10 @@ mod tests {
     fn test_tool_recipes() {
         // Test pickaxe recipe (3 material + 2 sticks)
         let recipe = ToolRecipes::get_recipe(ToolType::Pickaxe, ToolMaterial::Iron);
-        assert_eq!(recipe.output, ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron));
+        assert_eq!(
+            recipe.output,
+            ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron)
+        );
         assert_eq!(recipe.output_count, 1);
         assert_eq!(recipe.inputs.len(), 2);
         assert_eq!(recipe.inputs[0].1, 3); // 3 iron ingots

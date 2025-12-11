@@ -336,10 +336,10 @@ impl ItemType {
     pub fn silk_touch_drop(block_id: u16) -> Option<(ItemType, u32)> {
         match block_id {
             // Blocks that normally drop something else
-            1 => Some((ItemType::Stone, 1)),       // Stone drops stone instead of cobblestone
-            3 => Some((ItemType::Grass, 1)),       // Grass drops grass block instead of dirt
-            14 => Some((ItemType::CoalOre, 1)),    // Coal ore drops ore block instead of coal
-            98 => Some((ItemType::LapisOre, 1)),   // Lapis ore drops ore block instead of lapis
+            1 => Some((ItemType::Stone, 1)), // Stone drops stone instead of cobblestone
+            3 => Some((ItemType::Grass, 1)), // Grass drops grass block instead of dirt
+            14 => Some((ItemType::CoalOre, 1)), // Coal ore drops ore block instead of coal
+            98 => Some((ItemType::LapisOre, 1)), // Lapis ore drops ore block instead of lapis
             17 => Some((ItemType::DiamondOre, 1)), // Diamond ore drops ore block
             // Blocks that already drop themselves can use normal drops
             _ => ItemType::from_block(block_id),
@@ -358,7 +358,11 @@ impl ItemType {
     ///
     /// # Returns
     /// Some((item_type, count)) with potentially increased count.
-    pub fn fortune_drop(block_id: u16, fortune_level: u8, random_value: f64) -> Option<(ItemType, u32)> {
+    pub fn fortune_drop(
+        block_id: u16,
+        fortune_level: u8,
+        random_value: f64,
+    ) -> Option<(ItemType, u32)> {
         let base_drop = ItemType::from_block(block_id)?;
         let (item_type, base_count) = base_drop;
 
@@ -467,7 +471,9 @@ impl ItemType {
             crate::PotionType::Strength => Some(ItemType::PotionStrength),
             crate::PotionType::Weakness => Some(ItemType::PotionWeakness),
             // Base potions without effects - no item representation
-            crate::PotionType::Water | crate::PotionType::Mundane | crate::PotionType::Thick => None,
+            crate::PotionType::Water | crate::PotionType::Mundane | crate::PotionType::Thick => {
+                None
+            }
             // Potions not yet implemented as items
             crate::PotionType::Luck | crate::PotionType::SlowFalling => None,
         }

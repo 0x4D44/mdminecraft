@@ -8,7 +8,9 @@ use crate::{
 use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
-use mdminecraft_core::{item::potion_ids, EnchantmentType, ItemStack, ItemType, ToolMaterial, ToolType};
+use mdminecraft_core::{
+    item::potion_ids, EnchantmentType, ItemStack, ItemType, SimTick, ToolMaterial, ToolType,
+};
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, ControlMode, DebugHud, Frustum, InputContext, InputState,
     ParticleEmitter, ParticleSystem, ParticleVertex, RaycastHit, Renderer, RendererConfig,
@@ -23,9 +25,9 @@ use mdminecraft_world::{
     ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
     EnchantingTableState, FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob,
     MobSpawner, MobType, PlayerArmor, PotionType, Projectile, ProjectileManager, StatusEffect,
-    StatusEffects, TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
-    BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
-    CHUNK_SIZE_Z,
+    StatusEffects, TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR,
+    BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE,
+    BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -35,6 +37,8 @@ const MAX_PARTICLES: usize = 8_192;
 const PRECIPITATION_SPAWN_RATE: f32 = 480.0;
 const PRECIPITATION_RADIUS: f32 = 18.0;
 const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
+/// Fixed simulation tick rate (20 TPS).
+const TICK_RATE: f64 = 1.0 / 20.0;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -899,8 +903,10 @@ pub struct GameWorld {
     mob_spawner: MobSpawner,
     /// Active mobs in the world
     mobs: Vec<Mob>,
-    /// Frame counter for tick-based updates
-    frame_count: u64,
+    /// Simulation tick counter
+    sim_tick: SimTick,
+    /// Time accumulator for fixed timestep loop
+    accumulator: f64,
     /// Whether the crafting UI is open
     crafting_open: bool,
     /// Crafting grid (3x3)
@@ -1028,7 +1034,13 @@ impl GameWorld {
                         .pipeline
                         .create_chunk_bind_group(resources.device, chunk_pos);
 
-                    chunk_manager.add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
+                    chunk_manager.add_chunk(
+                        resources.device,
+                        resources.queue,
+                        &mesh,
+                        chunk_pos,
+                        chunk_bind_group,
+                    );
                     chunks.insert(chunk_pos, chunk);
                 }
             }
@@ -1151,7 +1163,8 @@ impl GameWorld {
             inventory: Inventory::new(),
             mob_spawner,
             mobs,
-            frame_count: 0,
+            sim_tick: SimTick::ZERO,
+            accumulator: 0.0,
             crafting_open: false,
             crafting_grid: Default::default(),
             furnace_open: false,
@@ -1539,7 +1552,7 @@ impl GameWorld {
                         if current_dur < max_dur {
                             // Each XP restores 2 durability
                             let missing_dur = max_dur - current_dur;
-                            let xp_needed = (missing_dur + 1) / 2; // Ceiling division
+                            let xp_needed = missing_dur.div_ceil(2); // Ceiling division
                             let xp_to_use = remaining_xp.min(xp_needed);
                             let dur_restored = xp_to_use * 2;
 
@@ -1805,25 +1818,10 @@ impl GameWorld {
         self.renderer.camera_mut().position = position;
     }
 
-    fn update_and_render(&mut self) {
-        let now = Instant::now();
-        let dt = (now - self.last_frame).as_secs_f32();
-        self.last_frame = now;
-        self.frame_dt = dt;
-        self.debug_hud.chunk_uploads_last_frame = 0;
-
-        self.process_actions(dt);
-
-        // Update time-of-day
-        self.time_of_day.update(dt);
-
-        // Update player health
-        self.player_health.update(dt);
-
-        // Update environment and effects
-        self.update_weather(dt);
-        self.update_particles(dt);
-        self.debug_hud.particle_count = self.particles.len();
+    fn fixed_update(&mut self) {
+        // Increment tick
+        self.sim_tick = self.sim_tick.advance(1);
+        let dt = TICK_RATE as f32;
 
         // Update dropped items and handle pickup
         self.update_dropped_items();
@@ -1834,18 +1832,55 @@ impl GameWorld {
         // Update brewing stands
         self.update_brewing_stands(dt);
 
-        // Update player status effects
-        self.update_status_effects(dt);
-
         // Update mobs
         self.update_mobs(dt);
 
         // Update projectiles (arrows)
         self.update_projectiles();
 
+        // Check for death
+        if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
+            self.handle_death("You died!");
+        }
+    }
+
+    fn update_and_render(&mut self) {
+        let now = Instant::now();
+        let dt = (now - self.last_frame).as_secs_f64();
+        self.last_frame = now;
+        self.frame_dt = dt as f32;
+        self.debug_hud.chunk_uploads_last_frame = 0;
+
+        // Cap dt to avoid spiral of death
+        let dt = dt.min(0.25);
+        self.accumulator += dt;
+
+        while self.accumulator >= TICK_RATE {
+            self.fixed_update();
+            self.accumulator -= TICK_RATE;
+        }
+
+        // Process input and camera every frame for responsiveness
+        self.process_actions(self.frame_dt);
+
+        // Update time-of-day (visual)
+        self.time_of_day.update(self.frame_dt);
+
+        // Update player health (needs dt)
+        self.player_health.update(self.frame_dt);
+
+        // Update environment and effects (visual)
+        self.update_weather(self.frame_dt);
+        self.update_particles(self.frame_dt);
+        self.debug_hud.particle_count = self.particles.len();
+
+        // Update player status effects (needs dt)
+        self.update_status_effects(self.frame_dt);
+
         // Update XP orbs (physics, magnetic attraction, collection)
         let player_pos = self.renderer.camera().position;
         let mut xp_collected = 0u32;
+        let frame_dt = self.frame_dt;
         self.xp_orbs.retain_mut(|orb| {
             // Check if player should collect this orb
             if orb.should_collect(player_pos) {
@@ -1854,7 +1889,7 @@ impl GameWorld {
             }
 
             // Update orb physics
-            !orb.update(dt, player_pos) // Remove if update returns true (despawned)
+            !orb.update(frame_dt, player_pos) // Remove if update returns true (despawned)
         });
 
         // Add collected XP to player (Mending uses some XP to repair tools first)
@@ -1878,15 +1913,8 @@ impl GameWorld {
             }
         }
 
-        self.frame_count = self.frame_count.wrapping_add(1);
-
-        // Check for death
-        if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
-            self.handle_death("You died!");
-        }
-
         // Update debug HUD
-        self.debug_hud.update_fps(dt);
+        self.debug_hud.update_fps(self.frame_dt);
         let camera = self.renderer.camera();
         self.debug_hud.camera_pos = [camera.position.x, camera.position.y, camera.position.z];
         self.debug_hud.camera_rot = [camera.yaw, camera.pitch];
@@ -1899,7 +1927,7 @@ impl GameWorld {
 
         // Update camera from input (only if alive)
         if self.player_state == PlayerState::Alive {
-            self.update_camera(dt);
+            self.update_camera(self.frame_dt);
         }
 
         // Raycast for block selection (only if alive)
@@ -1928,7 +1956,7 @@ impl GameWorld {
             });
 
             // Handle block breaking/placing
-            self.handle_block_interaction(dt);
+            self.handle_block_interaction(self.frame_dt);
         } else {
             self.selected_block = None;
         }
@@ -2009,14 +2037,15 @@ impl GameWorld {
 
         // Left click: try to attack a mob first (on click, not hold)
         // Only attack if cooldown has reached 0
-        if self.input.is_mouse_clicked(MouseButton::Left) && self.attack_cooldown <= 0.0 {
-            if self.try_attack_mob() {
-                // Attacked a mob successfully - set cooldown to 0.6 seconds
-                self.attack_cooldown = 0.6;
-                // Don't mine
-                self.mining_progress = None;
-                return;
-            }
+        if self.input.is_mouse_clicked(MouseButton::Left)
+            && self.attack_cooldown <= 0.0
+            && self.try_attack_mob()
+        {
+            // Attacked a mob successfully - set cooldown to 0.6 seconds
+            self.attack_cooldown = 0.6;
+            // Don't mine
+            self.mining_progress = None;
+            return;
         }
 
         if let Some(hit) = self.selected_block {
@@ -2035,10 +2064,7 @@ impl GameWorld {
                 if let Some(stack) = &self.hotbar.slots[self.hotbar.selected] {
                     if let Some(dropped_type) = item_type_to_armor_dropped(stack.item_type) {
                         // Extract enchantments from the ItemStack
-                        let enchantments = stack
-                            .enchantments
-                            .clone()
-                            .unwrap_or_default();
+                        let enchantments = stack.enchantments.clone().unwrap_or_default();
                         if let Some(armor_piece) =
                             ArmorPiece::from_item_with_enchantments(dropped_type, enchantments)
                         {
@@ -2255,6 +2281,7 @@ impl GameWorld {
                                 .create_chunk_bind_group(resources.device, chunk_pos);
                             self.chunk_manager.add_chunk(
                                 resources.device,
+                                resources.queue,
                                 &mesh,
                                 chunk_pos,
                                 chunk_bind_group,
@@ -2283,7 +2310,7 @@ impl GameWorld {
                             DroppedItemType::silk_touch_drop(block_id)
                         } else if fortune_level > 0 {
                             // Fortune: increased drops for ores
-                            let random = (self.frame_count as f64 / 1000.0).fract(); // Simple RNG
+                            let random = (self.sim_tick.0 as f64 / 1000.0).fract(); // Simple RNG
                             DroppedItemType::fortune_drop(block_id, fortune_level, random)
                         } else {
                             // Normal drop
@@ -2389,6 +2416,7 @@ impl GameWorld {
                             .create_chunk_bind_group(resources.device, chunk_pos);
                         self.chunk_manager.add_chunk(
                             resources.device,
+                            resources.queue,
                             &mesh,
                             chunk_pos,
                             chunk_bind_group,
@@ -2909,7 +2937,7 @@ impl GameWorld {
     fn update_mobs(&mut self, _dt: f32) {
         // Use frame count as tick for deterministic behavior
         // TODO: Use proper SimTick for multiplayer sync
-        let tick = self.frame_count;
+        let tick = self.sim_tick.0;
 
         // Get player position for hostile mob targeting
         let player_pos = self.renderer.camera().position;
@@ -3263,9 +3291,14 @@ impl GameWorld {
                         // Apply knockback from arrow direction
                         let knock_dir_x = projectile.vel_x;
                         let knock_dir_z = projectile.vel_z;
-                        let knock_len = (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
+                        let knock_len =
+                            (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
                         if knock_len > 0.001 {
-                            mob.apply_knockback(knock_dir_x / knock_len, knock_dir_z / knock_len, 0.3);
+                            mob.apply_knockback(
+                                knock_dir_x / knock_len,
+                                knock_dir_z / knock_len,
+                                0.3,
+                            );
                         }
 
                         tracing::debug!("Arrow hit {:?} for {:.1} damage", mob.mob_type, damage);
@@ -3471,6 +3504,7 @@ impl GameWorld {
                         .create_chunk_bind_group(resources.device, chunk_pos);
                     self.chunk_manager.add_chunk(
                         resources.device,
+                        resources.queue,
                         &mesh,
                         chunk_pos,
                         chunk_bind_group,
@@ -3602,11 +3636,12 @@ impl GameWorld {
             if is_sword {
                 let target_x = mob.x;
                 let target_z = mob.z;
-                let sweep_damage = 1.0 + if sharpness_level > 0 {
-                    0.5 + 0.5 * sharpness_level as f32
-                } else {
-                    0.0
-                };
+                let sweep_damage = 1.0
+                    + if sharpness_level > 0 {
+                        0.5 + 0.5 * sharpness_level as f32
+                    } else {
+                        0.0
+                    };
                 let sweep_range = 1.0; // 1 block radius for sweep
 
                 // Collect indices of mobs to sweep (excluding the primary target)
@@ -3928,11 +3963,8 @@ impl GameWorld {
                         continue;
                     }
 
-                    let check_pos = IVec3::new(
-                        table_pos.x + dx,
-                        table_pos.y + dy,
-                        table_pos.z + dz,
-                    );
+                    let check_pos =
+                        IVec3::new(table_pos.x + dx, table_pos.y + dy, table_pos.z + dz);
 
                     if let Some(block_id) = self.get_block_at(check_pos) {
                         if block_id == bookshelf_id {
@@ -4003,7 +4035,7 @@ impl GameWorld {
 
     /// Update all brewing stands in the world
     fn update_brewing_stands(&mut self, dt: f32) {
-        for (_pos, stand) in &mut self.brewing_stands {
+        for stand in self.brewing_stands.values_mut() {
             stand.update(dt);
         }
     }
@@ -4112,7 +4144,11 @@ fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar) {
                                             );
                                         }
                                     }
-                                    ItemType::Block(_) | ItemType::Item(_) | ItemType::Food(_) | ItemType::Potion(_) | ItemType::SplashPotion(_) => {
+                                    ItemType::Block(_)
+                                    | ItemType::Item(_)
+                                    | ItemType::Food(_)
+                                    | ItemType::Potion(_)
+                                    | ItemType::SplashPotion(_) => {
                                         if stack.count > 1 {
                                             ui.label(
                                                 egui::RichText::new(format!("x{}", stack.count))
@@ -5317,7 +5353,11 @@ fn render_enchanting_table(
             ui.add_space(5.0);
 
             // Enchantment options
-            ui.label(egui::RichText::new("Enchantment Options:").size(14.0).strong());
+            ui.label(
+                egui::RichText::new("Enchantment Options:")
+                    .size(14.0)
+                    .strong(),
+            );
             ui.add_space(5.0);
 
             // Track which slot was clicked (to apply after iteration)
@@ -5637,7 +5677,11 @@ fn render_brewing_ingredient_slot(ui: &mut egui::Ui, ingredient: Option<&(u16, u
                     117 => "Sugar",
                     _ => "Unknown",
                 };
-                ui.label(egui::RichText::new(name).size(10.0).color(egui::Color32::WHITE));
+                ui.label(
+                    egui::RichText::new(name)
+                        .size(10.0)
+                        .color(egui::Color32::WHITE),
+                );
                 ui.label(
                     egui::RichText::new(format!("x{}", count))
                         .size(10.0)
@@ -5646,7 +5690,11 @@ fn render_brewing_ingredient_slot(ui: &mut egui::Ui, ingredient: Option<&(u16, u
             });
         } else {
             ui.centered_and_justified(|ui| {
-                ui.label(egui::RichText::new("-").size(14.0).color(egui::Color32::DARK_GRAY));
+                ui.label(
+                    egui::RichText::new("-")
+                        .size(14.0)
+                        .color(egui::Color32::DARK_GRAY),
+                );
             });
         }
     });

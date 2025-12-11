@@ -100,7 +100,11 @@ mod tests {
             let registry = recipe_registry_from_file(config_path).unwrap();
 
             // Should have all 25 tool recipes (5 tools × 5 materials)
-            assert_eq!(registry.len(), 25, "Recipe registry should contain 25 recipes");
+            assert_eq!(
+                registry.len(),
+                25,
+                "Recipe registry should contain 25 recipes"
+            );
 
             // Test a sample from each material tier
             let test_recipes = vec![
@@ -123,7 +127,11 @@ mod tests {
                         recipe_name,
                         expected_inputs
                     );
-                    assert_eq!(recipe.output_count, 1, "{} should produce 1 tool", recipe_name);
+                    assert_eq!(
+                        recipe.output_count, 1,
+                        "{} should produce 1 tool",
+                        recipe_name
+                    );
                 }
             }
 

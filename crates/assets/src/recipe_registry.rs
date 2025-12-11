@@ -39,7 +39,10 @@ impl RecipeRegistry {
     }
 
     /// Find all recipes that can be crafted with the given available items.
-    pub fn craftable_recipes(&self, available: &[(mdminecraft_core::ItemType, u32)]) -> Vec<(&String, &Recipe)> {
+    pub fn craftable_recipes(
+        &self,
+        available: &[(mdminecraft_core::ItemType, u32)],
+    ) -> Vec<(&String, &Recipe)> {
         self.recipes
             .iter()
             .filter(|(_, recipe)| recipe.can_craft(available))
@@ -56,12 +59,8 @@ impl RecipeRegistry {
 pub fn parse_item_type(s: &str) -> Option<ItemType> {
     let parts: Vec<&str> = s.split(':').collect();
     match parts.as_slice() {
-        ["block", id_str] => {
-            id_str.parse::<u16>().ok().map(ItemType::Block)
-        }
-        ["item", id_str] => {
-            id_str.parse::<u16>().ok().map(ItemType::Item)
-        }
+        ["block", id_str] => id_str.parse::<u16>().ok().map(ItemType::Block),
+        ["item", id_str] => id_str.parse::<u16>().ok().map(ItemType::Item),
         ["tool", tool_str, material_str] => {
             let tool = parse_tool_type(tool_str)?;
             let material = parse_tool_material(material_str)?;
@@ -134,21 +133,16 @@ mod tests {
 
         let found = registry.get("wooden_pickaxe").unwrap();
         assert_eq!(found.inputs.len(), 2);
-        assert_eq!(found.output, ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood));
+        assert_eq!(
+            found.output,
+            ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood)
+        );
     }
 
     #[test]
     fn test_craftable_recipes() {
-        let recipe1 = Recipe::new(
-            vec![(ItemType::Block(1), 2)],
-            ItemType::Block(2),
-            4,
-        );
-        let recipe2 = Recipe::new(
-            vec![(ItemType::Block(1), 5)],
-            ItemType::Block(3),
-            1,
-        );
+        let recipe1 = Recipe::new(vec![(ItemType::Block(1), 2)], ItemType::Block(2), 4);
+        let recipe2 = Recipe::new(vec![(ItemType::Block(1), 5)], ItemType::Block(3), 1);
 
         let registry = RecipeRegistry::new(vec![
             ("planks".to_string(), recipe1),

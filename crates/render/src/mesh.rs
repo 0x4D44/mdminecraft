@@ -6,17 +6,6 @@ use mdminecraft_world::{
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
 
-/// Output mesh buffers per chunk.
-#[derive(Debug, Clone)]
-pub struct MeshBuffers {
-    /// Vertex buffer used for draw submission.
-    pub vertices: Vec<MeshVertex>,
-    /// Index buffer (triangle list) referencing the vertex buffer.
-    pub indices: Vec<u32>,
-    /// Stable hash of the vertex + index buffers for cache comparisons.
-    pub hash: MeshHash,
-}
-
 /// Hash of the combined vertex/index buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MeshHash(pub [u8; 32]);
@@ -39,6 +28,17 @@ pub struct MeshVertex {
     _padding: u8,
 }
 
+/// Output mesh buffers per chunk.
+#[derive(Debug, Clone)]
+pub struct MeshBuffers {
+    /// Vertex buffer used for draw submission.
+    pub vertices: Vec<MeshVertex>,
+    /// Index buffer (triangle list) referencing the vertex buffer.
+    pub indices: Vec<u32>,
+    /// Stable hash of the vertex + index buffers for cache comparisons.
+    pub hash: MeshHash,
+}
+
 impl MeshBuffers {
     /// Construct an empty mesh (useful for initialization).
     pub fn empty() -> Self {
@@ -57,10 +57,11 @@ pub fn mesh_chunk(
     atlas: Option<&TextureAtlasMetadata>,
 ) -> MeshBuffers {
     let mut builder = MeshBuilder::new(registry, atlas);
-    GreedyMesher::mesh(chunk, registry, &mut builder);
+    GreedyMesher::mesh(chunk, &mut builder);
     builder.finish()
 }
 
+/// Internal helper for building mesh data.
 struct MeshBuilder<'a> {
     vertices: Vec<MeshVertex>,
     indices: Vec<u32>,
@@ -71,8 +72,8 @@ struct MeshBuilder<'a> {
 impl<'a> MeshBuilder<'a> {
     fn new(registry: &'a BlockRegistry, atlas: Option<&'a TextureAtlasMetadata>) -> Self {
         Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
+            vertices: Vec::with_capacity(1024), // Pre-allocate to reduce reallocations
+            indices: Vec::with_capacity(1024 * 6 / 4), // Indices are 1.5x vertices for quads
             registry,
             atlas,
         }
@@ -129,18 +130,43 @@ impl<'a> MeshBuilder<'a> {
             hash: MeshHash(*hasher.finalize().as_bytes()),
         }
     }
+
+    fn resolve_uvs(&self, block_id: BlockId, face: BlockFace) -> [[f32; 2]; 4] {
+        if let Some(atlas) = self.atlas {
+            if let Some(desc) = self.registry.descriptor(block_id) {
+                if let Some(entry) = atlas.entry(desc.texture_for(face)) {
+                    return [
+                        [entry.u0, entry.v0],
+                        [entry.u1, entry.v0],
+                        [entry.u1, entry.v1],
+                        [entry.u0, entry.v1],
+                    ];
+                }
+            }
+        }
+
+        let atlas_size = 16.0;
+        let atlas_x = (block_id % 16) as f32;
+        let atlas_y = (block_id / 16) as f32;
+        [
+            [atlas_x / atlas_size, atlas_y / atlas_size],
+            [(atlas_x + 1.0) / atlas_size, atlas_y / atlas_size],
+            [(atlas_x + 1.0) / atlas_size, (atlas_y + 1.0) / atlas_size],
+            [atlas_x / atlas_size, (atlas_y + 1.0) / atlas_size],
+        ]
+    }
 }
 
 struct GreedyMesher;
 
 impl GreedyMesher {
-    pub fn mesh(chunk: &Chunk, registry: &BlockRegistry, builder: &mut MeshBuilder) {
+    pub fn mesh(chunk: &Chunk, builder: &mut MeshBuilder) {
         for axis in 0..3 {
-            Self::mesh_axis(chunk, registry, builder, axis);
+            Self::mesh_axis(chunk, builder, axis);
         }
     }
 
-    fn mesh_axis(chunk: &Chunk, registry: &BlockRegistry, builder: &mut MeshBuilder, axis: usize) {
+    fn mesh_axis(chunk: &Chunk, builder: &mut MeshBuilder, axis: usize) {
         let u_axis = (axis + 1) % 3;
         let v_axis = (axis + 2) % 3;
         let width = AXIS_SIZE[u_axis];
@@ -151,7 +177,7 @@ impl GreedyMesher {
             for j in 0..height {
                 for i in 0..width {
                     let idx = j * width + i;
-                    mask[idx] = Self::sample_face(chunk, registry, axis, slice, i, j);
+                    mask[idx] = Self::sample_face(chunk, builder.registry, axis, slice, i, j);
                 }
             }
 
@@ -343,33 +369,6 @@ fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
         .unwrap_or(voxel.id != BLOCK_AIR)
 }
 
-impl<'a> MeshBuilder<'a> {
-    fn resolve_uvs(&self, block_id: BlockId, face: BlockFace) -> [[f32; 2]; 4] {
-        if let Some(atlas) = self.atlas {
-            if let Some(desc) = self.registry.descriptor(block_id) {
-                if let Some(entry) = atlas.entry(desc.texture_for(face)) {
-                    return [
-                        [entry.u0, entry.v0],
-                        [entry.u1, entry.v0],
-                        [entry.u1, entry.v1],
-                        [entry.u0, entry.v1],
-                    ];
-                }
-            }
-        }
-
-        let atlas_size = 16.0;
-        let atlas_x = (block_id % 16) as f32;
-        let atlas_y = (block_id / 16) as f32;
-        [
-            [atlas_x / atlas_size, atlas_y / atlas_size],
-            [(atlas_x + 1.0) / atlas_size, atlas_y / atlas_size],
-            [(atlas_x + 1.0) / atlas_size, (atlas_y + 1.0) / atlas_size],
-            [atlas_x / atlas_size, (atlas_y + 1.0) / atlas_size],
-        ]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
@@ -395,7 +394,8 @@ mod tests {
             light_block: 0,
         };
         chunk.set_voxel(1, 1, 1, voxel);
-        let mesh = mesh_chunk(&chunk, &registry(), None);
+        let registry = registry();
+        let mesh = mesh_chunk(&chunk, &registry, None);
         assert!(!mesh.vertices.is_empty());
         assert_eq!(mesh.indices.len(), 36); // 6 faces * 2 tris * 3 indices
     }
