@@ -6,7 +6,7 @@ use crate::chunk::{
     BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use crate::terrain::blocks;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Fluid type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -134,7 +134,7 @@ pub fn is_flammable(block_id: BlockId) -> bool {
 }
 
 /// World position for fluid updates
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FluidPos {
     pub x: i32,
     pub y: i32,
@@ -181,7 +181,7 @@ impl FluidPos {
 /// Fluid simulator using cellular automata approach
 pub struct FluidSimulator {
     /// Pending fluid updates (position -> scheduled tick)
-    pending_updates: HashMap<FluidPos, u64>,
+    pending_updates: BTreeMap<FluidPos, u64>,
     /// Current simulation tick
     current_tick: u64,
     /// Dirty chunks that need mesh rebuilding
@@ -192,7 +192,7 @@ impl FluidSimulator {
     /// Create a new fluid simulator
     pub fn new() -> Self {
         Self {
-            pending_updates: HashMap::new(),
+            pending_updates: BTreeMap::new(),
             current_tick: 0,
             dirty_chunks: HashSet::new(),
         }

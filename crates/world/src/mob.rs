@@ -282,11 +282,11 @@ impl Mob {
     /// Returns true if fire damage was dealt this tick.
     pub fn update_fire(&mut self) -> bool {
         if self.fire_ticks > 0 {
-            self.fire_ticks -= 1;
-            // Deal 1 damage every 20 ticks (1 second)
-            if self.fire_ticks % 20 == 0 {
+            // Extinguish fire after duration
+            self.fire_ticks = self.fire_ticks.saturating_sub(1);
+            if self.fire_ticks.is_multiple_of(20) {
+                // Fire damage every second (20 ticks)
                 self.damage(1.0);
-                return true;
             }
         }
         false

@@ -1,7 +1,7 @@
 //! Item system - Tools, blocks, and other inventory items
 
-use serde::{Deserialize, Serialize};
 use crate::enchantment::{Enchantment, EnchantmentType};
+use serde::{Deserialize, Serialize};
 
 /// Item type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -259,11 +259,11 @@ impl ToolType {
         match self {
             // Tools get a 1.5x effectiveness bonus on their preferred blocks
             // This is in addition to the material's base speed multiplier
-            ToolType::Pickaxe => 1.5,  // Effective on stone, ores
-            ToolType::Axe => 1.5,      // Effective on wood
-            ToolType::Shovel => 1.5,   // Effective on dirt, sand, gravel
-            ToolType::Sword => 1.0,    // No mining bonus (combat tool)
-            ToolType::Hoe => 1.0,      // No mining bonus (farming tool)
+            ToolType::Pickaxe => 1.5, // Effective on stone, ores
+            ToolType::Axe => 1.5,     // Effective on wood
+            ToolType::Shovel => 1.5,  // Effective on dirt, sand, gravel
+            ToolType::Sword => 1.0,   // No mining bonus (combat tool)
+            ToolType::Hoe => 1.0,     // No mining bonus (farming tool)
         }
     }
 }
@@ -303,7 +303,7 @@ impl ItemStack {
             ItemType::Tool(_, _) => 1, // Tools don't stack
             ItemType::Block(_) => 64,
             ItemType::Food(_) => 64,
-            ItemType::Potion(_) => 1, // Potions don't stack
+            ItemType::Potion(_) => 1,       // Potions don't stack
             ItemType::SplashPotion(_) => 1, // Splash potions don't stack
             ItemType::Item(_) => 64,
         }
@@ -333,7 +333,7 @@ impl ItemStack {
     /// - Unbreaking I: 50% chance to ignore damage
     /// - Unbreaking II: 67% chance to ignore damage
     /// - Unbreaking III: 75% chance to ignore damage
-    /// Formula: 1 / (unbreaking_level + 1) chance to take damage
+    ///   Formula: 1 / (unbreaking_level + 1) chance to take damage
     pub fn damage_durability(&mut self, amount: u32) {
         // Check for Unbreaking enchantment before borrowing durability mutably
         let unbreaking_level = self.enchantment_level(EnchantmentType::Unbreaking);
@@ -418,7 +418,10 @@ impl ItemStack {
         if let Some(ref mut enchants) = self.enchantments {
             // Check compatibility with existing enchantments
             for existing in enchants.iter() {
-                if !existing.enchantment_type.is_compatible_with(&enchantment.enchantment_type) {
+                if !existing
+                    .enchantment_type
+                    .is_compatible_with(&enchantment.enchantment_type)
+                {
                     return false; // Incompatible enchantment
                 }
             }
@@ -519,7 +522,10 @@ mod tests {
 
         // Test axe damage (higher than swords)
         assert_eq!(ToolMaterial::Diamond.attack_damage(ToolType::Axe), 9.0);
-        assert!(ToolMaterial::Diamond.attack_damage(ToolType::Axe) > ToolMaterial::Diamond.attack_damage(ToolType::Sword));
+        assert!(
+            ToolMaterial::Diamond.attack_damage(ToolType::Axe)
+                > ToolMaterial::Diamond.attack_damage(ToolType::Sword)
+        );
 
         // Test hoe damage (minimal)
         assert_eq!(ToolMaterial::Diamond.attack_damage(ToolType::Hoe), 1.0);
@@ -550,7 +556,10 @@ mod tests {
 
         // Gold has same harvest tier as Wood
         assert_eq!(ToolMaterial::Gold.harvest_tier(), 0);
-        assert_eq!(ToolMaterial::Gold.harvest_tier(), ToolMaterial::Wood.harvest_tier());
+        assert_eq!(
+            ToolMaterial::Gold.harvest_tier(),
+            ToolMaterial::Wood.harvest_tier()
+        );
     }
 
     #[test]
@@ -583,7 +592,8 @@ mod tests {
         let iron_axe = ItemStack::new(ItemType::Tool(ToolType::Axe, ToolMaterial::Iron), 1);
         assert_eq!(iron_axe.harvest_tier(), Some(2));
 
-        let diamond_sword = ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond), 1);
+        let diamond_sword =
+            ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond), 1);
         assert_eq!(diamond_sword.harvest_tier(), Some(3));
 
         // Gold has same tier as wood
@@ -622,7 +632,8 @@ mod tests {
         assert!(!iron_pick.can_harvest_tier(3));
 
         // Diamond pickaxe can harvest all tiers
-        let diamond_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+        let diamond_pick =
+            ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
         assert!(diamond_pick.can_harvest_tier(0));
         assert!(diamond_pick.can_harvest_tier(1));
         assert!(diamond_pick.can_harvest_tier(2));
@@ -665,7 +676,8 @@ mod tests {
         let iron_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1);
         assert_eq!(iron_pick.mining_speed_multiplier(), 6.0 * 1.5); // 9.0
 
-        let diamond_pick = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+        let diamond_pick =
+            ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
         assert_eq!(diamond_pick.mining_speed_multiplier(), 8.0 * 1.5); // 12.0
 
         // Gold is fastest but weakest tier
@@ -674,7 +686,8 @@ mod tests {
         assert!(gold_pick.mining_speed_multiplier() > diamond_pick.mining_speed_multiplier());
 
         // Test sword (no effectiveness bonus)
-        let diamond_sword = ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond), 1);
+        let diamond_sword =
+            ItemStack::new(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond), 1);
         assert_eq!(diamond_sword.mining_speed_multiplier(), 8.0 * 1.0); // 8.0
 
         // Non-tool items use hand speed
@@ -684,7 +697,8 @@ mod tests {
 
     #[test]
     fn test_enchantment_application() {
-        let mut pickaxe = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+        let mut pickaxe =
+            ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
 
         // Initially no enchantments
         assert!(pickaxe.get_enchantments().is_empty());
@@ -725,7 +739,8 @@ mod tests {
 
     #[test]
     fn test_enchantment_incompatibility() {
-        let mut pickaxe = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
+        let mut pickaxe =
+            ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond), 1);
 
         // Add Silk Touch
         let silk_touch = Enchantment::new(EnchantmentType::SilkTouch, 1);

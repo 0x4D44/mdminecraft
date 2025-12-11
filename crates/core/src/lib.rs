@@ -1,18 +1,18 @@
 #![warn(missing_docs)]
 //! Core primitives shared across the workspace.
 
-pub mod item;
 pub mod crafting;
 /// Enchantment types and data structures for the enchanting system.
 pub mod enchantment;
+pub mod item;
 
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types
-pub use item::{ItemStack, ItemType, ToolMaterial, ToolType};
 pub use crafting::{Recipe, ToolRecipes};
 pub use enchantment::{Enchantment, EnchantmentType};
+pub use item::{ItemStack, ItemType, ToolMaterial, ToolType};
 
 /// Fixed tick type (20 TPS => 50 ms per tick).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

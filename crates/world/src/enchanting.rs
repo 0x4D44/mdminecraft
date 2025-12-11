@@ -192,7 +192,10 @@ impl EnchantingTableState {
         self.enchant_options = [None, None, None];
 
         // Generate new seed for next enchant
-        self.enchant_seed = self.enchant_seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.enchant_seed = self
+            .enchant_seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
 
         Some((offer.enchantment, offer.levels_consumed))
     }
@@ -263,7 +266,7 @@ fn get_tool_category(item_id: ItemId) -> u8 {
 
     match tool_index {
         0..=3 => 1, // Pickaxe, axe, shovel, hoe = mining tools
-        4 => 2,    // Sword = weapon
+        4 => 2,     // Sword = weapon
         _ => 0,
     }
 }

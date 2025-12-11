@@ -1,9 +1,8 @@
 //! Chunk mesh buffer management for multi-chunk rendering.
 
 use std::collections::HashMap;
-use wgpu::util::DeviceExt;
 
-use crate::mesh::MeshBuffers;
+use crate::mesh::{MeshBuffers, MeshVertex};
 use mdminecraft_world::ChunkPos;
 
 /// GPU buffer for a chunk mesh with position.
@@ -20,32 +19,51 @@ pub struct ChunkRenderData {
     pub chunk_bind_group: wgpu::BindGroup,
 }
 
-impl ChunkRenderData {
-    /// Create chunk render data from mesh buffers.
-    pub fn new(
-        device: &wgpu::Device,
-        mesh: &MeshBuffers,
-        chunk_pos: ChunkPos,
-        chunk_bind_group: wgpu::BindGroup,
-    ) -> Self {
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Vertex Buffer"),
-            contents: bytemuck::cast_slice(&mesh.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+struct BufferPool {
+    vertex_buffers: Vec<wgpu::Buffer>,
+    index_buffers: Vec<wgpu::Buffer>,
+}
 
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Index Buffer"),
-            contents: bytemuck::cast_slice(&mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
+impl BufferPool {
+    fn new() -> Self {
         Self {
-            vertex_buffer,
-            index_buffer,
-            index_count: mesh.indices.len() as u32,
-            chunk_pos,
-            chunk_bind_group,
+            vertex_buffers: Vec::new(),
+            index_buffers: Vec::new(),
+        }
+    }
+
+    fn acquire(
+        &mut self,
+        device: &wgpu::Device,
+        size: u64,
+        usage: wgpu::BufferUsages,
+        label: &str,
+    ) -> wgpu::Buffer {
+        // Find best fit buffer (first one large enough)
+        let list = if usage.contains(wgpu::BufferUsages::VERTEX) {
+            &mut self.vertex_buffers
+        } else {
+            &mut self.index_buffers
+        };
+
+        if let Some(idx) = list.iter().position(|b| b.size() >= size) {
+            return list.swap_remove(idx);
+        }
+
+        // No suitable buffer found, create new one
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: usage | wgpu::BufferUsages::COPY_DST, // Ensure we can write to it
+            mapped_at_creation: false,
+        })
+    }
+
+    fn release(&mut self, buffer: wgpu::Buffer) {
+        if buffer.usage().contains(wgpu::BufferUsages::VERTEX) {
+            self.vertex_buffers.push(buffer);
+        } else {
+            self.index_buffers.push(buffer);
         }
     }
 }
@@ -53,6 +71,7 @@ impl ChunkRenderData {
 /// Manages rendering data for multiple chunks.
 pub struct ChunkManager {
     chunks: HashMap<ChunkPos, ChunkRenderData>,
+    pool: BufferPool,
 }
 
 impl ChunkManager {
@@ -60,6 +79,7 @@ impl ChunkManager {
     pub fn new() -> Self {
         Self {
             chunks: HashMap::new(),
+            pool: BufferPool::new(),
         }
     }
 
@@ -67,17 +87,68 @@ impl ChunkManager {
     pub fn add_chunk(
         &mut self,
         device: &wgpu::Device,
-        mesh: &MeshBuffers,
+        queue: &wgpu::Queue,
+        mesh_buffers: &MeshBuffers,
         chunk_pos: ChunkPos,
         chunk_bind_group: wgpu::BindGroup,
     ) {
-        let render_data = ChunkRenderData::new(device, mesh, chunk_pos, chunk_bind_group);
+        // Reuse old buffers if replacing
+        if let Some(old) = self.chunks.remove(&chunk_pos) {
+            self.pool.release(old.vertex_buffer);
+            self.pool.release(old.index_buffer);
+        }
+
+        let vertex_size = (mesh_buffers.vertices.len() * std::mem::size_of::<MeshVertex>()) as u64;
+        let index_size = (mesh_buffers.indices.len() * std::mem::size_of::<u32>()) as u64;
+
+        if vertex_size == 0 || index_size == 0 {
+            return; // Don't add empty meshes
+        }
+
+        let vertex_buffer = self.pool.acquire(
+            device,
+            vertex_size,
+            wgpu::BufferUsages::VERTEX,
+            "Chunk Vertex Buffer",
+        );
+        queue.write_buffer(
+            &vertex_buffer,
+            0,
+            bytemuck::cast_slice(&mesh_buffers.vertices),
+        );
+
+        let index_buffer = self.pool.acquire(
+            device,
+            index_size,
+            wgpu::BufferUsages::INDEX,
+            "Chunk Index Buffer",
+        );
+        queue.write_buffer(
+            &index_buffer,
+            0,
+            bytemuck::cast_slice(&mesh_buffers.indices),
+        );
+
+        let render_data = ChunkRenderData {
+            vertex_buffer,
+            index_buffer,
+            index_count: mesh_buffers.indices.len() as u32,
+            chunk_pos,
+            chunk_bind_group,
+        };
+
         self.chunks.insert(chunk_pos, render_data);
     }
 
     /// Remove a chunk.
     pub fn remove_chunk(&mut self, chunk_pos: &ChunkPos) -> bool {
-        self.chunks.remove(chunk_pos).is_some()
+        if let Some(data) = self.chunks.remove(chunk_pos) {
+            self.pool.release(data.vertex_buffer);
+            self.pool.release(data.index_buffer);
+            true
+        } else {
+            false
+        }
     }
 
     /// Get all chunks for rendering.
@@ -92,7 +163,10 @@ impl ChunkManager {
 
     /// Clear all chunks.
     pub fn clear(&mut self) {
-        self.chunks.clear();
+        for (_, data) in self.chunks.drain() {
+            self.pool.release(data.vertex_buffer);
+            self.pool.release(data.index_buffer);
+        }
     }
 }
 

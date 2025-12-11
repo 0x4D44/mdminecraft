@@ -5,7 +5,7 @@
 use crate::chunk::{
     BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Block IDs for redstone components
 pub mod redstone_blocks {
@@ -109,7 +109,7 @@ pub fn set_active(state: BlockState, active: bool) -> BlockState {
 }
 
 /// World position for redstone updates
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RedstonePos {
     pub x: i32,
     pub y: i32,
@@ -154,23 +154,23 @@ struct ButtonTimer {
 /// Redstone simulator for power propagation
 pub struct RedstoneSimulator {
     /// Pending redstone updates
-    pending_updates: HashSet<RedstonePos>,
+    pending_updates: BTreeSet<RedstonePos>,
     /// Button timers for momentary switches
     button_timers: Vec<ButtonTimer>,
     /// Current simulation tick
     current_tick: u64,
     /// Dirty chunks that need mesh rebuilding
-    dirty_chunks: HashSet<ChunkPos>,
+    dirty_chunks: std::collections::HashSet<ChunkPos>,
 }
 
 impl RedstoneSimulator {
     /// Create a new redstone simulator
     pub fn new() -> Self {
         Self {
-            pending_updates: HashSet::new(),
+            pending_updates: BTreeSet::new(),
             button_timers: Vec::new(),
             current_tick: 0,
-            dirty_chunks: HashSet::new(),
+            dirty_chunks: std::collections::HashSet::new(),
         }
     }
 
@@ -321,7 +321,8 @@ impl RedstoneSimulator {
             return;
         }
 
-        let updates: Vec<RedstonePos> = self.pending_updates.drain().collect();
+        let updates: Vec<RedstonePos> = self.pending_updates.iter().copied().collect();
+        self.pending_updates.clear();
         let mut queue: VecDeque<RedstonePos> = updates.into_iter().collect();
         let mut visited: HashSet<RedstonePos> = HashSet::new();
 

@@ -49,7 +49,7 @@ impl ProjectileType {
     /// How long the projectile lives (in ticks at 20 TPS)
     pub fn lifetime_ticks(&self) -> u32 {
         match self {
-            ProjectileType::Arrow => 1200, // 60 seconds
+            ProjectileType::Arrow => 1200,          // 60 seconds
             ProjectileType::SplashPotion(_) => 600, // 30 seconds (should break on impact much sooner)
         }
     }
