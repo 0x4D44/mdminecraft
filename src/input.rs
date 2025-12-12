@@ -134,16 +134,12 @@ impl Default for ActionState {
 #[derive(Debug)]
 pub struct InputProcessor {
     bindings: Bindings,
-    prev_keys: std::collections::HashSet<KeyCode>,
-    prev_mouse: std::collections::HashSet<MouseButton>,
 }
 
 impl InputProcessor {
     pub fn new(config: &ControlsConfig) -> Self {
         Self {
             bindings: Bindings::from_config(config),
-            prev_keys: std::collections::HashSet::new(),
-            prev_mouse: std::collections::HashSet::new(),
         }
     }
 
@@ -197,9 +193,6 @@ impl InputProcessor {
         state.hotbar_slot = self.detect_hotbar_slot(snapshot);
         state.hotbar_scroll = self.detect_hotbar_scroll(snapshot);
 
-        self.prev_keys = snapshot.keys_pressed.clone();
-        self.prev_mouse = snapshot.mouse_buttons.clone();
-
         state
     }
 
@@ -233,9 +226,9 @@ impl InputProcessor {
 
     fn action_triggered(&self, action: Action, snapshot: &InputSnapshot) -> bool {
         if let Some(bindings) = self.bindings.bindings_for(&action, snapshot.context) {
-            bindings.iter().any(|binding| {
-                binding_triggered(binding, snapshot, &self.prev_keys, &self.prev_mouse)
-            })
+            bindings
+                .iter()
+                .any(|binding| binding_triggered(binding, snapshot))
         } else {
             false
         }
@@ -262,8 +255,12 @@ fn axis_value(
 
 fn binding_active(binding: &InputBinding, snapshot: &InputSnapshot) -> bool {
     match binding {
-        InputBinding::Key(code) => snapshot.keys_pressed.contains(code),
-        InputBinding::Mouse(btn) => snapshot.mouse_buttons.contains(btn),
+        InputBinding::Key(code) => {
+            snapshot.keys_pressed.contains(code) || snapshot.keys_just_pressed.contains(code)
+        }
+        InputBinding::Mouse(btn) => {
+            snapshot.mouse_buttons.contains(btn) || snapshot.mouse_clicks.contains(btn)
+        }
         InputBinding::ScrollUp => snapshot.scroll_delta > 0.0,
         InputBinding::ScrollDown => snapshot.scroll_delta < 0.0,
     }
@@ -272,16 +269,10 @@ fn binding_active(binding: &InputBinding, snapshot: &InputSnapshot) -> bool {
 fn binding_triggered(
     binding: &InputBinding,
     snapshot: &InputSnapshot,
-    prev_keys: &std::collections::HashSet<KeyCode>,
-    prev_mouse: &std::collections::HashSet<MouseButton>,
 ) -> bool {
     match binding {
-        InputBinding::Key(code) => {
-            snapshot.keys_pressed.contains(code) && !prev_keys.contains(code)
-        }
-        InputBinding::Mouse(btn) => {
-            snapshot.mouse_buttons.contains(btn) && !prev_mouse.contains(btn)
-        }
+        InputBinding::Key(code) => snapshot.keys_just_pressed.contains(code),
+        InputBinding::Mouse(btn) => snapshot.mouse_clicks.contains(btn),
         InputBinding::ScrollUp => snapshot.scroll_delta > 0.0,
         InputBinding::ScrollDown => snapshot.scroll_delta < 0.0,
     }
