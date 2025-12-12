@@ -23,11 +23,12 @@ use mdminecraft_ui3d::render::{
 use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
-    EnchantingTableState, FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob,
-    MobSpawner, MobType, PlayerArmor, PotionType, Projectile, ProjectileManager, StatusEffect,
-    StatusEffects, TerrainGenerator, Voxel, WeatherState, WeatherToggle, BLOCK_AIR,
-    BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE,
-    BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    EnchantingTableState, FluidPos, FluidSimulator, FurnaceState, Inventory,
+    ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PotionType,
+    Projectile, ProjectileManager, RegionStore, StatusEffect, StatusEffects, TerrainGenerator,
+    Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
+    BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -335,6 +336,8 @@ struct PlayerPhysics {
     physics_enabled: bool,
     /// Previous Y position for fall damage calculation
     last_ground_y: f32,
+    /// Time since last jump press (for double-jump flight toggle)
+    last_jump_press_time: f32,
 }
 
 /// Mining progress tracking
@@ -345,6 +348,31 @@ struct MiningProgress {
     time_mining: f32,
     /// Total time required to mine this block
     time_required: f32,
+}
+
+/// Helper function to recompute lighting for a chunk and its neighbors
+fn recompute_lighting(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    registry: &BlockRegistry,
+    chunk_pos: ChunkPos,
+) {
+    if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+        let _ = init_skylight(chunk, registry);
+    }
+
+    let neighbors = [
+        chunk_pos,
+        ChunkPos::new(chunk_pos.x + 1, chunk_pos.z),
+        ChunkPos::new(chunk_pos.x - 1, chunk_pos.z),
+        ChunkPos::new(chunk_pos.x, chunk_pos.z + 1),
+        ChunkPos::new(chunk_pos.x, chunk_pos.z - 1),
+    ];
+
+    for pos in neighbors {
+        if chunks.contains_key(&pos) {
+            let _ = stitch_light_seams(chunks, registry, pos, LightType::Skylight);
+        }
+    }
 }
 
 /// Helper: given time slices, return how many frames are needed to finish mining.
@@ -826,6 +854,7 @@ impl PlayerPhysics {
             player_width: 0.6,
             physics_enabled: true,
             last_ground_y: 100.0, // Initial spawn height
+            last_jump_press_time: 10.0,
         }
     }
 
@@ -903,10 +932,18 @@ pub struct GameWorld {
     mob_spawner: MobSpawner,
     /// Active mobs in the world
     mobs: Vec<Mob>,
+    /// Fluid simulation
+    fluid_sim: FluidSimulator,
     /// Simulation tick counter
     sim_tick: SimTick,
     /// Time accumulator for fixed timestep loop
     accumulator: f64,
+    /// Region store for persistence
+    region_store: RegionStore,
+    /// Terrain generator
+    terrain_generator: TerrainGenerator,
+    /// Render distance (chunks radius)
+    render_distance: i32,
     /// Whether the crafting UI is open
     crafting_open: bool,
     /// Crafting grid (3x3)
@@ -1005,112 +1042,30 @@ impl GameWorld {
             }
         };
 
-        // Generate world
+        // Load block registry
         let registry = load_block_registry();
-        let world_seed = 12345u64;
-        let generator = TerrainGenerator::new(world_seed);
 
-        let mut chunk_manager = ChunkManager::new();
-        let mut chunks = HashMap::new();
-        let chunk_radius = 2;
-        let mut total_vertices = 0;
-        let mut total_indices = 0;
+        // Setup persistence and generator
+        let save_path = PathBuf::from("saves/default");
+        let region_store = RegionStore::new(&save_path).unwrap_or_else(|_| {
+            tracing::warn!("Failed to create save directory, using temporary");
+            RegionStore::new(std::env::temp_dir().join("mdminecraft_save")).unwrap()
+        });
+
+        let world_seed = rand::random();
+        tracing::info!("World Seed: {}", world_seed);
+        let terrain_generator = TerrainGenerator::new(world_seed);
+        let render_distance = 8; // Default radius
+
+        let chunk_manager = ChunkManager::new();
+        let chunks = HashMap::new();
         let mut rng = StdRng::seed_from_u64(world_seed ^ 0x5eed_a11c);
 
-        {
-            let resources = renderer.render_resources().expect("GPU not initialized");
-
-            for x in -chunk_radius..=chunk_radius {
-                for z in -chunk_radius..=chunk_radius {
-                    let chunk_pos = ChunkPos::new(x, z);
-                    let mut chunk = generator.generate_chunk(chunk_pos);
-                    let _ = init_skylight(&mut chunk, &registry);
-                    let mesh = mesh_chunk(&chunk, &registry, renderer.atlas_metadata());
-
-                    total_vertices += mesh.vertices.len();
-                    total_indices += mesh.indices.len();
-
-                    let chunk_bind_group = resources
-                        .pipeline
-                        .create_chunk_bind_group(resources.device, chunk_pos);
-
-                    chunk_manager.add_chunk(
-                        resources.device,
-                        resources.queue,
-                        &mesh,
-                        chunk_pos,
-                        chunk_bind_group,
-                    );
-                    chunks.insert(chunk_pos, chunk);
-                }
-            }
-        }
-
-        // Stitch skylight across chunk seams for the generated region.
-        let chunk_positions: Vec<_> = chunks.keys().copied().collect();
-        for pos in chunk_positions {
-            let _ = stitch_light_seams(&mut chunks, &registry, pos, LightType::Skylight);
-        }
-
-        tracing::info!(
-            "Generated {} chunks ({} vertices, {} indices)",
-            chunk_manager.chunk_count(),
-            total_vertices,
-            total_indices
-        );
-
-        // Spawn passive mobs in generated chunks
         let mob_spawner = MobSpawner::new(world_seed);
-        let mut mobs = Vec::new();
-        for (pos, chunk) in &chunks {
-            // Get biome at chunk center
-            let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
-            let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
-            let biome = generator
-                .biome_assigner()
-                .get_biome(chunk_center_x, chunk_center_z);
-
-            // Calculate surface heights for each (x, z) position
-            let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
-            for (local_z, row) in surface_heights.iter_mut().enumerate() {
-                for (local_x, height) in row.iter_mut().enumerate() {
-                    // Find highest non-air block
-                    for y in (0..CHUNK_SIZE_Y).rev() {
-                        let voxel = chunk.voxel(local_x, y, local_z);
-                        if voxel.id != BLOCK_AIR {
-                            *height = y as i32;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            let mut new_mobs = mob_spawner.generate_spawns(pos.x, pos.z, biome, &surface_heights);
-            tracing::debug!(
-                "Spawned {} mobs in chunk {:?} ({:?})",
-                new_mobs.len(),
-                pos,
-                biome
-            );
-            mobs.append(&mut new_mobs);
-        }
-        tracing::info!("Spawned {} passive mobs", mobs.len());
-
-        // Determine spawn point near world origin so the player doesn't start mid-air.
-        let spawn_feet = Self::determine_spawn_point(&chunks, &registry)
-            .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
-
-        // Setup camera at eye height above feet
-        renderer.camera_mut().position =
-            spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
-        renderer.camera_mut().yaw = 0.0;
-        renderer.camera_mut().pitch = -0.3;
+        let mobs = Vec::new();
 
         // Setup state
-        let mut debug_hud = DebugHud::new();
-        debug_hud.chunks_loaded = chunk_manager.chunk_count();
-        debug_hud.total_vertices = total_vertices;
-        debug_hud.total_triangles = total_indices / 3;
+        let debug_hud = DebugHud::new(); // Zeroed by default
 
         let input = InputState::new();
         let input_processor = InputProcessor::new(&controls);
@@ -1136,7 +1091,7 @@ impl GameWorld {
             player_health: PlayerHealth::new(),
             chunks_visible: 0,
             mining_progress: None,
-            spawn_point: spawn_feet,
+            spawn_point: glam::Vec3::ZERO, // Temp
             controls,
             input_processor,
             actions: ActionState::default(),
@@ -1163,6 +1118,7 @@ impl GameWorld {
             inventory: Inventory::new(),
             mob_spawner,
             mobs,
+            fluid_sim: FluidSimulator::new(),
             sim_tick: SimTick::ZERO,
             accumulator: 0.0,
             crafting_open: false,
@@ -1184,8 +1140,54 @@ impl GameWorld {
             brewing_stands: HashMap::new(),
             brewing_open: false,
             open_brewing_pos: None,
+
+            // New fields
+            region_store,
+            terrain_generator,
+            render_distance,
         };
 
+        // Initial chunk load (blocking, load all initial chunks)
+        world.update_chunks(usize::MAX);
+
+        // Spawn passive mobs in newly generated chunks
+        for (pos, chunk) in &world.chunks {
+            let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
+            let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
+            let biome = world
+                .terrain_generator
+                .biome_assigner()
+                .get_biome(chunk_center_x, chunk_center_z);
+
+            let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
+            for (local_z, row) in surface_heights.iter_mut().enumerate() {
+                for (local_x, height) in row.iter_mut().enumerate() {
+                    for y in (0..CHUNK_SIZE_Y).rev() {
+                        let voxel = chunk.voxel(local_x, y, local_z);
+                        if voxel.id != BLOCK_AIR {
+                            *height = y as i32;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let mut new_mobs = world
+                .mob_spawner
+                .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+            world.mobs.append(&mut new_mobs);
+        }
+
+        // Determine spawn point
+        let spawn_feet = Self::determine_spawn_point(&world.chunks, &world.registry)
+            .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
+        world.spawn_point = spawn_feet;
+
+        // Setup camera
+        world.renderer.camera_mut().position =
+            spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
+        world.renderer.camera_mut().yaw = 0.0;
+        world.renderer.camera_mut().pitch = -0.3;
         world.player_physics.last_ground_y = spawn_feet.y;
 
         let _ = world.input.enter_gameplay(&world.window);
@@ -1675,6 +1677,50 @@ impl GameWorld {
                 },
             );
         }
+
+        // Render mobs
+        for mob in &self.mobs {
+            if mob.dead { continue; }
+            
+            let height = match mob.mob_type {
+                MobType::Chicken | MobType::Spider => 0.5,
+                _ => 1.8,
+            };
+            
+            let center_pos = glam::Vec3::new(
+                mob.x as f32,
+                mob.y as f32 + height * 0.5,
+                mob.z as f32
+            );
+            
+            let color = match mob.mob_type {
+                MobType::Zombie => [0.0, 0.5, 0.0, 1.0],
+                MobType::Skeleton => [0.8, 0.8, 0.8, 1.0],
+                MobType::Creeper => [0.0, 0.8, 0.0, 1.0],
+                MobType::Spider => [0.1, 0.1, 0.1, 1.0],
+                MobType::Pig => [1.0, 0.6, 0.6, 1.0],
+                MobType::Cow => [0.3, 0.2, 0.1, 1.0],
+                MobType::Sheep => [0.9, 0.9, 0.9, 1.0],
+                MobType::Chicken => [1.0, 1.0, 1.0, 1.0],
+            };
+            
+            let size = match mob.mob_type {
+                MobType::Chicken => [0.5, 0.5],
+                MobType::Spider => [1.0, 0.5],
+                _ => [0.6, 1.8],
+            };
+
+            self.billboard_emitter.submit(
+                0,
+                BillboardInstance {
+                    position: center_pos.to_array(),
+                    size,
+                    color,
+                    flags: 0, 
+                    ..Default::default()
+                },
+            );
+        }
     }
 
     fn current_control_mode(&self) -> ControlMode {
@@ -1730,6 +1776,27 @@ impl GameWorld {
 
         {
             let physics = &mut self.player_physics;
+
+            // Handle double-jump to toggle fly mode
+            if actions.jump_pressed {
+                if physics.last_jump_press_time < 0.3 {
+                    physics.toggle_physics();
+                    physics.last_jump_press_time = 10.0; // Reset
+                    tracing::info!(
+                        "Physics mode: {}",
+                        if physics.physics_enabled {
+                            "ENABLED"
+                        } else {
+                            "DISABLED (fly mode)"
+                        }
+                    );
+                } else {
+                    physics.last_jump_press_time = 0.0;
+                }
+            } else {
+                physics.last_jump_press_time += dt;
+            }
+
             physics.velocity.y += physics.gravity * dt;
             if physics.velocity.y < physics.terminal_velocity {
                 physics.velocity.y = physics.terminal_velocity;
@@ -1795,6 +1862,20 @@ impl GameWorld {
     }
 
     fn apply_fly_movement(&mut self, actions: &ActionState, dt: f32) {
+        // Handle double-jump to toggle fly mode (exit fly)
+        if actions.jump_pressed {
+            let physics = &mut self.player_physics;
+            if physics.last_jump_press_time < 0.3 {
+                physics.toggle_physics();
+                physics.last_jump_press_time = 10.0; // Reset
+                tracing::info!("Physics mode: ENABLED");
+            } else {
+                physics.last_jump_press_time = 0.0;
+            }
+        } else {
+            self.player_physics.last_jump_press_time += dt;
+        }
+
         let (forward, right, mut position) = {
             let camera = self.renderer.camera();
             let (f, r) = Self::flat_directions(camera);
@@ -1819,6 +1900,9 @@ impl GameWorld {
     }
 
     fn fixed_update(&mut self) {
+        // Update world chunks
+        self.update_chunks(1);
+
         // Increment tick
         self.sim_tick = self.sim_tick.advance(1);
         let dt = TICK_RATE as f32;
@@ -1835,12 +1919,146 @@ impl GameWorld {
         // Update mobs
         self.update_mobs(dt);
 
+        // Update fluids
+        self.fluid_sim.tick(&mut self.chunks);
+        let dirty_fluids = self.fluid_sim.take_dirty_chunks();
+        for chunk_pos in dirty_fluids {
+            self.recompute_chunk_lighting(chunk_pos);
+            if let Some(chunk) = self.chunks.get(&chunk_pos) {
+                let mesh = mesh_chunk(chunk, &self.registry, self.renderer.atlas_metadata());
+                if let Some(resources) = self.renderer.render_resources() {
+                    let chunk_bind_group = resources
+                        .pipeline
+                        .create_chunk_bind_group(resources.device, chunk_pos);
+                    self.chunk_manager.add_chunk(
+                        resources.device,
+                        resources.queue,
+                        &mesh,
+                        chunk_pos,
+                        chunk_bind_group,
+                    );
+                }
+            }
+        }
+
         // Update projectiles (arrows)
         self.update_projectiles();
 
         // Check for death
         if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
             self.handle_death("You died!");
+        }
+    }
+
+    fn update_chunks(&mut self, max_load: usize) {
+        let camera_pos = self.renderer.camera().position;
+        let center_chunk_x = (camera_pos.x / 16.0).floor() as i32;
+        let center_chunk_z = (camera_pos.z / 16.0).floor() as i32;
+        let radius = self.render_distance;
+
+        // Unload chunks
+        let mut chunks_to_unload = Vec::new();
+        for pos in self.chunks.keys() {
+            let dx = pos.x - center_chunk_x;
+            let dz = pos.z - center_chunk_z;
+            if dx * dx + dz * dz > (radius + 2) * (radius + 2) {
+                chunks_to_unload.push(*pos);
+            }
+        }
+
+        for pos in chunks_to_unload {
+            if let Some(chunk) = self.chunks.remove(&pos) {
+                if let Err(e) = self.region_store.save_chunk(&chunk) {
+                    tracing::error!("Failed to save chunk {:?}: {}", pos, e);
+                }
+                self.chunk_manager.remove_chunk(&pos);
+            }
+        }
+
+        // Load chunks
+        let mut chunks_to_load = Vec::new();
+        for x in -radius..=radius {
+            for z in -radius..=radius {
+                if x * x + z * z > radius * radius {
+                    continue;
+                }
+                let chunk_pos = ChunkPos::new(center_chunk_x + x, center_chunk_z + z);
+                if !self.chunks.contains_key(&chunk_pos) {
+                    chunks_to_load.push(chunk_pos);
+                }
+            }
+        }
+
+        // Sort by distance to center to load nearest first
+        chunks_to_load.sort_by_key(|pos| {
+            let dx = pos.x - center_chunk_x;
+            let dz = pos.z - center_chunk_z;
+            dx * dx + dz * dz
+        });
+
+        // Apply limit
+        if chunks_to_load.len() > max_load {
+            chunks_to_load.truncate(max_load);
+        }
+
+        let resources = if let Some(res) = self.renderer.render_resources() {
+            res
+        } else {
+            return;
+        };
+
+        // Load limited number per frame to avoid lag (e.g. 2 chunks)
+        // But for initial load we might want more.
+        // For now, load all to ensure correctness, optimization later.
+        for pos in chunks_to_load {
+            let chunk = if let Ok(loaded) = self.region_store.load_chunk(pos) {
+                loaded
+            } else {
+                let mut c = self.terrain_generator.generate_chunk(pos);
+                let _ = init_skylight(&mut c, &self.registry);
+                c
+            };
+
+            // Mesh and add
+            let mesh = mesh_chunk(&chunk, &self.registry, self.renderer.atlas_metadata());
+            let chunk_bind_group = resources
+                .pipeline
+                .create_chunk_bind_group(resources.device, pos);
+
+            self.chunk_manager.add_chunk(
+                resources.device,
+                resources.queue,
+                &mesh,
+                pos,
+                chunk_bind_group,
+            );
+
+            self.chunks.insert(pos, chunk);
+            // Stitch seams using standalone function to avoid borrow conflict
+            recompute_lighting(&mut self.chunks, &self.registry, pos);
+
+            // Spawn mobs in new chunk
+            if let Some(chunk) = self.chunks.get(&pos) {
+                let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
+                let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
+                let biome = self.terrain_generator.biome_assigner().get_biome(chunk_center_x, chunk_center_z);
+                
+                let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
+                for (local_z, row) in surface_heights.iter_mut().enumerate() {
+                    for (local_x, height) in row.iter_mut().enumerate() {
+                        for y in (0..CHUNK_SIZE_Y).rev() {
+                            let voxel = chunk.voxel(local_x, y, local_z);
+                            if voxel.id != BLOCK_AIR {
+                                *height = y as i32;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                let mut new_mobs = self.mob_spawner.generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                self.mobs.append(&mut new_mobs);
+            }
         }
     }
 
@@ -2247,6 +2465,11 @@ impl GameWorld {
 
                     // Remove the block
                     chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                    // Notify fluid sim to update neighbors
+                    self.fluid_sim.on_fluid_removed(
+                        FluidPos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
+                        &self.chunks,
+                    );
                     spawn_particles_at = Some(glam::Vec3::new(
                         hit.block_pos.x as f32 + 0.5,
                         hit.block_pos.y as f32 + 0.5,
@@ -2383,6 +2606,11 @@ impl GameWorld {
                             light_block: 0,
                         };
                         chunk.set_voxel(local_x, local_y, local_z, new_voxel);
+                        // Notify fluid sim (treat as removal to wake neighbors who might be flowing here)
+                        self.fluid_sim.on_fluid_removed(
+                            FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
+                            &self.chunks,
+                        );
                         spawn_particles_at = Some(glam::Vec3::new(
                             place_pos.x as f32 + 0.5,
                             place_pos.y as f32 + 0.5,

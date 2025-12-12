@@ -133,6 +133,8 @@ pub struct InputSnapshot {
     pub context: InputContext,
     /// Keys that were held when the snapshot was taken.
     pub keys_pressed: HashSet<KeyCode>,
+    /// Keys that were pressed at least once during the frame.
+    pub keys_just_pressed: HashSet<KeyCode>,
     /// Mouse buttons held at snapshot time.
     pub mouse_buttons: HashSet<MouseButton>,
     /// Mouse buttons clicked during the frame.
@@ -154,6 +156,8 @@ pub struct InputSnapshot {
 pub struct InputState {
     /// Keys currently pressed
     pub keys_pressed: HashSet<KeyCode>,
+    /// Keys pressed this frame
+    pub keys_just_pressed: HashSet<KeyCode>,
     /// Mouse position (x, y) in pixels
     pub mouse_pos: (f64, f64),
     /// Mouse delta since last frame (x, y)
@@ -176,6 +180,7 @@ impl Default for InputState {
     fn default() -> Self {
         Self {
             keys_pressed: HashSet::new(),
+            keys_just_pressed: HashSet::new(),
             mouse_pos: (0.0, 0.0),
             mouse_delta: (0.0, 0.0),
             raw_mouse_delta: (0.0, 0.0),
@@ -206,6 +211,7 @@ impl InputState {
         InputSnapshot {
             context: self.context,
             keys_pressed: self.keys_pressed.clone(),
+            keys_just_pressed: self.keys_just_pressed.clone(),
             mouse_buttons: self.mouse_buttons.clone(),
             mouse_clicks: self.mouse_clicks.clone(),
             mouse_pos: self.mouse_pos,
@@ -237,6 +243,7 @@ impl InputState {
         self.raw_mouse_delta = (0.0, 0.0);
         self.scroll_delta = 0.0;
         self.mouse_clicks.clear();
+        self.keys_just_pressed.clear();
     }
 
     /// Handle a window event and update state.
@@ -250,6 +257,7 @@ impl InputState {
                     match event.state {
                         ElementState::Pressed => {
                             self.keys_pressed.insert(keycode);
+                            self.keys_just_pressed.insert(keycode);
                         }
                         ElementState::Released => {
                             self.keys_pressed.remove(&keycode);
