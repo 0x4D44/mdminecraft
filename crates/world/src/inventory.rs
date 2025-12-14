@@ -383,4 +383,245 @@ mod tests {
         assert_eq!(inv.find_item(42), Some(5));
         assert_eq!(inv.find_item(99), None);
     }
+
+    #[test]
+    fn item_stack_with_metadata() {
+        let stack = ItemStack::with_metadata(1, 10, vec![1, 2, 3]);
+        assert_eq!(stack.item_id, 1);
+        assert_eq!(stack.count, 10);
+        assert_eq!(stack.metadata, Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn item_stack_metadata_affects_merge() {
+        let stack1 = ItemStack::new(1, 10);
+        let stack2 = ItemStack::with_metadata(1, 10, vec![1, 2, 3]);
+        let stack3 = ItemStack::with_metadata(1, 10, vec![1, 2, 3]);
+
+        // Same item but different metadata shouldn't merge
+        assert!(!stack1.can_merge(&stack2));
+
+        // Same item with same metadata should merge
+        assert!(stack2.can_merge(&stack3));
+    }
+
+    #[test]
+    fn item_stack_remove() {
+        let mut stack = ItemStack::new(1, 10);
+        let removed = stack.remove(5);
+        assert_eq!(removed, 5);
+        assert_eq!(stack.count, 5);
+
+        // Try to remove more than available
+        let removed = stack.remove(10);
+        assert_eq!(removed, 5);
+        assert_eq!(stack.count, 0);
+    }
+
+    #[test]
+    fn item_stack_remaining_space() {
+        let stack = ItemStack::new(1, 60);
+        assert_eq!(stack.remaining_space(), 4);
+
+        let full_stack = ItemStack::new(1, 64);
+        assert_eq!(full_stack.remaining_space(), 0);
+    }
+
+    #[test]
+    fn item_stack_split_invalid() {
+        let mut stack = ItemStack::new(1, 10);
+
+        // Split 0 items
+        assert!(stack.split(0).is_none());
+
+        // Split more than available
+        assert!(stack.split(15).is_none());
+
+        // Stack count should be unchanged
+        assert_eq!(stack.count, 10);
+    }
+
+    #[test]
+    fn item_stack_split_preserves_metadata() {
+        let mut stack = ItemStack::with_metadata(1, 10, vec![42]);
+        let split = stack.split(5).unwrap();
+
+        assert_eq!(split.metadata, Some(vec![42]));
+        assert_eq!(stack.metadata, Some(vec![42]));
+    }
+
+    #[test]
+    fn item_stack_max_stack_size() {
+        let stack = ItemStack::new(1, 1);
+        assert_eq!(stack.max_stack_size(), DEFAULT_STACK_SIZE);
+        assert_eq!(stack.max_stack_size(), 64);
+    }
+
+    #[test]
+    fn inventory_new() {
+        let inv = Inventory::new();
+        assert!(inv.is_empty());
+        assert!(!inv.is_full());
+        assert_eq!(inv.empty_slots(), INVENTORY_SIZE);
+    }
+
+    #[test]
+    fn inventory_default() {
+        let inv = Inventory::default();
+        assert!(inv.is_empty());
+    }
+
+    #[test]
+    fn inventory_get_out_of_bounds() {
+        let inv = Inventory::new();
+        assert!(inv.get(100).is_none());
+    }
+
+    #[test]
+    fn inventory_get_mut_out_of_bounds() {
+        let mut inv = Inventory::new();
+        assert!(inv.get_mut(100).is_none());
+    }
+
+    #[test]
+    fn inventory_set_out_of_bounds() {
+        let mut inv = Inventory::new();
+        let result = inv.set(100, Some(ItemStack::new(1, 1)));
+        assert!(!result);
+    }
+
+    #[test]
+    fn inventory_take_out_of_bounds() {
+        let mut inv = Inventory::new();
+        assert!(inv.take(100).is_none());
+    }
+
+    #[test]
+    fn inventory_take() {
+        let mut inv = Inventory::new();
+        inv.set(5, Some(ItemStack::new(1, 10)));
+
+        let taken = inv.take(5);
+        assert!(taken.is_some());
+        assert_eq!(taken.unwrap().count, 10);
+
+        // Slot should now be empty
+        assert!(inv.get(5).is_none());
+    }
+
+    #[test]
+    fn inventory_get_mut() {
+        let mut inv = Inventory::new();
+        inv.set(5, Some(ItemStack::new(1, 10)));
+
+        if let Some(stack) = inv.get_mut(5) {
+            stack.count = 20;
+        }
+
+        assert_eq!(inv.get(5).unwrap().count, 20);
+    }
+
+    #[test]
+    fn inventory_count_item_multiple_stacks() {
+        let mut inv = Inventory::new();
+        inv.add_item(ItemStack::new(1, 64));
+        inv.add_item(ItemStack::new(1, 64));
+        inv.add_item(ItemStack::new(1, 20));
+
+        assert_eq!(inv.count_item(1), 148);
+    }
+
+    #[test]
+    fn inventory_remove_item_across_stacks() {
+        let mut inv = Inventory::new();
+
+        // Add two stacks of same item in specific slots
+        inv.set(0, Some(ItemStack::new(1, 30)));
+        inv.set(1, Some(ItemStack::new(1, 30)));
+
+        // Remove more than one stack holds
+        let removed = inv.remove_item(1, 50);
+        assert_eq!(removed, 50);
+        assert_eq!(inv.count_item(1), 10);
+    }
+
+    #[test]
+    fn inventory_remove_item_empties_slots() {
+        let mut inv = Inventory::new();
+        inv.set(0, Some(ItemStack::new(1, 10)));
+
+        inv.remove_item(1, 10);
+
+        // Slot should be empty
+        assert!(inv.get(0).is_none());
+    }
+
+    #[test]
+    fn inventory_remove_more_than_available() {
+        let mut inv = Inventory::new();
+        inv.add_item(ItemStack::new(1, 10));
+
+        let removed = inv.remove_item(1, 50);
+        assert_eq!(removed, 10);
+        assert_eq!(inv.count_item(1), 0);
+    }
+
+    #[test]
+    fn inventory_add_item_creates_multiple_stacks() {
+        let mut inv = Inventory::new();
+
+        // Add more than fits in one stack
+        inv.add_item(ItemStack::new(1, 64));
+        inv.add_item(ItemStack::new(1, 64));
+
+        assert_eq!(inv.count_item(1), 128);
+        assert!(inv.get(0).is_some());
+        assert!(inv.get(1).is_some());
+    }
+
+    #[test]
+    fn inventory_serialization() {
+        let mut inv = Inventory::new();
+        inv.add_item(ItemStack::new(1, 10));
+        inv.add_item(ItemStack::new(2, 20));
+
+        let serialized = serde_json::to_string(&inv).unwrap();
+        let deserialized: Inventory = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.count_item(1), 10);
+        assert_eq!(deserialized.count_item(2), 20);
+    }
+
+    #[test]
+    fn inventory_deserialization_wrong_size() {
+        // Array with wrong number of slots
+        let json = "[null]";
+        let result: Result<Inventory, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn inventory_is_empty_after_remove() {
+        let mut inv = Inventory::new();
+        inv.add_item(ItemStack::new(1, 10));
+        assert!(!inv.is_empty());
+
+        inv.remove_item(1, 10);
+        assert!(inv.is_empty());
+    }
+
+    #[test]
+    fn inventory_partial_merge() {
+        let mut inv = Inventory::new();
+
+        // Add stack with 60 items
+        inv.set(0, Some(ItemStack::new(1, 60)));
+
+        // Try to add 10 more - should merge 4, then need new slot for 6
+        let remainder = inv.add_item(ItemStack::new(1, 10));
+
+        assert!(remainder.is_none());
+        assert_eq!(inv.get(0).unwrap().count, 64);
+        assert_eq!(inv.get(1).unwrap().count, 6);
+    }
 }

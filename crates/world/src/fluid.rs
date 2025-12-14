@@ -607,4 +607,551 @@ mod tests {
         assert_eq!(FluidType::Water.max_flow_distance(), 7);
         assert_eq!(FluidType::Lava.max_flow_distance(), 3);
     }
+
+    #[test]
+    fn test_fluid_type_properties() {
+        // Water properties
+        assert_eq!(FluidType::Water.source_block_id(), blocks::WATER);
+        assert_eq!(FluidType::Water.flow_speed(), 1);
+        assert_eq!(FluidType::Water.light_level(), 0);
+        assert!(!FluidType::Water.causes_fire());
+        assert_eq!(FluidType::Water.damage_per_tick(), 0.0);
+
+        // Lava properties
+        assert_eq!(FluidType::Lava.source_block_id(), BLOCK_LAVA);
+        assert_eq!(FluidType::Lava.flow_speed(), 4);
+        assert_eq!(FluidType::Lava.light_level(), 15);
+        assert!(FluidType::Lava.causes_fire());
+        assert_eq!(FluidType::Lava.damage_per_tick(), 4.0);
+    }
+
+    #[test]
+    fn test_is_fluid_functions() {
+        assert!(is_fluid(blocks::WATER));
+        assert!(is_fluid(BLOCK_LAVA));
+        assert!(is_fluid(BLOCK_WATER_FLOWING));
+        assert!(is_fluid(BLOCK_LAVA_FLOWING));
+        assert!(!is_fluid(blocks::STONE));
+        assert!(!is_fluid(blocks::AIR));
+    }
+
+    #[test]
+    fn test_is_source_fluid() {
+        assert!(is_source_fluid(blocks::WATER));
+        assert!(is_source_fluid(BLOCK_LAVA));
+        assert!(!is_source_fluid(BLOCK_WATER_FLOWING));
+        assert!(!is_source_fluid(BLOCK_LAVA_FLOWING));
+        assert!(!is_source_fluid(blocks::STONE));
+    }
+
+    #[test]
+    fn test_is_flowing_fluid() {
+        assert!(!is_flowing_fluid(blocks::WATER));
+        assert!(!is_flowing_fluid(BLOCK_LAVA));
+        assert!(is_flowing_fluid(BLOCK_WATER_FLOWING));
+        assert!(is_flowing_fluid(BLOCK_LAVA_FLOWING));
+        assert!(!is_flowing_fluid(blocks::STONE));
+    }
+
+    #[test]
+    fn test_can_fluid_replace() {
+        assert!(can_fluid_replace(blocks::AIR));
+        assert!(can_fluid_replace(blocks::WATER));
+        assert!(can_fluid_replace(BLOCK_LAVA));
+        assert!(can_fluid_replace(BLOCK_WATER_FLOWING));
+        assert!(!can_fluid_replace(blocks::STONE));
+        assert!(!can_fluid_replace(blocks::DIRT));
+    }
+
+    #[test]
+    fn test_is_flammable() {
+        assert!(is_flammable(11)); // oak_log
+        assert!(is_flammable(12)); // oak_planks
+        assert!(!is_flammable(blocks::STONE));
+        assert!(!is_flammable(blocks::DIRT));
+    }
+
+    #[test]
+    fn test_fluid_pos_neighbors() {
+        let pos = FluidPos::new(5, 64, 5);
+        let neighbors = pos.neighbors();
+
+        // Should return 5 neighbors (down first, then 4 horizontal)
+        assert_eq!(neighbors.len(), 5);
+
+        // First should be below
+        assert_eq!(neighbors[0], FluidPos::new(5, 63, 5));
+
+        // Check horizontal neighbors
+        let horizontal = pos.horizontal_neighbors();
+        assert_eq!(horizontal.len(), 4);
+    }
+
+    /// Helper to create a test chunk
+    fn create_test_chunk() -> Chunk {
+        Chunk::new(ChunkPos::new(0, 0))
+    }
+
+    #[test]
+    fn test_simulator_new() {
+        let sim = FluidSimulator::new();
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_schedule_update() {
+        let mut sim = FluidSimulator::new();
+        let pos = FluidPos::new(5, 64, 5);
+
+        sim.schedule_update(pos, 1);
+        assert_eq!(sim.pending_count(), 1);
+
+        // Scheduling same position with later tick keeps earlier
+        sim.schedule_update(pos, 10);
+        assert_eq!(sim.pending_count(), 1);
+
+        // Different position adds to pending
+        sim.schedule_update(FluidPos::new(6, 64, 5), 1);
+        assert_eq!(sim.pending_count(), 2);
+    }
+
+    #[test]
+    fn test_schedule_update_earlier_overrides() {
+        let mut sim = FluidSimulator::new();
+        let pos = FluidPos::new(5, 64, 5);
+
+        // Schedule for tick 10
+        sim.schedule_update(pos, 10);
+        // Then schedule for tick 5 (earlier) - should override
+        sim.schedule_update(pos, 5);
+
+        // Tick 6 times - the earlier update should have processed
+        for _ in 0..6 {
+            let mut chunks = HashMap::new();
+            sim.tick(&mut chunks);
+        }
+
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_on_fluid_placed() {
+        let mut sim = FluidSimulator::new();
+        let pos = FluidPos::new(5, 64, 5);
+
+        sim.on_fluid_placed(pos, FluidType::Water);
+        assert_eq!(sim.pending_count(), 1);
+
+        // Lava schedules with longer delay
+        sim.on_fluid_placed(FluidPos::new(6, 64, 5), FluidType::Lava);
+        assert_eq!(sim.pending_count(), 2);
+    }
+
+    #[test]
+    fn test_on_fluid_removed() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place water around a position
+        chunk.set_voxel(4, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = FluidPos::new(5, 64, 5);
+        sim.on_fluid_removed(pos, &chunks);
+
+        // Should schedule updates for water neighbors
+        assert!(sim.pending_count() >= 2);
+    }
+
+    #[test]
+    fn test_check_infinite_water() {
+        let sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place one water source
+        chunk.set_voxel(4, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = FluidPos::new(5, 64, 5);
+
+        // One source = not infinite
+        assert!(!sim.check_infinite_water(pos, &chunks));
+
+        // Add second source
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(6, 64, 5, Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            });
+        }
+
+        // Two sources = infinite
+        assert!(sim.check_infinite_water(pos, &chunks));
+    }
+
+    #[test]
+    fn test_take_dirty_chunks() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place water source
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Schedule and process update
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let dirty = sim.take_dirty_chunks();
+        assert!(dirty.contains(&ChunkPos::new(0, 0)));
+
+        // Second call returns empty
+        let dirty2 = sim.take_dirty_chunks();
+        assert!(dirty2.is_empty());
+    }
+
+    #[test]
+    fn test_water_flows_down() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place water source with air below
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::AIR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let below = chunk.voxel(5, 63, 5);
+
+        // Water should have flowed down
+        assert_eq!(below.id, BLOCK_WATER_FLOWING);
+        assert!(is_falling(below.state));
+    }
+
+    #[test]
+    fn test_water_spreads_horizontally() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place water source on solid ground
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: blocks::AIR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, 64, 5);
+
+        // Water should have spread horizontally
+        assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
+        assert_eq!(get_fluid_level(adjacent.state), 7); // max_flow_distance for water
+    }
+
+    #[test]
+    fn test_lava_spreads_slower() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place lava source on solid ground
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: BLOCK_LAVA,
+            state: 0,
+            light_sky: 0,
+            light_block: 15,
+        });
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: blocks::AIR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, 64, 5);
+
+        // Lava should have spread with shorter flow distance
+        assert_eq!(adjacent.id, BLOCK_LAVA_FLOWING);
+        assert_eq!(get_fluid_level(adjacent.state), 3); // max_flow_distance for lava
+    }
+
+    #[test]
+    fn test_out_of_bounds_handling() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), create_test_chunk());
+
+        // Schedule updates at invalid Y coordinates
+        sim.schedule_update(FluidPos::new(5, -1, 5), 0);
+        sim.schedule_update(FluidPos::new(5, 256, 5), 0);
+
+        // Should not crash
+        sim.tick(&mut chunks);
+    }
+
+    #[test]
+    fn test_missing_chunk_handling() {
+        let mut sim = FluidSimulator::new();
+        let chunks = HashMap::new();
+
+        // Operations on missing chunks should not crash
+        sim.on_fluid_removed(FluidPos::new(5, 64, 5), &chunks);
+        assert!(!sim.check_infinite_water(FluidPos::new(5, 64, 5), &chunks));
+    }
+
+    #[test]
+    fn test_default_implementation() {
+        let sim = FluidSimulator::default();
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_swimming_state_default() {
+        let state = SwimmingState::default();
+        assert!(!state.in_water);
+        assert!(!state.in_lava);
+        assert_eq!(state.water_depth, 0.0);
+    }
+
+    #[test]
+    fn test_swimming_vertical_drag() {
+        let mut state = SwimmingState::default();
+        assert_eq!(state.vertical_drag(), 1.0);
+
+        state.in_water = true;
+        assert!(state.vertical_drag() < 1.0);
+
+        state.in_water = false;
+        state.in_lava = true;
+        assert!(state.vertical_drag() < 0.8);
+    }
+
+    #[test]
+    fn test_fluid_level_max() {
+        // Test level boundaries
+        let state = set_fluid_level(0, FLUID_LEVEL_SOURCE);
+        assert_eq!(get_fluid_level(state), FLUID_LEVEL_SOURCE);
+
+        let state = set_fluid_level(0, 0);
+        assert_eq!(get_fluid_level(state), 0);
+
+        // Test that level is masked to 4 bits
+        let state = set_fluid_level(0, 15);
+        assert_eq!(get_fluid_level(state), 15);
+    }
+
+    #[test]
+    fn test_falling_preserves_level() {
+        // Set both falling and level
+        let state = set_falling(set_fluid_level(0, 5), true);
+        assert!(is_falling(state));
+        assert_eq!(get_fluid_level(state), 5);
+
+        // Unset falling, level should remain
+        let state = set_falling(state, false);
+        assert!(!is_falling(state));
+        assert_eq!(get_fluid_level(state), 5);
+    }
+
+    #[test]
+    fn test_process_non_fluid_block() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place stone (not a fluid)
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        // Stone should remain unchanged
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(chunk.voxel(5, 64, 5).id, blocks::STONE);
+    }
+
+    #[test]
+    fn test_flowing_water_continues_flowing() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place flowing water with level 5 on solid ground
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: BLOCK_WATER_FLOWING,
+            state: set_fluid_level(0, 5),
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: blocks::AIR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, 64, 5);
+
+        // Should spread with reduced level (5 - 1 = 4)
+        assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
+        assert_eq!(get_fluid_level(adjacent.state), 4);
+    }
+
+    #[test]
+    fn test_lava_destroys_flammable() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place lava next to wood
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: BLOCK_LAVA,
+            state: 0,
+            light_sky: 0,
+            light_block: 15,
+        });
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: 11, // oak_log (flammable)
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, 64, 5);
+
+        // Wood should be replaced (with air for now)
+        assert_eq!(adjacent.id, blocks::AIR);
+    }
+
+    #[test]
+    fn test_fluid_pos_negative_coords() {
+        let pos = FluidPos::new(-5, 64, -10);
+        let (chunk_pos, lx, ly, lz) = pos.to_chunk_local();
+
+        assert_eq!(chunk_pos, ChunkPos::new(-1, -1));
+        assert_eq!(lx, 11);
+        assert_eq!(ly, 64);
+        assert_eq!(lz, 6);
+    }
 }

@@ -408,4 +408,211 @@ mod tests {
         assert!(!projectile.update()); // age becomes 1199, not dead yet
         assert!(projectile.update()); // age becomes 1200, should be dead now (age >= 1200)
     }
+
+    #[test]
+    fn test_projectile_type_properties() {
+        // Arrow properties
+        assert_eq!(ProjectileType::Arrow.base_damage(), 2.0);
+        assert_eq!(ProjectileType::Arrow.gravity(), 0.05);
+        assert_eq!(ProjectileType::Arrow.drag(), 0.99);
+        assert_eq!(ProjectileType::Arrow.hitbox_radius(), 0.3);
+        assert_eq!(ProjectileType::Arrow.lifetime_ticks(), 1200);
+        assert!(!ProjectileType::Arrow.is_splash_potion());
+        assert_eq!(ProjectileType::Arrow.potion_id(), None);
+        assert_eq!(ProjectileType::Arrow.effect_radius(), 0.0);
+
+        // Splash potion properties
+        let splash = ProjectileType::SplashPotion(42);
+        assert_eq!(splash.base_damage(), 0.0);
+        assert_eq!(splash.gravity(), 0.06);
+        assert_eq!(splash.drag(), 0.98);
+        assert_eq!(splash.hitbox_radius(), 0.25);
+        assert_eq!(splash.lifetime_ticks(), 600);
+        assert!(splash.is_splash_potion());
+        assert_eq!(splash.potion_id(), Some(42));
+        assert_eq!(splash.effect_radius(), 4.0);
+    }
+
+    #[test]
+    fn test_arrow_charge_clamping() {
+        // Charge should clamp to 0.1-1.0
+        let low = Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 0.0);
+        assert_eq!(low.charge, 0.1);
+
+        let high = Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 2.0);
+        assert_eq!(high.charge, 1.0);
+    }
+
+    #[test]
+    fn test_splash_potion_creation() {
+        let potion = Projectile::throw_splash_potion(0.0, 0.0, 0.0, 0.0, 0.0, 123);
+        assert!(matches!(
+            potion.projectile_type,
+            ProjectileType::SplashPotion(123)
+        ));
+        assert!(potion.speed() > 0.0);
+        assert!(!potion.stuck);
+        assert!(!potion.dead);
+    }
+
+    #[test]
+    fn test_projectile_stick() {
+        let mut arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        assert!(arrow.speed() > 0.0);
+
+        arrow.stick();
+        assert!(arrow.stuck);
+        assert_eq!(arrow.vel_x, 0.0);
+        assert_eq!(arrow.vel_y, 0.0);
+        assert_eq!(arrow.vel_z, 0.0);
+        assert_eq!(arrow.speed(), 0.0);
+    }
+
+    #[test]
+    fn test_stuck_projectile_no_movement() {
+        let mut arrow = Projectile::shoot_arrow(0.0, 100.0, 0.0, 0.0, 0.0, 1.0);
+        let initial_y = arrow.y;
+        arrow.stick();
+
+        // Update should not move stuck projectile
+        arrow.update();
+        assert_eq!(arrow.y, initial_y);
+    }
+
+    #[test]
+    fn test_projectile_hit_method() {
+        let mut arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        assert!(!arrow.hit_entity);
+        assert!(!arrow.dead);
+
+        arrow.hit();
+        assert!(arrow.hit_entity);
+        assert!(arrow.dead);
+    }
+
+    #[test]
+    fn test_projectile_hits_point_basic() {
+        let arrow = Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+
+        // Should hit at exact position
+        assert!(arrow.hits_point(5.0, 5.0, 5.0, 0.5));
+
+        // Should hit nearby
+        assert!(arrow.hits_point(5.2, 5.0, 5.0, 0.5));
+
+        // Should miss far away
+        assert!(!arrow.hits_point(10.0, 10.0, 10.0, 0.5));
+    }
+
+    #[test]
+    fn test_stuck_projectile_no_hit() {
+        let mut arrow = Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+        arrow.stuck = true;
+
+        // Stuck projectile shouldn't hit anything
+        assert!(!arrow.hits_point(5.0, 5.0, 5.0, 0.5));
+    }
+
+    #[test]
+    fn test_dead_projectile_no_hit() {
+        let mut arrow = Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+        arrow.dead = true;
+
+        assert!(!arrow.hits_point(5.0, 5.0, 5.0, 0.5));
+    }
+
+    #[test]
+    fn test_dead_projectile_update() {
+        let mut arrow = Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+        arrow.dead = true;
+
+        // Should return true immediately when dead
+        assert!(arrow.update());
+    }
+
+    #[test]
+    fn test_projectile_manager_new() {
+        let manager = ProjectileManager::new();
+        assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_projectile_manager_default() {
+        let manager = ProjectileManager::default();
+        assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_projectile_manager_spawn() {
+        let mut manager = ProjectileManager::new();
+        manager.spawn(Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0));
+        manager.spawn(Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0));
+        assert_eq!(manager.count(), 2);
+    }
+
+    #[test]
+    fn test_projectile_manager_update_removes_dead() {
+        let mut manager = ProjectileManager::new();
+
+        let mut arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        arrow.dead = true;
+        manager.spawn(arrow);
+
+        manager.update();
+        assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_projectile_manager_check_hit_miss() {
+        let mut manager = ProjectileManager::new();
+        let arrow = Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+        manager.spawn(arrow);
+
+        // Miss
+        let damage = manager.check_hit(100.0, 100.0, 100.0, 0.5);
+        assert!(damage.is_none());
+        assert_eq!(manager.count(), 1);
+    }
+
+    #[test]
+    fn test_projectile_manager_lifetime_expiry() {
+        let mut manager = ProjectileManager::new();
+        let mut arrow = Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
+        arrow.age = 1199;
+        manager.spawn(arrow);
+
+        // Should be removed after update (age reaches 1200)
+        manager.update();
+        assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_arrow_trajectory_downward() {
+        // Positive pitch = looking up = dir_y = -sin(pitch) = negative
+        let arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, std::f32::consts::FRAC_PI_4, 1.0);
+        // With the game's coordinate system, positive pitch shoots down
+        assert!(arrow.vel_y < 0.0);
+    }
+
+    #[test]
+    fn test_arrow_trajectory_upward() {
+        // Negative pitch = looking down = dir_y = -sin(pitch) = positive (since sin(-x) = -sin(x))
+        let arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, -std::f32::consts::FRAC_PI_4, 1.0);
+        // With the game's coordinate system, negative pitch shoots up
+        assert!(arrow.vel_y > 0.0);
+    }
+
+    #[test]
+    fn test_projectile_speed_calculation() {
+        let arrow = Projectile::new(0.0, 0.0, 0.0, 3.0, 4.0, 0.0, ProjectileType::Arrow, 1.0);
+        // 3-4-5 triangle
+        assert_eq!(arrow.speed(), 5.0);
+    }
+
+    #[test]
+    fn test_splash_potion_upward_arc() {
+        let potion = Projectile::throw_splash_potion(0.0, 0.0, 0.0, 0.0, 0.0, 1);
+        // Potion should have slight upward arc added
+        assert!(potion.vel_y > 0.0);
+    }
 }

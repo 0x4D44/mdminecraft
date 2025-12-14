@@ -381,4 +381,323 @@ mod tests {
         assert_eq!(furnace.add_fuel(ItemType::Stone, 1), 1);
         assert!(furnace.fuel.is_none());
     }
+
+    #[test]
+    fn test_furnace_default() {
+        let furnace = FurnaceState::default();
+        assert!(furnace.input.is_none());
+        assert!(furnace.fuel.is_none());
+        assert!(furnace.output.is_none());
+        assert_eq!(furnace.smelt_progress, 0.0);
+        assert_eq!(furnace.fuel_remaining, 0.0);
+        assert!(!furnace.is_lit);
+    }
+
+    #[test]
+    fn test_furnace_take_input() {
+        let mut furnace = FurnaceState::new();
+        furnace.add_input(ItemType::IronOre, 5);
+
+        let taken = furnace.take_input();
+        assert_eq!(taken, Some((ItemType::IronOre, 5)));
+        assert!(furnace.input.is_none());
+
+        // Take again - should be None
+        assert!(furnace.take_input().is_none());
+    }
+
+    #[test]
+    fn test_furnace_take_fuel() {
+        let mut furnace = FurnaceState::new();
+        furnace.add_fuel(ItemType::Coal, 3);
+
+        let taken = furnace.take_fuel();
+        assert_eq!(taken, Some((ItemType::Coal, 3)));
+        assert!(furnace.fuel.is_none());
+
+        // Take again - should be None
+        assert!(furnace.take_fuel().is_none());
+    }
+
+    #[test]
+    fn test_furnace_take_output() {
+        let mut furnace = FurnaceState::new();
+
+        // Setup and smelt
+        furnace.add_input(ItemType::IronOre, 1);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+
+        let taken = furnace.take_output();
+        assert_eq!(taken, Some((ItemType::IronIngot, 1)));
+        assert!(furnace.output.is_none());
+    }
+
+    #[test]
+    fn test_furnace_add_input_stacking() {
+        let mut furnace = FurnaceState::new();
+
+        // Add some iron ore
+        assert_eq!(furnace.add_input(ItemType::IronOre, 10), 0);
+        assert_eq!(furnace.input, Some((ItemType::IronOre, 10)));
+
+        // Add more of the same - should stack
+        assert_eq!(furnace.add_input(ItemType::IronOre, 20), 0);
+        assert_eq!(furnace.input, Some((ItemType::IronOre, 30)));
+
+        // Try to add different item - should fail
+        assert_eq!(furnace.add_input(ItemType::GoldOre, 5), 5);
+    }
+
+    #[test]
+    fn test_furnace_add_fuel_stacking() {
+        let mut furnace = FurnaceState::new();
+
+        // Add some coal
+        assert_eq!(furnace.add_fuel(ItemType::Coal, 10), 0);
+        assert_eq!(furnace.fuel, Some((ItemType::Coal, 10)));
+
+        // Add more of the same - should stack
+        assert_eq!(furnace.add_fuel(ItemType::Coal, 20), 0);
+        assert_eq!(furnace.fuel, Some((ItemType::Coal, 30)));
+
+        // Try to add different fuel - should fail
+        assert_eq!(furnace.add_fuel(ItemType::OakLog, 5), 5);
+    }
+
+    #[test]
+    fn test_furnace_is_lit_state() {
+        let mut furnace = FurnaceState::new();
+
+        // Empty furnace should not be lit
+        assert!(!furnace.is_lit);
+
+        furnace.add_input(ItemType::IronOre, 1);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        // After update, should be lit (has fuel and valid recipe)
+        furnace.update(0.1);
+        assert!(furnace.is_lit);
+    }
+
+    #[test]
+    fn test_furnace_no_fuel_not_lit() {
+        let mut furnace = FurnaceState::new();
+        furnace.add_input(ItemType::IronOre, 1);
+        // No fuel added
+
+        furnace.update(0.1);
+        assert!(!furnace.is_lit);
+        assert_eq!(furnace.smelt_progress, 0.0);
+    }
+
+    #[test]
+    fn test_furnace_multiple_smelts() {
+        let mut furnace = FurnaceState::new();
+
+        // Add multiple ore and enough fuel
+        furnace.add_input(ItemType::IronOre, 3);
+        furnace.add_fuel(ItemType::Coal, 1); // Coal smelts 8 items
+
+        // Smelt first item
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+        assert_eq!(furnace.output, Some((ItemType::IronIngot, 1)));
+        assert_eq!(furnace.input, Some((ItemType::IronOre, 2)));
+
+        // Smelt second item
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+        assert_eq!(furnace.output, Some((ItemType::IronIngot, 2)));
+        assert_eq!(furnace.input, Some((ItemType::IronOre, 1)));
+
+        // Smelt third item
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+        assert_eq!(furnace.output, Some((ItemType::IronIngot, 3)));
+        assert!(furnace.input.is_none());
+    }
+
+    #[test]
+    fn test_furnace_output_slot_stacking() {
+        let mut furnace = FurnaceState::new();
+
+        // Set up existing output
+        furnace.output = Some((ItemType::IronIngot, 5));
+
+        // Add input and fuel
+        furnace.add_input(ItemType::IronOre, 1);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        // Smelt - output should stack
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+
+        assert_eq!(furnace.output, Some((ItemType::IronIngot, 6)));
+    }
+
+    #[test]
+    fn test_furnace_output_slot_full() {
+        let mut furnace = FurnaceState::new();
+
+        // Set up full output (max stack)
+        let max_stack = ItemType::IronIngot.max_stack_size();
+        furnace.output = Some((ItemType::IronIngot, max_stack));
+
+        // Add input and fuel
+        furnace.add_input(ItemType::IronOre, 1);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        // Update - should not smelt (output full)
+        furnace.update(0.1);
+
+        // Progress should not advance or should reset
+        // Input should still be there
+        assert_eq!(furnace.input, Some((ItemType::IronOre, 1)));
+    }
+
+    #[test]
+    fn test_furnace_fuel_consumption() {
+        let mut furnace = FurnaceState::new();
+
+        // Add input and a single piece of coal (smelts 8 items)
+        furnace.add_input(ItemType::IronOre, 10);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        // Verify coal was added
+        assert!(furnace.fuel.is_some());
+
+        // Smelt until fuel slot is empty
+        for _ in 0..2000 {
+            furnace.update(0.05);
+        }
+
+        // Fuel slot should be consumed (coal is gone)
+        assert!(furnace.fuel.is_none());
+
+        // Output should have multiple items smelted
+        assert!(furnace.output.is_some());
+        let (_, count) = furnace.output.unwrap();
+        assert!(count > 0, "Should have smelted at least some items");
+    }
+
+    #[test]
+    fn test_furnace_stick_fuel() {
+        let mut furnace = FurnaceState::new();
+
+        // Stick smelts 0.25 items (need 4 sticks for 1 item)
+        furnace.add_input(ItemType::IronOre, 1);
+        furnace.add_fuel(ItemType::Stick, 4);
+
+        // Smelt
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+
+        assert_eq!(furnace.output, Some((ItemType::IronIngot, 1)));
+    }
+
+    #[test]
+    fn test_furnace_lit_state_transition() {
+        let mut furnace = FurnaceState::new();
+        furnace.add_input(ItemType::IronOre, 1);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        // First update should transition to lit
+        let changed = furnace.update(0.1);
+        assert!(changed); // was_lit (false) != is_lit (true)
+        assert!(furnace.is_lit);
+    }
+
+    #[test]
+    fn test_all_fuel_types() {
+        // Test all valid fuel types
+        assert!(is_fuel(ItemType::Coal));
+        assert!(is_fuel(ItemType::OakLog));
+        assert!(is_fuel(ItemType::OakPlanks));
+        assert!(is_fuel(ItemType::Stick));
+
+        // Verify burn values
+        assert_eq!(get_fuel_value(ItemType::Stick), 0.25);
+    }
+
+    #[test]
+    fn test_smelt_recipe_constants() {
+        // Verify all recipes in SMELT_RECIPES
+        assert_eq!(SMELT_RECIPES.len(), 4);
+
+        for recipe in SMELT_RECIPES {
+            // Each recipe should have valid input and output
+            assert!(get_smelt_output(recipe.input).is_some());
+            assert_eq!(get_smelt_output(recipe.input), Some(recipe.output));
+        }
+    }
+
+    #[test]
+    fn test_fuel_value_constants() {
+        // Verify all fuels in FUEL_VALUES
+        assert_eq!(FUEL_VALUES.len(), 4);
+
+        for fuel in FUEL_VALUES {
+            assert!(fuel.burn_value > 0.0);
+            assert!(is_fuel(fuel.item));
+        }
+    }
+
+    #[test]
+    fn test_furnace_serialization() {
+        let mut furnace = FurnaceState::new();
+        furnace.add_input(ItemType::IronOre, 5);
+        furnace.add_fuel(ItemType::Coal, 3);
+        furnace.smelt_progress = 0.5;
+
+        let serialized = serde_json::to_string(&furnace).unwrap();
+        let deserialized: FurnaceState = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.input, Some((ItemType::IronOre, 5)));
+        assert_eq!(deserialized.fuel, Some((ItemType::Coal, 3)));
+        assert!((deserialized.smelt_progress - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_smelt_time_constant() {
+        assert_eq!(SMELT_TIME_SECONDS, 10.0);
+    }
+
+    #[test]
+    fn test_furnace_food_smelting() {
+        let mut furnace = FurnaceState::new();
+
+        // Smelt raw pork
+        furnace.add_input(ItemType::RawPork, 1);
+        furnace.add_fuel(ItemType::Coal, 1);
+
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+
+        assert_eq!(furnace.output, Some((ItemType::CookedPork, 1)));
+    }
+
+    #[test]
+    fn test_furnace_gold_smelting() {
+        let mut furnace = FurnaceState::new();
+
+        // Smelt gold ore
+        furnace.add_input(ItemType::GoldOre, 1);
+        furnace.add_fuel(ItemType::OakLog, 1); // 1.5 items per log
+
+        for _ in 0..220 {
+            furnace.update(0.05);
+        }
+
+        assert_eq!(furnace.output, Some((ItemType::GoldIngot, 1)));
+    }
 }

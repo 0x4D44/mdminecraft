@@ -738,4 +738,625 @@ mod tests {
         assert_eq!(result, SleepResult::Success);
         assert_eq!(bed.spawn_point(), Some((10, 64, 10)));
     }
+
+    #[test]
+    fn test_bed_set_spawn_point() {
+        let mut bed = BedSystem::new();
+        bed.set_spawn_point((50, 100, 50));
+        assert_eq!(bed.spawn_point(), Some((50, 100, 50)));
+    }
+
+    #[test]
+    fn test_bed_default() {
+        let bed = BedSystem::default();
+        assert_eq!(bed.spawn_point(), None);
+    }
+
+    #[test]
+    fn test_facing_opposite() {
+        assert_eq!(Facing::North.opposite(), Facing::South);
+        assert_eq!(Facing::South.opposite(), Facing::North);
+        assert_eq!(Facing::East.opposite(), Facing::West);
+        assert_eq!(Facing::West.opposite(), Facing::East);
+    }
+
+    #[test]
+    fn test_facing_offset() {
+        assert_eq!(Facing::North.offset(), (0, -1));
+        assert_eq!(Facing::South.offset(), (0, 1));
+        assert_eq!(Facing::East.offset(), (1, 0));
+        assert_eq!(Facing::West.offset(), (-1, 0));
+    }
+
+    #[test]
+    fn test_trapdoor_state() {
+        let state: BlockState = 0;
+        assert!(!is_trapdoor_open(state));
+
+        let open_state = set_trapdoor_open(state, true);
+        assert!(is_trapdoor_open(open_state));
+
+        let closed_state = set_trapdoor_open(open_state, false);
+        assert!(!is_trapdoor_open(closed_state));
+    }
+
+    #[test]
+    fn test_fence_gate_state() {
+        let state: BlockState = 0;
+        assert!(!is_fence_gate_open(state));
+
+        let open_state = set_fence_gate_open(state, true);
+        assert!(is_fence_gate_open(open_state));
+
+        let closed_state = set_fence_gate_open(open_state, false);
+        assert!(!is_fence_gate_open(closed_state));
+    }
+
+    #[test]
+    fn test_is_trapdoor() {
+        assert!(is_trapdoor(interactive_blocks::TRAPDOOR));
+        assert!(!is_trapdoor(interactive_blocks::OAK_DOOR_LOWER));
+        assert!(!is_trapdoor(blocks::STONE));
+    }
+
+    #[test]
+    fn test_is_ladder() {
+        assert!(is_ladder(interactive_blocks::LADDER));
+        assert!(!is_ladder(blocks::STONE));
+        assert!(!is_ladder(interactive_blocks::OAK_FENCE));
+    }
+
+    #[test]
+    fn test_is_slab() {
+        assert!(is_slab(interactive_blocks::STONE_SLAB));
+        assert!(is_slab(interactive_blocks::OAK_SLAB));
+        assert!(!is_slab(blocks::STONE));
+        assert!(!is_slab(interactive_blocks::STONE_STAIRS));
+    }
+
+    #[test]
+    fn test_is_stairs() {
+        assert!(is_stairs(interactive_blocks::STONE_STAIRS));
+        assert!(is_stairs(interactive_blocks::OAK_STAIRS));
+        assert!(!is_stairs(blocks::STONE));
+        assert!(!is_stairs(interactive_blocks::STONE_SLAB));
+    }
+
+    #[test]
+    fn test_is_fence() {
+        assert!(is_fence(interactive_blocks::OAK_FENCE));
+        assert!(!is_fence(interactive_blocks::OAK_FENCE_GATE));
+        assert!(!is_fence(blocks::STONE));
+    }
+
+    #[test]
+    fn test_is_fence_gate() {
+        assert!(is_fence_gate(interactive_blocks::OAK_FENCE_GATE));
+        assert!(!is_fence_gate(interactive_blocks::OAK_FENCE));
+        assert!(!is_fence_gate(blocks::STONE));
+    }
+
+    #[test]
+    fn test_is_bed() {
+        assert!(is_bed(interactive_blocks::BED_HEAD));
+        assert!(is_bed(interactive_blocks::BED_FOOT));
+        assert!(!is_bed(blocks::STONE));
+    }
+
+    #[test]
+    fn test_is_chest() {
+        assert!(is_chest(interactive_blocks::CHEST));
+        assert!(!is_chest(blocks::STONE));
+    }
+
+    #[test]
+    fn test_door_collision_type() {
+        // Closed door
+        let collision = get_collision_type(interactive_blocks::OAK_DOOR_LOWER, 0);
+        match collision {
+            CollisionType::Door { open } => assert!(!open),
+            _ => panic!("Expected Door collision"),
+        }
+
+        // Open door
+        let open_state = set_door_open(0, true);
+        let collision = get_collision_type(interactive_blocks::OAK_DOOR_LOWER, open_state);
+        match collision {
+            CollisionType::Door { open } => assert!(open),
+            _ => panic!("Expected Door collision"),
+        }
+    }
+
+    #[test]
+    fn test_fence_gate_collision() {
+        // Closed fence gate
+        let collision = get_collision_type(interactive_blocks::OAK_FENCE_GATE, 0);
+        assert_eq!(collision, CollisionType::Fence);
+
+        // Open fence gate
+        let open_state = set_fence_gate_open(0, true);
+        let collision = get_collision_type(interactive_blocks::OAK_FENCE_GATE, open_state);
+        assert_eq!(collision, CollisionType::None);
+    }
+
+    #[test]
+    fn test_trapdoor_collision() {
+        // Closed trapdoor
+        let collision = get_collision_type(interactive_blocks::TRAPDOOR, 0);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert_eq!(max_y, 0.1875);
+            }
+            _ => panic!("Expected Partial collision for closed trapdoor"),
+        }
+
+        // Open trapdoor
+        let open_state = set_trapdoor_open(0, true);
+        let collision = get_collision_type(interactive_blocks::TRAPDOOR, open_state);
+        assert_eq!(collision, CollisionType::None);
+    }
+
+    #[test]
+    fn test_top_slab_collision() {
+        let top_state = SlabPosition::Top.to_state(0);
+        let collision = get_collision_type(interactive_blocks::STONE_SLAB, top_state);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.5);
+                assert_eq!(max_y, 1.0);
+            }
+            _ => panic!("Expected Partial collision for top slab"),
+        }
+    }
+
+    #[test]
+    fn test_stairs_collision() {
+        let collision = get_collision_type(interactive_blocks::OAK_STAIRS, 0);
+        match collision {
+            CollisionType::Partial { min_y: _, max_y } => {
+                assert_eq!(max_y, 1.0);
+            }
+            _ => panic!("Expected Partial collision for stairs"),
+        }
+    }
+
+    #[test]
+    fn test_bed_collision() {
+        let collision = get_collision_type(interactive_blocks::BED_HEAD, 0);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert_eq!(max_y, 0.5625);
+            }
+            _ => panic!("Expected Partial collision for bed"),
+        }
+    }
+
+    #[test]
+    fn test_chest_collision() {
+        let collision = get_collision_type(interactive_blocks::CHEST, 0);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert_eq!(max_y, 0.875);
+            }
+            _ => panic!("Expected Partial collision for chest"),
+        }
+    }
+
+    #[test]
+    fn test_torch_collision() {
+        let collision = get_collision_type(interactive_blocks::TORCH, 0);
+        assert_eq!(collision, CollisionType::None);
+    }
+
+    #[test]
+    fn test_glass_collision() {
+        let collision = get_collision_type(interactive_blocks::GLASS, 0);
+        assert_eq!(collision, CollisionType::Full);
+
+        let collision = get_collision_type(interactive_blocks::GLASS_PANE, 0);
+        assert_eq!(collision, CollisionType::Full);
+    }
+
+    #[test]
+    fn test_water_collision() {
+        let collision = get_collision_type(blocks::WATER, 0);
+        assert_eq!(collision, CollisionType::None);
+    }
+
+    /// Helper to create a test chunk
+    fn create_test_chunk() -> Chunk {
+        Chunk::new(ChunkPos::new(0, 0))
+    }
+
+    #[test]
+    fn test_interaction_manager_new() {
+        let manager = InteractionManager::new();
+        let dirty = manager.dirty_chunks.clone();
+        assert!(dirty.is_empty());
+    }
+
+    #[test]
+    fn test_interaction_manager_default() {
+        let manager = InteractionManager::default();
+        assert!(manager.dirty_chunks.is_empty());
+    }
+
+    #[test]
+    fn test_toggle_door() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place oak door
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::OAK_DOOR_LOWER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 65, 5, Voxel {
+            id: interactive_blocks::OAK_DOOR_UPPER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Toggle door
+        let result = manager.toggle_door(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(result);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lower = chunk.voxel(5, 64, 5);
+        let upper = chunk.voxel(5, 65, 5);
+
+        // Both halves should be open
+        assert!(is_door_open(lower.state));
+        assert!(is_door_open(upper.state));
+    }
+
+    #[test]
+    fn test_toggle_door_from_upper() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place oak door
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::OAK_DOOR_LOWER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 65, 5, Voxel {
+            id: interactive_blocks::OAK_DOOR_UPPER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Toggle door from upper half
+        let result = manager.toggle_door(ChunkPos::new(0, 0), 5, 65, 5, &mut chunks);
+        assert!(result);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lower = chunk.voxel(5, 64, 5);
+        let upper = chunk.voxel(5, 65, 5);
+
+        // Both halves should be open
+        assert!(is_door_open(lower.state));
+        assert!(is_door_open(upper.state));
+    }
+
+    #[test]
+    fn test_toggle_iron_door_fails() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place iron door
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::IRON_DOOR_LOWER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Iron doors can't be toggled manually
+        let result = manager.toggle_door(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_toggle_non_door() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place stone
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Should fail
+        let result = manager.toggle_door(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_toggle_fence_gate() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place fence gate
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::OAK_FENCE_GATE,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Toggle gate
+        let result = manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(result);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let gate = chunk.voxel(5, 64, 5);
+        assert!(is_fence_gate_open(gate.state));
+
+        // Toggle again to close
+        let result = manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(result);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let gate = chunk.voxel(5, 64, 5);
+        assert!(!is_fence_gate_open(gate.state));
+    }
+
+    #[test]
+    fn test_toggle_non_fence_gate() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_toggle_trapdoor() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place trapdoor
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::TRAPDOOR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Toggle trapdoor
+        let result = manager.toggle_trapdoor(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(result);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let trapdoor = chunk.voxel(5, 64, 5);
+        assert!(is_trapdoor_open(trapdoor.state));
+    }
+
+    #[test]
+    fn test_toggle_non_trapdoor() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.toggle_trapdoor(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_interact_with_door() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::OAK_DOOR_LOWER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 65, 5, Voxel {
+            id: interactive_blocks::OAK_DOOR_UPPER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::DoorToggled);
+    }
+
+    #[test]
+    fn test_interact_with_fence_gate() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::OAK_FENCE_GATE,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::FenceGateToggled);
+    }
+
+    #[test]
+    fn test_interact_with_trapdoor() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::TRAPDOOR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::TrapdoorToggled);
+    }
+
+    #[test]
+    fn test_interact_with_bed() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::BED_HEAD,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::OpenBedUI);
+    }
+
+    #[test]
+    fn test_interact_with_chest() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::CHEST,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::OpenChestUI);
+    }
+
+    #[test]
+    fn test_interact_with_stone() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::None);
+    }
+
+    #[test]
+    fn test_interact_missing_chunk() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::None);
+    }
+
+    #[test]
+    fn test_take_dirty_chunks() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::OAK_FENCE_GATE,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+
+        let dirty = manager.take_dirty_chunks();
+        assert!(dirty.contains(&ChunkPos::new(0, 0)));
+
+        let dirty2 = manager.take_dirty_chunks();
+        assert!(dirty2.is_empty());
+    }
+
+    #[test]
+    fn test_missing_chunk_operations() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+
+        // All operations should return false with missing chunk
+        assert!(!manager.toggle_door(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks));
+        assert!(!manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks));
+        assert!(!manager.toggle_trapdoor(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks));
+    }
+
+    #[test]
+    fn test_interact_with_iron_door() {
+        let mut manager = InteractionManager::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: interactive_blocks::IRON_DOOR_LOWER,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Iron door requires redstone, so interact should return None
+        let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
+        assert_eq!(result, InteractionResult::None);
+    }
 }

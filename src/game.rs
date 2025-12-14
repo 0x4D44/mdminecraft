@@ -321,6 +321,24 @@ impl AABB {
             max: center + half_size,
         }
     }
+
+    /// Check if this AABB intersects with another
+    fn intersects(&self, other: &AABB) -> bool {
+        self.min.x < other.max.x
+            && self.max.x > other.min.x
+            && self.min.y < other.max.y
+            && self.max.y > other.min.y
+            && self.min.z < other.max.z
+            && self.max.z > other.min.z
+    }
+
+    /// Offset the AABB by a vector
+    fn offset(&self, offset: glam::Vec3) -> Self {
+        Self {
+            min: self.min + offset,
+            max: self.max + offset,
+        }
+    }
 }
 
 /// Player physics state
@@ -1183,6 +1201,33 @@ impl GameWorld {
             .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
         world.spawn_point = spawn_feet;
 
+        // Force spawn test mobs near player for visibility testing
+        let test_mob_types = [
+            MobType::Pig,
+            MobType::Cow,
+            MobType::Sheep,
+            MobType::Chicken,
+            MobType::Villager,
+        ];
+        for (i, mob_type) in test_mob_types.iter().enumerate() {
+            let angle = (i as f32) * std::f32::consts::TAU / test_mob_types.len() as f32;
+            let distance = 8.0; // 8 blocks away from player
+            let mob_x = spawn_feet.x as f64 + (angle.cos() * distance) as f64;
+            let mob_z = spawn_feet.z as f64 + (angle.sin() * distance) as f64;
+            let mob_y = spawn_feet.y as f64 + 1.0; // Spawn at player's ground level + 1
+
+            let mob = Mob::new(mob_x, mob_y, mob_z, *mob_type);
+            tracing::info!(
+                mob_type = ?mob_type,
+                x = mob_x,
+                y = mob_y,
+                z = mob_z,
+                "Force spawned test mob near player"
+            );
+            world.mobs.push(mob);
+        }
+        tracing::info!(total_mobs = world.mobs.len(), "Total mobs after forced spawns");
+
         // Setup camera
         world.renderer.camera_mut().position =
             spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
@@ -1222,6 +1267,112 @@ impl GameWorld {
             }
         }
         50.0
+    }
+
+    /// Check if a block at the given world position is solid (collidable)
+    fn is_block_solid(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        registry: &BlockRegistry,
+        block_x: i32,
+        block_y: i32,
+        block_z: i32,
+    ) -> bool {
+        if block_y < 0 || block_y >= CHUNK_SIZE_Y as i32 {
+            return block_y < 0; // Below world is solid, above is not
+        }
+        let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+        let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+        let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+        if let Some(chunk) = chunks.get(&chunk_pos) {
+            let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            let voxel = chunk.voxel(local_x, block_y as usize, local_z);
+            // A block is solid if it's not air and is opaque
+            voxel.id != BLOCK_AIR
+                && registry
+                    .descriptor(voxel.id)
+                    .map(|d| d.opaque)
+                    .unwrap_or(true)
+        } else {
+            false // Unloaded chunks are not solid (allows movement)
+        }
+    }
+
+    /// Check if an AABB collides with any solid blocks in the world
+    fn aabb_collides_with_world(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        registry: &BlockRegistry,
+        aabb: &AABB,
+    ) -> bool {
+        // Get the range of blocks the AABB might intersect
+        let min_x = aabb.min.x.floor() as i32;
+        let min_y = aabb.min.y.floor() as i32;
+        let min_z = aabb.min.z.floor() as i32;
+        let max_x = aabb.max.x.ceil() as i32;
+        let max_y = aabb.max.y.ceil() as i32;
+        let max_z = aabb.max.z.ceil() as i32;
+
+        for bx in min_x..max_x {
+            for by in min_y..max_y {
+                for bz in min_z..max_z {
+                    if Self::is_block_solid(chunks, registry, bx, by, bz) {
+                        // Check if block AABB intersects player AABB
+                        let block_aabb = AABB {
+                            min: glam::Vec3::new(bx as f32, by as f32, bz as f32),
+                            max: glam::Vec3::new(bx as f32 + 1.0, by as f32 + 1.0, bz as f32 + 1.0),
+                        };
+                        if aabb.intersects(&block_aabb) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Move with collision detection, returning the actual position after collision resolution.
+    /// Uses sweep testing along each axis separately for wall sliding.
+    fn move_with_collision(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        registry: &BlockRegistry,
+        current_aabb: &AABB,
+        velocity: glam::Vec3,
+    ) -> (glam::Vec3, glam::Vec3) {
+        let mut result_offset = glam::Vec3::ZERO;
+        let mut result_velocity = velocity;
+
+        // Move along X axis
+        if velocity.x != 0.0 {
+            let test_aabb = current_aabb.offset(glam::Vec3::new(velocity.x, 0.0, 0.0) + result_offset);
+            if !Self::aabb_collides_with_world(chunks, registry, &test_aabb) {
+                result_offset.x += velocity.x;
+            } else {
+                result_velocity.x = 0.0;
+            }
+        }
+
+        // Move along Y axis
+        if velocity.y != 0.0 {
+            let test_aabb = current_aabb.offset(glam::Vec3::new(0.0, velocity.y, 0.0) + result_offset);
+            if !Self::aabb_collides_with_world(chunks, registry, &test_aabb) {
+                result_offset.y += velocity.y;
+            } else {
+                result_velocity.y = 0.0;
+            }
+        }
+
+        // Move along Z axis
+        if velocity.z != 0.0 {
+            let test_aabb = current_aabb.offset(glam::Vec3::new(0.0, 0.0, velocity.z) + result_offset);
+            if !Self::aabb_collides_with_world(chunks, registry, &test_aabb) {
+                result_offset.z += velocity.z;
+            } else {
+                result_velocity.z = 0.0;
+            }
+        }
+
+        (result_offset, result_velocity)
     }
 
     fn determine_spawn_point(
@@ -1288,6 +1439,12 @@ impl GameWorld {
                 match event {
                     WindowEvent::CloseRequested => {
                         return GameAction::Quit;
+                    }
+                    WindowEvent::Focused(focused) => {
+                        if *focused {
+                            // Regained focus - recapture cursor if we were in gameplay mode
+                            let _ = self.input.handle_focus_regained(&self.window);
+                        }
                     }
                     WindowEvent::KeyboardInput { event, .. } => {
                         // ESC returns to menu
@@ -1797,11 +1954,13 @@ impl GameWorld {
                 physics.last_jump_press_time += dt;
             }
 
+            // Apply gravity
             physics.velocity.y += physics.gravity * dt;
             if physics.velocity.y < physics.terminal_velocity {
                 physics.velocity.y = physics.terminal_velocity;
             }
 
+            // Calculate horizontal movement
             let mut axis = glam::Vec2::new(actions.move_x, actions.move_y);
             if axis.length_squared() > 1.0 {
                 axis = axis.normalize();
@@ -1812,40 +1971,53 @@ impl GameWorld {
                 move_speed *= 0.5;
             }
 
+            // Build movement velocity vector
+            let mut move_velocity = glam::Vec3::ZERO;
             if axis.length_squared() > 0.0 {
                 let move_dir = forward_h * axis.y + right_h * axis.x;
-                camera_pos += move_dir * move_speed * dt;
+                move_velocity = move_dir * move_speed * dt;
             }
+            move_velocity.y = physics.velocity.y * dt;
 
-            camera_pos.y += physics.velocity.y * dt;
-
-            let was_on_ground = physics.on_ground;
-            let was_falling = physics.velocity.y < 0.0;
-            let player_aabb = physics.get_aabb(camera_pos);
-            let feet_y = player_aabb.min.y;
-            let ground_y = Self::column_ground_height(
+            // Get current AABB and apply movement with collision
+            let current_aabb = physics.get_aabb(camera_pos);
+            let (offset, new_velocity) = Self::move_with_collision(
                 &self.chunks,
                 &self.registry,
-                player_aabb.min.x + physics.player_width * 0.5, // approx center footprint
-                player_aabb.min.z + physics.player_width * 0.5,
+                &current_aabb,
+                move_velocity,
             );
 
-            if feet_y < ground_y {
-                let correction = ground_y - feet_y + PlayerPhysics::GROUND_EPS;
-                camera_pos.y += correction;
+            camera_pos += offset;
 
-                if !was_on_ground && was_falling {
-                    fall_damage = Some(physics.last_ground_y - ground_y);
-                }
+            // Update velocity based on collision results (for Y axis mainly)
+            let was_on_ground = physics.on_ground;
+            let was_falling = physics.velocity.y < 0.0;
 
-                physics.velocity.y = 0.0;
-                physics.on_ground = true;
-                physics.last_ground_y = ground_y;
-            } else {
-                if physics.on_ground {
+            if new_velocity.y == 0.0 && physics.velocity.y != 0.0 {
+                // We hit something vertically
+                if was_falling {
+                    // Hit ground
+                    let player_aabb = physics.get_aabb(camera_pos);
+                    let ground_y = player_aabb.min.y;
+
+                    if !was_on_ground {
+                        fall_damage = Some(physics.last_ground_y - ground_y);
+                    }
+
+                    physics.on_ground = true;
                     physics.last_ground_y = ground_y;
                 }
+                physics.velocity.y = 0.0;
+            } else {
                 physics.on_ground = false;
+            }
+
+            // Check if standing on ground (for jump detection)
+            let feet_check_aabb = physics.get_aabb(camera_pos).offset(glam::Vec3::new(0.0, -0.1, 0.0));
+            if Self::aabb_collides_with_world(&self.chunks, &self.registry, &feet_check_aabb) {
+                physics.on_ground = true;
+                physics.last_ground_y = physics.get_aabb(camera_pos).min.y;
             }
 
             if actions.jump && physics.on_ground {
@@ -1876,7 +2048,7 @@ impl GameWorld {
             self.player_physics.last_jump_press_time += dt;
         }
 
-        let (forward, right, mut position) = {
+        let (forward, right, position) = {
             let camera = self.renderer.camera();
             let (f, r) = Self::flat_directions(camera);
             (f, r, camera.position)
@@ -1893,10 +2065,19 @@ impl GameWorld {
 
         if movement.length_squared() > 0.0 {
             let speed = if actions.sprint { 20.0 } else { 10.0 };
-            position += movement.normalize() * speed * dt;
-        }
+            let velocity = movement.normalize() * speed * dt;
 
-        self.renderer.camera_mut().position = position;
+            // Apply collision detection for fly mode (like original Minecraft)
+            let current_aabb = self.player_physics.get_aabb(position);
+            let (offset, _) = Self::move_with_collision(
+                &self.chunks,
+                &self.registry,
+                &current_aabb,
+                velocity,
+            );
+
+            self.renderer.camera_mut().position = position + offset;
+        }
     }
 
     fn fixed_update(&mut self) {
@@ -2057,6 +2238,15 @@ impl GameWorld {
                 }
                 
                 let mut new_mobs = self.mob_spawner.generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                if !new_mobs.is_empty() {
+                    tracing::info!(
+                        chunk_x = pos.x,
+                        chunk_z = pos.z,
+                        new_mob_count = new_mobs.len(),
+                        total_mobs = self.mobs.len() + new_mobs.len(),
+                        "Adding mobs to world"
+                    );
+                }
                 self.mobs.append(&mut new_mobs);
             }
         }
@@ -3266,6 +3456,7 @@ impl GameWorld {
                     MobType::Zombie | MobType::Skeleton | MobType::Spider => 5,
                     MobType::Creeper => 5,
                     MobType::Pig | MobType::Cow | MobType::Sheep | MobType::Chicken => 1,
+                    MobType::Villager => 0, // Villagers don't drop XP
                 };
                 xp_orb_spawns.push((mob.x, mob.y + 0.5, mob.z, xp_value));
                 // Drop loot based on mob type
@@ -3358,6 +3549,9 @@ impl GameWorld {
                                 count,
                             ));
                         }
+                    }
+                    MobType::Villager => {
+                        // Villagers don't drop items when killed
                     }
                 }
                 false // Remove dead mob

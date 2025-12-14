@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 
 use lru::LruCache;
@@ -6,8 +6,10 @@ use lru::LruCache;
 use crate::{Chunk, ChunkPos};
 
 /// In-memory chunk arena with an LRU eviction policy.
+/// Uses BTreeMap for deterministic iteration order (critical for multiplayer sync).
 pub struct ChunkStorage {
-    chunks: HashMap<ChunkPos, Chunk>,
+    /// Chunks stored with deterministic key ordering.
+    chunks: BTreeMap<ChunkPos, Chunk>,
     lru: LruCache<ChunkPos, ()>,
     capacity: usize,
 }
@@ -15,9 +17,10 @@ pub struct ChunkStorage {
 impl ChunkStorage {
     /// Create a storage with the desired maximum chunk count.
     pub fn new(capacity: usize) -> Self {
-        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity > 0");
+        // Capacity is always at least 1, so NonZeroUsize is guaranteed valid
+        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity is at least 1 after max(1)");
         Self {
-            chunks: HashMap::new(),
+            chunks: BTreeMap::new(),
             lru: LruCache::new(cap),
             capacity,
         }
@@ -105,5 +108,47 @@ mod tests {
         storage.ensure_chunk(ChunkPos::new(1, 0));
         let positions: Vec<_> = storage.iter_positions().collect();
         assert_eq!(positions.len(), storage.len());
+    }
+
+    #[test]
+    fn iter_positions_is_deterministic() {
+        // BTreeMap provides deterministic iteration order
+        let mut storage = ChunkStorage::new(10);
+
+        // Insert in non-sorted order
+        storage.ensure_chunk(ChunkPos::new(5, 5));
+        storage.ensure_chunk(ChunkPos::new(1, 2));
+        storage.ensure_chunk(ChunkPos::new(3, 0));
+        storage.ensure_chunk(ChunkPos::new(0, 0));
+        storage.ensure_chunk(ChunkPos::new(2, 1));
+
+        // Collect positions multiple times - should always be same order
+        let order1: Vec<_> = storage.iter_positions().collect();
+        let order2: Vec<_> = storage.iter_positions().collect();
+
+        assert_eq!(order1, order2);
+
+        // BTreeMap should iterate in sorted order (by ChunkPos's Ord impl)
+        // ChunkPos is (x, z) so it sorts by x first, then z
+        let expected = vec![
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 2),
+            ChunkPos::new(2, 1),
+            ChunkPos::new(3, 0),
+            ChunkPos::new(5, 5),
+        ];
+        assert_eq!(order1, expected);
+    }
+
+    #[test]
+    fn get_returns_none_for_missing_chunk() {
+        let storage = ChunkStorage::new(2);
+        assert!(storage.get(ChunkPos::new(999, 999)).is_none());
+    }
+
+    #[test]
+    fn get_mut_returns_none_for_missing_chunk() {
+        let mut storage = ChunkStorage::new(2);
+        assert!(storage.get_mut(ChunkPos::new(999, 999)).is_none());
     }
 }

@@ -29,6 +29,26 @@ pub const MAX_CHAT_LEN: usize = 256;
 /// 16KB is enough for typical chunks (avg ~500 bytes), allows for complex ones.
 pub const MAX_CHUNK_DATA_LEN: usize = 16 * 1024;
 
+/// Maximum number of block actions per input bundle.
+/// Prevents DoS through excessive action spam.
+pub const MAX_BLOCK_ACTIONS: usize = 16;
+
+/// Maximum number of inventory actions per input bundle.
+pub const MAX_INVENTORY_ACTIONS: usize = 16;
+
+/// Maximum palette size (unique block types per chunk).
+/// 256 is the max since palette indices are u8.
+pub const MAX_PALETTE_SIZE: usize = 256;
+
+/// Maximum entity updates per delta message.
+pub const MAX_ENTITY_UPDATES: usize = 1024;
+
+/// Maximum recipe ID length for crafting.
+pub const MAX_RECIPE_ID_LEN: usize = 64;
+
+/// Maximum entity type name length.
+pub const MAX_ENTITY_TYPE_LEN: usize = 64;
+
 /// Messages sent from client to server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ClientMessage {
@@ -61,8 +81,13 @@ pub enum ClientMessage {
 
 impl ClientMessage {
     /// Verify message limits and validity.
+    ///
+    /// This should be called on all received messages to prevent DoS attacks.
     pub fn verify(&self) -> Result<(), &'static str> {
         match self {
+            ClientMessage::Input(bundle) => {
+                bundle.verify()?;
+            }
             ClientMessage::Chat { text } => {
                 if text.len() > MAX_CHAT_LEN {
                     return Err("Chat message too long");
@@ -133,6 +158,8 @@ pub enum ServerMessage {
 
 impl ServerMessage {
     /// Verify message limits and validity.
+    ///
+    /// This should be called on all received messages to prevent DoS attacks.
     pub fn verify(&self) -> Result<(), &'static str> {
         match self {
             ServerMessage::Chat { text, sender } => {
@@ -144,9 +171,10 @@ impl ServerMessage {
                 }
             }
             ServerMessage::ChunkData(data) => {
-                if data.compressed_data.len() > MAX_CHUNK_DATA_LEN {
-                    return Err("Chunk data too large");
-                }
+                data.verify()?;
+            }
+            ServerMessage::EntityDelta(delta) => {
+                delta.verify()?;
             }
             ServerMessage::HandshakeResponse {
                 reason: Some(r), ..
@@ -186,6 +214,39 @@ pub struct InputBundle {
 
     /// Inventory operations.
     pub inventory_actions: Vec<InventoryAction>,
+}
+
+impl InputBundle {
+    /// Verify input bundle limits and validity.
+    ///
+    /// Returns an error if any limits are exceeded, preventing DoS attacks.
+    pub fn verify(&self) -> Result<(), &'static str> {
+        if self.block_actions.len() > MAX_BLOCK_ACTIONS {
+            return Err("Too many block actions");
+        }
+        if self.inventory_actions.len() > MAX_INVENTORY_ACTIONS {
+            return Err("Too many inventory actions");
+        }
+
+        // Validate inventory actions
+        for action in &self.inventory_actions {
+            if let InventoryAction::Craft { recipe_id } = action {
+                if recipe_id.len() > MAX_RECIPE_ID_LEN {
+                    return Err("Recipe ID too long");
+                }
+            }
+        }
+
+        // Validate movement values are in expected range
+        if self.movement.forward < -1 || self.movement.forward > 1 {
+            return Err("Invalid forward movement value");
+        }
+        if self.movement.strafe < -1 || self.movement.strafe > 1 {
+            return Err("Invalid strafe movement value");
+        }
+
+        Ok(())
+    }
 }
 
 /// Movement input with delta compression.
@@ -307,6 +368,19 @@ pub struct ChunkDataMessage {
     pub crc32: u32,
 }
 
+impl ChunkDataMessage {
+    /// Verify chunk data message limits.
+    pub fn verify(&self) -> Result<(), &'static str> {
+        if self.palette.len() > MAX_PALETTE_SIZE {
+            return Err("Palette too large");
+        }
+        if self.compressed_data.len() > MAX_CHUNK_DATA_LEN {
+            return Err("Chunk data too large");
+        }
+        Ok(())
+    }
+}
+
 /// Entity delta update message.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EntityDeltaMessage {
@@ -317,6 +391,22 @@ pub struct EntityDeltaMessage {
     pub entities: Vec<EntityUpdate>,
 }
 
+impl EntityDeltaMessage {
+    /// Verify entity delta message limits.
+    pub fn verify(&self) -> Result<(), &'static str> {
+        if self.entities.len() > MAX_ENTITY_UPDATES {
+            return Err("Too many entity updates");
+        }
+
+        // Validate each entity update
+        for update in &self.entities {
+            update.verify()?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Update for a single entity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EntityUpdate {
@@ -325,6 +415,18 @@ pub struct EntityUpdate {
 
     /// Entity update type.
     pub update: EntityUpdateType,
+}
+
+impl EntityUpdate {
+    /// Verify entity update limits.
+    pub fn verify(&self) -> Result<(), &'static str> {
+        if let EntityUpdateType::Spawn { entity_type, .. } = &self.update {
+            if entity_type.len() > MAX_ENTITY_TYPE_LEN {
+                return Err("Entity type name too long");
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Type of entity update.
@@ -474,5 +576,167 @@ mod tests {
         let decoded: InputBundle = postcard::from_bytes(&encoded).expect("Failed to decode");
 
         assert_eq!(bundle, decoded);
+    }
+
+    // === Validation Tests ===
+
+    #[test]
+    fn test_valid_input_bundle() {
+        let bundle = InputBundle {
+            tick: 1000,
+            sequence: 42,
+            last_ack_tick: 995,
+            movement: MovementInput::zero(),
+            block_actions: vec![],
+            inventory_actions: vec![],
+        };
+        assert!(bundle.verify().is_ok());
+    }
+
+    #[test]
+    fn test_input_bundle_too_many_block_actions() {
+        let mut bundle = InputBundle {
+            tick: 1000,
+            sequence: 42,
+            last_ack_tick: 995,
+            movement: MovementInput::zero(),
+            block_actions: vec![],
+            inventory_actions: vec![],
+        };
+
+        // Add more than MAX_BLOCK_ACTIONS
+        for i in 0..(MAX_BLOCK_ACTIONS + 1) {
+            bundle.block_actions.push(BlockAction::Break {
+                x: i as i32,
+                y: 64,
+                z: 0,
+            });
+        }
+
+        assert!(bundle.verify().is_err());
+        assert_eq!(bundle.verify().unwrap_err(), "Too many block actions");
+    }
+
+    #[test]
+    fn test_input_bundle_too_many_inventory_actions() {
+        let mut bundle = InputBundle {
+            tick: 1000,
+            sequence: 42,
+            last_ack_tick: 995,
+            movement: MovementInput::zero(),
+            block_actions: vec![],
+            inventory_actions: vec![],
+        };
+
+        // Add more than MAX_INVENTORY_ACTIONS
+        for i in 0..(MAX_INVENTORY_ACTIONS + 1) {
+            bundle.inventory_actions.push(InventoryAction::Drop {
+                slot: i as u8,
+                amount: 1,
+            });
+        }
+
+        assert!(bundle.verify().is_err());
+        assert_eq!(bundle.verify().unwrap_err(), "Too many inventory actions");
+    }
+
+    #[test]
+    fn test_input_bundle_recipe_id_too_long() {
+        let bundle = InputBundle {
+            tick: 1000,
+            sequence: 42,
+            last_ack_tick: 995,
+            movement: MovementInput::zero(),
+            block_actions: vec![],
+            inventory_actions: vec![InventoryAction::Craft {
+                recipe_id: "x".repeat(MAX_RECIPE_ID_LEN + 1),
+            }],
+        };
+
+        assert!(bundle.verify().is_err());
+        assert_eq!(bundle.verify().unwrap_err(), "Recipe ID too long");
+    }
+
+    #[test]
+    fn test_chat_message_too_long() {
+        let msg = ClientMessage::Chat {
+            text: "x".repeat(MAX_CHAT_LEN + 1),
+        };
+        assert!(msg.verify().is_err());
+        assert_eq!(msg.verify().unwrap_err(), "Chat message too long");
+    }
+
+    #[test]
+    fn test_valid_chat_message() {
+        let msg = ClientMessage::Chat {
+            text: "Hello, world!".to_string(),
+        };
+        assert!(msg.verify().is_ok());
+    }
+
+    #[test]
+    fn test_chunk_data_palette_too_large() {
+        let msg = ChunkDataMessage {
+            chunk_x: 0,
+            chunk_z: 0,
+            palette: vec![0u16; MAX_PALETTE_SIZE + 1],
+            compressed_data: vec![],
+            crc32: 0,
+        };
+        assert!(msg.verify().is_err());
+        assert_eq!(msg.verify().unwrap_err(), "Palette too large");
+    }
+
+    #[test]
+    fn test_chunk_data_too_large() {
+        let msg = ChunkDataMessage {
+            chunk_x: 0,
+            chunk_z: 0,
+            palette: vec![],
+            compressed_data: vec![0u8; MAX_CHUNK_DATA_LEN + 1],
+            crc32: 0,
+        };
+        assert!(msg.verify().is_err());
+        assert_eq!(msg.verify().unwrap_err(), "Chunk data too large");
+    }
+
+    #[test]
+    fn test_entity_delta_too_many_updates() {
+        let msg = EntityDeltaMessage {
+            tick: 1000,
+            entities: (0..(MAX_ENTITY_UPDATES + 1) as u64)
+                .map(|id| EntityUpdate {
+                    entity_id: id,
+                    update: EntityUpdateType::Despawn,
+                })
+                .collect(),
+        };
+        assert!(msg.verify().is_err());
+        assert_eq!(msg.verify().unwrap_err(), "Too many entity updates");
+    }
+
+    #[test]
+    fn test_entity_type_name_too_long() {
+        let update = EntityUpdate {
+            entity_id: 1,
+            update: EntityUpdateType::Spawn {
+                transform: Transform::from_f32(0.0, 0.0, 0.0, 0.0, 0.0),
+                entity_type: "x".repeat(MAX_ENTITY_TYPE_LEN + 1),
+            },
+        };
+        assert!(update.verify().is_err());
+        assert_eq!(update.verify().unwrap_err(), "Entity type name too long");
+    }
+
+    #[test]
+    fn test_constants_values() {
+        assert_eq!(MAX_CHAT_LEN, 256);
+        assert_eq!(MAX_CHUNK_DATA_LEN, 16 * 1024);
+        assert_eq!(MAX_BLOCK_ACTIONS, 16);
+        assert_eq!(MAX_INVENTORY_ACTIONS, 16);
+        assert_eq!(MAX_PALETTE_SIZE, 256);
+        assert_eq!(MAX_ENTITY_UPDATES, 1024);
+        assert_eq!(MAX_RECIPE_ID_LEN, 64);
+        assert_eq!(MAX_ENTITY_TYPE_LEN, 64);
     }
 }

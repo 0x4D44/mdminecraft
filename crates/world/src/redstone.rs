@@ -681,4 +681,502 @@ mod tests {
             assert_eq!(dx + dy + dz, 1);
         }
     }
+
+    #[test]
+    fn test_redstone_pos_to_chunk_local() {
+        // Positive coordinates
+        let pos = RedstonePos::new(17, 64, 5);
+        let (chunk_pos, lx, ly, lz) = pos.to_chunk_local();
+        assert_eq!(chunk_pos, ChunkPos::new(1, 0));
+        assert_eq!(lx, 1);
+        assert_eq!(ly, 64);
+        assert_eq!(lz, 5);
+
+        // Negative coordinates
+        let pos = RedstonePos::new(-5, 32, -20);
+        let (chunk_pos, lx, ly, lz) = pos.to_chunk_local();
+        assert_eq!(chunk_pos, ChunkPos::new(-1, -2));
+        assert_eq!(lx, 11);
+        assert_eq!(ly, 32);
+        assert_eq!(lz, 12);
+    }
+
+    #[test]
+    fn test_conducts_and_can_be_powered() {
+        assert!(RedstoneComponent::Wire.conducts_power());
+        assert!(!RedstoneComponent::Lever.conducts_power());
+        assert!(!RedstoneComponent::Lamp.conducts_power());
+
+        assert!(RedstoneComponent::Lamp.can_be_powered());
+        assert!(RedstoneComponent::Wire.can_be_powered());
+        assert!(!RedstoneComponent::Lever.can_be_powered());
+        assert!(!RedstoneComponent::Button.can_be_powered());
+    }
+
+    /// Helper to create a test chunk with air
+    fn create_test_chunk() -> Chunk {
+        Chunk::new(ChunkPos::new(0, 0))
+    }
+
+    #[test]
+    fn test_simulator_new() {
+        let sim = RedstoneSimulator::new();
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_schedule_update() {
+        let mut sim = RedstoneSimulator::new();
+        let pos = RedstonePos::new(5, 64, 5);
+
+        sim.schedule_update(pos);
+        assert_eq!(sim.pending_count(), 1);
+
+        // Scheduling same position doesn't duplicate
+        sim.schedule_update(pos);
+        assert_eq!(sim.pending_count(), 1);
+
+        // Different position adds to pending
+        sim.schedule_update(RedstonePos::new(6, 64, 5));
+        assert_eq!(sim.pending_count(), 2);
+    }
+
+    #[test]
+    fn test_toggle_lever() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place a lever
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::LEVER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+
+        // Toggle lever on
+        sim.toggle_lever(pos, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(is_active(voxel.state));
+        assert_eq!(get_power_level(voxel.state), MAX_POWER);
+
+        // Neighbors should be scheduled for update
+        assert!(sim.pending_count() > 0);
+
+        // Toggle lever off
+        sim.toggle_lever(pos, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(!is_active(voxel.state));
+        assert_eq!(get_power_level(voxel.state), 0);
+    }
+
+    #[test]
+    fn test_toggle_lever_wrong_block() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place stone instead of lever
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: 1, // Stone
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+
+        // Toggle should do nothing
+        sim.toggle_lever(pos, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert_eq!(voxel.id, 1);
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_activate_button() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place a stone button
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::STONE_BUTTON,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+
+        // Activate button
+        sim.activate_button(pos, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(is_active(voxel.state));
+        assert_eq!(get_power_level(voxel.state), MAX_POWER);
+
+        // Activating again should do nothing (already active)
+        sim.activate_button(pos, &mut chunks);
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(is_active(voxel.state));
+    }
+
+    #[test]
+    fn test_button_deactivation_on_tick() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place a stone button
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::STONE_BUTTON,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+        sim.activate_button(pos, &mut chunks);
+
+        // Tick 21 times (button deactivates after 20 ticks)
+        for _ in 0..21 {
+            sim.tick(&mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(!is_active(voxel.state));
+        assert_eq!(get_power_level(voxel.state), 0);
+    }
+
+    #[test]
+    fn test_update_pressure_plate() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place a stone pressure plate
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::STONE_PRESSURE_PLATE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+
+        // Entity steps on plate
+        sim.update_pressure_plate(pos, true, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(is_active(voxel.state));
+        assert_eq!(get_power_level(voxel.state), MAX_POWER);
+
+        // Entity steps off plate
+        sim.update_pressure_plate(pos, false, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(!is_active(voxel.state));
+        assert_eq!(get_power_level(voxel.state), 0);
+    }
+
+    #[test]
+    fn test_redstone_wire_power_propagation() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place lever and wire next to each other
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::LEVER,
+            state: set_active(set_power_level(0, MAX_POWER), true),
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: redstone_blocks::REDSTONE_WIRE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(7, 64, 5, Voxel {
+            id: redstone_blocks::REDSTONE_WIRE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Schedule updates for wire positions
+        sim.schedule_update(RedstonePos::new(6, 64, 5));
+        sim.schedule_update(RedstonePos::new(7, 64, 5));
+
+        // Process updates
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+
+        // First wire should have power 14 (15 - 1)
+        let wire1 = chunk.voxel(6, 64, 5);
+        assert_eq!(get_power_level(wire1.state), 14);
+
+        // Second wire should have power 13 (14 - 1)
+        let wire2 = chunk.voxel(7, 64, 5);
+        assert_eq!(get_power_level(wire2.state), 13);
+    }
+
+    #[test]
+    fn test_redstone_lamp() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place lever and lamp next to each other
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::LEVER,
+            state: set_active(set_power_level(0, MAX_POWER), true),
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(6, 64, 5, Voxel {
+            id: redstone_blocks::REDSTONE_LAMP,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Schedule lamp update
+        sim.schedule_update(RedstonePos::new(6, 64, 5));
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lamp = chunk.voxel(6, 64, 5);
+
+        // Lamp should be lit
+        assert_eq!(lamp.id, redstone_blocks::REDSTONE_LAMP_LIT);
+        assert_eq!(lamp.light_block, 15);
+    }
+
+    #[test]
+    fn test_redstone_torch_inversion() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place wire below and torch above
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: redstone_blocks::REDSTONE_WIRE,
+            state: set_power_level(0, MAX_POWER), // Powered wire
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::REDSTONE_TORCH,
+            state: set_active(set_power_level(0, MAX_POWER), true), // Initially on
+            light_sky: 0,
+            light_block: 7,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Schedule torch update
+        sim.schedule_update(RedstonePos::new(5, 64, 5));
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let torch = chunk.voxel(5, 64, 5);
+
+        // Torch should be off (inverted)
+        assert!(!is_active(torch.state));
+        assert_eq!(get_power_level(torch.state), 0);
+        assert_eq!(torch.light_block, 0);
+    }
+
+    #[test]
+    fn test_take_dirty_chunks() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::LEVER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.toggle_lever(RedstonePos::new(5, 64, 5), &mut chunks);
+
+        let dirty = sim.take_dirty_chunks();
+        assert!(dirty.contains(&ChunkPos::new(0, 0)));
+
+        // Second call should return empty set
+        let dirty2 = sim.take_dirty_chunks();
+        assert!(dirty2.is_empty());
+    }
+
+    #[test]
+    fn test_out_of_bounds_updates() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), create_test_chunk());
+
+        // Try to toggle lever at invalid Y
+        sim.toggle_lever(RedstonePos::new(5, -1, 5), &mut chunks);
+        sim.toggle_lever(RedstonePos::new(5, 256, 5), &mut chunks);
+
+        // Should not crash, just do nothing
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_oak_button() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place an oak button
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::OAK_BUTTON,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+        sim.activate_button(pos, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(is_active(voxel.state));
+    }
+
+    #[test]
+    fn test_oak_pressure_plate() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::OAK_PRESSURE_PLATE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = RedstonePos::new(5, 64, 5);
+        sim.update_pressure_plate(pos, true, &mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let voxel = chunk.voxel(5, 64, 5);
+        assert!(is_active(voxel.state));
+    }
+
+    #[test]
+    fn test_get_emitted_power_all_components() {
+        let sim = RedstoneSimulator::new();
+
+        // Active lever
+        let lever_on = Voxel {
+            id: redstone_blocks::LEVER,
+            state: set_active(0, true),
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(sim.get_emitted_power(lever_on), MAX_POWER);
+
+        // Inactive lever
+        let lever_off = Voxel {
+            id: redstone_blocks::LEVER,
+            state: set_active(0, false),
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(sim.get_emitted_power(lever_off), 0);
+
+        // Wire with power level 10
+        let wire = Voxel {
+            id: redstone_blocks::REDSTONE_WIRE,
+            state: set_power_level(0, 10),
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(sim.get_emitted_power(wire), 10);
+
+        // Non-redstone block
+        let stone = Voxel {
+            id: 1,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(sim.get_emitted_power(stone), 0);
+    }
+
+    #[test]
+    fn test_missing_chunk_handling() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+
+        // Operations on missing chunks should not panic
+        sim.toggle_lever(RedstonePos::new(5, 64, 5), &mut chunks);
+        sim.activate_button(RedstonePos::new(5, 64, 5), &mut chunks);
+        sim.update_pressure_plate(RedstonePos::new(5, 64, 5), true, &mut chunks);
+
+        assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_lamp_turns_off_when_unpowered() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place a lit lamp with no power source
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: redstone_blocks::REDSTONE_LAMP_LIT,
+            state: 0,
+            light_sky: 0,
+            light_block: 15,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(RedstonePos::new(5, 64, 5));
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lamp = chunk.voxel(5, 64, 5);
+
+        // Lamp should turn off
+        assert_eq!(lamp.id, redstone_blocks::REDSTONE_LAMP);
+        assert_eq!(lamp.light_block, 0);
+    }
+
+    #[test]
+    fn test_default_implementation() {
+        let sim = RedstoneSimulator::default();
+        assert_eq!(sim.pending_count(), 0);
+    }
 }

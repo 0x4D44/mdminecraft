@@ -3,15 +3,18 @@
 //! Efficiently replicates entity state from server to clients using delta encoding.
 
 use crate::protocol::{EntityDeltaMessage, EntityId, EntityUpdate, EntityUpdateType, Transform};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Tracks entity state for delta encoding.
+/// Uses BTreeMap/BTreeSet for deterministic iteration order (critical for multiplayer sync).
 pub struct EntityReplicationTracker {
     /// Last known state for each entity (per client).
-    last_states: HashMap<EntityId, EntityState>,
+    /// BTreeMap ensures deterministic iteration order.
+    last_states: BTreeMap<EntityId, EntityState>,
 
     /// Entities visible to this client.
-    visible_entities: HashSet<EntityId>,
+    /// BTreeSet ensures deterministic iteration order.
+    visible_entities: BTreeSet<EntityId>,
 
     /// View distance in chunks.
     view_distance: u32,
@@ -29,8 +32,8 @@ impl EntityReplicationTracker {
     /// Create a new entity replication tracker.
     pub fn new(view_distance: u32) -> Self {
         Self {
-            last_states: HashMap::new(),
-            visible_entities: HashSet::new(),
+            last_states: BTreeMap::new(),
+            visible_entities: BTreeSet::new(),
             view_distance,
         }
     }
@@ -41,12 +44,12 @@ impl EntityReplicationTracker {
     pub fn update_visibility(
         &mut self,
         player_pos: &Transform,
-        entity_positions: &HashMap<EntityId, Transform>,
+        entity_positions: &BTreeMap<EntityId, Transform>,
     ) {
         let player_chunk_x = player_pos.x / (16 * 16); // 16 blocks * 16 subunits
         let player_chunk_z = player_pos.z / (16 * 16);
 
-        let mut new_visible = HashSet::new();
+        let mut new_visible = BTreeSet::new();
 
         for (&entity_id, entity_pos) in entity_positions {
             let entity_chunk_x = entity_pos.x / (16 * 16);
@@ -70,7 +73,7 @@ impl EntityReplicationTracker {
     pub fn generate_delta(
         &mut self,
         tick: u64,
-        entities: &HashMap<EntityId, EntityState>,
+        entities: &BTreeMap<EntityId, EntityState>,
     ) -> EntityDeltaMessage {
         let mut updates = Vec::new();
 
@@ -215,7 +218,7 @@ mod tests {
         let mut tracker = EntityReplicationTracker::new(5);
 
         let player_pos = make_transform(0, 0, 0);
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         entities.insert(1, make_transform(16 * 16, 0, 0)); // 1 chunk away
         entities.insert(2, make_transform(16 * 16 * 10, 0, 0)); // 10 chunks away
 
@@ -231,7 +234,7 @@ mod tests {
         let mut tracker = EntityReplicationTracker::new(5);
         tracker.visible_entities.insert(1);
 
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         let state = create_entity_state(
             make_transform(100, 200, 300),
             "Player",
@@ -258,7 +261,7 @@ mod tests {
         tracker.visible_entities.insert(1);
 
         // Initial state
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         let state1 = create_entity_state(make_transform(100, 200, 300), "Player", None);
         entities.insert(1, state1);
 
@@ -286,7 +289,7 @@ mod tests {
         tracker.visible_entities.insert(1);
 
         // Spawn entity
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         let state = create_entity_state(make_transform(100, 200, 300), "Player", None);
         entities.insert(1, state);
 
@@ -311,7 +314,7 @@ mod tests {
         let mut tracker = EntityReplicationTracker::new(5);
         tracker.visible_entities.insert(1);
 
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         let state = create_entity_state(make_transform(100, 200, 300), "Player", None);
         entities.insert(1, state.clone());
 
@@ -329,7 +332,7 @@ mod tests {
         let mut tracker = EntityReplicationTracker::new(5);
         tracker.visible_entities.insert(1);
 
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         let state1 = create_entity_state(
             make_transform(100, 200, 300),
             "Player",
@@ -361,7 +364,7 @@ mod tests {
         let mut tracker = EntityReplicationTracker::new(5);
         tracker.visible_entities.insert(1);
 
-        let mut entities = HashMap::new();
+        let mut entities = BTreeMap::new();
         let state = create_entity_state(make_transform(100, 200, 300), "Player", None);
         entities.insert(1, state);
 
@@ -371,5 +374,24 @@ mod tests {
         tracker.clear();
         assert_eq!(tracker.tracked_count(), 0);
         assert_eq!(tracker.visible_count(), 0);
+    }
+
+    #[test]
+    fn test_deterministic_iteration() {
+        // Verify that iteration order is deterministic
+        let mut tracker = EntityReplicationTracker::new(5);
+
+        // Insert entities in random order
+        for id in [5, 2, 8, 1, 9, 3, 7, 4, 6] {
+            tracker.visible_entities.insert(id);
+        }
+
+        // Collect order multiple times - should always be the same
+        let order1: Vec<EntityId> = tracker.visible_entities.iter().copied().collect();
+        let order2: Vec<EntityId> = tracker.visible_entities.iter().copied().collect();
+
+        assert_eq!(order1, order2);
+        // BTreeSet should iterate in sorted order
+        assert_eq!(order1, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 }

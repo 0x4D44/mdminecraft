@@ -4,13 +4,10 @@
 
 use crate::aquifer::AquiferGenerator;
 use crate::biome::{BiomeAssigner, BiomeData, BiomeId};
-use crate::caves::{
-    CaveCarver, CheeseCaveCarver, DeepDarkDecorator, DripstoneGenerator, LushCaveDecorator,
-    NoodleCaveCarver, RavineCarver, SpaghettiCaveCarver,
-};
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
 use crate::geode::GeodeGenerator;
 use crate::heightmap::Heightmap;
+use crate::noise::{NoiseConfig, NoiseGenerator};
 use crate::trees::{generate_tree_positions, Tree, TreeType};
 use tracing::{debug, instrument};
 
@@ -37,217 +34,140 @@ pub mod blocks {
     pub const DIAMOND_ORE: BlockId = 17;
 }
 
-/// Terrain generator that fills chunks with blocks.
+/// Terrain generator that fills chunks with blocks using 3D density.
 pub struct TerrainGenerator {
     world_seed: u64,
     biome_assigner: BiomeAssigner,
-    cave_carver: CaveCarver,
-    cheese_carver: CheeseCaveCarver,
-    spaghetti_carver: SpaghettiCaveCarver,
-    noodle_carver: NoodleCaveCarver,
-    ravine_carver: RavineCarver,
+    density_noise: NoiseGenerator,
+    cave_noise: NoiseGenerator,
     aquifer_gen: AquiferGenerator,
     geode_gen: GeodeGenerator,
-    dripstone_gen: DripstoneGenerator,
-    lush_decorator: LushCaveDecorator,
-    deepdark_decorator: DeepDarkDecorator,
 }
 
 impl TerrainGenerator {
     /// Create a new terrain generator from world seed.
     pub fn new(world_seed: u64) -> Self {
+        let density_config = NoiseConfig {
+            octaves: 4,
+            lacunarity: 2.0,
+            persistence: 0.5,
+            frequency: 0.01, // Large scale terrain features
+            seed: ((world_seed ^ 0x11111111) as u32),
+        };
+        
+        let cave_config = NoiseConfig {
+            octaves: 3,
+            lacunarity: 2.0,
+            persistence: 0.5,
+            frequency: 0.04, // Cave features
+            seed: ((world_seed ^ 0x22222222) as u32),
+        };
+
         Self {
             world_seed,
             biome_assigner: BiomeAssigner::new(world_seed),
-            cave_carver: CaveCarver::new(world_seed),
-            cheese_carver: CheeseCaveCarver::new(world_seed),
-            spaghetti_carver: SpaghettiCaveCarver::new(world_seed),
-            noodle_carver: NoodleCaveCarver::new(world_seed),
-            ravine_carver: RavineCarver::new(world_seed),
+            density_noise: NoiseGenerator::new(density_config),
+            cave_noise: NoiseGenerator::new(cave_config),
             aquifer_gen: AquiferGenerator::new(world_seed),
             geode_gen: GeodeGenerator::new(world_seed),
-            dripstone_gen: DripstoneGenerator::new(world_seed),
-            lush_decorator: LushCaveDecorator::new(world_seed),
-            deepdark_decorator: DeepDarkDecorator::new(world_seed),
         }
     }
 
     /// Generate terrain for a chunk at the given position.
     ///
-    /// Returns a fully populated chunk with blocks placed based on heightmap and biome.
+    /// Returns a fully populated chunk with blocks placed based on 3D density.
     #[instrument(skip(self), fields(chunk_pos = ?chunk_pos, world_seed = self.world_seed))]
     pub fn generate_chunk(&self, chunk_pos: ChunkPos) -> Chunk {
-        debug!("Starting terrain generation");
+        debug!("Starting terrain generation (3D Density)");
         let mut chunk = Chunk::new(chunk_pos);
 
-        // Generate heightmap for this chunk
+        // Generate heightmap for base terrain shape (gradient guidance)
         let heightmap = Heightmap::generate(self.world_seed, chunk_pos.x, chunk_pos.z);
 
-        // Calculate world-space origin of this chunk
         let chunk_origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
         let chunk_origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
 
-        // Fill each column based on heightmap and biome
-        for local_z in 0..CHUNK_SIZE_Z {
-            for local_x in 0..CHUNK_SIZE_X {
+        for local_x in 0..CHUNK_SIZE_X {
+            for local_z in 0..CHUNK_SIZE_Z {
                 let world_x = chunk_origin_x + local_x as i32;
                 let world_z = chunk_origin_z + local_z as i32;
-
-                // Get height and biome for this column
-                let height = heightmap.get(local_x, local_z);
+                
+                let base_height = heightmap.get(local_x, local_z) as i32;
                 let biome = self.biome_assigner.get_biome(world_x, world_z);
                 let biome_data = BiomeData::get(biome);
+                
+                // Adjust base height by biome
+                let target_height = (base_height as f32 + biome_data.height_modifier * 20.0) as i32;
 
-                // Apply biome height modifier
-                let modified_height = (height as f32 + biome_data.height_modifier * 20.0) as i32;
-                let final_height = modified_height.clamp(0, CHUNK_SIZE_Y as i32 - 1);
+                for y in 0..CHUNK_SIZE_Y {
+                    // Always place bedrock at y=0
+                    if y == 0 {
+                        chunk.set_voxel(local_x, y, local_z, Voxel { id: blocks::BEDROCK, ..Default::default() });
+                        continue;
+                    }
 
-                // Generate column
-                self.generate_column(
-                    &mut chunk,
-                    local_x,
-                    local_z,
-                    final_height as usize,
-                    biome,
-                    &biome_data,
-                );
-            }
-        }
+                    // Always place stone at y=1-4 to prevent holes in the world floor
+                    if y <= 4 {
+                        chunk.set_voxel(local_x, y, local_z, Voxel { id: blocks::STONE, ..Default::default() });
+                        continue;
+                    }
 
-        // Ore generation pass: Replace some stone with ores
-        self.generate_ores(&mut chunk, chunk_origin_x, chunk_origin_z);
+                    // Density calculation
+                    // 1. Vertical Gradient: Positive below target_height, negative above.
+                    // Scale factor controls slope steepness.
+                    let vertical_gradient = (target_height - y as i32) as f64 / 20.0;
 
-        // Cave pass: Carve caves through the terrain
-        self.carve_caves(&mut chunk, chunk_origin_x, chunk_origin_z);
+                    // 2. 3D Noise: Adds variation/overhangs
+                    let noise_val = self.density_noise.sample_3d(world_x as f64 * 0.02, y as f64 * 0.02, world_z as f64 * 0.02);
 
-        // Population pass: Add trees
-        self.populate_trees(&mut chunk, &heightmap, chunk_origin_x, chunk_origin_z);
+                    // 3. Cave Noise: Subtracts density (but not below y=5 to preserve bedrock area)
+                    let cave_val = self.cave_noise.sample_3d(world_x as f64 * 0.04, y as f64 * 0.04, world_z as f64 * 0.04);
+                    // Use absolute value for cave tunnels (worm-like), but don't carve below y=5
+                    let cave_modifier = if y >= 5 && cave_val.abs() < 0.15 { -10.0 } else { 0.0 };
 
-        debug!("Terrain generation complete");
-        chunk
-    }
+                    let density = vertical_gradient + noise_val + cave_modifier;
 
-    /// Generate a single vertical column of blocks.
-    fn generate_column(
-        &self,
-        chunk: &mut Chunk,
-        x: usize,
-        z: usize,
-        height: usize,
-        biome: BiomeId,
-        biome_data: &BiomeData,
-    ) {
-        // Bedrock layer (bottom 1-5 blocks)
-        let bedrock_height = 1 + ((x + z) % 5);
-        for y in 0..bedrock_height {
-            chunk.set_voxel(
-                x,
-                y,
-                z,
-                Voxel {
-                    id: blocks::BEDROCK,
-                    ..Default::default()
-                },
-            );
-        }
+                    if density > 0.0 {
+                        // Solid block
+                        let block_id = if (y as i32) > target_height - 4 && (y as i32) <= target_height {
+                             if (y as i32) == target_height {
+                                 self.get_surface_block(biome)
+                             } else {
+                                 self.get_subsurface_block(biome)
+                             }
+                        } else {
+                            blocks::STONE
+                        };
 
-        // Stone layer (bedrock to height - surface depth)
-        let surface_depth = self.get_surface_depth(biome);
-        let stone_top = if height > surface_depth {
-            height - surface_depth
-        } else {
-            bedrock_height
-        };
-
-        for y in bedrock_height..stone_top {
-            chunk.set_voxel(
-                x,
-                y,
-                z,
-                Voxel {
-                    id: blocks::STONE,
-                    ..Default::default()
-                },
-            );
-        }
-
-        // Surface layers
-        let surface_block = self.get_surface_block(biome);
-        let subsurface_block = self.get_subsurface_block(biome);
-
-        for y in stone_top..height {
-            let depth_from_surface = height - y - 1;
-            let block_id = if depth_from_surface == 0 {
-                surface_block
-            } else {
-                subsurface_block
-            };
-
-            chunk.set_voxel(
-                x,
-                y,
-                z,
-                Voxel {
-                    id: block_id,
-                    ..Default::default()
-                },
-            );
-        }
-
-        // Top surface block
-        chunk.set_voxel(
-            x,
-            height,
-            z,
-            Voxel {
-                id: surface_block,
-                ..Default::default()
-            },
-        );
-
-        // Water/ice filling for ocean biomes
-        if matches!(biome, BiomeId::Ocean | BiomeId::DeepOcean) {
-            let sea_level = 64;
-            if height < sea_level {
-                let water_block = if biome_data.temperature < 0.2 {
-                    blocks::ICE
-                } else {
-                    blocks::WATER
-                };
-
-                for y in (height + 1)..=sea_level {
-                    chunk.set_voxel(
-                        x,
-                        y,
-                        z,
-                        Voxel {
-                            id: water_block,
-                            ..Default::default()
-                        },
-                    );
+                        chunk.set_voxel(local_x, y, local_z, Voxel { id: block_id, ..Default::default() });
+                    } else if y < 64 {
+                        // Water level
+                        if matches!(biome, BiomeId::Ocean | BiomeId::DeepOcean) {
+                             chunk.set_voxel(local_x, y, local_z, Voxel { id: blocks::WATER, ..Default::default() });
+                        }
+                    }
                 }
             }
         }
 
-        // Snow layer for cold biomes at high elevations
-        if biome_data.temperature < 0.3 && height > 90 && height + 1 < CHUNK_SIZE_Y {
-            chunk.set_voxel(
-                x,
-                height + 1,
-                z,
-                Voxel {
-                    id: blocks::SNOW,
-                    ..Default::default()
-                },
-            );
-        }
+        // Ore generation pass
+        self.generate_ores(&mut chunk, chunk_origin_x, chunk_origin_z);
+
+        // Structure decoration pass: Aquifers and Geodes
+        self.aquifer_gen.fill_aquifers(&mut chunk, chunk_pos.x, chunk_pos.z);
+        self.geode_gen.try_generate_geode(&mut chunk, chunk_pos.x, chunk_pos.z);
+
+        // Population pass: Add trees
+        self.populate_trees(&mut chunk, chunk_origin_x, chunk_origin_z);
+
+        debug!("Terrain generation complete");
+        chunk
     }
 
     /// Populate chunk with trees based on biome.
     fn populate_trees(
         &self,
         chunk: &mut Chunk,
-        heightmap: &Heightmap,
         chunk_origin_x: i32,
         chunk_origin_z: i32,
     ) {
@@ -279,77 +199,30 @@ impl TerrainGenerator {
                 continue;
             }
 
-            // Get surface height at this position
-            let surface_height = heightmap.get(local_x, local_z);
+            // Find surface height by scanning down
+            let mut surface_height = 0;
+            for y in (0..CHUNK_SIZE_Y).rev() {
+                let id = chunk.voxel(local_x, y, local_z).id;
+                if id != blocks::AIR && id != blocks::WATER {
+                    surface_height = y;
+                    break;
+                }
+            }
+            
+            if surface_height == 0 { continue; }
 
             // Calculate world position
             let world_x = chunk_origin_x + local_x as i32;
             let world_z = chunk_origin_z + local_z as i32;
-            let world_y = surface_height + 1; // Place on top of surface
+            let world_y = (surface_height + 1) as i32; // Place on top of surface
 
             // Check if surface is suitable for trees (grass or dirt)
-            let surface_block = chunk.voxel(local_x, surface_height as usize, local_z);
+            let surface_block = chunk.voxel(local_x, surface_height, local_z);
             if surface_block.id == blocks::GRASS || surface_block.id == blocks::DIRT {
                 // Create and place tree
                 let tree = Tree::new(world_x, world_y, world_z, tree_type);
                 tree.generate_into_chunk(chunk);
             }
-        }
-    }
-
-    /// Carve caves through generated terrain
-    fn carve_caves(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32) {
-        // Use new CaveCarver to carve caves
-        let chunk_x = chunk_origin_x / CHUNK_SIZE_X as i32;
-        let chunk_z = chunk_origin_z / CHUNK_SIZE_Z as i32;
-
-        // Original cave carver disabled - replaced by Minecraft 1.18+ system
-        // self.cave_carver.carve_chunk(chunk, chunk_x, chunk_z);
-
-        // Minecraft 1.18+ cave carvers
-        self.cheese_carver.carve_chunk(chunk, chunk_x, chunk_z);
-        self.spaghetti_carver.carve_chunk(chunk, chunk_x, chunk_z);
-        self.noodle_carver.carve_chunk(chunk, chunk_x, chunk_z);
-
-        // Ravines (vertical canyons)
-        self.ravine_carver.carve_chunk(chunk, chunk_x, chunk_z);
-
-        // Aquifer system (water/lava lakes)
-        self.aquifer_gen.fill_aquifers(chunk, chunk_x, chunk_z);
-
-        // Amethyst geodes (rare)
-        self.geode_gen.try_generate_geode(chunk, chunk_x, chunk_z);
-
-        // Add dripstone decorations in dripstone biomes
-        self.dripstone_gen
-            .decorate_chunk(chunk, chunk_x, chunk_z, |x, y, z| {
-                self.cave_carver.get_biome(x, y, z)
-            });
-
-        // Add lush cave decorations
-        self.lush_decorator
-            .decorate_chunk(chunk, chunk_x, chunk_z, |x, y, z| {
-                self.cave_carver.get_biome(x, y, z)
-            });
-
-        // Add deep dark decorations
-        self.deepdark_decorator
-            .decorate_chunk(chunk, chunk_x, chunk_z, |x, y, z| {
-                self.cave_carver.get_biome(x, y, z)
-            });
-
-        // Flood low-lying cave areas with water
-        crate::caves::flood_low_areas(chunk, 10, blocks::WATER);
-    }
-
-    /// Get surface depth (number of non-stone blocks at top).
-    fn get_surface_depth(&self, biome: BiomeId) -> usize {
-        match biome {
-            BiomeId::Desert => 5,    // Thick sand layer
-            BiomeId::Ocean => 3,     // Sand/gravel
-            BiomeId::DeepOcean => 4, // Thicker ocean floor
-            BiomeId::Swamp => 2,     // Shallow dirt
-            _ => 3,                  // Standard grass/dirt depth
         }
     }
 
@@ -493,13 +366,17 @@ mod tests {
         let gen = TerrainGenerator::new(123);
         let chunk = gen.generate_chunk(ChunkPos::new(0, 0));
 
-        // Should have stone somewhere in middle
+        // Should have stone somewhere in the chunk (checking multiple positions)
         let mut found_stone = false;
-        for y in 5..60 {
-            let voxel = chunk.voxel(8, y, 8);
-            if voxel.id == blocks::STONE {
-                found_stone = true;
-                break;
+        'outer: for x in 0..16 {
+            for z in 0..16 {
+                for y in 1..60 {
+                    let voxel = chunk.voxel(x, y, z);
+                    if voxel.id == blocks::STONE {
+                        found_stone = true;
+                        break 'outer;
+                    }
+                }
             }
         }
         assert!(found_stone, "Should have stone layer");

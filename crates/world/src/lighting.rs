@@ -966,4 +966,200 @@ mod tests {
             "Opaque block should not receive light"
         );
     }
+
+    #[test]
+    fn init_skylight_with_neighbors_returns_cross_chunk_updates() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = MockRegistry;
+
+        // Init skylight with neighbors tracking
+        let (update, cross_chunk_updates) = init_skylight_with_neighbors(&mut chunk, &registry);
+
+        // Should have processed many nodes (skylight propagation)
+        assert!(update.nodes_processed > 0);
+        assert_eq!(update.light_type, LightType::Skylight);
+
+        // Empty chunk should generate cross-chunk updates at boundaries
+        // Light should want to propagate to neighboring chunks
+        assert!(
+            !cross_chunk_updates.is_empty(),
+            "Should have cross-chunk updates for neighbors"
+        );
+    }
+
+    #[test]
+    fn init_skylight_with_neighbors_blocked_by_opaque() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = MockRegistry;
+
+        // Place opaque blocks to create a roof below top layer
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                let mut voxel = chunk.voxel(x, 200, z);
+                voxel.id = 1; // Opaque block
+                chunk.set_voxel(x, 200, z, voxel);
+            }
+        }
+
+        let (update, _cross_chunk_updates) = init_skylight_with_neighbors(&mut chunk, &registry);
+
+        // Should still process nodes
+        assert!(update.nodes_processed > 0);
+
+        // Light above the opaque layer should still be max
+        let above = chunk.voxel(8, 201, 8);
+        assert_eq!(above.light_sky, MAX_LIGHT_LEVEL);
+
+        // Deep below the opaque layer should have reduced light
+        let deep_below = chunk.voxel(8, 100, 8);
+        assert!(
+            deep_below.light_sky < MAX_LIGHT_LEVEL,
+            "Light far below should be reduced"
+        );
+    }
+
+    #[test]
+    fn skylight_propagation_respects_opacity() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = MockRegistry;
+
+        // Place an opaque block in the middle of the chunk
+        let block_pos = LocalPos {
+            x: 8,
+            y: 128,
+            z: 8,
+        };
+        let mut voxel = chunk.voxel(block_pos.x, block_pos.y, block_pos.z);
+        voxel.id = 1; // Opaque
+        chunk.set_voxel(block_pos.x, block_pos.y, block_pos.z, voxel);
+
+        init_skylight(&mut chunk, &registry);
+
+        // Check that light below the block is reduced
+        let below = chunk.voxel(block_pos.x, block_pos.y - 1, block_pos.z);
+        assert!(
+            below.light_sky < MAX_LIGHT_LEVEL,
+            "Light below opaque block should be reduced"
+        );
+    }
+
+    #[test]
+    fn light_queue_boundary_checks() {
+        let pos = ChunkPos::new(0, 0);
+        let mut queue = LightQueue::new_for_chunk(pos);
+
+        // Enqueue positions at all corners
+        let corners = [
+            LocalPos { x: 0, y: 0, z: 0 },
+            LocalPos {
+                x: CHUNK_SIZE_X - 1,
+                y: 0,
+                z: 0,
+            },
+            LocalPos {
+                x: 0,
+                y: CHUNK_SIZE_Y - 1,
+                z: 0,
+            },
+            LocalPos {
+                x: 0,
+                y: 0,
+                z: CHUNK_SIZE_Z - 1,
+            },
+        ];
+
+        for corner in &corners {
+            queue.enqueue(*corner, MAX_LIGHT_LEVEL);
+        }
+
+        // Should not panic and should have items
+        assert!(
+            !queue.queue.is_empty(),
+            "Queue should contain corner nodes"
+        );
+    }
+
+    #[test]
+    fn multiple_light_sources_combine() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = MockRegistry;
+
+        // Add two light sources
+        let pos1 = LocalPos { x: 4, y: 64, z: 8 };
+        let pos2 = LocalPos {
+            x: 12,
+            y: 64,
+            z: 8,
+        };
+
+        add_block_light(&mut chunk, pos1, 15, &registry);
+        add_block_light(&mut chunk, pos2, 15, &registry);
+
+        // Check both sources have max light
+        assert_eq!(chunk.voxel(pos1.x, pos1.y, pos1.z).light_block, 15);
+        assert_eq!(chunk.voxel(pos2.x, pos2.y, pos2.z).light_block, 15);
+
+        // Check middle point receives light from both (should be max of both)
+        let middle = chunk.voxel(8, 64, 8);
+        assert!(middle.light_block > 0, "Middle should receive light");
+    }
+
+    #[test]
+    fn light_update_has_correct_type() {
+        let pos = ChunkPos::new(5, -3);
+        let mut chunk = Chunk::new(pos);
+        let registry = MockRegistry;
+
+        // Skylight update
+        let sky_update = init_skylight(&mut chunk, &registry);
+        assert_eq!(sky_update.light_type, LightType::Skylight);
+        assert_eq!(sky_update.chunk_pos, pos);
+
+        // Block light update
+        let block_update =
+            add_block_light(&mut chunk, LocalPos { x: 8, y: 64, z: 8 }, 15, &registry);
+        assert_eq!(block_update.light_type, LightType::BlockLight);
+        assert_eq!(block_update.chunk_pos, pos);
+    }
+
+    #[test]
+    fn cross_chunk_light_update_fields() {
+        let update = CrossChunkLightUpdate {
+            target_chunk: ChunkPos::new(1, 2),
+            target_pos: LocalPos { x: 0, y: 64, z: 8 },
+            light_type: LightType::BlockLight,
+            level: 10,
+        };
+
+        assert_eq!(update.target_chunk.x, 1);
+        assert_eq!(update.target_chunk.z, 2);
+        assert_eq!(update.target_pos.x, 0);
+        assert_eq!(update.level, 10);
+        assert_eq!(update.light_type, LightType::BlockLight);
+    }
+
+    #[test]
+    fn stitch_light_seams_skylight() {
+        let mut chunks = HashMap::new();
+        let pos_a = ChunkPos::new(0, 0);
+        let pos_b = ChunkPos::new(1, 0);
+        let mut chunk_a = Chunk::new(pos_a);
+        let chunk_b = Chunk::new(pos_b);
+        let registry = MockRegistry;
+
+        // Initialize skylight in chunk A
+        init_skylight(&mut chunk_a, &registry);
+
+        chunks.insert(pos_a, chunk_a);
+        chunks.insert(pos_b, chunk_b);
+
+        // Stitch skylight across seam
+        let updates = stitch_light_seams(&mut chunks, &registry, pos_a, LightType::Skylight);
+
+        assert!(updates > 0, "Should have stitched some skylight");
+    }
 }

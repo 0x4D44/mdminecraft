@@ -448,4 +448,183 @@ mod tests {
         assert!(enchants.contains(&EnchantmentType::Fortune));
         assert!(!enchants.contains(&EnchantmentType::Sharpness)); // Not for pickaxes
     }
+
+    #[test]
+    fn test_take_item() {
+        let mut table = EnchantingTableState::new();
+        table.add_item(TEST_PICKAXE_ID, 1);
+
+        let taken = table.take_item();
+        assert!(taken.is_some());
+        assert_eq!(taken.unwrap(), (TEST_PICKAXE_ID, 1));
+        assert!(table.item.is_none());
+
+        // Take again - should be None
+        assert!(table.take_item().is_none());
+    }
+
+    #[test]
+    fn test_take_lapis() {
+        let mut table = EnchantingTableState::new();
+        table.add_lapis(10);
+
+        // Take partial amount
+        let taken = table.take_lapis(5);
+        assert_eq!(taken, 5);
+        assert_eq!(table.lapis_count, 5);
+
+        // Take all remaining
+        let taken = table.take_lapis(10); // Request more than available
+        assert_eq!(taken, 5); // Only 5 available
+        assert_eq!(table.lapis_count, 0);
+
+        // Take again - should be 0
+        assert_eq!(table.take_lapis(10), 0);
+    }
+
+    #[test]
+    fn test_apply_enchantment_no_item() {
+        let mut table = EnchantingTableState::with_seed(42);
+        table.add_lapis(5);
+        table.set_bookshelf_count(5);
+
+        // No item - should fail
+        let result = table.apply_enchantment(0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_can_enchant_no_lapis() {
+        let mut table = EnchantingTableState::with_seed(42);
+        table.add_item(TEST_SWORD_ID, 1);
+        table.set_bookshelf_count(5);
+        // No lapis added
+
+        // can_enchant checks lapis and should return false
+        let level_cost = table.enchant_options[0].as_ref().unwrap().level_cost;
+        assert!(!table.can_enchant(0, level_cost));
+    }
+
+    #[test]
+    fn test_apply_enchantment_invalid_slot() {
+        let mut table = EnchantingTableState::with_seed(42);
+        table.add_item(TEST_SWORD_ID, 1);
+        table.add_lapis(5);
+        table.set_bookshelf_count(5);
+
+        // Invalid slot
+        let result = table.apply_enchantment(3);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_valid_enchantments_bow() {
+        let enchants = get_valid_enchantments_for_id(BOW_ID);
+
+        // Bow is a weapon, gets weapon enchantments
+        assert!(enchants.contains(&EnchantmentType::Sharpness));
+        assert!(enchants.contains(&EnchantmentType::Knockback));
+        assert!(enchants.contains(&EnchantmentType::Unbreaking));
+    }
+
+    #[test]
+    fn test_valid_enchantments_non_tool() {
+        let enchants = get_valid_enchantments_for_id(TEST_STONE_ID);
+        assert!(enchants.is_empty());
+    }
+
+    #[test]
+    fn test_enchanting_table_default() {
+        let table = EnchantingTableState::default();
+        assert!(table.item.is_none());
+        assert_eq!(table.lapis_count, 0);
+    }
+
+    #[test]
+    fn test_enchanting_table_with_seed() {
+        let table = EnchantingTableState::with_seed(12345);
+        assert_eq!(table.enchant_seed, 12345);
+    }
+
+    #[test]
+    fn test_enchant_level_cost_affects_level() {
+        let mut table = EnchantingTableState::with_seed(42);
+
+        // With no bookshelves
+        table.add_item(TEST_SWORD_ID, 1);
+        table.set_bookshelf_count(0);
+        let low_cost = table.enchant_options[0].as_ref().unwrap().level_cost;
+
+        // With max bookshelves
+        table.set_bookshelf_count(MAX_BOOKSHELVES);
+        let high_cost = table.enchant_options[0].as_ref().unwrap().level_cost;
+
+        assert!(high_cost > low_cost);
+    }
+
+    #[test]
+    fn test_enchanting_table_serialization() {
+        let mut table = EnchantingTableState::with_seed(42);
+        table.add_item(TEST_PICKAXE_ID, 1);
+        table.add_lapis(5);
+        table.set_bookshelf_count(8);
+
+        // Note: add_item increments seed (42 -> 43)
+        let expected_seed = table.enchant_seed;
+
+        let serialized = serde_json::to_string(&table).unwrap();
+        let deserialized: EnchantingTableState = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.lapis_count, 5);
+        assert_eq!(deserialized.bookshelf_count, 8);
+        assert_eq!(deserialized.enchant_seed, expected_seed);
+        assert!(deserialized.item.is_some());
+    }
+
+    #[test]
+    fn test_enchantment_offer_serialization() {
+        let offer = EnchantmentOffer {
+            enchantment: Enchantment::new(EnchantmentType::Sharpness, 3),
+            level_cost: 15,
+            levels_consumed: 2,
+        };
+
+        let serialized = serde_json::to_string(&offer).unwrap();
+        let deserialized: EnchantmentOffer = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.level_cost, 15);
+        assert_eq!(deserialized.levels_consumed, 2);
+    }
+
+    #[test]
+    fn test_apply_all_three_slots() {
+        // Test applying enchantment from slot 1 and 2
+        let mut table = EnchantingTableState::with_seed(42);
+        table.add_item(TEST_SWORD_ID, 1);
+        table.add_lapis(10);
+        table.set_bookshelf_count(5);
+
+        // Apply from slot 1 (costs 2 lapis)
+        let result = table.apply_enchantment(1);
+        assert!(result.is_some());
+        let (_, levels_consumed) = result.unwrap();
+        assert_eq!(levels_consumed, 2); // Slot 1 consumes 2 levels
+    }
+
+    #[test]
+    fn test_add_item_replaces_existing() {
+        let mut table = EnchantingTableState::new();
+        table.add_item(TEST_PICKAXE_ID, 1);
+
+        // Adding another item should fail (slot full)
+        let remaining = table.add_item(TEST_SWORD_ID, 1);
+        assert_eq!(remaining, 1);
+
+        // Take the item first
+        table.take_item();
+
+        // Now add new item
+        let remaining = table.add_item(TEST_SWORD_ID, 1);
+        assert_eq!(remaining, 0);
+    }
 }
