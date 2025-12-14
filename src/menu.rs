@@ -23,6 +23,8 @@ enum MenuView {
     Main,
     /// Settings submenu
     Settings,
+    /// Help/How to Play screen
+    Help,
 }
 
 /// Game settings that can be configured
@@ -272,6 +274,7 @@ impl MenuState {
 
         // Track state changes from UI
         let mut goto_settings = false;
+        let mut goto_help = false;
         let mut goto_main = false;
         let mut save_settings = false;
         let current_view = self.current_view;
@@ -284,7 +287,7 @@ impl MenuState {
                 .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 30)))
                 .show(ctx, |ui| match current_view {
                     MenuView::Main => {
-                        render_main_menu_ui(ui, &mut action, &mut goto_settings);
+                        render_main_menu_ui(ui, &mut action, &mut goto_settings, &mut goto_help);
                     }
                     MenuView::Settings => {
                         render_settings_menu_ui(
@@ -294,6 +297,9 @@ impl MenuState {
                             &mut goto_main,
                             &mut save_settings,
                         );
+                    }
+                    MenuView::Help => {
+                        render_help_ui(ui, &mut goto_main);
                     }
                 });
         });
@@ -305,6 +311,9 @@ impl MenuState {
         // Handle view transitions after UI rendering
         if goto_settings {
             self.current_view = MenuView::Settings;
+        }
+        if goto_help {
+            self.current_view = MenuView::Help;
         }
         if goto_main {
             self.current_view = MenuView::Main;
@@ -390,9 +399,14 @@ impl MenuState {
 }
 
 /// Render the main menu UI (standalone function to avoid borrow issues)
-fn render_main_menu_ui(ui: &mut egui::Ui, action: &mut MenuAction, goto_settings: &mut bool) {
+fn render_main_menu_ui(
+    ui: &mut egui::Ui,
+    action: &mut MenuAction,
+    goto_settings: &mut bool,
+    goto_help: &mut bool,
+) {
     ui.vertical_centered(|ui| {
-        ui.add_space(150.0);
+        ui.add_space(120.0);
 
         // Title
         ui.heading(
@@ -408,7 +422,7 @@ fn render_main_menu_ui(ui: &mut egui::Ui, action: &mut MenuAction, goto_settings
                 .color(egui::Color32::LIGHT_GRAY),
         );
 
-        ui.add_space(100.0);
+        ui.add_space(80.0);
 
         // Menu buttons
         let button_width = 300.0;
@@ -422,6 +436,18 @@ fn render_main_menu_ui(ui: &mut egui::Ui, action: &mut MenuAction, goto_settings
             .clicked()
         {
             *action = MenuAction::StartGame;
+        }
+
+        ui.add_space(15.0);
+
+        if ui
+            .add_sized(
+                [button_width, button_height],
+                egui::Button::new(egui::RichText::new("Help").size(24.0)),
+            )
+            .clicked()
+        {
+            *goto_help = true;
         }
 
         ui.add_space(15.0);
@@ -448,7 +474,7 @@ fn render_main_menu_ui(ui: &mut egui::Ui, action: &mut MenuAction, goto_settings
             *action = MenuAction::Quit;
         }
 
-        ui.add_space(100.0);
+        ui.add_space(60.0);
 
         // Version info
         ui.label(
@@ -763,4 +789,170 @@ fn render_settings_menu_ui(
             );
         }
     });
+}
+
+/// Render the help/how to play UI
+fn render_help_ui(ui: &mut egui::Ui, goto_main: &mut bool) {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+
+            // Title
+            ui.heading(
+                egui::RichText::new("How to Play")
+                    .size(48.0)
+                    .color(egui::Color32::from_rgb(100, 200, 255)),
+            );
+
+            ui.add_space(30.0);
+
+            // Help content panel
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgba_unmultiplied(30, 30, 40, 200))
+                .inner_margin(egui::Margin::same(20.0))
+                .outer_margin(egui::Margin::symmetric(80.0, 0.0))
+                .rounding(8.0)
+                .show(ui, |ui| {
+                    ui.set_min_width(600.0);
+
+                    // Controls section
+                    ui.heading(
+                        egui::RichText::new("Controls")
+                            .size(24.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                    );
+                    ui.add_space(15.0);
+
+                    render_key_binding(ui, "W / A / S / D", "Move forward / left / backward / right");
+                    render_key_binding(ui, "Space", "Jump (or fly up when flying)");
+                    render_key_binding(ui, "Left Shift", "Sneak/crouch (or fly down when flying)");
+                    render_key_binding(ui, "Left Ctrl", "Sprint");
+                    render_key_binding(ui, "F4", "Toggle fly mode");
+                    render_key_binding(ui, "Tab", "Toggle cursor capture");
+                    render_key_binding(ui, "Mouse", "Look around");
+                    render_key_binding(ui, "Left Click", "Break block / Attack");
+                    render_key_binding(ui, "Right Click", "Place block / Use item");
+                    render_key_binding(ui, "1-9", "Select hotbar slot");
+                    render_key_binding(ui, "Scroll Wheel", "Cycle hotbar");
+                    render_key_binding(ui, "E", "Open inventory");
+                    render_key_binding(ui, "Escape", "Pause / Menu");
+                    render_key_binding(ui, "F3", "Toggle debug info");
+
+                    ui.add_space(20.0);
+                    ui.separator();
+                    ui.add_space(15.0);
+
+                    // Features section
+                    ui.heading(
+                        egui::RichText::new("Features")
+                            .size(24.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                    );
+                    ui.add_space(15.0);
+
+                    render_feature(ui, "Procedural World Generation", "Explore infinite terrain with multiple biomes including plains, forests, deserts, mountains, oceans, and more.");
+                    render_feature(ui, "Block Building", "Place and break blocks to build structures. Over 50 block types available.");
+                    render_feature(ui, "Day/Night Cycle", "Watch the sun rise and set with dynamic lighting.");
+                    render_feature(ui, "Mobs & Animals", "Encounter passive animals like pigs, cows, sheep, and chickens roaming the world.");
+                    render_feature(ui, "Structures", "Discover generated structures like villages and dungeons.");
+                    render_feature(ui, "Physics", "Experience gravity and collision detection.");
+                    render_feature(ui, "Flying Mode", "Press F4 to toggle creative flying mode.");
+                    render_feature(ui, "Combat", "Fight hostile mobs with melee attacks. Sword sweep attacks hit multiple enemies.");
+
+                    ui.add_space(20.0);
+                    ui.separator();
+                    ui.add_space(15.0);
+
+                    // Tips section
+                    ui.heading(
+                        egui::RichText::new("Tips")
+                            .size(24.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                    );
+                    ui.add_space(15.0);
+
+                    ui.label(
+                        egui::RichText::new("• Use F3 to see debug information including position and FPS")
+                            .size(14.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("• Hold Left Ctrl while moving to sprint faster")
+                            .size(14.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("• Flying mode (F4) lets you explore without falling")
+                            .size(14.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(5.0);
+                    ui.label(
+                        egui::RichText::new("• Click on the debug overlay to minimize it")
+                            .size(14.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                });
+
+            ui.add_space(30.0);
+
+            // Back button
+            if ui
+                .add_sized(
+                    [150.0, 50.0],
+                    egui::Button::new(
+                        egui::RichText::new("Back")
+                            .size(24.0)
+                            .color(egui::Color32::WHITE),
+                    ),
+                )
+                .clicked()
+            {
+                *goto_main = true;
+            }
+
+            ui.add_space(30.0);
+        });
+    });
+}
+
+/// Helper to render a key binding row
+fn render_key_binding(ui: &mut egui::Ui, key: &str, description: &str) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [150.0, 20.0],
+            egui::Label::new(
+                egui::RichText::new(key)
+                    .size(14.0)
+                    .color(egui::Color32::from_rgb(255, 220, 100))
+                    .monospace(),
+            ),
+        );
+        ui.label(
+            egui::RichText::new(description)
+                .size(14.0)
+                .color(egui::Color32::LIGHT_GRAY),
+        );
+    });
+    ui.add_space(5.0);
+}
+
+/// Helper to render a feature row
+fn render_feature(ui: &mut egui::Ui, name: &str, description: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new(format!("{}: ", name))
+                .size(14.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
+        ui.label(
+            egui::RichText::new(description)
+                .size(14.0)
+                .color(egui::Color32::LIGHT_GRAY),
+        );
+    });
+    ui.add_space(8.0);
 }

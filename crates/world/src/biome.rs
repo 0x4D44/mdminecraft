@@ -547,4 +547,200 @@ mod tests {
         let biome2 = lookup.lookup(0.0, 1.0);
         assert_eq!(biome1, biome2);
     }
+
+    #[test]
+    fn test_all_biome_data() {
+        // Test that BiomeData::get works for all biome types
+        for biome_id in BiomeId::all() {
+            let data = BiomeData::get(*biome_id);
+            assert_eq!(data.id, *biome_id);
+            assert!(data.temperature >= 0.0 && data.temperature <= 1.0);
+            assert!(data.humidity >= 0.0 && data.humidity <= 1.0);
+            assert!(data.height_modifier >= -1.0 && data.height_modifier <= 1.0);
+            assert!(data.height_variation >= 0.0 && data.height_variation <= 2.0);
+        }
+    }
+
+    #[test]
+    fn test_biome_data_cold_biomes() {
+        // IcePlains
+        let ice_plains = BiomeData::get(BiomeId::IcePlains);
+        assert_eq!(ice_plains.temperature, 0.0);
+        assert!(ice_plains.grass_color.0 > 150); // Cold biomes have bluish grass
+
+        // IceMountains
+        let ice_mountains = BiomeData::get(BiomeId::IceMountains);
+        assert!(ice_mountains.height_modifier > 0.5); // Mountains are tall
+
+        // Tundra
+        let tundra = BiomeData::get(BiomeId::Tundra);
+        assert!(tundra.temperature < 0.3);
+    }
+
+    #[test]
+    fn test_biome_data_hot_biomes() {
+        // Desert
+        let desert = BiomeData::get(BiomeId::Desert);
+        assert!(desert.temperature > 0.8);
+        assert!(desert.humidity < 0.2);
+
+        // Savanna
+        let savanna = BiomeData::get(BiomeId::Savanna);
+        assert!(savanna.temperature > 0.7);
+
+        // RainForest
+        let rainforest = BiomeData::get(BiomeId::RainForest);
+        assert!(rainforest.temperature > 0.7);
+        assert!(rainforest.humidity > 0.8);
+    }
+
+    #[test]
+    fn test_biome_data_ocean_biomes() {
+        // Ocean
+        let ocean = BiomeData::get(BiomeId::Ocean);
+        assert!(ocean.height_modifier < 0.0);
+        assert_eq!(ocean.humidity, 1.0);
+
+        // DeepOcean
+        let deep_ocean = BiomeData::get(BiomeId::DeepOcean);
+        assert!(deep_ocean.height_modifier < ocean.height_modifier);
+    }
+
+    #[test]
+    fn test_biome_data_temperate_biomes() {
+        // Plains
+        let plains = BiomeData::get(BiomeId::Plains);
+        assert!(plains.temperature > 0.3 && plains.temperature < 0.7);
+
+        // Forest
+        let forest = BiomeData::get(BiomeId::Forest);
+        assert!(forest.humidity > 0.5);
+
+        // BirchForest
+        let birch = BiomeData::get(BiomeId::BirchForest);
+        assert_eq!(birch.id, BiomeId::BirchForest);
+
+        // Mountains
+        let mountains = BiomeData::get(BiomeId::Mountains);
+        assert!(mountains.height_variation > 1.5);
+
+        // Hills
+        let hills = BiomeData::get(BiomeId::Hills);
+        assert!(hills.height_modifier > 0.0);
+
+        // Swamp
+        let swamp = BiomeData::get(BiomeId::Swamp);
+        assert!(swamp.humidity > 0.8);
+        assert!(swamp.height_modifier < 0.0);
+    }
+
+    #[test]
+    fn test_blended_biome_various_radii() {
+        let assigner = BiomeAssigner::new(12345);
+
+        // Test different blend radii
+        let blend_0 = assigner.get_blended_biome(50, 50, 0);
+        let blend_1 = assigner.get_blended_biome(50, 50, 1);
+        let blend_3 = assigner.get_blended_biome(50, 50, 3);
+
+        // All should have valid biome IDs
+        assert!(BiomeId::all().contains(&blend_0.id));
+        assert!(BiomeId::all().contains(&blend_1.id));
+        assert!(BiomeId::all().contains(&blend_3.id));
+
+        // Larger radius should have smoother (closer to average) values
+        // Just verify they're in valid ranges
+        assert!(blend_3.temperature >= 0.0 && blend_3.temperature <= 1.0);
+        assert!(blend_3.humidity >= 0.0 && blend_3.humidity <= 1.0);
+    }
+
+    #[test]
+    fn test_biome_lookup_all_regions() {
+        let lookup = BiomeLookup::new();
+
+        // Test all corners and center
+        let corners = [
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (1.0, 1.0),
+            (0.5, 0.5),
+        ];
+
+        for (temp, hum) in corners {
+            let biome = lookup.lookup(temp, hum);
+            assert!(BiomeId::all().contains(&biome));
+        }
+    }
+
+    #[test]
+    fn test_biome_lookup_select_biome_boundaries() {
+        let lookup = BiomeLookup::new();
+
+        // Test cold region boundaries
+        assert_eq!(lookup.lookup(0.0, 0.0), BiomeId::IcePlains);
+        assert_eq!(lookup.lookup(0.0, 0.7), BiomeId::IceMountains);
+
+        // Test temperate swamp region
+        assert_eq!(lookup.lookup(0.5, 0.9), BiomeId::Swamp);
+
+        // Test hot region
+        assert_eq!(lookup.lookup(0.9, 0.1), BiomeId::Desert);
+        assert_eq!(lookup.lookup(0.9, 0.5), BiomeId::Savanna);
+        assert_eq!(lookup.lookup(0.9, 0.8), BiomeId::RainForest);
+    }
+
+    #[test]
+    fn test_biome_assigner_noise_accessors() {
+        let assigner = BiomeAssigner::new(42);
+
+        // Verify noise generators are accessible
+        let _temp_noise = assigner.temperature_noise();
+        let _humidity_noise = assigner.humidity_noise();
+    }
+
+    #[test]
+    fn test_biome_lookup_default() {
+        let lookup = BiomeLookup::default();
+
+        // Should work same as new()
+        let biome = lookup.lookup(0.5, 0.5);
+        assert!(BiomeId::all().contains(&biome));
+    }
+
+    #[test]
+    fn test_biome_id_serialization() {
+        let biome = BiomeId::Forest;
+        let serialized = serde_json::to_string(&biome).unwrap();
+        let deserialized: BiomeId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(biome, deserialized);
+    }
+
+    #[test]
+    fn test_biome_wide_area_variety() {
+        let assigner = BiomeAssigner::new(777);
+
+        // Sample a wide area and ensure multiple biomes appear
+        let mut biomes_found = std::collections::HashSet::new();
+        for x in 0..100 {
+            for z in 0..100 {
+                let biome = assigner.get_biome(x * 16, z * 16);
+                biomes_found.insert(biome);
+            }
+        }
+
+        // Should find at least 5 different biomes in a 1600x1600 area
+        assert!(biomes_found.len() >= 5, "Expected variety in biomes");
+    }
+
+    #[test]
+    fn test_biome_grass_colors_differ() {
+        let plains = BiomeData::get(BiomeId::Plains);
+        let desert = BiomeData::get(BiomeId::Desert);
+        let swamp = BiomeData::get(BiomeId::Swamp);
+
+        // Different biomes should have different grass colors
+        assert_ne!(plains.grass_color, desert.grass_color);
+        assert_ne!(plains.grass_color, swamp.grass_color);
+    }
 }

@@ -75,7 +75,10 @@ impl LocalPos {
 }
 
 /// Chunk coordinate (X,Z) in chunk space.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+/// Implements Ord for deterministic iteration in BTreeMap/BTreeSet (sorts by x, then z).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
@@ -213,5 +216,139 @@ mod tests {
         chunk.set_voxel(1, 2, 3, voxel);
         assert_eq!(chunk.voxel(1, 2, 3).id, 5);
         assert!(chunk.take_dirty_flags().contains(DirtyFlags::MESH));
+    }
+
+    #[test]
+    fn test_local_pos_index() {
+        // Test index calculation
+        let pos1 = LocalPos { x: 0, y: 0, z: 0 };
+        assert_eq!(pos1.index(), 0);
+
+        let pos2 = LocalPos { x: 15, y: 0, z: 0 };
+        assert_eq!(pos2.index(), 15);
+
+        let pos3 = LocalPos { x: 0, y: 1, z: 0 };
+        // y=1 means z*x + x offset, then y layer
+        let expected = 1 * CHUNK_SIZE_Z * CHUNK_SIZE_X;
+        assert_eq!(pos3.index(), expected);
+    }
+
+    #[test]
+    fn test_chunk_pos_display() {
+        let pos = ChunkPos::new(5, -3);
+        let display = format!("{}", pos);
+        assert_eq!(display, "(5, -3)");
+    }
+
+    #[test]
+    fn test_voxel_default() {
+        let voxel = Voxel::default();
+        assert_eq!(voxel.id, BLOCK_AIR);
+        assert_eq!(voxel.state, 0);
+        assert_eq!(voxel.light_sky, 0);
+        assert_eq!(voxel.light_block, 0);
+    }
+
+    #[test]
+    fn test_voxel_is_air() {
+        let air = Voxel::default();
+        assert!(air.is_air());
+        assert!(!air.is_opaque());
+
+        let stone = Voxel {
+            id: BLOCK_STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert!(!stone.is_air());
+        assert!(stone.is_opaque());
+    }
+
+    #[test]
+    fn test_dirty_flags_default() {
+        let flags = DirtyFlags::default();
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_position() {
+        let pos = ChunkPos::new(10, 20);
+        let chunk = Chunk::new(pos);
+        assert_eq!(chunk.position(), pos);
+    }
+
+    #[test]
+    fn test_chunk_new_is_air() {
+        let chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        // All voxels should be air
+        for x in 0..CHUNK_SIZE_X {
+            for y in 0..CHUNK_SIZE_Y {
+                for z in 0..CHUNK_SIZE_Z {
+                    assert!(chunk.voxel(x, y, z).is_air());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_set_same_voxel_no_dirty() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.take_dirty_flags(); // Clear initial flags
+
+        // Set air to air - should not set dirty
+        let air = Voxel::default();
+        chunk.set_voxel(0, 0, 0, air);
+        assert!(chunk.take_dirty_flags().is_empty());
+    }
+
+    #[test]
+    fn test_chunk_pos_ordering() {
+        // ChunkPos implements Ord for BTreeMap determinism
+        let pos1 = ChunkPos::new(0, 0);
+        let pos2 = ChunkPos::new(1, 0);
+        let pos3 = ChunkPos::new(0, 1);
+
+        assert!(pos1 < pos2);
+        assert!(pos1 < pos3);
+        assert!(pos2 > pos1);
+    }
+
+    #[test]
+    fn test_dirty_flags_all() {
+        let chunk = Chunk::new(ChunkPos::new(0, 0));
+        // New chunk should have all flags set
+        assert!(chunk.dirty.contains(DirtyFlags::MESH));
+        assert!(chunk.dirty.contains(DirtyFlags::LIGHT));
+    }
+
+    #[test]
+    fn test_voxel_serialization() {
+        let voxel = Voxel {
+            id: 42,
+            state: 7,
+            light_sky: 15,
+            light_block: 10,
+        };
+
+        let serialized = serde_json::to_string(&voxel).unwrap();
+        let deserialized: Voxel = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.id, 42);
+        assert_eq!(deserialized.state, 7);
+        assert_eq!(deserialized.light_sky, 15);
+        assert_eq!(deserialized.light_block, 10);
+    }
+
+    #[test]
+    fn test_chunk_pos_serialization() {
+        let pos = ChunkPos::new(-5, 10);
+
+        let serialized = serde_json::to_string(&pos).unwrap();
+        let deserialized: ChunkPos = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.x, -5);
+        assert_eq!(deserialized.z, 10);
     }
 }

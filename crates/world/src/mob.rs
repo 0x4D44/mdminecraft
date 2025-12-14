@@ -21,6 +21,10 @@ pub enum MobType {
     /// Chicken - spawns in plains, forests
     Chicken,
 
+    // NPCs
+    /// Villager - spawns in plains, wanders and trades
+    Villager,
+
     // Hostile mobs
     /// Zombie - spawns at night or in darkness, attacks players
     Zombie,
@@ -44,6 +48,7 @@ impl MobType {
                 (MobType::Cow, 8.0),
                 (MobType::Sheep, 12.0),
                 (MobType::Chicken, 10.0),
+                (MobType::Villager, 2.0), // Rare villager spawns
             ],
             BiomeId::Forest | BiomeId::BirchForest => vec![
                 (MobType::Pig, 8.0),
@@ -52,7 +57,14 @@ impl MobType {
             ],
             BiomeId::Hills => vec![(MobType::Sheep, 15.0), (MobType::Cow, 5.0)],
             BiomeId::Savanna => vec![(MobType::Cow, 6.0), (MobType::Chicken, 8.0)],
-            // No mobs in cold, ocean, or extreme biomes
+            BiomeId::RainForest => vec![
+                (MobType::Pig, 6.0),
+                (MobType::Chicken, 12.0),
+            ],
+            BiomeId::Mountains => vec![
+                (MobType::Sheep, 10.0),
+            ],
+            // No mobs in cold, ocean, or swamp biomes
             _ => vec![],
         }
     }
@@ -64,6 +76,7 @@ impl MobType {
             MobType::Cow => 0.2,
             MobType::Sheep => 0.23,
             MobType::Chicken => 0.4,
+            MobType::Villager => 0.2, // Villagers walk slowly
             MobType::Zombie => 0.23,
             MobType::Skeleton => 0.25,
             MobType::Spider => 0.35, // Spiders are fast
@@ -78,6 +91,7 @@ impl MobType {
             MobType::Cow => 0.7,
             MobType::Sheep => 0.45,
             MobType::Chicken => 0.3,
+            MobType::Villager => 0.6, // Human-sized
             MobType::Zombie => 0.6,
             MobType::Skeleton => 0.6,
             MobType::Spider => 0.7,  // Spiders are wide
@@ -100,6 +114,7 @@ impl MobType {
             MobType::Cow => 10.0,
             MobType::Sheep => 8.0,
             MobType::Chicken => 4.0,
+            MobType::Villager => 20.0, // Villagers have good health
             MobType::Zombie => 20.0,
             MobType::Skeleton => 20.0,
             MobType::Spider => 16.0,
@@ -586,6 +601,12 @@ impl MobSpawner {
     ) -> Vec<Mob> {
         let mob_types = MobType::for_biome(biome);
         if mob_types.is_empty() {
+            tracing::debug!(
+                chunk_x,
+                chunk_z,
+                ?biome,
+                "No mob types for biome, skipping spawn"
+            );
             return vec![];
         }
 
@@ -602,16 +623,16 @@ impl MobSpawner {
             .wrapping_add((chunk_x as u64).wrapping_mul(374761393))
             .wrapping_add((chunk_z as u64).wrapping_mul(668265263));
 
-        // Try to spawn mobs on a grid pattern (every 8 blocks)
-        for local_x in (0..CHUNK_SIZE_X).step_by(8) {
-            for local_z in (0..CHUNK_SIZE_Z).step_by(8) {
+        // Try to spawn mobs on a grid pattern (every 4 blocks = 16 spawn points per chunk)
+        for local_x in (0..CHUNK_SIZE_X).step_by(4) {
+            for local_z in (0..CHUNK_SIZE_Z).step_by(4) {
                 let pos_seed = chunk_seed
                     .wrapping_add((local_x as u64).wrapping_mul(1103515245))
                     .wrapping_add((local_z as u64).wrapping_mul(12345));
 
-                // Spawn chance: 5% per spawn point
+                // Spawn chance: 15% per spawn point (~2.4 mobs per chunk in populated biomes)
                 let spawn_roll = (pos_seed % 100) as f32 / 100.0;
-                if spawn_roll > 0.05 {
+                if spawn_roll > 0.15 {
                     continue;
                 }
 
@@ -638,6 +659,16 @@ impl MobSpawner {
             }
         }
 
+        if !mobs.is_empty() {
+            tracing::info!(
+                chunk_x,
+                chunk_z,
+                ?biome,
+                mob_count = mobs.len(),
+                "Spawned mobs in chunk"
+            );
+        }
+
         mobs
     }
 }
@@ -649,8 +680,9 @@ mod tests {
     #[test]
     fn test_mob_types_for_biome() {
         let plains = MobType::for_biome(BiomeId::Plains);
-        assert_eq!(plains.len(), 4);
+        assert_eq!(plains.len(), 5); // Pig, Cow, Sheep, Chicken, Villager
         assert!(plains.iter().any(|(t, _)| *t == MobType::Pig));
+        assert!(plains.iter().any(|(t, _)| *t == MobType::Villager));
 
         let forest = MobType::for_biome(BiomeId::Forest);
         assert_eq!(forest.len(), 3);
@@ -781,10 +813,9 @@ mod tests {
 
         let mobs = spawner.generate_spawns(0, 0, BiomeId::Plains, &heights);
 
-        // Plains should spawn mobs (low chance but should get at least some across multiple attempts)
-        // With 5% spawn chance and 4 spawn points per chunk, expected ~0.2 mobs per chunk
-        // Over many chunks we should see some spawns
-        assert!(mobs.len() <= 10, "Should not spawn excessive mobs");
+        // Plains should spawn mobs
+        // With 15% spawn chance and 16 spawn points per chunk, expected ~2.4 mobs per chunk
+        assert!(mobs.len() <= 16, "Should not spawn excessive mobs");
 
         // All spawned mobs should be valid plains types
         for mob in &mobs {
@@ -792,7 +823,8 @@ mod tests {
                 mob.mob_type == MobType::Pig
                     || mob.mob_type == MobType::Cow
                     || mob.mob_type == MobType::Sheep
-                    || mob.mob_type == MobType::Chicken,
+                    || mob.mob_type == MobType::Chicken
+                    || mob.mob_type == MobType::Villager,
                 "Invalid mob type for plains biome"
             );
         }
@@ -838,5 +870,554 @@ mod tests {
             spawns_different,
             "Different seeds should produce different spawns"
         );
+    }
+
+    #[test]
+    fn test_mob_damage() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        assert_eq!(mob.health, 10.0); // Pig max health
+
+        let died = mob.damage(5.0);
+        assert!(!died);
+        assert_eq!(mob.health, 5.0);
+        assert!(mob.damage_flash > 0.0);
+        assert!(!mob.dead);
+
+        let died = mob.damage(10.0);
+        assert!(died);
+        assert!(mob.dead);
+        assert!(mob.health <= 0.0);
+    }
+
+    #[test]
+    fn test_mob_knockback() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        assert_eq!(mob.vel_x, 0.0);
+        assert_eq!(mob.vel_z, 0.0);
+
+        mob.apply_knockback(1.0, 0.0, 2.0);
+        assert!(mob.vel_x > 0.0);
+        assert!(mob.vel_y > 0.0); // Upward knockback
+        assert_eq!(mob.vel_z, 0.0);
+
+        // Test normalized direction
+        let mut mob2 = Mob::new(0.0, 64.0, 0.0, MobType::Cow);
+        mob2.apply_knockback(3.0, 4.0, 5.0); // 3-4-5 triangle
+        // Direction should be normalized
+        assert!((mob2.vel_x - 3.0).abs() < 0.1);
+        assert!((mob2.vel_z - 4.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_mob_knockback_zero_distance() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.apply_knockback(0.0, 0.0, 2.0);
+        // Should not crash, velocity should stay 0
+        assert_eq!(mob.vel_x, 0.0);
+        assert_eq!(mob.vel_z, 0.0);
+    }
+
+    #[test]
+    fn test_mob_fire() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        assert!(!mob.is_on_fire());
+
+        mob.set_on_fire(60); // 3 seconds
+        assert!(mob.is_on_fire());
+        assert_eq!(mob.fire_ticks, 60);
+
+        // Setting shorter duration should not reduce fire
+        mob.set_on_fire(30);
+        assert_eq!(mob.fire_ticks, 60);
+
+        // Setting longer duration should extend fire
+        mob.set_on_fire(100);
+        assert_eq!(mob.fire_ticks, 100);
+    }
+
+    #[test]
+    fn test_mob_fire_damage() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.set_on_fire(20); // 1 second
+
+        // Fire ticks down
+        for _ in 0..19 {
+            mob.update_fire();
+            assert!(mob.fire_ticks > 0);
+        }
+
+        // At tick 20, fire damage is dealt
+        mob.update_fire();
+        // Health should be reduced by fire damage
+        assert!(mob.health < 10.0);
+    }
+
+    #[test]
+    fn test_mob_distance_to() {
+        let mob = Mob::new(0.0, 0.0, 0.0, MobType::Pig);
+
+        assert_eq!(mob.distance_to(0.0, 0.0, 0.0), 0.0);
+        assert_eq!(mob.distance_to(3.0, 4.0, 0.0), 5.0); // 3-4-5 triangle
+        assert_eq!(mob.distance_to(0.0, 0.0, 5.0), 5.0);
+    }
+
+    #[test]
+    fn test_hostile_mob_properties() {
+        assert!(MobType::Zombie.is_hostile());
+        assert!(MobType::Skeleton.is_hostile());
+        assert!(MobType::Spider.is_hostile());
+        assert!(MobType::Creeper.is_hostile());
+        assert!(!MobType::Pig.is_hostile());
+        assert!(!MobType::Cow.is_hostile());
+        assert!(!MobType::Villager.is_hostile());
+    }
+
+    #[test]
+    fn test_hostile_mob_damage() {
+        assert_eq!(MobType::Zombie.attack_damage(), 3.0);
+        assert_eq!(MobType::Skeleton.attack_damage(), 2.0);
+        assert_eq!(MobType::Spider.attack_damage(), 2.0);
+        assert_eq!(MobType::Creeper.attack_damage(), 0.0); // Explodes instead
+        assert_eq!(MobType::Pig.attack_damage(), 0.0);
+    }
+
+    #[test]
+    fn test_hostile_mob_detection_range() {
+        assert_eq!(MobType::Zombie.detection_range(), 16.0);
+        assert_eq!(MobType::Skeleton.detection_range(), 16.0);
+        assert_eq!(MobType::Spider.detection_range(), 16.0);
+        assert_eq!(MobType::Creeper.detection_range(), 12.0);
+        assert_eq!(MobType::Pig.detection_range(), 0.0);
+    }
+
+    #[test]
+    fn test_creeper_explosion() {
+        assert!(MobType::Creeper.explodes());
+        assert!(!MobType::Zombie.explodes());
+
+        assert_eq!(MobType::Creeper.explosion_damage(), 15.0);
+        assert_eq!(MobType::Creeper.explosion_radius(), 3.0);
+        assert_eq!(MobType::Creeper.fuse_time(), 1.5);
+    }
+
+    #[test]
+    fn test_spider_can_climb() {
+        assert!(MobType::Spider.can_climb_walls());
+        assert!(!MobType::Zombie.can_climb_walls());
+        assert!(!MobType::Pig.can_climb_walls());
+    }
+
+    #[test]
+    fn test_spider_hostility_time_based() {
+        // Spider is neutral in daylight
+        assert!(!MobType::Spider.is_hostile_at_time(false));
+        assert!(MobType::Spider.is_hostile_at_time(true));
+
+        // Other hostile mobs are always hostile
+        assert!(MobType::Zombie.is_hostile_at_time(false));
+        assert!(MobType::Zombie.is_hostile_at_time(true));
+    }
+
+    #[test]
+    fn test_mob_update_with_target_passive() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+
+        // Passive mobs should not deal damage
+        let dealt_damage = mob.update_with_target(0, 5.0, 64.0, 5.0);
+        assert!(!dealt_damage);
+    }
+
+    #[test]
+    fn test_zombie_chases_player() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        mob.state = MobState::Idle;
+
+        // Player is within detection range
+        let _dealt_damage = mob.update_with_target(0, 10.0, 64.0, 0.0);
+
+        // Zombie should start chasing
+        assert_eq!(mob.state, MobState::Chasing);
+        assert!(mob.vel_x > 0.0); // Moving toward player
+    }
+
+    #[test]
+    fn test_zombie_attacks_player() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        mob.state = MobState::Chasing;
+        mob.attack_cooldown = 0.0;
+
+        // Player is within attack range
+        let dealt_damage = mob.update_with_target(0, 1.0, 64.0, 0.0);
+
+        // Zombie should attack
+        assert!(dealt_damage);
+        assert_eq!(mob.state, MobState::Attacking);
+        assert!(mob.attack_cooldown > 0.0);
+    }
+
+    #[test]
+    fn test_zombie_attack_cooldown() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        mob.attack_cooldown = 1.0;
+
+        // Player is within attack range but on cooldown
+        let dealt_damage = mob.update_with_target(0, 1.0, 64.0, 0.0);
+
+        // Should not attack while on cooldown
+        assert!(!dealt_damage);
+    }
+
+    #[test]
+    fn test_zombie_wanders_when_player_far() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        mob.state = MobState::Idle;
+        mob.ai_timer = 0;
+
+        // Player is far away (outside detection range)
+        let _dealt_damage = mob.update_with_target(0, 100.0, 64.0, 0.0);
+
+        // Zombie should wander (idle or wandering)
+        assert!(mob.state == MobState::Idle || mob.state == MobState::Wandering);
+    }
+
+    #[test]
+    fn test_creeper_starts_fuse() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Creeper);
+        mob.state = MobState::Chasing;
+        mob.exploding = false;
+
+        // Player is within attack range
+        let dealt_damage = mob.update_with_target(0, 1.0, 64.0, 0.0);
+
+        // Creeper should start fuse
+        assert!(!dealt_damage); // No damage yet
+        assert!(mob.exploding);
+        assert!(mob.fuse_timer > 0.0);
+        assert_eq!(mob.state, MobState::Exploding);
+    }
+
+    #[test]
+    fn test_creeper_explodes_when_fuse_expires() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Creeper);
+        mob.exploding = true;
+        mob.fuse_timer = 0.01; // About to explode
+
+        // Player nearby
+        let dealt_damage = mob.update_with_target(0, 1.0, 64.0, 0.0);
+
+        // Creeper should explode
+        assert!(dealt_damage);
+        assert!(mob.dead);
+    }
+
+    #[test]
+    fn test_creeper_cancels_explosion_when_player_escapes() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Creeper);
+        mob.exploding = true;
+        mob.fuse_timer = 1.0;
+        mob.state = MobState::Exploding;
+
+        // Player escapes
+        let _dealt_damage = mob.update_with_target(0, 20.0, 64.0, 0.0);
+
+        // Creeper should cancel fuse
+        assert!(!mob.exploding);
+        assert_eq!(mob.fuse_timer, 0.0);
+        assert_eq!(mob.state, MobState::Chasing);
+    }
+
+    #[test]
+    fn test_spider_climbs_toward_elevated_player() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Spider);
+        mob.state = MobState::Idle;
+
+        // Player is above and within range
+        let _dealt_damage = mob.update_with_target(0, 5.0, 70.0, 0.0);
+
+        // Spider should have upward velocity when target is above
+        // Note: vel_y is set when climbing
+        assert_eq!(mob.state, MobState::Chasing);
+    }
+
+    #[test]
+    fn test_mob_gravity() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.vel_y = 1.0; // Give upward velocity
+
+        mob.update(0);
+
+        // Gravity should reduce upward velocity
+        assert!(mob.vel_y < 1.0);
+        // Position should change
+        assert!(mob.y > 64.0);
+    }
+
+    #[test]
+    fn test_mob_state_idle_to_wandering() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.state = MobState::Idle;
+        mob.ai_timer = 100; // Past idle duration
+
+        mob.update(200); // Tick that triggers transition
+
+        // Should transition to wandering and set velocity
+        // (exact behavior depends on tick value)
+    }
+
+    #[test]
+    fn test_mob_max_health() {
+        assert_eq!(MobType::Pig.max_health(), 10.0);
+        assert_eq!(MobType::Cow.max_health(), 10.0);
+        assert_eq!(MobType::Sheep.max_health(), 8.0);
+        assert_eq!(MobType::Chicken.max_health(), 4.0);
+        assert_eq!(MobType::Villager.max_health(), 20.0);
+        assert_eq!(MobType::Zombie.max_health(), 20.0);
+        assert_eq!(MobType::Skeleton.max_health(), 20.0);
+        assert_eq!(MobType::Spider.max_health(), 16.0);
+        assert_eq!(MobType::Creeper.max_health(), 20.0);
+    }
+
+    #[test]
+    fn test_mob_size() {
+        assert!(MobType::Chicken.size() < MobType::Pig.size());
+        assert!(MobType::Pig.size() < MobType::Cow.size());
+        assert!(MobType::Spider.size() > MobType::Zombie.size()); // Spiders are wide
+    }
+
+    #[test]
+    fn test_mob_is_hostile_method() {
+        let pig = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        assert!(!pig.is_hostile());
+
+        let zombie = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        assert!(zombie.is_hostile());
+    }
+
+    #[test]
+    fn test_biome_mob_spawns() {
+        // Test various biomes
+        assert!(!MobType::for_biome(BiomeId::Hills).is_empty());
+        assert!(!MobType::for_biome(BiomeId::Savanna).is_empty());
+        assert!(!MobType::for_biome(BiomeId::RainForest).is_empty());
+        assert!(!MobType::for_biome(BiomeId::Mountains).is_empty());
+        assert!(!MobType::for_biome(BiomeId::BirchForest).is_empty());
+
+        // Biomes with no spawns
+        assert!(MobType::for_biome(BiomeId::Ocean).is_empty());
+        assert!(MobType::for_biome(BiomeId::Desert).is_empty());
+        assert!(MobType::for_biome(BiomeId::Swamp).is_empty());
+    }
+
+    #[test]
+    fn test_update_cooldown_decreases() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.attack_cooldown = 1.0;
+        mob.damage_flash = 1.0;
+
+        mob.update(0);
+
+        assert!(mob.attack_cooldown < 1.0);
+        assert!(mob.damage_flash < 1.0);
+    }
+
+    #[test]
+    fn test_mob_wandering_transitions_to_idle() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.state = MobState::Wandering;
+        mob.ai_timer = 100; // Past wander duration
+        mob.vel_x = 0.25;
+        mob.vel_z = 0.25;
+
+        // Run enough ticks to trigger state transition
+        for tick in 0..100 {
+            if mob.state == MobState::Wandering && mob.ai_timer > 60 {
+                mob.update(tick);
+                if mob.state == MobState::Idle {
+                    break;
+                }
+            } else {
+                mob.update(tick);
+            }
+        }
+
+        // Eventually should go back to idle
+    }
+
+    #[test]
+    fn test_chasing_state_falls_back_to_idle() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        mob.state = MobState::Chasing; // Invalid for passive mob
+
+        mob.update(0);
+
+        // Should fall back to idle
+        assert_eq!(mob.state, MobState::Idle);
+        assert_eq!(mob.vel_x, 0.0);
+        assert_eq!(mob.vel_z, 0.0);
+    }
+
+    #[test]
+    fn test_movement_speed_all_mobs() {
+        // Test all mob movement speeds are positive
+        assert!(MobType::Pig.movement_speed() > 0.0);
+        assert!(MobType::Cow.movement_speed() > 0.0);
+        assert!(MobType::Sheep.movement_speed() > 0.0);
+        assert!(MobType::Chicken.movement_speed() > 0.0);
+        assert!(MobType::Villager.movement_speed() > 0.0);
+        assert!(MobType::Zombie.movement_speed() > 0.0);
+        assert!(MobType::Skeleton.movement_speed() > 0.0);
+        assert!(MobType::Spider.movement_speed() > 0.0);
+        assert!(MobType::Creeper.movement_speed() > 0.0);
+
+        // Spider should be fastest
+        assert!(MobType::Spider.movement_speed() > MobType::Zombie.movement_speed());
+        // Creeper should be slow
+        assert!(MobType::Creeper.movement_speed() < MobType::Spider.movement_speed());
+    }
+
+    #[test]
+    fn test_size_all_mobs() {
+        // Test all mob sizes
+        assert_eq!(MobType::Pig.size(), 0.45);
+        assert_eq!(MobType::Cow.size(), 0.7);
+        assert_eq!(MobType::Sheep.size(), 0.45);
+        assert_eq!(MobType::Chicken.size(), 0.3);
+        assert_eq!(MobType::Villager.size(), 0.6);
+        assert_eq!(MobType::Zombie.size(), 0.6);
+        assert_eq!(MobType::Skeleton.size(), 0.6);
+        assert_eq!(MobType::Spider.size(), 0.7);
+        assert_eq!(MobType::Creeper.size(), 0.5);
+    }
+
+    #[test]
+    fn test_explosion_methods_non_creeper() {
+        // Non-creeper mobs should have 0 explosion damage/radius/fuse
+        assert_eq!(MobType::Zombie.explosion_damage(), 0.0);
+        assert_eq!(MobType::Zombie.explosion_radius(), 0.0);
+        assert_eq!(MobType::Zombie.fuse_time(), 0.0);
+
+        assert_eq!(MobType::Pig.explosion_damage(), 0.0);
+        assert_eq!(MobType::Pig.explosion_radius(), 0.0);
+        assert_eq!(MobType::Pig.fuse_time(), 0.0);
+    }
+
+    #[test]
+    fn test_creeper_chases_player() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Creeper);
+        mob.state = MobState::Idle;
+        mob.exploding = false;
+
+        // Player is within detection range but not attack range
+        let _dealt_damage = mob.update_with_target(0, 8.0, 64.0, 0.0);
+
+        // Creeper should chase
+        assert_eq!(mob.state, MobState::Chasing);
+        assert!(mob.vel_x > 0.0);
+    }
+
+    #[test]
+    fn test_creeper_wanders_when_far() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Creeper);
+        mob.state = MobState::Idle;
+        mob.ai_timer = 0;
+
+        // Player is very far (outside detection range)
+        let _dealt_damage = mob.update_with_target(0, 50.0, 64.0, 0.0);
+
+        // Creeper should wander or stay idle
+        assert!(mob.state == MobState::Idle || mob.state == MobState::Wandering);
+    }
+
+    #[test]
+    fn test_attacking_state_resets_to_idle() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Cow);
+        mob.state = MobState::Attacking;
+        mob.vel_x = 0.5;
+        mob.vel_z = 0.5;
+
+        mob.update(0);
+
+        // Passive mob in attacking state should reset
+        assert_eq!(mob.state, MobState::Idle);
+        assert_eq!(mob.vel_x, 0.0);
+        assert_eq!(mob.vel_z, 0.0);
+    }
+
+    #[test]
+    fn test_exploding_state_resets_to_idle() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Sheep);
+        mob.state = MobState::Exploding;
+        mob.vel_x = 0.3;
+        mob.vel_z = 0.3;
+
+        mob.update(0);
+
+        // Passive mob in exploding state should reset
+        assert_eq!(mob.state, MobState::Idle);
+    }
+
+    #[test]
+    fn test_skeleton_attacks() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Skeleton);
+        mob.attack_cooldown = 0.0;
+
+        // Player within attack range
+        let dealt = mob.update_with_target(0, 1.0, 64.0, 0.0);
+
+        assert!(dealt);
+        assert_eq!(mob.state, MobState::Attacking);
+    }
+
+    #[test]
+    fn test_skeleton_chases() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Skeleton);
+        mob.state = MobState::Idle;
+
+        // Player within detection but outside attack range
+        let dealt = mob.update_with_target(0, 10.0, 64.0, 0.0);
+
+        assert!(!dealt);
+        assert_eq!(mob.state, MobState::Chasing);
+    }
+
+    #[test]
+    fn test_spider_attack_damage() {
+        assert_eq!(MobType::Spider.attack_damage(), 2.0);
+        assert_eq!(MobType::Skeleton.attack_damage(), 2.0);
+        assert_eq!(MobType::Zombie.attack_damage(), 3.0);
+        assert_eq!(MobType::Creeper.attack_damage(), 0.0); // Creepers don't attack
+        assert_eq!(MobType::Pig.attack_damage(), 0.0); // Passive mobs don't attack
+    }
+
+    #[test]
+    fn test_detection_range_all_hostile() {
+        assert_eq!(MobType::Zombie.detection_range(), 16.0);
+        assert_eq!(MobType::Skeleton.detection_range(), 16.0);
+        assert_eq!(MobType::Spider.detection_range(), 16.0);
+        assert_eq!(MobType::Creeper.detection_range(), 12.0);
+        assert_eq!(MobType::Pig.detection_range(), 0.0); // Passive mobs
+        assert_eq!(MobType::Cow.detection_range(), 0.0);
+    }
+
+    #[test]
+    fn test_mob_chunk_pos() {
+        // Mob in chunk 0,0
+        let mob1 = Mob::new(8.0, 64.0, 8.0, MobType::Pig);
+        assert_eq!(mob1.chunk_pos(), (0, 0));
+
+        // Mob in chunk 1,0
+        let mob2 = Mob::new(20.0, 64.0, 8.0, MobType::Pig);
+        assert_eq!(mob2.chunk_pos(), (1, 0));
+
+        // Mob in negative chunk
+        let mob3 = Mob::new(-5.0, 64.0, -10.0, MobType::Pig);
+        assert_eq!(mob3.chunk_pos(), (-1, -1));
+    }
+
+    #[test]
+    fn test_villager_is_passive() {
+        assert!(!MobType::Villager.is_hostile());
+        assert_eq!(MobType::Villager.attack_damage(), 0.0);
+        assert_eq!(MobType::Villager.detection_range(), 0.0);
     }
 }

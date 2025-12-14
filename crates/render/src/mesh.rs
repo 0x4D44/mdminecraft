@@ -259,23 +259,48 @@ impl GreedyMesher {
             Some(chunk.voxel(pos[0], pos[1], pos[2]))
         };
 
+        // Determine which faces to render based on block types:
+        // - Opaque blocks: render face when adjacent to non-opaque (air or transparent)
+        // - Transparent blocks: render face when adjacent to air or different block type
+        // - Air: never render
         match (front, back) {
-            (Some(a), Some(b)) => match (is_opaque(a, registry), is_opaque(b, registry)) {
-                (true, false) => {
+            (Some(a), Some(b)) => {
+                let a_opaque = is_opaque(a, registry);
+                let b_opaque = is_opaque(b, registry);
+                let a_solid = is_solid(a);
+                let b_solid = is_solid(b);
+
+                if a_opaque && !b_opaque {
+                    // Opaque block 'a' facing non-opaque 'b' (air or transparent)
                     let light = a.light_sky.max(a.light_block);
                     Some(FaceDesc::new(a.id, axis, false, light))
-                }
-                (false, true) => {
+                } else if b_opaque && !a_opaque {
+                    // Opaque block 'b' facing non-opaque 'a' (air or transparent)
                     let light = b.light_sky.max(b.light_block);
                     Some(FaceDesc::new(b.id, axis, true, light))
+                } else if a_solid && !a_opaque && !b_solid {
+                    // Transparent block 'a' facing air
+                    let light = a.light_sky.max(a.light_block);
+                    Some(FaceDesc::new(a.id, axis, false, light))
+                } else if b_solid && !b_opaque && !a_solid {
+                    // Transparent block 'b' facing air
+                    let light = b.light_sky.max(b.light_block);
+                    Some(FaceDesc::new(b.id, axis, true, light))
+                } else if a_solid && !a_opaque && b_solid && !b_opaque && a.id != b.id {
+                    // Two different transparent blocks - render face for 'a'
+                    let light = a.light_sky.max(a.light_block);
+                    Some(FaceDesc::new(a.id, axis, false, light))
+                } else {
+                    None
                 }
-                _ => None,
-            },
-            (Some(a), None) if is_opaque(a, registry) => {
+            }
+            (Some(a), None) if is_solid(a) => {
+                // Block at chunk edge facing outside
                 let light = a.light_sky.max(a.light_block);
                 Some(FaceDesc::new(a.id, axis, false, light))
             }
-            (None, Some(b)) if is_opaque(b, registry) => {
+            (None, Some(b)) if is_solid(b) => {
+                // Block at chunk edge facing outside
                 let light = b.light_sky.max(b.light_block);
                 Some(FaceDesc::new(b.id, axis, true, light))
             }
@@ -369,6 +394,11 @@ fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
         .unwrap_or(voxel.id != BLOCK_AIR)
 }
 
+/// Check if a voxel is a solid (non-air) block that should be rendered
+fn is_solid(voxel: Voxel) -> bool {
+    voxel.id != BLOCK_AIR
+}
+
 #[cfg(test)]
 mod tests {
     use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
@@ -380,6 +410,7 @@ mod tests {
         BlockRegistry::new(vec![
             BlockDescriptor::simple("air", false),
             BlockDescriptor::simple("stone", true),
+            BlockDescriptor::simple("leaves", false), // transparent block
         ])
     }
 
@@ -417,5 +448,59 @@ mod tests {
         chunk.set_voxel(0, 0, 0, voxel);
         let mesh_updated = mesh_chunk(&chunk, &registry, None);
         assert_ne!(hash_empty, mesh_updated.hash);
+    }
+
+    #[test]
+    fn transparent_block_renders_faces() {
+        // Test that transparent blocks (like leaves) render faces when adjacent to air
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry();
+
+        // Place a transparent block (id=2 is "leaves" with opaque=false)
+        let leaves = Voxel {
+            id: 2,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        };
+        chunk.set_voxel(5, 5, 5, leaves);
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+
+        // Transparent block surrounded by air should have 6 faces
+        assert!(!mesh.vertices.is_empty(), "Transparent block should generate mesh vertices");
+        assert_eq!(mesh.indices.len(), 36, "Transparent block should have 6 faces (36 indices)");
+    }
+
+    #[test]
+    fn transparent_blocks_adjacent_render_correctly() {
+        // Test that two adjacent transparent blocks of the same type don't render internal faces
+        // and that greedy meshing combines faces properly
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry();
+
+        let leaves = Voxel {
+            id: 2,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        };
+        // Place two adjacent leaves blocks along Z axis
+        chunk.set_voxel(5, 5, 5, leaves);
+        chunk.set_voxel(5, 5, 6, leaves);
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+
+        // Two adjacent same-type transparent blocks: greedy mesher merges front/back Z faces
+        // So we get: 2 merged Z faces (front+back) + 4 individual side faces per block merged
+        // = fewer total quads due to greedy meshing
+        // The key test is that SOME mesh is generated (transparent blocks render)
+        assert!(!mesh.vertices.is_empty(), "Should generate mesh for adjacent transparent blocks");
+        // With greedy meshing, the exact count depends on merge opportunities
+        // Just verify we have less than 12 faces (would be 72 indices if no merging)
+        assert!(mesh.indices.len() > 0 && mesh.indices.len() < 72,
+            "Greedy meshing should reduce face count for adjacent blocks, got {} indices", mesh.indices.len());
     }
 }

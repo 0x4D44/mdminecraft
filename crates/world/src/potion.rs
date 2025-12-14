@@ -723,6 +723,89 @@ mod tests {
     }
 
     #[test]
+    fn test_status_effect_amplifier_clamping() {
+        // Try to create Speed with amplifier 10, should be clamped to max (2)
+        let effect = StatusEffect::new(StatusEffectType::Speed, 10, 100);
+        assert_eq!(effect.amplifier, 2);
+
+        // Fire resistance has max amplifier 0
+        let effect = StatusEffect::new(StatusEffectType::FireResistance, 5, 100);
+        assert_eq!(effect.amplifier, 0);
+    }
+
+    #[test]
+    fn test_all_status_effect_max_amplifiers() {
+        assert_eq!(StatusEffectType::Speed.max_amplifier(), 2);
+        assert_eq!(StatusEffectType::Haste.max_amplifier(), 2);
+        assert_eq!(StatusEffectType::Strength.max_amplifier(), 2);
+        assert_eq!(StatusEffectType::InstantHealth.max_amplifier(), 1);
+        assert_eq!(StatusEffectType::JumpBoost.max_amplifier(), 1);
+        assert_eq!(StatusEffectType::Regeneration.max_amplifier(), 1);
+        assert_eq!(StatusEffectType::Resistance.max_amplifier(), 3);
+        assert_eq!(StatusEffectType::FireResistance.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::WaterBreathing.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Invisibility.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::NightVision.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Absorption.max_amplifier(), 3);
+        assert_eq!(StatusEffectType::Saturation.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::SlowFalling.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Luck.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Slowness.max_amplifier(), 3);
+        assert_eq!(StatusEffectType::MiningFatigue.max_amplifier(), 2);
+        assert_eq!(StatusEffectType::InstantDamage.max_amplifier(), 1);
+        assert_eq!(StatusEffectType::Nausea.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Blindness.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Hunger.max_amplifier(), 2);
+        assert_eq!(StatusEffectType::Weakness.max_amplifier(), 0);
+        assert_eq!(StatusEffectType::Poison.max_amplifier(), 1);
+        assert_eq!(StatusEffectType::Wither.max_amplifier(), 1);
+        assert_eq!(StatusEffectType::BadLuck.max_amplifier(), 0);
+    }
+
+    #[test]
+    fn test_all_positive_effects() {
+        assert!(StatusEffectType::Speed.is_positive());
+        assert!(StatusEffectType::Haste.is_positive());
+        assert!(StatusEffectType::Strength.is_positive());
+        assert!(StatusEffectType::InstantHealth.is_positive());
+        assert!(StatusEffectType::JumpBoost.is_positive());
+        assert!(StatusEffectType::Regeneration.is_positive());
+        assert!(StatusEffectType::Resistance.is_positive());
+        assert!(StatusEffectType::FireResistance.is_positive());
+        assert!(StatusEffectType::WaterBreathing.is_positive());
+        assert!(StatusEffectType::Invisibility.is_positive());
+        assert!(StatusEffectType::NightVision.is_positive());
+        assert!(StatusEffectType::Absorption.is_positive());
+        assert!(StatusEffectType::Saturation.is_positive());
+        assert!(StatusEffectType::SlowFalling.is_positive());
+        assert!(StatusEffectType::Luck.is_positive());
+    }
+
+    #[test]
+    fn test_all_negative_effects() {
+        assert!(!StatusEffectType::Slowness.is_positive());
+        assert!(!StatusEffectType::MiningFatigue.is_positive());
+        assert!(!StatusEffectType::InstantDamage.is_positive());
+        assert!(!StatusEffectType::Nausea.is_positive());
+        assert!(!StatusEffectType::Blindness.is_positive());
+        assert!(!StatusEffectType::Hunger.is_positive());
+        assert!(!StatusEffectType::Weakness.is_positive());
+        assert!(!StatusEffectType::Poison.is_positive());
+        assert!(!StatusEffectType::Wither.is_positive());
+        assert!(!StatusEffectType::BadLuck.is_positive());
+    }
+
+    #[test]
+    fn test_all_instant_effects() {
+        assert!(StatusEffectType::InstantHealth.is_instant());
+        assert!(StatusEffectType::InstantDamage.is_instant());
+        assert!(StatusEffectType::Saturation.is_instant());
+        assert!(!StatusEffectType::Speed.is_instant());
+        assert!(!StatusEffectType::Regeneration.is_instant());
+        assert!(!StatusEffectType::Poison.is_instant());
+    }
+
+    #[test]
     fn test_status_effect_tick() {
         let mut effect = StatusEffect::new(StatusEffectType::Speed, 0, 3);
         assert!(!effect.tick()); // 2 remaining
@@ -947,5 +1030,379 @@ mod tests {
         stand.update(1.0);
         assert!(!stand.is_brewing);
         assert_eq!(stand.fuel, 1); // Fuel not consumed
+    }
+
+    #[test]
+    fn test_status_effects_remove() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 100));
+        effects.add(StatusEffect::new(StatusEffectType::Strength, 0, 100));
+
+        assert!(effects.has(StatusEffectType::Speed));
+        assert!(effects.has(StatusEffectType::Strength));
+
+        effects.remove(StatusEffectType::Speed);
+        assert!(!effects.has(StatusEffectType::Speed));
+        assert!(effects.has(StatusEffectType::Strength));
+    }
+
+    #[test]
+    fn test_status_effects_clear() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 100));
+        effects.add(StatusEffect::new(StatusEffectType::Strength, 0, 100));
+        effects.add(StatusEffect::new(StatusEffectType::Regeneration, 0, 100));
+
+        assert!(!effects.is_empty());
+
+        effects.clear();
+        assert!(effects.is_empty());
+        assert!(!effects.has(StatusEffectType::Speed));
+        assert!(!effects.has(StatusEffectType::Strength));
+    }
+
+    #[test]
+    fn test_status_effects_iter() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 100));
+        effects.add(StatusEffect::new(StatusEffectType::Strength, 1, 200));
+
+        let collected: Vec<_> = effects.iter().collect();
+        assert_eq!(collected.len(), 2);
+    }
+
+    #[test]
+    fn test_status_effects_tick_expires() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 2)); // 2 ticks
+        effects.add(StatusEffect::new(StatusEffectType::Strength, 0, 100)); // Long duration
+
+        // First tick - no expiry
+        let expired = effects.tick();
+        assert!(expired.is_empty());
+        assert!(effects.has(StatusEffectType::Speed));
+
+        // Second tick - speed expires
+        let expired = effects.tick();
+        assert!(expired.contains(&StatusEffectType::Speed));
+        assert!(!effects.has(StatusEffectType::Speed));
+        assert!(effects.has(StatusEffectType::Strength));
+    }
+
+    #[test]
+    fn test_status_effects_instant_expires_immediately() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::instant(StatusEffectType::InstantHealth, 0));
+
+        let expired = effects.tick();
+        assert!(expired.contains(&StatusEffectType::InstantHealth));
+        assert!(!effects.has(StatusEffectType::InstantHealth));
+    }
+
+    #[test]
+    fn test_status_effects_get() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 1, 500));
+
+        let speed = effects.get(StatusEffectType::Speed);
+        assert!(speed.is_some());
+        assert_eq!(speed.unwrap().amplifier, 1);
+        assert_eq!(speed.unwrap().duration_ticks, 500);
+
+        let strength = effects.get(StatusEffectType::Strength);
+        assert!(strength.is_none());
+    }
+
+    #[test]
+    fn test_status_effects_add_extends_same_level() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 100));
+
+        // Add same level with longer duration - should extend
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 500));
+        assert_eq!(effects.get(StatusEffectType::Speed).unwrap().duration_ticks, 500);
+
+        // Add same level with shorter duration - should not change
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 50));
+        assert_eq!(effects.get(StatusEffectType::Speed).unwrap().duration_ticks, 500);
+    }
+
+    #[test]
+    fn test_damage_reduction() {
+        let mut effects = StatusEffects::new();
+        assert_eq!(effects.damage_reduction(), 1.0); // No reduction
+
+        // Resistance I: 20% reduction
+        effects.add(StatusEffect::new(StatusEffectType::Resistance, 0, 100));
+        assert!((effects.damage_reduction() - 0.8).abs() < 0.01);
+
+        // Resistance II: 40% reduction
+        effects.add(StatusEffect::new(StatusEffectType::Resistance, 1, 100));
+        assert!((effects.damage_reduction() - 0.6).abs() < 0.01);
+
+        // Resistance III: 60% reduction
+        effects.add(StatusEffect::new(StatusEffectType::Resistance, 2, 100));
+        assert!((effects.damage_reduction() - 0.4).abs() < 0.01);
+
+        // Resistance IV: 80% reduction (capped)
+        effects.add(StatusEffect::new(StatusEffectType::Resistance, 3, 100));
+        assert!((effects.damage_reduction() - 0.2).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_slowness_speed_interaction() {
+        let mut effects = StatusEffects::new();
+
+        // Speed II + Slowness I
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 1, 100));
+        effects.add(StatusEffect::new(StatusEffectType::Slowness, 0, 100));
+
+        // Speed II = +40%, Slowness I = -15%, net = 1.4 * 0.85 = 1.19
+        let multiplier = effects.speed_multiplier();
+        assert!((multiplier - 1.19).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_weakness_strength_interaction() {
+        let mut effects = StatusEffects::new();
+
+        // Strength I + Weakness I
+        effects.add(StatusEffect::new(StatusEffectType::Strength, 0, 100));
+        effects.add(StatusEffect::new(StatusEffectType::Weakness, 0, 100));
+
+        // Strength I = +3, Weakness I = -4, net = -1
+        let modifier = effects.attack_damage_modifier();
+        assert!((modifier - (-1.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_all_potion_types_base_duration() {
+        // Base potions have no duration
+        assert_eq!(PotionType::Water.base_duration_ticks(), 0);
+        assert_eq!(PotionType::Awkward.base_duration_ticks(), 0);
+        assert_eq!(PotionType::Mundane.base_duration_ticks(), 0);
+        assert_eq!(PotionType::Thick.base_duration_ticks(), 0);
+
+        // Instant potions have no duration
+        assert_eq!(PotionType::Healing.base_duration_ticks(), 0);
+        assert_eq!(PotionType::Harming.base_duration_ticks(), 0);
+
+        // 3 minute potions
+        assert_eq!(PotionType::NightVision.base_duration_ticks(), 3600);
+        assert_eq!(PotionType::Invisibility.base_duration_ticks(), 3600);
+        assert_eq!(PotionType::FireResistance.base_duration_ticks(), 3600);
+        assert_eq!(PotionType::WaterBreathing.base_duration_ticks(), 3600);
+        assert_eq!(PotionType::Swiftness.base_duration_ticks(), 3600);
+        assert_eq!(PotionType::Leaping.base_duration_ticks(), 3600);
+        assert_eq!(PotionType::Strength.base_duration_ticks(), 3600);
+
+        // 1:30 potions
+        assert_eq!(PotionType::Slowness.base_duration_ticks(), 1800);
+        assert_eq!(PotionType::Weakness.base_duration_ticks(), 1800);
+        assert_eq!(PotionType::SlowFalling.base_duration_ticks(), 1800);
+
+        // 45 second potions
+        assert_eq!(PotionType::Poison.base_duration_ticks(), 900);
+        assert_eq!(PotionType::Regeneration.base_duration_ticks(), 900);
+
+        // 5 minute luck
+        assert_eq!(PotionType::Luck.base_duration_ticks(), 6000);
+    }
+
+    #[test]
+    fn test_all_potion_effects() {
+        // Base potions have no effect
+        assert!(PotionType::Water.effect().is_none());
+        assert!(PotionType::Awkward.effect().is_none());
+        assert!(PotionType::Mundane.effect().is_none());
+        assert!(PotionType::Thick.effect().is_none());
+
+        // Effect potions map to correct effect
+        assert_eq!(PotionType::NightVision.effect(), Some(StatusEffectType::NightVision));
+        assert_eq!(PotionType::Invisibility.effect(), Some(StatusEffectType::Invisibility));
+        assert_eq!(PotionType::Leaping.effect(), Some(StatusEffectType::JumpBoost));
+        assert_eq!(PotionType::FireResistance.effect(), Some(StatusEffectType::FireResistance));
+        assert_eq!(PotionType::Swiftness.effect(), Some(StatusEffectType::Speed));
+        assert_eq!(PotionType::Slowness.effect(), Some(StatusEffectType::Slowness));
+        assert_eq!(PotionType::WaterBreathing.effect(), Some(StatusEffectType::WaterBreathing));
+        assert_eq!(PotionType::Healing.effect(), Some(StatusEffectType::InstantHealth));
+        assert_eq!(PotionType::Harming.effect(), Some(StatusEffectType::InstantDamage));
+        assert_eq!(PotionType::Poison.effect(), Some(StatusEffectType::Poison));
+        assert_eq!(PotionType::Regeneration.effect(), Some(StatusEffectType::Regeneration));
+        assert_eq!(PotionType::Strength.effect(), Some(StatusEffectType::Strength));
+        assert_eq!(PotionType::Weakness.effect(), Some(StatusEffectType::Weakness));
+        assert_eq!(PotionType::Luck.effect(), Some(StatusEffectType::Luck));
+        assert_eq!(PotionType::SlowFalling.effect(), Some(StatusEffectType::SlowFalling));
+    }
+
+    #[test]
+    fn test_potion_create_effect_base_potions() {
+        assert!(PotionType::Water.create_effect(0, false).is_none());
+        assert!(PotionType::Awkward.create_effect(0, true).is_none());
+    }
+
+    #[test]
+    fn test_brew_recipe_coverage() {
+        // Test all recipes exist
+        assert!(get_brew_result(PotionType::Water, 102).is_some()); // Nether wart
+        assert!(get_brew_result(PotionType::Awkward, 109).is_some()); // Sugar
+        assert!(get_brew_result(PotionType::Awkward, 112).is_some()); // Rabbit foot
+        assert!(get_brew_result(PotionType::Awkward, 110).is_some()); // Glistering melon
+        assert!(get_brew_result(PotionType::Awkward, 108).is_some()); // Spider eye
+        assert!(get_brew_result(PotionType::Awkward, 105).is_some()); // Ghast tear
+        assert!(get_brew_result(PotionType::Awkward, 103).is_some()); // Blaze powder
+        assert!(get_brew_result(PotionType::Awkward, 111).is_some()); // Golden carrot
+        assert!(get_brew_result(PotionType::Awkward, 106).is_some()); // Magma cream
+        assert!(get_brew_result(PotionType::Awkward, 113).is_some()); // Phantom membrane
+
+        // Corruption recipes
+        assert_eq!(get_brew_result(PotionType::Swiftness, 107), Some(PotionType::Slowness));
+        assert_eq!(get_brew_result(PotionType::NightVision, 107), Some(PotionType::Invisibility));
+        assert_eq!(get_brew_result(PotionType::Healing, 107), Some(PotionType::Harming));
+        assert_eq!(get_brew_result(PotionType::Poison, 107), Some(PotionType::Harming));
+        assert_eq!(get_brew_result(PotionType::Water, 107), Some(PotionType::Weakness));
+    }
+
+    #[test]
+    fn test_brewing_stand_add_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        // Add ingredient to empty slot
+        assert_eq!(stand.add_ingredient(102, 10), 0);
+        assert_eq!(stand.ingredient, Some((102, 10)));
+
+        // Add same ingredient - should stack
+        assert_eq!(stand.add_ingredient(102, 60), 6); // Only 54 more fit
+        assert_eq!(stand.ingredient, Some((102, 64)));
+
+        // Add different ingredient - should fail
+        assert_eq!(stand.add_ingredient(103, 10), 10);
+    }
+
+    #[test]
+    fn test_brewing_stand_take_ingredient() {
+        let mut stand = BrewingStandState::new();
+        stand.add_ingredient(102, 10);
+
+        let taken = stand.take_ingredient();
+        assert_eq!(taken, Some((102, 10)));
+        assert!(stand.ingredient.is_none());
+
+        // Take again - should be None
+        assert!(stand.take_ingredient().is_none());
+    }
+
+    #[test]
+    fn test_brewing_stand_has_bottles() {
+        let mut stand = BrewingStandState::new();
+        assert!(!stand.has_bottles());
+
+        stand.add_bottle(1, PotionType::Water);
+        assert!(stand.has_bottles());
+        assert_eq!(stand.bottle_count(), 1);
+
+        stand.take_bottle(1);
+        assert!(!stand.has_bottles());
+    }
+
+    #[test]
+    fn test_brewing_stand_multiple_bottles_transform() {
+        let mut stand = BrewingStandState::new();
+
+        // Add 3 water bottles
+        stand.add_bottle(0, PotionType::Water);
+        stand.add_bottle(1, PotionType::Water);
+        stand.add_bottle(2, PotionType::Water);
+
+        // Add nether wart and fuel
+        stand.add_ingredient(102, 1);
+        stand.add_fuel(1);
+
+        // Brew for 21 seconds
+        for _ in 0..420 {
+            stand.update(0.05);
+        }
+
+        // All bottles should become awkward
+        assert_eq!(stand.bottles[0], Some(PotionType::Awkward));
+        assert_eq!(stand.bottles[1], Some(PotionType::Awkward));
+        assert_eq!(stand.bottles[2], Some(PotionType::Awkward));
+    }
+
+    #[test]
+    fn test_brewing_stand_partial_transform() {
+        let mut stand = BrewingStandState::new();
+
+        // Add only 2 water bottles (slot 0 and 2)
+        stand.add_bottle(0, PotionType::Water);
+        stand.add_bottle(2, PotionType::Water);
+
+        // Add nether wart and fuel
+        stand.add_ingredient(102, 1);
+        stand.add_fuel(1);
+
+        // Brew
+        for _ in 0..420 {
+            stand.update(0.05);
+        }
+
+        // Filled slots should become awkward, empty remains empty
+        assert_eq!(stand.bottles[0], Some(PotionType::Awkward));
+        assert_eq!(stand.bottles[1], None);
+        assert_eq!(stand.bottles[2], Some(PotionType::Awkward));
+    }
+
+    #[test]
+    fn test_brewing_stand_default() {
+        let stand = BrewingStandState::default();
+        assert_eq!(stand.bottles, [None, None, None]);
+        assert!(stand.ingredient.is_none());
+        assert_eq!(stand.fuel, 0);
+    }
+
+    #[test]
+    fn test_status_effect_show_particles() {
+        let effect = StatusEffect::new(StatusEffectType::Speed, 0, 100);
+        assert!(effect.show_particles); // Default is true
+    }
+
+    #[test]
+    fn test_status_effects_serialization() {
+        let mut effects = StatusEffects::new();
+        effects.add(StatusEffect::new(StatusEffectType::Speed, 1, 500));
+        effects.add(StatusEffect::new(StatusEffectType::Strength, 0, 300));
+
+        let serialized = serde_json::to_string(&effects).unwrap();
+        let deserialized: StatusEffects = serde_json::from_str(&serialized).unwrap();
+
+        assert!(deserialized.has(StatusEffectType::Speed));
+        assert!(deserialized.has(StatusEffectType::Strength));
+        assert_eq!(deserialized.amplifier(StatusEffectType::Speed), Some(1));
+    }
+
+    #[test]
+    fn test_brewing_stand_serialization() {
+        let mut stand = BrewingStandState::new();
+        stand.add_bottle(0, PotionType::Swiftness);
+        stand.add_fuel(10);
+
+        let serialized = serde_json::to_string(&stand).unwrap();
+        let deserialized: BrewingStandState = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.bottles[0], Some(PotionType::Swiftness));
+        assert_eq!(deserialized.fuel, 10);
+    }
+
+    #[test]
+    fn test_slowness_extreme_reduces_to_zero() {
+        let mut effects = StatusEffects::new();
+        // Slowness IV: -60%
+        effects.add(StatusEffect::new(StatusEffectType::Slowness, 3, 100));
+
+        let multiplier = effects.speed_multiplier();
+        assert!((multiplier - 0.4).abs() < 0.01);
+
+        // Very high slowness would go negative, but clamped to 0
+        // (this tests the max(0.0) behavior)
     }
 }

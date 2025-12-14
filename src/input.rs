@@ -279,17 +279,25 @@ fn binding_triggered(
 }
 
 fn default_base_bindings() -> Vec<(Action, Vec<InputBinding>)> {
+    // Canonical Minecraft key bindings:
+    // - Space = Jump AND Fly Up (same key, context-dependent)
+    // - Left Shift = Sneak/Crouch AND Fly Down (same key, context-dependent)
+    // - Left Control = Sprint
+    // - E = Inventory (not bound here)
+    // - Q = Drop item (not bound here)
     use InputBinding::Key;
     vec![
         (Action::MoveForward, vec![Key(KeyCode::KeyW)]),
         (Action::MoveBackward, vec![Key(KeyCode::KeyS)]),
         (Action::MoveLeft, vec![Key(KeyCode::KeyA)]),
         (Action::MoveRight, vec![Key(KeyCode::KeyD)]),
-        (Action::MoveUp, vec![Key(KeyCode::KeyE)]),
-        (Action::MoveDown, vec![Key(KeyCode::KeyQ)]),
+        // Space does double duty: jump on ground, fly up when flying
+        (Action::MoveUp, vec![Key(KeyCode::Space)]),
+        // Left Shift does double duty: sneak on ground, fly down when flying
+        (Action::MoveDown, vec![Key(KeyCode::ShiftLeft)]),
         (Action::Jump, vec![Key(KeyCode::Space)]),
-        (Action::Sprint, vec![Key(KeyCode::ShiftLeft)]),
-        (Action::Crouch, vec![Key(KeyCode::ControlLeft)]),
+        (Action::Sprint, vec![Key(KeyCode::ControlLeft)]),
+        (Action::Crouch, vec![Key(KeyCode::ShiftLeft)]),
         (Action::ToggleFly, vec![Key(KeyCode::F4)]),
         (Action::ToggleCursor, vec![Key(KeyCode::Tab)]),
         (Action::HotbarScrollUp, vec![InputBinding::ScrollUp]),

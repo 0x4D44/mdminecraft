@@ -2,6 +2,7 @@
 //!
 //! Provides reliable and unreliable channels for efficient message delivery.
 
+use crate::codec::MAX_FRAME_SIZE;
 use anyhow::{Context, Result};
 use quinn::Connection;
 use serde::{Deserialize, Serialize};
@@ -161,6 +162,15 @@ impl ChannelManager {
             .await
             .context("Failed to read length prefix")?;
         let len = u32::from_le_bytes(len_bytes) as usize;
+
+        // Validate length to prevent DoS via memory exhaustion
+        if len > MAX_FRAME_SIZE {
+            return Err(anyhow::anyhow!(
+                "Message too large: {} bytes (max {})",
+                len,
+                MAX_FRAME_SIZE
+            ));
+        }
 
         // Read data
         let mut data = vec![0u8; len];

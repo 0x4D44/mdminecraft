@@ -172,6 +172,10 @@ pub struct InputState {
     pub scroll_delta: f32,
     /// Whether cursor is currently captured/hidden
     pub cursor_captured: bool,
+    /// Whether the window currently has focus
+    pub focused: bool,
+    /// Whether cursor should be captured when focus is regained
+    pub wants_cursor_capture: bool,
     /// Current context
     pub context: InputContext,
 }
@@ -188,6 +192,8 @@ impl Default for InputState {
             mouse_clicks: HashSet::new(),
             scroll_delta: 0.0,
             cursor_captured: false,
+            focused: true,
+            wants_cursor_capture: false,
             context: InputContext::default(),
         }
     }
@@ -290,6 +296,13 @@ impl InputState {
                 };
                 self.scroll_delta += scroll;
             }
+            WindowEvent::Focused(focused) => {
+                self.focused = *focused;
+                if !focused {
+                    // Remember if we wanted cursor capture when we lost focus
+                    self.wants_cursor_capture = self.cursor_captured;
+                }
+            }
             _ => {}
         }
     }
@@ -317,14 +330,29 @@ impl InputState {
     pub fn set_cursor_capture(&mut self, window: &Window, capture: bool) -> Result<()> {
         use winit::window::CursorGrabMode;
 
+        self.wants_cursor_capture = capture;
+
         if capture {
-            let locked = window.set_cursor_grab(CursorGrabMode::Locked);
-            if locked.is_err() {
-                if let Err(err) = window.set_cursor_grab(CursorGrabMode::Confined) {
-                    warn!("Failed to capture cursor: {err}");
-                    self.cursor_captured = false;
-                    return Ok(());
+            // On Linux/WSL2, Locked mode breaks DeviceEvent delivery and CursorMoved stops.
+            // Use Confined mode which keeps CursorMoved events working.
+            // On Windows/macOS, Locked mode works best.
+            #[cfg(target_os = "linux")]
+            let grab_result = window.set_cursor_grab(CursorGrabMode::Confined);
+
+            #[cfg(not(target_os = "linux"))]
+            let grab_result = {
+                let locked = window.set_cursor_grab(CursorGrabMode::Locked);
+                if locked.is_err() {
+                    window.set_cursor_grab(CursorGrabMode::Confined)
+                } else {
+                    locked
                 }
+            };
+
+            if let Err(err) = grab_result {
+                warn!("Failed to capture cursor: {err}");
+                self.cursor_captured = false;
+                return Ok(());
             }
             window.set_cursor_visible(false);
             self.cursor_captured = true;
@@ -336,6 +364,14 @@ impl InputState {
             self.cursor_captured = false;
         }
 
+        Ok(())
+    }
+
+    /// Handle focus changes - call this when focus is regained to recapture cursor if needed.
+    pub fn handle_focus_regained(&mut self, window: &Window) -> Result<()> {
+        if self.wants_cursor_capture && !self.cursor_captured {
+            self.set_cursor_capture(window, true)?;
+        }
         Ok(())
     }
 

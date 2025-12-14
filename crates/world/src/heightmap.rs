@@ -329,4 +329,74 @@ mod tests {
             "Seam detected crossing chunk boundary at Z=0"
         );
     }
+
+    #[test]
+    fn test_heights_raw_array() {
+        let seed = 999;
+        let hm = Heightmap::generate(seed, 5, 5);
+
+        // Get raw heights array
+        let heights = hm.heights();
+
+        // Verify it matches get() method
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                assert_eq!(heights[z][x], hm.get(x, z));
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Chunks are not adjacent")]
+    fn test_seam_continuity_non_adjacent_panics() {
+        let seed = 42;
+        // These chunks are not adjacent - should panic
+        check_seam_continuity(seed, (0, 0), (5, 5));
+    }
+
+    #[test]
+    fn test_min_max_height_specific() {
+        let seed = 54321;
+        let hm = Heightmap::generate(seed, 0, 0);
+
+        let min = hm.min_height();
+        let max = hm.max_height();
+
+        // Verify min/max by scanning all values
+        let mut found_min = MAX_HEIGHT;
+        let mut found_max = MIN_HEIGHT;
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let h = hm.get(x, z);
+                if h < found_min {
+                    found_min = h;
+                }
+                if h > found_max {
+                    found_max = h;
+                }
+            }
+        }
+
+        assert_eq!(min, found_min);
+        assert_eq!(max, found_max);
+    }
+
+    #[test]
+    fn test_avg_height_calculation() {
+        let seed = 11111;
+        let hm = Heightmap::generate(seed, 3, 3);
+
+        let avg = hm.avg_height();
+
+        // Calculate average manually
+        let mut sum: i64 = 0;
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                sum += hm.get(x, z) as i64;
+            }
+        }
+        let expected_avg = sum as f32 / (CHUNK_SIZE_X * CHUNK_SIZE_Z) as f32;
+
+        assert!((avg - expected_avg).abs() < 0.001);
+    }
 }

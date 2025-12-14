@@ -461,4 +461,166 @@ mod tests {
 
         fs::remove_dir_all(&temp_dir).ok();
     }
+
+    #[test]
+    fn load_chunk_not_found_errors() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_notfound_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        // Save one chunk
+        let pos_present = ChunkPos::new(5, 5);
+        let chunk = Chunk::new(pos_present);
+        store.save_chunk(&chunk).unwrap();
+
+        // Try to load a different chunk in same region
+        let pos_absent = ChunkPos::new(5, 6);
+        let result = store.load_chunk(pos_absent);
+        assert!(result.is_err());
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn load_chunk_region_not_found_errors() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_noregion_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        // Try to load chunk from non-existent region
+        let pos = ChunkPos::new(100, 100);
+        let result = store.load_chunk(pos);
+        assert!(result.is_err());
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn chunk_exists_returns_false_for_missing_region() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_nomiss_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        // Check chunk in non-existent region
+        let pos = ChunkPos::new(1000, 1000);
+        assert!(!store.chunk_exists(pos));
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn chunk_to_region_negative_coords() {
+        // Test negative chunk coords map to negative regions
+        let pos = ChunkPos::new(-1, -1);
+        let (rx, rz) = chunk_to_region(pos);
+        assert_eq!(rx, -1);
+        assert_eq!(rz, -1);
+
+        let pos2 = ChunkPos::new(-32, -32);
+        let (rx2, rz2) = chunk_to_region(pos2);
+        assert_eq!(rx2, -1);
+        assert_eq!(rz2, -1);
+    }
+
+    #[test]
+    fn save_and_load_chunk_different_regions() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_diffregion_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        // Save chunks in different regions
+        let pos1 = ChunkPos::new(0, 0);
+        let pos2 = ChunkPos::new(32, 0); // Different region (1, 0)
+        let pos3 = ChunkPos::new(0, 32); // Different region (0, 1)
+
+        let mut chunk1 = Chunk::new(pos1);
+        let mut chunk2 = Chunk::new(pos2);
+        let mut chunk3 = Chunk::new(pos3);
+
+        chunk1.set_voxel(0, 0, 0, Voxel {
+            id: 1,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk2.set_voxel(0, 0, 0, Voxel {
+            id: 2,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk3.set_voxel(0, 0, 0, Voxel {
+            id: 3,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+
+        store.save_chunk(&chunk1).unwrap();
+        store.save_chunk(&chunk2).unwrap();
+        store.save_chunk(&chunk3).unwrap();
+
+        // Load and verify
+        let loaded1 = store.load_chunk(pos1).unwrap();
+        let loaded2 = store.load_chunk(pos2).unwrap();
+        let loaded3 = store.load_chunk(pos3).unwrap();
+
+        assert_eq!(loaded1.voxel(0, 0, 0).id, 1);
+        assert_eq!(loaded2.voxel(0, 0, 0).id, 2);
+        assert_eq!(loaded3.voxel(0, 0, 0).id, 3);
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn region_header_too_short_fails() {
+        // Test parsing a header that's too short
+        let short_bytes = vec![0u8; 10]; // Too short
+        let result = RegionHeader::from_bytes(&short_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn region_header_invalid_magic_fails() {
+        // Create bytes with wrong magic
+        let mut bytes = vec![0u8; 14];
+        // Set wrong magic (not REGION_MAGIC)
+        bytes[0] = 0xFF;
+        bytes[1] = 0xFF;
+        bytes[2] = 0xFF;
+        bytes[3] = 0xFF;
+
+        let result = RegionHeader::from_bytes(&bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn chunk_to_region_boundary_values() {
+        // Test boundary values
+        let pos = ChunkPos::new(31, 31); // Last chunk in region (0,0)
+        let (rx, rz) = chunk_to_region(pos);
+        assert_eq!(rx, 0);
+        assert_eq!(rz, 0);
+
+        let pos2 = ChunkPos::new(32, 32); // First chunk in region (1,1)
+        let (rx2, rz2) = chunk_to_region(pos2);
+        assert_eq!(rx2, 1);
+        assert_eq!(rz2, 1);
+    }
 }

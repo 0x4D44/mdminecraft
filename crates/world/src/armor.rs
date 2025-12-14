@@ -458,4 +458,255 @@ mod tests {
         let multiplier = armor.damage_multiplier();
         assert!((multiplier - 0.216).abs() < 0.01);
     }
+
+    #[test]
+    fn test_armor_get_slot() {
+        let mut armor = PlayerArmor::new();
+        armor.equip(ArmorPiece::from_item(ItemType::IronHelmet).unwrap());
+        armor.equip(ArmorPiece::from_item(ItemType::IronBoots).unwrap());
+
+        // Test get() for each slot
+        assert!(armor.get(ArmorSlot::Helmet).is_some());
+        assert!(armor.get(ArmorSlot::Chestplate).is_none());
+        assert!(armor.get(ArmorSlot::Leggings).is_none());
+        assert!(armor.get(ArmorSlot::Boots).is_some());
+
+        // Verify the retrieved pieces are correct
+        assert_eq!(armor.get(ArmorSlot::Helmet).unwrap().item_type, ItemType::IronHelmet);
+        assert_eq!(armor.get(ArmorSlot::Boots).unwrap().item_type, ItemType::IronBoots);
+    }
+
+    #[test]
+    fn test_armor_unequip() {
+        let mut armor = PlayerArmor::new();
+        armor.equip(ArmorPiece::from_item(ItemType::DiamondChestplate).unwrap());
+
+        // Unequip the chestplate
+        let piece = armor.unequip(ArmorSlot::Chestplate);
+        assert!(piece.is_some());
+        assert_eq!(piece.unwrap().item_type, ItemType::DiamondChestplate);
+
+        // Slot should now be empty
+        assert!(armor.get(ArmorSlot::Chestplate).is_none());
+
+        // Unequip again - should return None
+        assert!(armor.unequip(ArmorSlot::Chestplate).is_none());
+    }
+
+    #[test]
+    fn test_armor_unequip_all_slots() {
+        let mut armor = PlayerArmor::new();
+        armor.equip(ArmorPiece::from_item(ItemType::LeatherHelmet).unwrap());
+        armor.equip(ArmorPiece::from_item(ItemType::LeatherChestplate).unwrap());
+        armor.equip(ArmorPiece::from_item(ItemType::LeatherLeggings).unwrap());
+        armor.equip(ArmorPiece::from_item(ItemType::LeatherBoots).unwrap());
+
+        // Unequip all
+        assert!(armor.unequip(ArmorSlot::Helmet).is_some());
+        assert!(armor.unequip(ArmorSlot::Chestplate).is_some());
+        assert!(armor.unequip(ArmorSlot::Leggings).is_some());
+        assert!(armor.unequip(ArmorSlot::Boots).is_some());
+
+        // All should now be empty
+        assert_eq!(armor.total_defense(), 0);
+    }
+
+    #[test]
+    fn test_armor_piece_durability_ratio() {
+        let mut piece = ArmorPiece::from_item(ItemType::IronChestplate).unwrap();
+
+        // Full durability
+        assert!((piece.durability_ratio() - 1.0).abs() < 0.001);
+
+        // Half durability
+        piece.durability = piece.max_durability / 2;
+        assert!((piece.durability_ratio() - 0.5).abs() < 0.01);
+
+        // Broken
+        piece.durability = 0;
+        assert_eq!(piece.durability_ratio(), 0.0);
+    }
+
+    #[test]
+    fn test_all_leather_armor() {
+        let helmet = ArmorPiece::from_item(ItemType::LeatherHelmet).unwrap();
+        let chestplate = ArmorPiece::from_item(ItemType::LeatherChestplate).unwrap();
+        let leggings = ArmorPiece::from_item(ItemType::LeatherLeggings).unwrap();
+        let boots = ArmorPiece::from_item(ItemType::LeatherBoots).unwrap();
+
+        // Leather total: 1+1+1+1 = 4
+        assert_eq!(helmet.defense(), 1);
+        assert_eq!(chestplate.defense(), 1);
+        assert_eq!(leggings.defense(), 1);
+        assert_eq!(boots.defense(), 1);
+
+        // Verify material
+        assert_eq!(helmet.material, ArmorMaterial::Leather);
+    }
+
+    #[test]
+    fn test_all_gold_armor() {
+        let helmet = ArmorPiece::from_item(ItemType::GoldHelmet).unwrap();
+        let chestplate = ArmorPiece::from_item(ItemType::GoldChestplate).unwrap();
+        let leggings = ArmorPiece::from_item(ItemType::GoldLeggings).unwrap();
+        let boots = ArmorPiece::from_item(ItemType::GoldBoots).unwrap();
+
+        // Gold total: 1+2+2+1 = 6
+        assert_eq!(helmet.defense(), 1);
+        assert_eq!(chestplate.defense(), 2);
+        assert_eq!(leggings.defense(), 2);
+        assert_eq!(boots.defense(), 1);
+
+        // Verify material
+        assert_eq!(chestplate.material, ArmorMaterial::Gold);
+    }
+
+    #[test]
+    fn test_all_diamond_armor() {
+        let helmet = ArmorPiece::from_item(ItemType::DiamondHelmet).unwrap();
+        let chestplate = ArmorPiece::from_item(ItemType::DiamondChestplate).unwrap();
+        let leggings = ArmorPiece::from_item(ItemType::DiamondLeggings).unwrap();
+        let boots = ArmorPiece::from_item(ItemType::DiamondBoots).unwrap();
+
+        // Diamond total: 2+3+3+2 = 10
+        assert_eq!(helmet.defense(), 2);
+        assert_eq!(chestplate.defense(), 3);
+        assert_eq!(leggings.defense(), 3);
+        assert_eq!(boots.defense(), 2);
+
+        // Verify max durability
+        assert_eq!(helmet.max_durability, 11 * 33); // 363
+        assert_eq!(chestplate.max_durability, 16 * 33); // 528
+    }
+
+    #[test]
+    fn test_armor_from_non_armor_item() {
+        // Non-armor items should return None
+        assert!(ArmorPiece::from_item(ItemType::Coal).is_none());
+        assert!(ArmorPiece::from_item(ItemType::Bow).is_none());
+        assert!(ArmorPiece::from_item(ItemType::IronIngot).is_none());
+    }
+
+    #[test]
+    fn test_armor_damage_breaks() {
+        let mut piece = ArmorPiece::from_item(ItemType::LeatherBoots).unwrap();
+
+        // Damage more than durability - should break
+        piece.durability = 5;
+        let broke = piece.damage(10);
+        assert!(broke);
+        assert!(piece.is_broken());
+        assert_eq!(piece.durability, 0);
+    }
+
+    #[test]
+    fn test_armor_damage_exact_break() {
+        let mut piece = ArmorPiece::from_item(ItemType::GoldLeggings).unwrap();
+
+        // Damage exactly equals durability
+        piece.durability = 10;
+        let broke = piece.damage(10);
+        assert!(broke);
+        assert!(piece.is_broken());
+    }
+
+    #[test]
+    fn test_equip_replaces_existing() {
+        let mut armor = PlayerArmor::new();
+
+        // Equip leather helmet
+        armor.equip(ArmorPiece::from_item(ItemType::LeatherHelmet).unwrap());
+        assert_eq!(armor.get(ArmorSlot::Helmet).unwrap().material, ArmorMaterial::Leather);
+
+        // Replace with iron helmet
+        let old = armor.equip(ArmorPiece::from_item(ItemType::IronHelmet).unwrap());
+        assert!(old.is_some());
+        assert_eq!(old.unwrap().material, ArmorMaterial::Leather);
+        assert_eq!(armor.get(ArmorSlot::Helmet).unwrap().material, ArmorMaterial::Iron);
+    }
+
+    #[test]
+    fn test_armor_take_damage_breaks_armor() {
+        let mut armor = PlayerArmor::new();
+
+        // Equip armor with low durability
+        let mut piece = ArmorPiece::from_item(ItemType::LeatherHelmet).unwrap();
+        piece.durability = 1;
+        armor.helmet = Some(piece);
+
+        // Take damage - should break the helmet
+        armor.take_damage(10.0);
+        assert!(armor.helmet.is_none());
+    }
+
+    #[test]
+    fn test_player_armor_serialization() {
+        let mut armor = PlayerArmor::new();
+        armor.equip(ArmorPiece::from_item(ItemType::IronHelmet).unwrap());
+        armor.equip(ArmorPiece::from_item(ItemType::IronChestplate).unwrap());
+
+        let serialized = serde_json::to_string(&armor).unwrap();
+        let deserialized: PlayerArmor = serde_json::from_str(&serialized).unwrap();
+
+        assert!(deserialized.helmet.is_some());
+        assert!(deserialized.chestplate.is_some());
+        assert!(deserialized.leggings.is_none());
+        assert!(deserialized.boots.is_none());
+    }
+
+    #[test]
+    fn test_armor_piece_serialization() {
+        let piece = ArmorPiece::from_item(ItemType::DiamondBoots).unwrap();
+
+        let serialized = serde_json::to_string(&piece).unwrap();
+        let deserialized: ArmorPiece = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.item_type, ItemType::DiamondBoots);
+        assert_eq!(deserialized.slot, ArmorSlot::Boots);
+        assert_eq!(deserialized.material, ArmorMaterial::Diamond);
+    }
+
+    #[test]
+    fn test_max_durability_all_materials() {
+        // Verify durability formula for all slots and materials
+        for slot in [ArmorSlot::Helmet, ArmorSlot::Chestplate, ArmorSlot::Leggings, ArmorSlot::Boots] {
+            for material in [ArmorMaterial::Leather, ArmorMaterial::Iron, ArmorMaterial::Gold, ArmorMaterial::Diamond] {
+                let durability = get_max_durability(slot, material);
+                assert!(durability > 0);
+
+                // Diamond should have highest durability
+                if material == ArmorMaterial::Diamond {
+                    assert!(durability > get_max_durability(slot, ArmorMaterial::Leather));
+                    assert!(durability > get_max_durability(slot, ArmorMaterial::Iron));
+                    assert!(durability > get_max_durability(slot, ArmorMaterial::Gold));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_defense_points_all_combinations() {
+        // Test all slot/material combinations
+        for slot in [ArmorSlot::Helmet, ArmorSlot::Chestplate, ArmorSlot::Leggings, ArmorSlot::Boots] {
+            for material in [ArmorMaterial::Leather, ArmorMaterial::Iron, ArmorMaterial::Gold, ArmorMaterial::Diamond] {
+                let defense = get_defense_points(slot, material);
+                assert!(defense >= 1 && defense <= 3);
+            }
+        }
+    }
+
+    #[test]
+    fn test_is_armor_comprehensive() {
+        // All armor items should return true
+        let armor_items = [
+            ItemType::LeatherHelmet, ItemType::LeatherChestplate, ItemType::LeatherLeggings, ItemType::LeatherBoots,
+            ItemType::IronHelmet, ItemType::IronChestplate, ItemType::IronLeggings, ItemType::IronBoots,
+            ItemType::GoldHelmet, ItemType::GoldChestplate, ItemType::GoldLeggings, ItemType::GoldBoots,
+            ItemType::DiamondHelmet, ItemType::DiamondChestplate, ItemType::DiamondLeggings, ItemType::DiamondBoots,
+        ];
+
+        for item in armor_items {
+            assert!(is_armor(item), "{:?} should be armor", item);
+        }
+    }
 }

@@ -404,4 +404,99 @@ mod tests {
         let peaks = NoiseConfig::peaks_valleys(seed);
         assert_eq!(peaks.seed, seed + 2000); // Offset seed
     }
+
+    #[test]
+    fn test_sample_2d_range() {
+        let config = NoiseConfig::default();
+        let gen = NoiseGenerator::new(config);
+
+        // Test mapping to custom range
+        for x in 0..10 {
+            for y in 0..10 {
+                let val = gen.sample_2d_range(x as f64 * 0.5, y as f64 * 0.5, 0.0, 100.0);
+                assert!(val >= 0.0 && val <= 100.0, "Value {} out of range [0, 100]", val);
+            }
+        }
+
+        // Test with negative range
+        for x in 0..10 {
+            let val = gen.sample_2d_range(x as f64 * 0.5, 0.0, -50.0, 50.0);
+            assert!(val >= -50.0 && val <= 50.0, "Value {} out of range [-50, 50]", val);
+        }
+    }
+
+    #[test]
+    fn test_sample_2d_u8() {
+        let config = NoiseConfig::default();
+        let gen = NoiseGenerator::new(config);
+
+        // Test u8 mapping - should always be in [0, 255]
+        for x in 0..20 {
+            for y in 0..20 {
+                let val = gen.sample_2d_u8(x as f64 * 0.3, y as f64 * 0.3);
+                // u8 is always in range, but verify the method works
+                assert!(val <= 255);
+            }
+        }
+    }
+
+    #[test]
+    fn test_simplex_3d() {
+        let config = NoiseConfig {
+            seed: 42,
+            octaves: 3,
+            ..Default::default()
+        };
+        let gen = SimplexGenerator::new(config);
+
+        // Test 3D sampling is in valid range
+        for x in 0..5 {
+            for y in 0..5 {
+                for z in 0..5 {
+                    let val = gen.sample_3d(x as f64 * 0.5, y as f64 * 0.5, z as f64 * 0.5);
+                    assert!(val >= -1.0 && val <= 1.0, "3D value {} out of range", val);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_simplex_3d_determinism() {
+        let config = NoiseConfig {
+            seed: 12345,
+            octaves: 4,
+            persistence: 0.5,
+            lacunarity: 2.0,
+            frequency: 0.1,
+        };
+
+        let gen1 = SimplexGenerator::new(config.clone());
+        let gen2 = SimplexGenerator::new(config);
+
+        // Same seed should produce same values
+        for x in 0..5 {
+            for y in 0..5 {
+                for z in 0..5 {
+                    let val1 = gen1.sample_3d(x as f64, y as f64, z as f64);
+                    let val2 = gen2.sample_3d(x as f64, y as f64, z as f64);
+                    assert_eq!(val1, val2, "3D noise not deterministic at ({}, {}, {})", x, y, z);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_layered_noise_components() {
+        let layered = LayeredNoise::new(42);
+
+        // Access the individual noise layers
+        let continental = layered.continental.sample_2d(10.0, 10.0);
+        let erosion = layered.erosion.sample_2d(10.0, 10.0);
+        let peaks = layered.peaks_valleys.sample_2d(10.0, 10.0);
+
+        // All should be in valid range
+        assert!(continental >= -1.0 && continental <= 1.0);
+        assert!(erosion >= -1.0 && erosion <= 1.0);
+        assert!(peaks >= -1.0 && peaks <= 1.0);
+    }
 }

@@ -156,9 +156,16 @@ fn rle_compress(data: &[u8]) -> Vec<u8> {
     compressed
 }
 
-/// Run-length decode a compressed sequence.
+/// Maximum decompressed size for RLE data (chunk size = 16 * 256 * 16 = 65536).
+/// Prevents decompression bombs from exhausting memory.
+const MAX_DECOMPRESSED_SIZE: usize = 65536;
+
+/// Run-length decode a compressed sequence with output size limit.
+///
+/// # Security
+/// Limits output to MAX_DECOMPRESSED_SIZE bytes to prevent decompression bombs.
 fn rle_decompress(compressed: &[u8]) -> Result<Vec<u8>> {
-    let mut decompressed = Vec::new();
+    let mut decompressed = Vec::with_capacity(MAX_DECOMPRESSED_SIZE.min(compressed.len() * 127));
     let mut i = 0;
 
     while i < compressed.len() {
@@ -173,6 +180,16 @@ fn rle_decompress(compressed: &[u8]) -> Result<Vec<u8>> {
             }
             let value = compressed[i];
             i += 1;
+
+            // Check size limit before expanding
+            if decompressed.len() + length > MAX_DECOMPRESSED_SIZE {
+                return Err(anyhow::anyhow!(
+                    "RLE decompression would exceed max size: {} + {} > {}",
+                    decompressed.len(),
+                    length,
+                    MAX_DECOMPRESSED_SIZE
+                ));
+            }
             decompressed.extend(std::iter::repeat(value).take(length));
         } else {
             // Literal: copy next (control) bytes
@@ -182,6 +199,16 @@ fn rle_decompress(compressed: &[u8]) -> Result<Vec<u8>> {
                     "Unexpected end of RLE data (literal): need {} bytes, have {}",
                     length,
                     compressed.len() - i
+                ));
+            }
+
+            // Check size limit before copying
+            if decompressed.len() + length > MAX_DECOMPRESSED_SIZE {
+                return Err(anyhow::anyhow!(
+                    "RLE decompression would exceed max size: {} + {} > {}",
+                    decompressed.len(),
+                    length,
+                    MAX_DECOMPRESSED_SIZE
                 ));
             }
             decompressed.extend_from_slice(&compressed[i..i + length]);
@@ -343,5 +370,87 @@ mod tests {
         let block_data = vec![1u16; 100]; // Wrong size
         let result = encode_chunk_data(0, 0, &block_data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rle_decompression_bomb_prevention_run() {
+        // Create malicious RLE data that tries to decompress to more than MAX_DECOMPRESSED_SIZE
+        // Each run control byte can specify up to 127 bytes
+        // We need > 65536 bytes output to trigger the limit
+
+        // Create data that would decompress to 127 * 600 = 76200 bytes (> 65536)
+        let mut malicious_data = Vec::new();
+        for _ in 0..600 {
+            malicious_data.push(255); // 128 + 127 = run of 127
+            malicious_data.push(0);   // value to repeat
+        }
+
+        let result = rle_decompress(&malicious_data);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("exceed max size"), "Error was: {}", err);
+    }
+
+    #[test]
+    fn test_rle_decompression_bomb_prevention_literal() {
+        // Create malicious data with many literal sequences
+        let mut malicious_data = Vec::new();
+
+        // Fill with literal sequences to exceed MAX_DECOMPRESSED_SIZE
+        // We'll use max literal length (127) repeatedly
+        for _ in 0..600 {
+            malicious_data.push(127); // literal length
+            malicious_data.extend(vec![0u8; 127]); // literal data
+        }
+
+        let result = rle_decompress(&malicious_data);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("exceed max size"), "Error was: {}", err);
+    }
+
+    #[test]
+    fn test_rle_decompression_exactly_max_size() {
+        // Create data that decompresses to exactly MAX_DECOMPRESSED_SIZE (65536)
+        // Using runs of 127 bytes: 65536 / 127 = 516.0...
+        // 516 * 127 = 65532, need 4 more
+
+        let mut valid_data = Vec::new();
+        for _ in 0..516 {
+            valid_data.push(255); // 128 + 127 = run of 127
+            valid_data.push(0);   // value to repeat
+        }
+        // Add remaining 4 bytes as a short run
+        valid_data.push(128 + 4); // run of 4
+        valid_data.push(0);
+
+        let result = rle_decompress(&valid_data);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 65536);
+    }
+
+    #[test]
+    fn test_rle_decompression_one_over_max() {
+        // Create data that would decompress to MAX_DECOMPRESSED_SIZE + 1
+        let mut malicious_data = Vec::new();
+        for _ in 0..516 {
+            malicious_data.push(255); // run of 127
+            malicious_data.push(0);
+        }
+        // 516 * 127 = 65532, add 5 more to exceed limit
+        malicious_data.push(128 + 5); // run of 5
+        malicious_data.push(0);
+
+        let result = rle_decompress(&malicious_data);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("exceed max size"), "Error was: {}", err);
+    }
+
+    #[test]
+    fn test_max_decompressed_size_constant() {
+        // Verify the constant matches the expected chunk size
+        assert_eq!(MAX_DECOMPRESSED_SIZE, 65536);
+        assert_eq!(MAX_DECOMPRESSED_SIZE, 16 * 256 * 16);
     }
 }

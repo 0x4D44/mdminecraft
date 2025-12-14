@@ -24,17 +24,24 @@ pub enum TlsMode {
 }
 
 impl TlsMode {
-    /// Resolve TLS mode from environment and build config defaults.
+    /// Resolve TLS mode from environment.
     ///
-    /// - `MDM_INSECURE_TLS=1` forces insecure mode.
-    /// - debug builds default to insecure for developer convenience.
-    /// - release builds default to secure.
+    /// - `MDM_INSECURE_TLS=1` forces insecure mode (requires explicit opt-in).
+    /// - All builds default to secure (certificate validation enabled).
+    ///
+    /// # Security Note
+    /// Insecure mode disables certificate validation entirely and should NEVER
+    /// be used in production. Only enable for development with self-signed certs.
     pub fn from_env() -> Self {
         let insecure_env = std::env::var("MDM_INSECURE_TLS")
             .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
             .unwrap_or(false);
 
-        if insecure_env || cfg!(debug_assertions) {
+        if insecure_env {
+            tracing::warn!(
+                "MDM_INSECURE_TLS is set - TLS certificate validation is DISABLED. \
+                 Do NOT use this in production!"
+            );
             TlsMode::InsecureSkipVerify
         } else {
             TlsMode::Secure
@@ -318,6 +325,10 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Mutex to serialize tests that modify environment variables
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[tokio::test]
     async fn test_server_bind() {
@@ -367,5 +378,61 @@ mod tests {
         // Cleanup
         client_conn.close(0u32.into(), b"Test complete");
         server_conn.close(0u32.into(), b"Test complete");
+    }
+
+    #[test]
+    fn test_tls_mode_defaults_to_secure() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        // Clear the env var to test default
+        std::env::remove_var("MDM_INSECURE_TLS");
+
+        let mode = TlsMode::from_env();
+        assert_eq!(mode, TlsMode::Secure);
+    }
+
+    #[test]
+    fn test_tls_mode_insecure_with_env_1() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        std::env::set_var("MDM_INSECURE_TLS", "1");
+        let mode = TlsMode::from_env();
+        std::env::remove_var("MDM_INSECURE_TLS");
+
+        assert_eq!(mode, TlsMode::InsecureSkipVerify);
+    }
+
+    #[test]
+    fn test_tls_mode_insecure_with_env_true() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        std::env::set_var("MDM_INSECURE_TLS", "true");
+        let mode = TlsMode::from_env();
+        std::env::remove_var("MDM_INSECURE_TLS");
+
+        assert_eq!(mode, TlsMode::InsecureSkipVerify);
+    }
+
+    #[test]
+    fn test_tls_mode_secure_with_invalid_env() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        // Any value other than "1", "true", "TRUE" should result in Secure mode
+        std::env::set_var("MDM_INSECURE_TLS", "false");
+        let mode = TlsMode::from_env();
+        std::env::remove_var("MDM_INSECURE_TLS");
+
+        assert_eq!(mode, TlsMode::Secure);
+    }
+
+    #[test]
+    fn test_tls_mode_secure_with_empty_env() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        std::env::set_var("MDM_INSECURE_TLS", "");
+        let mode = TlsMode::from_env();
+        std::env::remove_var("MDM_INSECURE_TLS");
+
+        assert_eq!(mode, TlsMode::Secure);
     }
 }

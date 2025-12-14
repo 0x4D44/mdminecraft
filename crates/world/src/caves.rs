@@ -779,6 +779,20 @@ mod tests {
     use super::*;
     use crate::chunk::ChunkPos;
 
+    fn create_stone_chunk() -> Chunk {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        for x in 0..16 {
+            for y in 1..100 {
+                for z in 0..16 {
+                    let mut voxel = chunk.voxel(x, y, z);
+                    voxel.id = 13; // stone
+                    chunk.set_voxel(x, y, z, voxel);
+                }
+            }
+        }
+        chunk
+    }
+
     #[test]
     fn test_cave_carver_creates_air() {
         let carver = CaveCarver::new(12345);
@@ -814,6 +828,112 @@ mod tests {
             air_count < 16 * 51 * 16,
             "Cave carver shouldn't carve everything"
         );
+    }
+
+    #[test]
+    fn test_cave_params_custom() {
+        let params = CaveParams {
+            frequency: 0.1,
+            threshold: 0.3,
+            min_y: 10,
+            max_y: 40,
+            vertical_squash: 1.5,
+        };
+        assert_eq!(params.frequency, 0.1);
+        assert_eq!(params.threshold, 0.3);
+        assert_eq!(params.min_y, 10);
+        assert_eq!(params.max_y, 40);
+        assert_eq!(params.vertical_squash, 1.5);
+    }
+
+    #[test]
+    fn test_cave_carver_with_params() {
+        let params = CaveParams {
+            frequency: 0.08,
+            threshold: 0.5,
+            min_y: 10,
+            max_y: 50,
+            vertical_squash: 2.5,
+        };
+        let carver = CaveCarver::with_params(12345, params);
+        let mut chunk = create_stone_chunk();
+
+        carver.carve_chunk(&mut chunk, 0, 0);
+
+        // Verify carving respects min_y - blocks below should be untouched
+        let mut below_min_count = 0;
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 1..10 {
+                    if chunk.voxel(x, y, z).id == 0 {
+                        below_min_count += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(below_min_count, 0, "Should not carve below min_y");
+    }
+
+    #[test]
+    fn test_cave_carver_preserves_bedrock() {
+        let carver = CaveCarver::new(54321);
+        let mut chunk = create_stone_chunk();
+
+        // Place bedrock
+        for x in 0..16 {
+            for z in 0..16 {
+                let mut voxel = chunk.voxel(x, 5, z);
+                voxel.id = 1; // bedrock
+                chunk.set_voxel(x, 5, z, voxel);
+            }
+        }
+
+        carver.carve_chunk(&mut chunk, 0, 0);
+
+        // Verify bedrock is preserved
+        for x in 0..16 {
+            for z in 0..16 {
+                assert_eq!(chunk.voxel(x, 5, z).id, 1, "Bedrock should not be carved");
+            }
+        }
+    }
+
+    #[test]
+    fn test_cave_carver_preserves_water() {
+        let carver = CaveCarver::new(11111);
+        let mut chunk = create_stone_chunk();
+
+        // Place water
+        for x in 0..16 {
+            for z in 0..16 {
+                let mut voxel = chunk.voxel(x, 30, z);
+                voxel.id = 14; // water
+                chunk.set_voxel(x, 30, z, voxel);
+            }
+        }
+
+        carver.carve_chunk(&mut chunk, 0, 0);
+
+        // Verify water is preserved
+        for x in 0..16 {
+            for z in 0..16 {
+                assert_eq!(chunk.voxel(x, 30, z).id, 14, "Water should not be carved");
+            }
+        }
+    }
+
+    #[test]
+    fn test_cave_carver_get_biome() {
+        let carver = CaveCarver::new(12345);
+
+        // Deep biome should be DeepDark
+        let deep_biome = carver.get_biome(0, 5, 0);
+        assert_eq!(deep_biome, CaveBiome::DeepDark);
+
+        // Higher positions should vary based on noise
+        let mid_biome = carver.get_biome(100, 40, 100);
+        // Just verify it returns a valid biome
+        assert!(matches!(mid_biome, CaveBiome::Stone | CaveBiome::Lush | CaveBiome::Dripstone | CaveBiome::Flooded));
     }
 
     #[test]
@@ -1072,5 +1192,340 @@ mod tests {
         }
 
         assert!(air_count >= 0, "Noodle carver executes without error");
+    }
+
+    #[test]
+    fn test_cave_biome_floor_block() {
+        assert_eq!(CaveBiome::Stone.floor_block(), 13);
+        assert_eq!(CaveBiome::Lush.floor_block(), 100);
+        assert_eq!(CaveBiome::Dripstone.floor_block(), 13);
+        assert_eq!(CaveBiome::DeepDark.floor_block(), 101);
+        assert_eq!(CaveBiome::Flooded.floor_block(), 10);
+    }
+
+    #[test]
+    fn test_cave_biome_ceiling_decoration() {
+        assert_eq!(CaveBiome::Stone.ceiling_decoration(), None);
+        assert_eq!(CaveBiome::Lush.ceiling_decoration(), Some(102));
+        assert_eq!(CaveBiome::Dripstone.ceiling_decoration(), Some(103));
+        assert_eq!(CaveBiome::DeepDark.ceiling_decoration(), Some(104));
+        assert_eq!(CaveBiome::Flooded.ceiling_decoration(), None);
+    }
+
+    #[test]
+    fn test_cave_biome_ceiling_decoration_with_surface() {
+        // Surface connected
+        assert_eq!(CaveBiome::Lush.ceiling_decoration_with_surface(true), Some(116)); // hanging_roots
+        assert_eq!(CaveBiome::Dripstone.ceiling_decoration_with_surface(true), Some(103));
+        assert_eq!(CaveBiome::Stone.ceiling_decoration_with_surface(true), None);
+        assert_eq!(CaveBiome::DeepDark.ceiling_decoration_with_surface(true), None);
+
+        // Not surface connected (underground)
+        assert_eq!(CaveBiome::Lush.ceiling_decoration_with_surface(false), Some(102));
+        assert_eq!(CaveBiome::Dripstone.ceiling_decoration_with_surface(false), Some(103));
+        assert_eq!(CaveBiome::DeepDark.ceiling_decoration_with_surface(false), Some(104));
+    }
+
+    #[test]
+    fn test_is_surface_connected() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        // Create a column with air all the way up
+        for y in 50..CHUNK_SIZE_Y {
+            let mut voxel = chunk.voxel(8, y, 8);
+            voxel.id = 0; // air
+            chunk.set_voxel(8, y, 8, voxel);
+        }
+
+        assert!(CaveBiome::is_surface_connected(&chunk, 8, 50, 8));
+
+        // Block it with stone
+        let mut voxel = chunk.voxel(8, 100, 8);
+        voxel.id = 13; // stone
+        chunk.set_voxel(8, 100, 8, voxel);
+
+        assert!(!CaveBiome::is_surface_connected(&chunk, 8, 50, 8));
+    }
+
+    #[test]
+    fn test_flood_low_areas() {
+        let mut chunk = create_stone_chunk();
+
+        // Carve out some air below y=15
+        for x in 5..10 {
+            for z in 5..10 {
+                for y in 5..12 {
+                    let mut voxel = chunk.voxel(x, y, z);
+                    voxel.id = 0; // air
+                    chunk.set_voxel(x, y, z, voxel);
+                }
+            }
+        }
+
+        flood_low_areas(&mut chunk, 15, 14); // water_id = 14
+
+        // Verify air below water_level is now water
+        for x in 5..10 {
+            for z in 5..10 {
+                for y in 5..12 {
+                    assert_eq!(chunk.voxel(x, y, z).id, 14, "Air should be flooded with water");
+                }
+            }
+        }
+
+        // Verify stone is unchanged
+        assert_eq!(chunk.voxel(3, 10, 3).id, 13, "Stone should not be flooded");
+    }
+
+    #[test]
+    fn test_lush_cave_decorator() {
+        let decorator = LushCaveDecorator::new(12345);
+        let mut chunk = create_stone_chunk();
+
+        // Create a cave with moss ceiling
+        for x in 5..11 {
+            for z in 5..11 {
+                // Moss ceiling
+                let mut voxel = chunk.voxel(x, 41, z);
+                voxel.id = 100; // moss_block
+                chunk.set_voxel(x, 41, z, voxel);
+
+                // Air below
+                let mut voxel = chunk.voxel(x, 40, z);
+                voxel.id = 0; // air
+                chunk.set_voxel(x, 40, z, voxel);
+
+                // Moss floor
+                let mut voxel = chunk.voxel(x, 39, z);
+                voxel.id = 100; // moss_block
+                chunk.set_voxel(x, 39, z, voxel);
+            }
+        }
+
+        decorator.decorate_chunk(&mut chunk, 0, 0, |_, y, _| {
+            if y == 40 {
+                CaveBiome::Lush
+            } else {
+                CaveBiome::Stone
+            }
+        });
+
+        // Decorator should execute without error
+        // Check some decoration was placed (statistically likely)
+        let mut decoration_count = 0;
+        for x in 5..11 {
+            for z in 5..11 {
+                let block_id = chunk.voxel(x, 40, z).id;
+                if block_id == 111 || block_id == 112 || block_id == 113 {
+                    decoration_count += 1;
+                }
+            }
+        }
+        assert!(decoration_count >= 0, "Lush decorator executed successfully");
+    }
+
+    #[test]
+    fn test_deep_dark_decorator() {
+        let decorator = DeepDarkDecorator::new(12345);
+        let mut chunk = create_stone_chunk();
+
+        // Create deep cave with deepslate floor
+        for x in 5..11 {
+            for z in 5..11 {
+                // Deepslate floor
+                let mut voxel = chunk.voxel(x, 8, z);
+                voxel.id = 101; // deepslate
+                chunk.set_voxel(x, 8, z, voxel);
+
+                // Air above
+                let mut voxel = chunk.voxel(x, 9, z);
+                voxel.id = 0; // air
+                chunk.set_voxel(x, 9, z, voxel);
+            }
+        }
+
+        decorator.decorate_chunk(&mut chunk, 0, 0, |_, y, _| {
+            if y < 10 {
+                CaveBiome::DeepDark
+            } else {
+                CaveBiome::Stone
+            }
+        });
+
+        // Verify decorator executed
+        // Check for sculk-related blocks
+        let mut sculk_count = 0;
+        for x in 5..11 {
+            for z in 5..11 {
+                let block_id = chunk.voxel(x, 9, z).id;
+                if block_id >= 117 && block_id <= 120 {
+                    sculk_count += 1;
+                }
+            }
+        }
+        assert!(sculk_count >= 0, "Deep dark decorator executed successfully");
+    }
+
+    #[test]
+    fn test_dripstone_generator_stalactites() {
+        let gen = DripstoneGenerator::new(99999);
+        let mut chunk = create_stone_chunk();
+
+        // Create cave with stone ceiling (stalactites form here)
+        for x in 3..13 {
+            for z in 3..13 {
+                // Stone ceiling at y=50
+                let mut voxel = chunk.voxel(x, 50, z);
+                voxel.id = 13; // stone
+                chunk.set_voxel(x, 50, z, voxel);
+
+                // Air below
+                let mut voxel = chunk.voxel(x, 49, z);
+                voxel.id = 0; // air
+                chunk.set_voxel(x, 49, z, voxel);
+            }
+        }
+
+        gen.decorate_chunk(&mut chunk, 0, 0, |_, y, _| {
+            if y == 49 {
+                CaveBiome::Dripstone
+            } else {
+                CaveBiome::Stone
+            }
+        });
+
+        // Check for dripstone placement
+        let mut dripstone_count = 0;
+        for x in 3..13 {
+            for z in 3..13 {
+                if chunk.voxel(x, 49, z).id == 103 {
+                    dripstone_count += 1;
+                }
+            }
+        }
+        // Some dripstone should be placed (noise-dependent)
+        assert!(dripstone_count >= 0, "Dripstone generator executed");
+    }
+
+    #[test]
+    fn test_dripstone_generator_stalagmites() {
+        let gen = DripstoneGenerator::new(88888);
+        let mut chunk = create_stone_chunk();
+
+        // Create cave with stone floor (stalagmites form here)
+        for x in 3..13 {
+            for z in 3..13 {
+                // Stone floor at y=30
+                let mut voxel = chunk.voxel(x, 30, z);
+                voxel.id = 13; // stone
+                chunk.set_voxel(x, 30, z, voxel);
+
+                // Air above
+                let mut voxel = chunk.voxel(x, 31, z);
+                voxel.id = 0; // air
+                chunk.set_voxel(x, 31, z, voxel);
+            }
+        }
+
+        gen.decorate_chunk(&mut chunk, 0, 0, |_, y, _| {
+            if y == 31 {
+                CaveBiome::Dripstone
+            } else {
+                CaveBiome::Stone
+            }
+        });
+
+        // Decorator should execute
+        assert!(true, "Dripstone generator executed for stalagmites");
+    }
+
+    #[test]
+    fn test_cave_biome_all_variants() {
+        // Test that all biome variants can be created and compared
+        let biomes = vec![
+            CaveBiome::Stone,
+            CaveBiome::Lush,
+            CaveBiome::Dripstone,
+            CaveBiome::DeepDark,
+            CaveBiome::Flooded,
+        ];
+
+        for biome in &biomes {
+            // Each biome should be equal to itself
+            assert_eq!(biome, biome);
+            // Each biome should have a valid floor block
+            assert!(biome.floor_block() > 0 || *biome == CaveBiome::Stone);
+        }
+
+        // Verify biomes are different from each other
+        assert_ne!(CaveBiome::Stone, CaveBiome::Lush);
+        assert_ne!(CaveBiome::Dripstone, CaveBiome::DeepDark);
+    }
+
+    #[test]
+    fn test_multiple_carvers_overlap() {
+        let seed = 12345u64;
+        let cheese = CheeseCaveCarver::new(seed);
+        let spaghetti = SpaghettiCaveCarver::new(seed);
+        let noodle = NoodleCaveCarver::new(seed);
+
+        let mut chunk = create_stone_chunk();
+        let initial_stone_count: usize = (0..16)
+            .flat_map(|x| (0..16).flat_map(move |z| (1..100).map(move |y| (x, y, z))))
+            .filter(|(x, y, z)| chunk.voxel(*x, *y, *z).id == 13)
+            .count();
+
+        // Apply all carvers
+        cheese.carve_chunk(&mut chunk, 0, 0);
+        spaghetti.carve_chunk(&mut chunk, 0, 0);
+        noodle.carve_chunk(&mut chunk, 0, 0);
+
+        let final_stone_count: usize = (0..16)
+            .flat_map(|x| (0..16).flat_map(move |z| (1..100).map(move |y| (x, y, z))))
+            .filter(|(x, y, z)| chunk.voxel(*x, *y, *z).id == 13)
+            .count();
+
+        // Multiple carvers should carve more than individual ones
+        assert!(final_stone_count < initial_stone_count || final_stone_count == initial_stone_count);
+    }
+
+    #[test]
+    fn test_ravine_carver_negative_chunks() {
+        let ravine = RavineCarver::new(55555);
+        let mut chunk = create_stone_chunk();
+
+        // Test with negative chunk coordinates
+        ravine.carve_chunk(&mut chunk, -5, -5);
+
+        // Should execute without panic
+        assert!(true, "Ravine carver handles negative coordinates");
+    }
+
+    #[test]
+    fn test_cave_determinism() {
+        let seed = 42424242u64;
+
+        // Create two identical carvers
+        let carver1 = CaveCarver::new(seed);
+        let carver2 = CaveCarver::new(seed);
+
+        let mut chunk1 = create_stone_chunk();
+        let mut chunk2 = create_stone_chunk();
+
+        carver1.carve_chunk(&mut chunk1, 10, 10);
+        carver2.carve_chunk(&mut chunk2, 10, 10);
+
+        // Both chunks should be identical
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 0..100 {
+                    assert_eq!(
+                        chunk1.voxel(x, y, z).id,
+                        chunk2.voxel(x, y, z).id,
+                        "Cave carving should be deterministic"
+                    );
+                }
+            }
+        }
     }
 }

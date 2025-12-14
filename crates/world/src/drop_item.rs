@@ -4,7 +4,7 @@
 //! They have physics (gravity, collision), a pickup radius, and despawn after 5 minutes.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Maximum lifetime for dropped items (5 minutes = 6000 ticks at 20 TPS).
 pub const ITEM_DESPAWN_TICKS: u32 = 6000;
@@ -623,8 +623,9 @@ impl DroppedItem {
 }
 
 /// Manages all dropped items in the world.
+/// Uses BTreeMap for deterministic iteration order (critical for multiplayer sync).
 pub struct ItemManager {
-    items: HashMap<u64, DroppedItem>,
+    items: BTreeMap<u64, DroppedItem>,
     next_id: u64,
 }
 
@@ -632,7 +633,7 @@ impl ItemManager {
     /// Create a new empty item manager.
     pub fn new() -> Self {
         Self {
-            items: HashMap::new(),
+            items: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -1059,5 +1060,261 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].count, 8);
         assert_eq!(items[0].item_type, ItemType::Stone);
+    }
+
+    #[test]
+    fn test_item_manager_deterministic_iteration() {
+        // BTreeMap provides deterministic iteration order for multiplayer sync
+        let mut manager = ItemManager::new();
+
+        // Spawn items (IDs will be 1, 2, 3, 4, 5 in order)
+        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 1);
+        manager.spawn_item(20.0, 64.0, 30.0, ItemType::Dirt, 2);
+        manager.spawn_item(30.0, 64.0, 40.0, ItemType::Sand, 3);
+        manager.spawn_item(15.0, 64.0, 25.0, ItemType::Ice, 4);
+        manager.spawn_item(5.0, 64.0, 10.0, ItemType::Gravel, 5);
+
+        // Collect items multiple times - should always be in same (ID) order
+        let order1: Vec<u64> = manager.items().iter().map(|i| i.id).collect();
+        let order2: Vec<u64> = manager.items().iter().map(|i| i.id).collect();
+
+        assert_eq!(order1, order2);
+        // BTreeMap iterates in key order (ID order)
+        assert_eq!(order1, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_silk_touch_drops() {
+        // Silk touch should drop the block itself instead of the normal drop
+        assert_eq!(ItemType::silk_touch_drop(1), Some((ItemType::Stone, 1))); // Stone instead of cobblestone
+        assert_eq!(ItemType::silk_touch_drop(3), Some((ItemType::Grass, 1))); // Grass instead of dirt
+        assert_eq!(ItemType::silk_touch_drop(14), Some((ItemType::CoalOre, 1))); // Coal ore instead of coal
+    }
+
+    #[test]
+    fn test_fortune_drops() {
+        // Fortune should increase drop counts for affected ores
+        // Fortune III (level 3) with random value 0.5 should give bonus
+        let result = ItemType::fortune_drop(14, 3, 0.5); // Coal ore
+        assert!(result.is_some());
+        let (item_type, count) = result.unwrap();
+        assert_eq!(item_type, ItemType::Coal);
+        assert!(count >= 1); // Should have at least base count
+
+        // Non-affected blocks shouldn't get bonus
+        let result = ItemType::fortune_drop(2, 3, 0.5); // Dirt
+        assert_eq!(result, Some((ItemType::Dirt, 1))); // No bonus
+    }
+
+    #[test]
+    fn test_potion_item_types() {
+        // Test potion-related functions
+        assert!(ItemType::PotionHealing.is_potion());
+        assert!(ItemType::PotionStrength.is_potion());
+        assert!(!ItemType::Apple.is_potion());
+        assert!(!ItemType::Stone.is_potion());
+    }
+
+    #[test]
+    fn test_all_potions_is_potion() {
+        // All potion types should return true for is_potion()
+        assert!(ItemType::PotionAwkward.is_potion());
+        assert!(ItemType::PotionNightVision.is_potion());
+        assert!(ItemType::PotionInvisibility.is_potion());
+        assert!(ItemType::PotionLeaping.is_potion());
+        assert!(ItemType::PotionFireResistance.is_potion());
+        assert!(ItemType::PotionSwiftness.is_potion());
+        assert!(ItemType::PotionSlowness.is_potion());
+        assert!(ItemType::PotionWaterBreathing.is_potion());
+        assert!(ItemType::PotionHealing.is_potion());
+        assert!(ItemType::PotionHarming.is_potion());
+        assert!(ItemType::PotionPoison.is_potion());
+        assert!(ItemType::PotionRegeneration.is_potion());
+        assert!(ItemType::PotionStrength.is_potion());
+        assert!(ItemType::PotionWeakness.is_potion());
+    }
+
+    #[test]
+    fn test_to_potion_type() {
+        use crate::PotionType;
+
+        assert_eq!(ItemType::PotionAwkward.to_potion_type(), Some(PotionType::Awkward));
+        assert_eq!(ItemType::PotionNightVision.to_potion_type(), Some(PotionType::NightVision));
+        assert_eq!(ItemType::PotionInvisibility.to_potion_type(), Some(PotionType::Invisibility));
+        assert_eq!(ItemType::PotionLeaping.to_potion_type(), Some(PotionType::Leaping));
+        assert_eq!(ItemType::PotionFireResistance.to_potion_type(), Some(PotionType::FireResistance));
+        assert_eq!(ItemType::PotionSwiftness.to_potion_type(), Some(PotionType::Swiftness));
+        assert_eq!(ItemType::PotionSlowness.to_potion_type(), Some(PotionType::Slowness));
+        assert_eq!(ItemType::PotionWaterBreathing.to_potion_type(), Some(PotionType::WaterBreathing));
+        assert_eq!(ItemType::PotionHealing.to_potion_type(), Some(PotionType::Healing));
+        assert_eq!(ItemType::PotionHarming.to_potion_type(), Some(PotionType::Harming));
+        assert_eq!(ItemType::PotionPoison.to_potion_type(), Some(PotionType::Poison));
+        assert_eq!(ItemType::PotionRegeneration.to_potion_type(), Some(PotionType::Regeneration));
+        assert_eq!(ItemType::PotionStrength.to_potion_type(), Some(PotionType::Strength));
+        assert_eq!(ItemType::PotionWeakness.to_potion_type(), Some(PotionType::Weakness));
+
+        // Non-potion items should return None
+        assert_eq!(ItemType::Apple.to_potion_type(), None);
+        assert_eq!(ItemType::Stone.to_potion_type(), None);
+    }
+
+    #[test]
+    fn test_from_potion_type() {
+        use crate::PotionType;
+
+        assert_eq!(ItemType::from_potion_type(PotionType::Awkward), Some(ItemType::PotionAwkward));
+        assert_eq!(ItemType::from_potion_type(PotionType::NightVision), Some(ItemType::PotionNightVision));
+        assert_eq!(ItemType::from_potion_type(PotionType::Invisibility), Some(ItemType::PotionInvisibility));
+        assert_eq!(ItemType::from_potion_type(PotionType::Leaping), Some(ItemType::PotionLeaping));
+        assert_eq!(ItemType::from_potion_type(PotionType::FireResistance), Some(ItemType::PotionFireResistance));
+        assert_eq!(ItemType::from_potion_type(PotionType::Swiftness), Some(ItemType::PotionSwiftness));
+        assert_eq!(ItemType::from_potion_type(PotionType::Slowness), Some(ItemType::PotionSlowness));
+        assert_eq!(ItemType::from_potion_type(PotionType::WaterBreathing), Some(ItemType::PotionWaterBreathing));
+        assert_eq!(ItemType::from_potion_type(PotionType::Healing), Some(ItemType::PotionHealing));
+        assert_eq!(ItemType::from_potion_type(PotionType::Harming), Some(ItemType::PotionHarming));
+        assert_eq!(ItemType::from_potion_type(PotionType::Poison), Some(ItemType::PotionPoison));
+        assert_eq!(ItemType::from_potion_type(PotionType::Regeneration), Some(ItemType::PotionRegeneration));
+        assert_eq!(ItemType::from_potion_type(PotionType::Strength), Some(ItemType::PotionStrength));
+        assert_eq!(ItemType::from_potion_type(PotionType::Weakness), Some(ItemType::PotionWeakness));
+
+        // Base potions have no item type
+        assert_eq!(ItemType::from_potion_type(PotionType::Water), None);
+        assert_eq!(ItemType::from_potion_type(PotionType::Mundane), None);
+        assert_eq!(ItemType::from_potion_type(PotionType::Thick), None);
+
+        // Unimplemented potions
+        assert_eq!(ItemType::from_potion_type(PotionType::Luck), None);
+        assert_eq!(ItemType::from_potion_type(PotionType::SlowFalling), None);
+    }
+
+    #[test]
+    fn test_item_type_id() {
+        // Test that ID conversion works
+        assert!(ItemType::Stone.id() < u16::MAX);
+        assert_ne!(ItemType::Stone.id(), ItemType::Dirt.id());
+    }
+
+    #[test]
+    fn test_non_stackable_items() {
+        // Weapons and armor should stack to 1
+        assert_eq!(ItemType::Bow.max_stack_size(), 1);
+        assert_eq!(ItemType::LeatherHelmet.max_stack_size(), 1);
+        assert_eq!(ItemType::IronChestplate.max_stack_size(), 1);
+        assert_eq!(ItemType::GoldLeggings.max_stack_size(), 1);
+        assert_eq!(ItemType::DiamondBoots.max_stack_size(), 1);
+
+        // Potions should stack to 1
+        assert_eq!(ItemType::PotionHealing.max_stack_size(), 1);
+        assert_eq!(ItemType::PotionStrength.max_stack_size(), 1);
+    }
+
+    #[test]
+    fn test_item_manager_get() {
+        let mut manager = ItemManager::new();
+        let id = manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
+
+        assert!(manager.get(id).is_some());
+        assert_eq!(manager.get(id).unwrap().item_type, ItemType::Stone);
+
+        // Non-existent ID
+        assert!(manager.get(9999).is_none());
+    }
+
+    #[test]
+    fn test_dropped_item_serialization() {
+        let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Diamond, 5);
+
+        let serialized = serde_json::to_string(&item).unwrap();
+        let deserialized: DroppedItem = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.id, 1);
+        assert_eq!(deserialized.item_type, ItemType::Diamond);
+        assert_eq!(deserialized.count, 5);
+    }
+
+    #[test]
+    fn test_item_type_serialization() {
+        let item_type = ItemType::DiamondOre;
+
+        let serialized = serde_json::to_string(&item_type).unwrap();
+        let deserialized: ItemType = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized, ItemType::DiamondOre);
+    }
+
+    #[test]
+    fn test_dropped_item_velocity_based_on_id() {
+        // Different IDs should have different velocities
+        let item1 = DroppedItem::new(1, 0.0, 0.0, 0.0, ItemType::Stone, 1);
+        let item2 = DroppedItem::new(100, 0.0, 0.0, 0.0, ItemType::Stone, 1);
+
+        // Velocities should differ (based on ID modulo)
+        assert!((item1.vel_x - item2.vel_x).abs() > 0.001 ||
+                (item1.vel_z - item2.vel_z).abs() > 0.001);
+    }
+
+    #[test]
+    fn test_item_manager_pickup_removes_items() {
+        let mut manager = ItemManager::new();
+        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
+        manager.spawn_item(20.0, 64.0, 30.0, ItemType::Dirt, 3);
+
+        assert_eq!(manager.count(), 2);
+
+        // Pickup first item
+        let picked = manager.pickup_items(10.0, 64.0, 20.0);
+        assert_eq!(picked.len(), 1);
+        assert_eq!(manager.count(), 1);
+    }
+
+    #[test]
+    fn test_item_pickup_out_of_range() {
+        let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+
+        // Test various out-of-range positions
+        assert!(!item.can_pickup(20.0, 64.0, 20.0)); // Far X
+        assert!(!item.can_pickup(10.0, 74.0, 20.0)); // Far Y
+        assert!(!item.can_pickup(10.0, 64.0, 30.0)); // Far Z
+        assert!(!item.can_pickup(12.0, 66.0, 22.0)); // Combined far
+    }
+
+    #[test]
+    fn test_merge_nearby_items_distance() {
+        // Test that merge_nearby_items respects distance
+        let mut manager = ItemManager::new();
+
+        // Spawn two items far apart - they should NOT merge
+        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
+        manager.spawn_item(200.0, 64.0, 200.0, ItemType::Stone, 3);
+
+        let merged = manager.merge_nearby_items();
+        assert_eq!(merged, 0); // Too far apart to merge
+        assert_eq!(manager.count(), 2);
+    }
+
+    #[test]
+    fn test_to_block_placeable_items() {
+        // Test all placeable item types
+        assert!(ItemType::Stone.to_block().is_some());
+        assert!(ItemType::Dirt.to_block().is_some());
+        assert!(ItemType::Grass.to_block().is_some());
+        assert!(ItemType::Sand.to_block().is_some());
+        assert!(ItemType::Gravel.to_block().is_some());
+        assert!(ItemType::Ice.to_block().is_some());
+        assert!(ItemType::Snow.to_block().is_some());
+        assert!(ItemType::Clay.to_block().is_some());
+        assert!(ItemType::OakLog.to_block().is_some());
+        assert!(ItemType::OakPlanks.to_block().is_some());
+        assert!(ItemType::Furnace.to_block().is_some());
+    }
+
+    #[test]
+    fn test_from_block_ores() {
+        // Test ore drops - lapis drops 4-8 items
+        let result = ItemType::from_block(98);
+        assert!(result.is_some());
+        let (item_type, count) = result.unwrap();
+        assert_eq!(item_type, ItemType::LapisLazuli);
+        assert!(count >= 4 && count <= 8);
     }
 }

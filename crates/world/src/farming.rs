@@ -6,7 +6,7 @@ use crate::chunk::{BlockId, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, 
 use crate::terrain::blocks;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 /// Block IDs for farming system
 pub mod farming_blocks {
@@ -113,14 +113,14 @@ pub fn can_till(block_id: BlockId) -> bool {
 pub struct CropGrowthSystem {
     /// World seed for determinism
     world_seed: u64,
-    /// Positions of crops that need updates
-    crop_positions: HashSet<CropPosition>,
-    /// Dirty chunks that need mesh rebuilding
-    dirty_chunks: HashSet<ChunkPos>,
+    /// Positions of crops that need updates (BTreeSet for deterministic iteration)
+    crop_positions: BTreeSet<CropPosition>,
+    /// Dirty chunks that need mesh rebuilding (BTreeSet for deterministic iteration)
+    dirty_chunks: BTreeSet<ChunkPos>,
 }
 
 /// Position of a crop in the world
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CropPosition {
     pub chunk: ChunkPos,
     pub x: u8,
@@ -133,8 +133,8 @@ impl CropGrowthSystem {
     pub fn new(world_seed: u64) -> Self {
         Self {
             world_seed,
-            crop_positions: HashSet::new(),
-            dirty_chunks: HashSet::new(),
+            crop_positions: BTreeSet::new(),
+            dirty_chunks: BTreeSet::new(),
         }
     }
 
@@ -276,7 +276,9 @@ impl CropGrowthSystem {
             return;
         }
 
-        let chunk_positions: Vec<ChunkPos> = chunks.keys().copied().collect();
+        // DETERMINISM FIX: Sort chunk positions to ensure consistent iteration order
+        let mut chunk_positions: Vec<ChunkPos> = chunks.keys().copied().collect();
+        chunk_positions.sort();
 
         for chunk_pos in chunk_positions {
             self.update_chunk_farmland(chunk_pos, chunks);
@@ -382,7 +384,7 @@ impl CropGrowthSystem {
     }
 
     /// Take the set of dirty chunks (clears internal state)
-    pub fn take_dirty_chunks(&mut self) -> HashSet<ChunkPos> {
+    pub fn take_dirty_chunks(&mut self) -> BTreeSet<ChunkPos> {
         std::mem::take(&mut self.dirty_chunks)
     }
 
@@ -460,5 +462,544 @@ mod tests {
         assert!(is_farmland(farming_blocks::FARMLAND_WET));
         assert!(!is_farmland(blocks::DIRT));
         assert!(!is_farmland(blocks::GRASS));
+    }
+
+    #[test]
+    fn test_crop_type_base_block_ids() {
+        assert_eq!(CropType::Wheat.base_block_id(), farming_blocks::WHEAT_0);
+        assert_eq!(CropType::Carrots.base_block_id(), farming_blocks::CARROTS_0);
+        assert_eq!(CropType::Potatoes.base_block_id(), farming_blocks::POTATOES_0);
+    }
+
+    #[test]
+    fn test_potato_stages() {
+        for stage in 0..=3 {
+            let id = CropType::Potatoes.block_id_at_stage(stage);
+            let (crop_type, parsed_stage) = CropType::from_block_id(id).unwrap();
+            assert_eq!(crop_type, CropType::Potatoes);
+            assert_eq!(parsed_stage, stage);
+        }
+    }
+
+    #[test]
+    fn test_crop_stage_clamping() {
+        // Stage higher than max should be clamped
+        let wheat_max = CropType::Wheat.block_id_at_stage(100);
+        assert_eq!(wheat_max, farming_blocks::WHEAT_7);
+
+        let carrot_max = CropType::Carrots.block_id_at_stage(100);
+        assert_eq!(carrot_max, farming_blocks::CARROTS_3);
+    }
+
+    #[test]
+    fn test_from_block_id_invalid() {
+        assert!(CropType::from_block_id(blocks::STONE).is_none());
+        assert!(CropType::from_block_id(blocks::AIR).is_none());
+        assert!(CropType::from_block_id(blocks::DIRT).is_none());
+    }
+
+    /// Helper to create a test chunk
+    fn create_test_chunk() -> Chunk {
+        Chunk::new(ChunkPos::new(0, 0))
+    }
+
+    #[test]
+    fn test_crop_growth_system_new() {
+        let system = CropGrowthSystem::new(12345);
+        assert_eq!(system.crop_count(), 0);
+    }
+
+    #[test]
+    fn test_register_and_unregister_crop() {
+        let mut system = CropGrowthSystem::new(12345);
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+
+        system.register_crop(pos);
+        assert_eq!(system.crop_count(), 1);
+
+        system.unregister_crop(pos);
+        assert_eq!(system.crop_count(), 0);
+    }
+
+    #[test]
+    fn test_register_duplicate_crop() {
+        let mut system = CropGrowthSystem::new(12345);
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+
+        system.register_crop(pos);
+        system.register_crop(pos);
+        assert_eq!(system.crop_count(), 1); // BTreeSet prevents duplicates
+    }
+
+    #[test]
+    fn test_take_dirty_chunks() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Setup: farmland with wheat
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: farming_blocks::FARMLAND_WET,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::WHEAT_0,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+        system.register_crop(pos);
+
+        // Run many ticks to ensure some growth happens
+        for tick in 0..1000 {
+            system.tick(tick, &mut chunks);
+        }
+
+        // Check if we got dirty chunks (may or may not depending on RNG)
+        let dirty = system.take_dirty_chunks();
+        // Second call should be empty
+        let dirty2 = system.take_dirty_chunks();
+        assert!(dirty2.is_empty());
+
+        // dirty may or may not contain chunks depending on RNG
+        let _ = dirty;
+    }
+
+    #[test]
+    fn test_crop_growth_requires_farmland() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Setup: wheat on stone (no farmland)
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::STONE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::WHEAT_0,
+            state: 0,
+            light_sky: 15,
+            light_block: 15,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+        system.register_crop(pos);
+
+        // Run ticks - growth should not happen
+        for tick in 0..1000 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let crop = chunk.voxel(5, 64, 5);
+        // Crop should remain at stage 0
+        assert_eq!(crop.id, farming_blocks::WHEAT_0);
+    }
+
+    #[test]
+    fn test_crop_growth_requires_light() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Setup: wheat with farmland but no light
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: farming_blocks::FARMLAND_WET,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::WHEAT_0,
+            state: 0,
+            light_sky: 0, // No light
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+        system.register_crop(pos);
+
+        // Run ticks - growth should not happen due to low light
+        for tick in 0..1000 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let crop = chunk.voxel(5, 64, 5);
+        // Crop should remain at stage 0 (light level < 9)
+        assert_eq!(crop.id, farming_blocks::WHEAT_0);
+    }
+
+    #[test]
+    fn test_crop_unregistered_when_fully_grown() {
+        let mut system = CropGrowthSystem::new(42); // Specific seed for reproducibility
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Setup: wheat at max stage
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: farming_blocks::FARMLAND_WET,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::WHEAT_7, // Already fully grown
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+        system.register_crop(pos);
+        assert_eq!(system.crop_count(), 1);
+
+        // After ticking, fully grown crops should be unregistered
+        for tick in 0..1000 {
+            system.tick(tick, &mut chunks);
+        }
+
+        // Fully grown crop should have been unregistered
+        assert_eq!(system.crop_count(), 0);
+    }
+
+    #[test]
+    fn test_crop_unregistered_when_replaced() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Setup: wheat on farmland
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: farming_blocks::FARMLAND_WET,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::WHEAT_0,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+        system.register_crop(pos);
+
+        // Replace crop with stone
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(5, 64, 5, Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            });
+        }
+
+        // After ticking, non-crop block should cause unregister
+        for tick in 0..1000 {
+            system.tick(tick, &mut chunks);
+        }
+
+        // Crop should have been unregistered
+        assert_eq!(system.crop_count(), 0);
+    }
+
+    #[test]
+    fn test_crop_position_ordering() {
+        // Test that CropPosition ordering is deterministic
+        let pos1 = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 0,
+            y: 64,
+            z: 0,
+        };
+        let pos2 = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 1,
+            y: 64,
+            z: 0,
+        };
+        let pos3 = CropPosition {
+            chunk: ChunkPos::new(1, 0),
+            x: 0,
+            y: 64,
+            z: 0,
+        };
+
+        assert!(pos1 < pos2);
+        assert!(pos2 < pos3);
+    }
+
+    #[test]
+    fn test_crop_at_y_zero() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place crop at y=0 (no farmland possible below)
+        chunk.set_voxel(5, 0, 5, Voxel {
+            id: farming_blocks::WHEAT_0,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 0,
+            z: 5,
+        };
+        system.register_crop(pos);
+
+        // Should not crash when checking growth conditions
+        for tick in 0..100 {
+            system.tick(tick, &mut chunks);
+        }
+
+        // Crop should still be at stage 0 (no farmland below)
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(chunk.voxel(5, 0, 5).id, farming_blocks::WHEAT_0);
+    }
+
+    #[test]
+    fn test_farmland_hydration_with_water() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place dry farmland with water nearby
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::FARMLAND,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(7, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Run hydration update (every 20 ticks)
+        for tick in 0..21 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let farmland = chunk.voxel(5, 64, 5);
+
+        // Farmland should be wet now (water within 4 blocks)
+        assert_eq!(farmland.id, farming_blocks::FARMLAND_WET);
+    }
+
+    #[test]
+    fn test_farmland_dries_without_water() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place wet farmland with no water nearby
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::FARMLAND_WET,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Run hydration update
+        for tick in 0..21 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let farmland = chunk.voxel(5, 64, 5);
+
+        // Farmland should dry without water
+        assert_eq!(farmland.id, farming_blocks::FARMLAND);
+    }
+
+    #[test]
+    fn test_default_implementation() {
+        let system = CropGrowthSystem::default();
+        assert_eq!(system.crop_count(), 0);
+    }
+
+    #[test]
+    fn test_missing_chunk_handling() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+
+        let pos = CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 64,
+            z: 5,
+        };
+        system.register_crop(pos);
+
+        // Tick without chunk in map - should not crash
+        system.tick(0, &mut chunks);
+
+        // Crop should remain registered (waiting for chunk)
+        assert_eq!(system.crop_count(), 1);
+    }
+
+    #[test]
+    fn test_multiple_crops_growth() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Setup multiple crops
+        for x in 0..3 {
+            chunk.set_voxel(x, 63, 5, Voxel {
+                id: farming_blocks::FARMLAND_WET,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            });
+            chunk.set_voxel(x, 64, 5, Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            });
+            system.register_crop(CropPosition {
+                chunk: ChunkPos::new(0, 0),
+                x: x as u8,
+                y: 64,
+                z: 5,
+            });
+        }
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        assert_eq!(system.crop_count(), 3);
+
+        // Run many ticks
+        for tick in 0..10000 {
+            system.tick(tick, &mut chunks);
+        }
+
+        // At least some crops should have grown or been unregistered
+        // (can't guarantee specific outcome due to RNG)
+    }
+
+    #[test]
+    fn test_hydration_check_water_one_below() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place dry farmland with water one block below
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::FARMLAND,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(5, 63, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Run hydration update
+        for tick in 0..21 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let farmland = chunk.voxel(5, 64, 5);
+
+        // Farmland should be wet (water at same level or one below)
+        assert_eq!(farmland.id, farming_blocks::FARMLAND_WET);
+    }
+
+    #[test]
+    fn test_hydration_water_too_far() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place dry farmland with water 5 blocks away (too far)
+        chunk.set_voxel(5, 64, 5, Voxel {
+            id: farming_blocks::FARMLAND,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        });
+        chunk.set_voxel(10, 64, 5, Voxel {
+            id: blocks::WATER,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        });
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Run hydration update
+        for tick in 0..21 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let farmland = chunk.voxel(5, 64, 5);
+
+        // Farmland should stay dry (water too far - manhattan distance 5 > 4)
+        assert_eq!(farmland.id, farming_blocks::FARMLAND);
     }
 }

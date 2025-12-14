@@ -6,6 +6,10 @@ use crate::protocol::{ClientMessage, ServerMessage, PROTOCOL_MAGIC, PROTOCOL_VER
 use anyhow::{Context, Result};
 use blake3::Hash;
 
+/// Maximum allowed frame size (16 MB).
+/// Prevents memory exhaustion from malicious length prefixes.
+pub const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+
 /// Compute schema hash from protocol definitions.
 ///
 /// This hash is used to ensure client and server have compatible protocol versions.
@@ -90,6 +94,15 @@ pub fn decode_client_message(data: &[u8]) -> Result<ClientMessage> {
     // Read length
     let length = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
 
+    // Validate length to prevent DoS via memory exhaustion
+    if length > MAX_FRAME_SIZE {
+        return Err(anyhow::anyhow!(
+            "Frame too large: {} bytes (max {})",
+            length,
+            MAX_FRAME_SIZE
+        ));
+    }
+
     if data.len() < 4 + length {
         return Err(anyhow::anyhow!(
             "Incomplete frame: expected {} bytes, got {}",
@@ -120,6 +133,15 @@ pub fn decode_server_message(data: &[u8]) -> Result<ServerMessage> {
 
     // Read length
     let length = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+    // Validate length to prevent DoS via memory exhaustion
+    if length > MAX_FRAME_SIZE {
+        return Err(anyhow::anyhow!(
+            "Frame too large: {} bytes (max {})",
+            length,
+            MAX_FRAME_SIZE
+        ));
+    }
 
     if data.len() < 4 + length {
         return Err(anyhow::anyhow!(
@@ -236,5 +258,68 @@ mod tests {
         let data = vec![1, 2, 3]; // Less than 5 bytes
         let result = decode_client_message(&data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_client_frame_too_large() {
+        // Create a frame with length exceeding MAX_FRAME_SIZE
+        let malicious_length: u32 = (MAX_FRAME_SIZE + 1) as u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(&malicious_length.to_le_bytes());
+        data.push(0); // message type tag
+        // Don't actually allocate the payload - the validation should reject before allocation
+
+        let result = decode_client_message(&data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Frame too large"));
+    }
+
+    #[test]
+    fn test_decode_server_frame_too_large() {
+        // Create a frame with length exceeding MAX_FRAME_SIZE
+        let malicious_length: u32 = (MAX_FRAME_SIZE + 1) as u32;
+        let mut data = Vec::new();
+        data.extend_from_slice(&malicious_length.to_le_bytes());
+        data.push(0); // message type tag
+
+        let result = decode_server_message(&data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Frame too large"));
+    }
+
+    #[test]
+    fn test_decode_client_max_u32_length() {
+        // Try to allocate maximum u32 length (4GB) - should be rejected
+        let malicious_length: u32 = u32::MAX;
+        let mut data = Vec::new();
+        data.extend_from_slice(&malicious_length.to_le_bytes());
+        data.push(0); // message type tag
+
+        let result = decode_client_message(&data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Frame too large"));
+    }
+
+    #[test]
+    fn test_decode_server_max_u32_length() {
+        // Try to allocate maximum u32 length (4GB) - should be rejected
+        let malicious_length: u32 = u32::MAX;
+        let mut data = Vec::new();
+        data.extend_from_slice(&malicious_length.to_le_bytes());
+        data.push(0); // message type tag
+
+        let result = decode_server_message(&data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Frame too large"));
+    }
+
+    #[test]
+    fn test_max_frame_size_constant() {
+        // Verify the constant is set appropriately (16 MB)
+        assert_eq!(MAX_FRAME_SIZE, 16 * 1024 * 1024);
     }
 }
