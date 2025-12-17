@@ -130,7 +130,7 @@ fn stage4_integration_worldtest() {
             for z in 0..16 {
                 let h1 = hm1.get(15, z);
                 let h2 = hm2.get(0, z);
-                let diff = (h1 as i32 - h2 as i32).abs();
+                let diff = (h1 - h2).abs();
                 seam_checks += 1;
                 if diff > 20 {
                     seam_failures += 1;
@@ -148,7 +148,7 @@ fn stage4_integration_worldtest() {
             for x in 0..16 {
                 let h1 = hm1.get(x, 15);
                 let h2 = hm2.get(x, 0);
-                let diff = (h1 as i32 - h2 as i32).abs();
+                let diff = (h1 - h2).abs();
                 seam_checks += 1;
                 if diff > 20 {
                     seam_failures += 1;

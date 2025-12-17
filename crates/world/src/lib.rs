@@ -33,7 +33,7 @@ pub use biome::*;
 pub use block_properties::*;
 pub use caves::*;
 pub use chunk::{
-    BlockId, BlockState, Chunk, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR,
+    BlockId, BlockState, Chunk, ChunkKey, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR,
     BLOCK_BREWING_STAND, BLOCK_COAL_ORE, BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE,
     BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_GOLD_ORE, BLOCK_IRON_ORE,
     BLOCK_LAPIS_ORE, BLOCK_NETHER_WART_BLOCK, BLOCK_SOUL_SAND, BLOCK_STONE, CHUNK_SIZE_X,

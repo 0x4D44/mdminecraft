@@ -25,10 +25,10 @@ use mdminecraft_world::{
     ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
     EnchantingTableState, FluidPos, FluidSimulator, FurnaceState, Inventory,
     ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PotionType,
-    Projectile, ProjectileManager, RegionStore, StatusEffect, StatusEffects, TerrainGenerator,
-    Voxel, WeatherState, WeatherToggle, BLOCK_AIR, BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE,
-    BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y,
-    CHUNK_SIZE_Z,
+    Projectile, ProjectileManager, RegionStore, SimTime, StatusEffect, StatusEffects,
+    TerrainGenerator, Voxel, WeatherState, WeatherToggle, WorldMeta, WorldState, BLOCK_AIR,
+    BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE,
+    BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -905,6 +905,8 @@ pub struct GameWorld {
     last_frame: Instant,
     debug_hud: DebugHud,
     time_of_day: TimeOfDay,
+    sim_time: SimTime,
+    sim_time_paused: bool,
     selected_block: Option<RaycastHit>,
     hotbar: Hotbar,
     player_physics: PlayerPhysics,
@@ -958,6 +960,8 @@ pub struct GameWorld {
     accumulator: f64,
     /// Region store for persistence
     region_store: RegionStore,
+    /// World seed used for deterministic world generation.
+    world_seed: u64,
     /// Terrain generator
     terrain_generator: TerrainGenerator,
     /// Render distance (chunks radius)
@@ -1070,7 +1074,45 @@ impl GameWorld {
             RegionStore::new(std::env::temp_dir().join("mdminecraft_save")).unwrap()
         });
 
-        let world_seed = rand::random();
+        let (world_seed, loaded_state) = {
+            let meta = if region_store.world_meta_exists() {
+                match region_store.load_world_meta() {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to load world meta; generating new seed");
+                        WorldMeta {
+                            world_seed: rand::random(),
+                        }
+                    }
+                }
+            } else {
+                let world_seed = std::env::var("MDM_WORLD_SEED")
+                    .ok()
+                    .and_then(|raw| raw.parse::<u64>().ok())
+                    .unwrap_or_else(rand::random);
+
+                let meta = WorldMeta { world_seed };
+                if let Err(err) = region_store.save_world_meta(&meta) {
+                    tracing::warn!(?err, "Failed to save world meta");
+                }
+                meta
+            };
+
+            let state = if region_store.world_state_exists() {
+                match region_store.load_world_state() {
+                    Ok(state) => Some(state),
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to load world state; starting fresh");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            (meta.world_seed, state)
+        };
+
         tracing::info!("World Seed: {}", world_seed);
         let terrain_generator = TerrainGenerator::new(world_seed);
         let render_distance = 8; // Default radius
@@ -1078,6 +1120,20 @@ impl GameWorld {
         let chunk_manager = ChunkManager::new();
         let chunks = HashMap::new();
         let mut rng = StdRng::seed_from_u64(world_seed ^ 0x5eed_a11c);
+
+        let mut sim_tick = SimTick::ZERO;
+        let mut sim_time = SimTime::default();
+        let mut weather = WeatherToggle::new();
+        let mut weather_timer = 0.0f32;
+        let mut next_weather_change = rng.gen_range(45.0..120.0);
+
+        if let Some(state) = loaded_state {
+            sim_tick = state.tick;
+            sim_time = state.sim_time;
+            weather = state.weather;
+            weather_timer = state.weather_timer_seconds;
+            next_weather_change = state.next_weather_change_seconds;
+        }
 
         let mob_spawner = MobSpawner::new(world_seed);
         let mobs = Vec::new();
@@ -1103,6 +1159,8 @@ impl GameWorld {
             last_frame: Instant::now(),
             debug_hud,
             time_of_day: TimeOfDay::new(),
+            sim_time,
+            sim_time_paused: false,
             selected_block: None,
             hotbar: Hotbar::new(),
             player_physics: PlayerPhysics::new(),
@@ -1116,9 +1174,9 @@ impl GameWorld {
             scripted_input,
             particle_emitter: ParticleEmitter::new(),
             particles: Vec::new(),
-            weather: WeatherToggle::new(),
-            weather_timer: 0.0,
-            next_weather_change: rng.gen_range(45.0..120.0),
+            weather,
+            weather_timer,
+            next_weather_change,
             precipitation_accumulator: 0.0,
             rng,
             weather_blend: 0.0,
@@ -1137,7 +1195,7 @@ impl GameWorld {
             mob_spawner,
             mobs,
             fluid_sim: FluidSimulator::new(),
-            sim_tick: SimTick::ZERO,
+            sim_tick,
             accumulator: 0.0,
             crafting_open: false,
             crafting_grid: Default::default(),
@@ -1161,9 +1219,12 @@ impl GameWorld {
 
             // New fields
             region_store,
+            world_seed,
             terrain_generator,
             render_distance,
         };
+
+        world.time_of_day.set_time(world.sim_time.time_of_day() as f32);
 
         // Initial chunk load (blocking, load all initial chunks)
         world.update_chunks(usize::MAX);
@@ -1416,6 +1477,36 @@ impl GameWorld {
         })
     }
 
+    fn persist_world(&mut self) {
+        self.persist_loaded_chunks();
+
+        let meta = WorldMeta {
+            world_seed: self.world_seed,
+        };
+        if let Err(err) = self.region_store.save_world_meta(&meta) {
+            tracing::warn!(?err, "Failed to save world meta");
+        }
+
+        let state = WorldState {
+            tick: self.sim_tick,
+            sim_time: self.sim_time,
+            weather: self.weather,
+            weather_timer_seconds: self.weather_timer,
+            next_weather_change_seconds: self.next_weather_change,
+        };
+        if let Err(err) = self.region_store.save_world_state(&state) {
+            tracing::warn!(?err, "Failed to save world state");
+        }
+    }
+
+    fn persist_loaded_chunks(&mut self) {
+        for (pos, chunk) in &self.chunks {
+            if let Err(err) = self.region_store.save_chunk(chunk) {
+                tracing::error!(?pos, ?err, "Failed to save chunk");
+            }
+        }
+    }
+
     /// Handle an event
     pub fn handle_event(
         &mut self,
@@ -1438,6 +1529,7 @@ impl GameWorld {
             Event::WindowEvent { event, window_id } if *window_id == self.window.id() => {
                 match event {
                     WindowEvent::CloseRequested => {
+                        self.persist_world();
                         return GameAction::Quit;
                     }
                     WindowEvent::Focused(focused) => {
@@ -1453,6 +1545,7 @@ impl GameWorld {
                         {
                             if event.state.is_pressed() {
                                 let _ = self.input.enter_menu(&self.window);
+                                self.persist_world();
                                 return GameAction::ReturnToMenu;
                             }
                         }
@@ -1467,6 +1560,9 @@ impl GameWorld {
 
                         // Check for death screen actions after render
                         if let Some(action) = self.check_death_screen_actions() {
+                            if matches!(action, GameAction::ReturnToMenu | GameAction::Quit) {
+                                self.persist_world();
+                            }
                             return action;
                         }
                     }
@@ -1505,13 +1601,29 @@ impl GameWorld {
                 );
             }
             PhysicalKey::Code(KeyCode::KeyP) => {
-                self.time_of_day.toggle_pause();
+                self.sim_time_paused = !self.sim_time_paused;
+                tracing::info!(
+                    paused = self.sim_time_paused,
+                    "Simulation day/night progression toggled"
+                );
             }
             PhysicalKey::Code(KeyCode::BracketLeft) => {
-                self.time_of_day.decrease_speed();
+                // Increase ticks per day to slow down the day/night cycle.
+                self.sim_time.ticks_per_day = (self.sim_time.ticks_per_day.saturating_mul(3) / 2)
+                    .min(240_000);
+                tracing::info!(
+                    ticks_per_day = self.sim_time.ticks_per_day,
+                    "Simulation day length increased"
+                );
             }
             PhysicalKey::Code(KeyCode::BracketRight) => {
-                self.time_of_day.increase_speed();
+                // Decrease ticks per day to speed up the day/night cycle.
+                self.sim_time.ticks_per_day =
+                    ((self.sim_time.ticks_per_day.saturating_mul(2)) / 3).max(2_400);
+                tracing::info!(
+                    ticks_per_day = self.sim_time.ticks_per_day,
+                    "Simulation day length decreased"
+                );
             }
             PhysicalKey::Code(KeyCode::KeyO) => {
                 self.weather.toggle();
@@ -2086,6 +2198,9 @@ impl GameWorld {
 
         // Increment tick
         self.sim_tick = self.sim_tick.advance(1);
+        if !self.sim_time_paused {
+            self.sim_time.advance();
+        }
         let dt = TICK_RATE as f32;
 
         // Update dropped items and handle pickup
@@ -2271,8 +2386,9 @@ impl GameWorld {
         // Process input and camera every frame for responsiveness
         self.process_actions(self.frame_dt);
 
-        // Update time-of-day (visual)
-        self.time_of_day.update(self.frame_dt);
+        // Sync visual time-of-day from deterministic simulation time.
+        self.time_of_day
+            .set_time(self.sim_time.time_of_day() as f32);
 
         // Update player health (needs dt)
         self.player_health.update(self.frame_dt);
@@ -3365,7 +3481,7 @@ impl GameWorld {
 
         // Check if it's night time (hostile mobs spawn at night)
         // Time: 0.0-0.25 Night→Dawn, 0.75-1.0 Dusk→Night
-        let time = self.time_of_day.time();
+        let time = self.sim_time.time_of_day() as f32;
         let is_night = !(0.25..=0.75).contains(&time);
 
         // Update each mob and track damage to player

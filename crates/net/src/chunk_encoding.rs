@@ -4,6 +4,7 @@
 
 use crate::protocol::{BlockId, ChunkDataMessage};
 use anyhow::{Context, Result};
+use mdminecraft_core::DimensionId;
 use std::collections::HashMap;
 
 /// Encode chunk data with palette and RLE compression.
@@ -16,6 +17,7 @@ use std::collections::HashMap;
 ///
 /// Typical compression: 80-95% for natural terrain.
 pub fn encode_chunk_data(
+    dimension: DimensionId,
     chunk_x: i32,
     chunk_z: i32,
     block_data: &[BlockId],
@@ -37,6 +39,7 @@ pub fn encode_chunk_data(
     let crc32 = calculate_crc32(&palette, &compressed_data);
 
     Ok(ChunkDataMessage {
+        dimension,
         chunk_x,
         chunk_z,
         palette,
@@ -190,7 +193,7 @@ fn rle_decompress(compressed: &[u8]) -> Result<Vec<u8>> {
                     MAX_DECOMPRESSED_SIZE
                 ));
             }
-            decompressed.extend(std::iter::repeat(value).take(length));
+            decompressed.extend(std::iter::repeat_n(value, length));
         } else {
             // Literal: copy next (control) bytes
             let length = control as usize;
@@ -308,7 +311,9 @@ mod tests {
     #[test]
     fn test_encode_decode_uniform_chunk() {
         let block_data = vec![1u16; 65536];
-        let encoded = encode_chunk_data(0, 0, &block_data).expect("Failed to encode");
+        let encoded = encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data)
+            .expect("Failed to encode");
+        assert_eq!(encoded.dimension, DimensionId::DEFAULT);
 
         assert_eq!(encoded.palette.len(), 1);
         assert_eq!(encoded.palette[0], 1);
@@ -330,8 +335,10 @@ mod tests {
             block_data[i] = (i % 10) as u16;
         }
 
-        let encoded = encode_chunk_data(5, -3, &block_data).expect("Failed to encode");
+        let encoded = encode_chunk_data(DimensionId::DEFAULT, 5, -3, &block_data)
+            .expect("Failed to encode");
 
+        assert_eq!(encoded.dimension, DimensionId::DEFAULT);
         assert_eq!(encoded.chunk_x, 5);
         assert_eq!(encoded.chunk_z, -3);
         assert!(encoded.palette.len() <= 10);
@@ -343,7 +350,8 @@ mod tests {
     #[test]
     fn test_crc32_validation() {
         let block_data = vec![1u16; 65536];
-        let mut encoded = encode_chunk_data(0, 0, &block_data).expect("Failed to encode");
+        let mut encoded = encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data)
+            .expect("Failed to encode");
 
         // Corrupt the CRC
         encoded.crc32 ^= 0xFFFFFFFF;
@@ -368,7 +376,7 @@ mod tests {
     #[test]
     fn test_invalid_chunk_size() {
         let block_data = vec![1u16; 100]; // Wrong size
-        let result = encode_chunk_data(0, 0, &block_data);
+        let result = encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data);
         assert!(result.is_err());
     }
 

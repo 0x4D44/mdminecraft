@@ -155,7 +155,7 @@ fn drop_item_lifecycle_worldtest() {
     let picked_up = pickup_manager.pickup_items(10.0, 64.0, 20.0);
     println!("  Picked up {} item stacks", picked_up.len());
 
-    assert!(picked_up.len() >= 1, "Should pick up at least one item");
+    assert!(!picked_up.is_empty(), "Should pick up at least one item");
     assert!(picked_up.len() <= 2, "Should only pick up nearby items");
 
     // Verify the distant item wasn't picked up

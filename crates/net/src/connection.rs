@@ -290,6 +290,7 @@ mod tests {
     use super::*;
     use crate::transport::{ClientEndpoint, ServerEndpoint, TlsMode};
     use crate::{InputBundle, MovementInput, Transform};
+    use mdminecraft_core::DimensionId;
 
     #[tokio::test]
     async fn test_handshake_success() {
@@ -430,6 +431,7 @@ mod tests {
             let state = ServerMessage::ServerState {
                 tick: 1,
                 player_transform: Transform {
+                    dimension: DimensionId::DEFAULT,
                     x: 1,
                     y: 2,
                     z: 3,

@@ -3,9 +3,10 @@
 //! All messages use postcard serialization for compact binary encoding.
 
 use serde::{Deserialize, Serialize};
+use mdminecraft_core::DimensionId;
 
 /// Protocol version for compatibility checking.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Protocol magic bytes to identify mdminecraft protocol.
 pub const PROTOCOL_MAGIC: &[u8; 10] = b"MDMC\x00\x01\x00\x00\x00\x00";
@@ -20,8 +21,6 @@ pub type EntityId = u64;
 pub type BlockId = u16;
 
 /// Item identifier.
-pub type ItemId = u16;
-
 /// Maximum length of a chat message (characters).
 pub const MAX_CHAT_LEN: usize = 256;
 
@@ -352,6 +351,8 @@ pub enum InventoryAction {
 /// Chunk data message with delta compression.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChunkDataMessage {
+    /// Dimension this chunk belongs to.
+    pub dimension: DimensionId,
     /// Chunk X coordinate.
     pub chunk_x: i32,
 
@@ -458,6 +459,8 @@ pub enum EntityUpdateType {
 /// Entity transform with quantized values for network efficiency.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Transform {
+    /// Dimension this transform belongs to.
+    pub dimension: DimensionId,
     /// X position (quantized to 1/16 block precision).
     pub x: i32,
 
@@ -475,12 +478,28 @@ pub struct Transform {
 }
 
 impl Transform {
-    /// Create transform from floating-point position and rotation.
+    /// Create transform from floating-point position and rotation in [`DimensionId::DEFAULT`].
     ///
     /// Position is quantized to 1/16 block precision.
     /// Rotation is quantized to 256 steps (0-255 = 0-360 degrees).
     pub fn from_f32(x: f32, y: f32, z: f32, yaw: f32, pitch: f32) -> Self {
+        Self::from_f32_in_dimension(DimensionId::DEFAULT, x, y, z, yaw, pitch)
+    }
+
+    /// Create transform from floating-point position and rotation in a specific dimension.
+    ///
+    /// Position is quantized to 1/16 block precision.
+    /// Rotation is quantized to 256 steps (0-255 = 0-360 degrees).
+    pub fn from_f32_in_dimension(
+        dimension: DimensionId,
+        x: f32,
+        y: f32,
+        z: f32,
+        yaw: f32,
+        pitch: f32,
+    ) -> Self {
         Self {
+            dimension,
             x: (x * 16.0) as i32,
             y: (y * 16.0) as i32,
             z: (z * 16.0) as i32,
@@ -508,6 +527,7 @@ mod tests {
     #[test]
     fn test_transform_quantization() {
         let transform = Transform::from_f32(10.5, 64.0, -5.25, 90.0, -45.0);
+        assert_eq!(transform.dimension, DimensionId::DEFAULT);
         let (x, y, z, yaw, pitch) = transform.to_f32();
 
         // Check precision (within 1/16 block)
@@ -677,6 +697,7 @@ mod tests {
     #[test]
     fn test_chunk_data_palette_too_large() {
         let msg = ChunkDataMessage {
+            dimension: DimensionId::DEFAULT,
             chunk_x: 0,
             chunk_z: 0,
             palette: vec![0u16; MAX_PALETTE_SIZE + 1],
@@ -690,6 +711,7 @@ mod tests {
     #[test]
     fn test_chunk_data_too_large() {
         let msg = ChunkDataMessage {
+            dimension: DimensionId::DEFAULT,
             chunk_x: 0,
             chunk_z: 0,
             palette: vec![],

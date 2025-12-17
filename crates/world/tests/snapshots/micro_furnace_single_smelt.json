@@ -1,0 +1,3102 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "fuel": [
+          "Coal",
+          1
+        ],
+        "fuel_remaining_milli": 0,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": false,
+        "output": null,
+        "smelt_progress_milli": 0
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7995,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 5
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7990,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 10
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7985,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 15
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7980,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 20
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7975,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 25
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7970,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 30
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7965,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 35
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7960,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 40
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7955,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 45
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7950,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 50
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7945,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 55
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7940,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 60
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7935,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 65
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7930,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 70
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7925,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 75
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7920,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 80
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7915,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 85
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7910,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 90
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7905,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 95
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7900,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 100
+      },
+      "tick": 20
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7895,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 105
+      },
+      "tick": 21
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7890,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 110
+      },
+      "tick": 22
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7885,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 115
+      },
+      "tick": 23
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7880,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 120
+      },
+      "tick": 24
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7875,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 125
+      },
+      "tick": 25
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7870,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 130
+      },
+      "tick": 26
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7865,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 135
+      },
+      "tick": 27
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7860,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 140
+      },
+      "tick": 28
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7855,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 145
+      },
+      "tick": 29
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7850,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 150
+      },
+      "tick": 30
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7845,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 155
+      },
+      "tick": 31
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7840,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 160
+      },
+      "tick": 32
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7835,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 165
+      },
+      "tick": 33
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7830,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 170
+      },
+      "tick": 34
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7825,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 175
+      },
+      "tick": 35
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7820,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 180
+      },
+      "tick": 36
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7815,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 185
+      },
+      "tick": 37
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7810,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 190
+      },
+      "tick": 38
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7805,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 195
+      },
+      "tick": 39
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7800,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 200
+      },
+      "tick": 40
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7795,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 205
+      },
+      "tick": 41
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7790,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 210
+      },
+      "tick": 42
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7785,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 215
+      },
+      "tick": 43
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7780,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 220
+      },
+      "tick": 44
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7775,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 225
+      },
+      "tick": 45
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7770,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 230
+      },
+      "tick": 46
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7765,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 235
+      },
+      "tick": 47
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7760,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 240
+      },
+      "tick": 48
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7755,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 245
+      },
+      "tick": 49
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7750,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 250
+      },
+      "tick": 50
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7745,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 255
+      },
+      "tick": 51
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7740,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 260
+      },
+      "tick": 52
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7735,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 265
+      },
+      "tick": 53
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7730,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 270
+      },
+      "tick": 54
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7725,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 275
+      },
+      "tick": 55
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7720,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 280
+      },
+      "tick": 56
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7715,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 285
+      },
+      "tick": 57
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7710,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 290
+      },
+      "tick": 58
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7705,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 295
+      },
+      "tick": 59
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7700,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 300
+      },
+      "tick": 60
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7695,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 305
+      },
+      "tick": 61
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7690,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 310
+      },
+      "tick": 62
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7685,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 315
+      },
+      "tick": 63
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7680,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 320
+      },
+      "tick": 64
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7675,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 325
+      },
+      "tick": 65
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7670,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 330
+      },
+      "tick": 66
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7665,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 335
+      },
+      "tick": 67
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7660,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 340
+      },
+      "tick": 68
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7655,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 345
+      },
+      "tick": 69
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7650,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 350
+      },
+      "tick": 70
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7645,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 355
+      },
+      "tick": 71
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7640,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 360
+      },
+      "tick": 72
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7635,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 365
+      },
+      "tick": 73
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7630,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 370
+      },
+      "tick": 74
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7625,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 375
+      },
+      "tick": 75
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7620,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 380
+      },
+      "tick": 76
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7615,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 385
+      },
+      "tick": 77
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7610,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 390
+      },
+      "tick": 78
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7605,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 395
+      },
+      "tick": 79
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7600,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 400
+      },
+      "tick": 80
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7595,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 405
+      },
+      "tick": 81
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7590,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 410
+      },
+      "tick": 82
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7585,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 415
+      },
+      "tick": 83
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7580,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 420
+      },
+      "tick": 84
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7575,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 425
+      },
+      "tick": 85
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7570,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 430
+      },
+      "tick": 86
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7565,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 435
+      },
+      "tick": 87
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7560,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 440
+      },
+      "tick": 88
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7555,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 445
+      },
+      "tick": 89
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7550,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 450
+      },
+      "tick": 90
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7545,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 455
+      },
+      "tick": 91
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7540,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 460
+      },
+      "tick": 92
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7535,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 465
+      },
+      "tick": 93
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7530,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 470
+      },
+      "tick": 94
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7525,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 475
+      },
+      "tick": 95
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7520,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 480
+      },
+      "tick": 96
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7515,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 485
+      },
+      "tick": 97
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7510,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 490
+      },
+      "tick": 98
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7505,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 495
+      },
+      "tick": 99
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7500,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 500
+      },
+      "tick": 100
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7495,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 505
+      },
+      "tick": 101
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7490,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 510
+      },
+      "tick": 102
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7485,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 515
+      },
+      "tick": 103
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7480,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 520
+      },
+      "tick": 104
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7475,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 525
+      },
+      "tick": 105
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7470,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 530
+      },
+      "tick": 106
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7465,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 535
+      },
+      "tick": 107
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7460,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 540
+      },
+      "tick": 108
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7455,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 545
+      },
+      "tick": 109
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7450,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 550
+      },
+      "tick": 110
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7445,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 555
+      },
+      "tick": 111
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7440,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 560
+      },
+      "tick": 112
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7435,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 565
+      },
+      "tick": 113
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7430,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 570
+      },
+      "tick": 114
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7425,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 575
+      },
+      "tick": 115
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7420,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 580
+      },
+      "tick": 116
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7415,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 585
+      },
+      "tick": 117
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7410,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 590
+      },
+      "tick": 118
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7405,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 595
+      },
+      "tick": 119
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7400,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 600
+      },
+      "tick": 120
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7395,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 605
+      },
+      "tick": 121
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7390,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 610
+      },
+      "tick": 122
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7385,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 615
+      },
+      "tick": 123
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7380,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 620
+      },
+      "tick": 124
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7375,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 625
+      },
+      "tick": 125
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7370,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 630
+      },
+      "tick": 126
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7365,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 635
+      },
+      "tick": 127
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7360,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 640
+      },
+      "tick": 128
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7355,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 645
+      },
+      "tick": 129
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7350,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 650
+      },
+      "tick": 130
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7345,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 655
+      },
+      "tick": 131
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7340,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 660
+      },
+      "tick": 132
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7335,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 665
+      },
+      "tick": 133
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7330,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 670
+      },
+      "tick": 134
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7325,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 675
+      },
+      "tick": 135
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7320,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 680
+      },
+      "tick": 136
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7315,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 685
+      },
+      "tick": 137
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7310,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 690
+      },
+      "tick": 138
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7305,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 695
+      },
+      "tick": 139
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7300,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 700
+      },
+      "tick": 140
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7295,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 705
+      },
+      "tick": 141
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7290,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 710
+      },
+      "tick": 142
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7285,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 715
+      },
+      "tick": 143
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7280,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 720
+      },
+      "tick": 144
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7275,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 725
+      },
+      "tick": 145
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7270,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 730
+      },
+      "tick": 146
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7265,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 735
+      },
+      "tick": 147
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7260,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 740
+      },
+      "tick": 148
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7255,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 745
+      },
+      "tick": 149
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7250,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 750
+      },
+      "tick": 150
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7245,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 755
+      },
+      "tick": 151
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7240,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 760
+      },
+      "tick": 152
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7235,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 765
+      },
+      "tick": 153
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7230,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 770
+      },
+      "tick": 154
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7225,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 775
+      },
+      "tick": 155
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7220,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 780
+      },
+      "tick": 156
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7215,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 785
+      },
+      "tick": 157
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7210,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 790
+      },
+      "tick": 158
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7205,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 795
+      },
+      "tick": 159
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7200,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 800
+      },
+      "tick": 160
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7195,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 805
+      },
+      "tick": 161
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7190,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 810
+      },
+      "tick": 162
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7185,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 815
+      },
+      "tick": 163
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7180,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 820
+      },
+      "tick": 164
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7175,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 825
+      },
+      "tick": 165
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7170,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 830
+      },
+      "tick": 166
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7165,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 835
+      },
+      "tick": 167
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7160,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 840
+      },
+      "tick": 168
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7155,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 845
+      },
+      "tick": 169
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7150,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 850
+      },
+      "tick": 170
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7145,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 855
+      },
+      "tick": 171
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7140,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 860
+      },
+      "tick": 172
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7135,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 865
+      },
+      "tick": 173
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7130,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 870
+      },
+      "tick": 174
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7125,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 875
+      },
+      "tick": 175
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7120,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 880
+      },
+      "tick": 176
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7115,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 885
+      },
+      "tick": 177
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7110,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 890
+      },
+      "tick": 178
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7105,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 895
+      },
+      "tick": 179
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7100,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 900
+      },
+      "tick": 180
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7095,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 905
+      },
+      "tick": 181
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7090,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 910
+      },
+      "tick": 182
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7085,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 915
+      },
+      "tick": 183
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7080,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 920
+      },
+      "tick": 184
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7075,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 925
+      },
+      "tick": 185
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7070,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 930
+      },
+      "tick": 186
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7065,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 935
+      },
+      "tick": 187
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7060,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 940
+      },
+      "tick": 188
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7055,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 945
+      },
+      "tick": 189
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7050,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 950
+      },
+      "tick": 190
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7045,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 955
+      },
+      "tick": 191
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7040,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 960
+      },
+      "tick": 192
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7035,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 965
+      },
+      "tick": 193
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7030,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 970
+      },
+      "tick": 194
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7025,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 975
+      },
+      "tick": 195
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7020,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 980
+      },
+      "tick": 196
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7015,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 985
+      },
+      "tick": 197
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7010,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 990
+      },
+      "tick": 198
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7005,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 995
+      },
+      "tick": 199
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 7000,
+        "input": [
+          "IronOre",
+          1
+        ],
+        "is_lit": true,
+        "output": null,
+        "smelt_progress_milli": 1000
+      },
+      "tick": 200
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 201
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 202
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 203
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 204
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 205
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 206
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 207
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 208
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 209
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 210
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 211
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 212
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 213
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 214
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 215
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 216
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 217
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 218
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 219
+    },
+    {
+      "snapshot": {
+        "fuel": null,
+        "fuel_remaining_milli": 6995,
+        "input": null,
+        "is_lit": true,
+        "output": [
+          "IronIngot",
+          1
+        ],
+        "smelt_progress_milli": 0
+      },
+      "tick": 220
+    }
+  ],
+  "name": "micro_furnace_single_smelt"
+}

@@ -423,6 +423,7 @@ fn transforms_equal(a: &Transform, b: &Transform) -> bool {
 mod tests {
     use super::*;
     use crate::protocol::MovementInput;
+    use mdminecraft_core::DimensionId;
     use std::fs;
     use tempfile::tempdir;
 
@@ -446,6 +447,7 @@ mod tests {
 
     fn make_transform(x: i32, y: i32, z: i32) -> Transform {
         Transform {
+            dimension: DimensionId::DEFAULT,
             x,
             y,
             z,

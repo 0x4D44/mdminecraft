@@ -342,7 +342,13 @@ impl EntityInterpolator {
 
 /// Interpolate between two transforms.
 fn interpolate_transform(from: &Transform, to: &Transform, alpha: f32) -> Transform {
+    let dimension = if from.dimension == to.dimension {
+        from.dimension
+    } else {
+        to.dimension
+    };
     Transform {
+        dimension,
         x: lerp_i32(from.x, to.x, alpha),
         y: lerp_i32(from.y, to.y, alpha),
         z: lerp_i32(from.z, to.z, alpha),
@@ -365,9 +371,11 @@ fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
 mod tests {
     use super::*;
     use crate::protocol::MovementInput;
+    use mdminecraft_core::DimensionId;
 
     fn make_transform(x: i32, y: i32, z: i32) -> Transform {
         Transform {
+            dimension: DimensionId::DEFAULT,
             x,
             y,
             z,

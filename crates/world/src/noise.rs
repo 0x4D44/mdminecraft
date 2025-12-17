@@ -318,7 +318,7 @@ mod tests {
             for y in 0..100 {
                 let val = gen.sample_2d(x as f64 * 0.1, y as f64 * 0.1);
                 assert!(
-                    val >= -1.0 && val <= 1.0,
+                    (-1.0..=1.0).contains(&val),
                     "Noise value {} out of range at ({}, {})",
                     val,
                     x,
@@ -414,14 +414,22 @@ mod tests {
         for x in 0..10 {
             for y in 0..10 {
                 let val = gen.sample_2d_range(x as f64 * 0.5, y as f64 * 0.5, 0.0, 100.0);
-                assert!(val >= 0.0 && val <= 100.0, "Value {} out of range [0, 100]", val);
+                assert!(
+                    (0.0..=100.0).contains(&val),
+                    "Value {} out of range [0, 100]",
+                    val
+                );
             }
         }
 
         // Test with negative range
         for x in 0..10 {
             let val = gen.sample_2d_range(x as f64 * 0.5, 0.0, -50.0, 50.0);
-            assert!(val >= -50.0 && val <= 50.0, "Value {} out of range [-50, 50]", val);
+            assert!(
+                (-50.0..=50.0).contains(&val),
+                "Value {} out of range [-50, 50]",
+                val
+            );
         }
     }
 
@@ -433,9 +441,7 @@ mod tests {
         // Test u8 mapping - should always be in [0, 255]
         for x in 0..20 {
             for y in 0..20 {
-                let val = gen.sample_2d_u8(x as f64 * 0.3, y as f64 * 0.3);
-                // u8 is always in range, but verify the method works
-                assert!(val <= 255);
+                let _val = gen.sample_2d_u8(x as f64 * 0.3, y as f64 * 0.3);
             }
         }
     }
@@ -454,7 +460,11 @@ mod tests {
             for y in 0..5 {
                 for z in 0..5 {
                     let val = gen.sample_3d(x as f64 * 0.5, y as f64 * 0.5, z as f64 * 0.5);
-                    assert!(val >= -1.0 && val <= 1.0, "3D value {} out of range", val);
+                    assert!(
+                        (-1.0..=1.0).contains(&val),
+                        "3D value {} out of range",
+                        val
+                    );
                 }
             }
         }
@@ -495,8 +505,8 @@ mod tests {
         let peaks = layered.peaks_valleys.sample_2d(10.0, 10.0);
 
         // All should be in valid range
-        assert!(continental >= -1.0 && continental <= 1.0);
-        assert!(erosion >= -1.0 && erosion <= 1.0);
-        assert!(peaks >= -1.0 && peaks <= 1.0);
+        assert!((-1.0..=1.0).contains(&continental));
+        assert!((-1.0..=1.0).contains(&erosion));
+        assert!((-1.0..=1.0).contains(&peaks));
     }
 }

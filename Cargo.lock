@@ -2071,6 +2071,7 @@ dependencies = [
  "anyhow",
  "blake3",
  "crc32fast",
+ "mdminecraft-core",
  "postcard",
  "proptest",
  "quinn",

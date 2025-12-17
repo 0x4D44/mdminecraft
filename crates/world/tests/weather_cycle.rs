@@ -64,7 +64,7 @@ fn skylight_varies_with_time_and_weather() {
     // Midnight, clear: minimum skylight.
     let midnight_clear = time.effective_skylight();
     assert!(
-        midnight_clear >= 3 && midnight_clear <= 4,
+        (3..=4).contains(&midnight_clear),
         "Midnight should have ~20% light, got {}",
         midnight_clear
     );
@@ -102,7 +102,7 @@ fn skylight_varies_with_time_and_weather() {
     let noon_modified = time.skylight_scalar() * weather.skylight_modifier();
     let noon_rain = (15.0 * noon_modified).round() as u8;
     assert!(
-        noon_rain < 15 && noon_rain >= 12,
+        (12..15).contains(&noon_rain),
         "Noon rain should have ~85% light, got {}",
         noon_rain
     );

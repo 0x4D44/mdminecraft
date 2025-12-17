@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use mdminecraft_core::SimTick;
+use mdminecraft_core::DimensionId;
 use mdminecraft_net::{
     ClientConnection, ClientEndpoint, ClientMessage, ClientPredictor, EntityInterpolator,
     InputBundle, MovementInput, ReconciliationResult, ServerMessage, ServerSnapshot, TlsMode,
@@ -46,6 +47,7 @@ impl MultiplayerClient {
             client_tick: SimTick::ZERO,
             player_entity_id: None,
             player_transform: Transform {
+                dimension: DimensionId::DEFAULT,
                 x: 0,
                 y: 0,
                 z: 0,
@@ -232,7 +234,7 @@ impl MultiplayerClient {
                             self.interpolator.set_target(update.entity_id, transform);
                         }
                         mdminecraft_net::EntityUpdateType::Transform(transform) => {
-                            if let Some(current) = self.remote_entities.get(&update.entity_id) {
+                            if self.remote_entities.contains_key(&update.entity_id) {
                                 // Set interpolation target
                                 self.interpolator
                                     .set_target(update.entity_id, transform.clone());

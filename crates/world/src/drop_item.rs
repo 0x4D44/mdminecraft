@@ -1315,6 +1315,6 @@ mod tests {
         assert!(result.is_some());
         let (item_type, count) = result.unwrap();
         assert_eq!(item_type, ItemType::LapisLazuli);
-        assert!(count >= 4 && count <= 8);
+        assert!((4..=8).contains(&count));
     }
 }

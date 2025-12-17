@@ -21,6 +21,16 @@ use thiserror::Error;
 pub struct BlockDefinition {
     /// Human-readable identifier (e.g., "stone").
     pub name: String,
+    /// Stable namespaced registry key (e.g., "mdm:stone").
+    ///
+    /// When omitted, defaults to `mdm:<name>`.
+    #[serde(default)]
+    pub key: Option<String>,
+    /// Optional tag keys applied to the block (e.g., "mdm:mineable/pickaxe").
+    ///
+    /// Tags are used by recipes, loot, and spawn rules as deterministic sets.
+    #[serde(default)]
+    pub tags: Vec<String>,
     /// Whether the block is opaque.
     #[serde(default)]
     pub opaque: bool,
@@ -49,6 +59,12 @@ pub enum AssetError {
     /// Wrap serde parsing issues.
     #[error("failed to parse asset pack: {0}")]
     Parse(#[from] serde_json::Error),
+    /// Validation error when parsing registry keys.
+    #[error("invalid registry key: {0}")]
+    InvalidRegistryKey(String),
+    /// Validation error when parsing tag keys.
+    #[error("invalid tag key: {0}")]
+    InvalidTagKey(String),
 }
 
 /// Parse a JSON string into a list of blocks.

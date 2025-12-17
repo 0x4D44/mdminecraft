@@ -1,0 +1,35 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "interior_light_1": 0,
+        "interior_light_2": 0,
+        "processed_nodes": 0,
+        "seam_light": 0,
+        "source_light": 15
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "interior_light_1": 13,
+        "interior_light_2": 12,
+        "processed_nodes": 3566,
+        "seam_light": 14,
+        "source_light": 15
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "interior_light_1": 13,
+        "interior_light_2": 12,
+        "processed_nodes": 413,
+        "seam_light": 14,
+        "source_light": 15
+      },
+      "tick": 2
+    }
+  ],
+  "name": "micro_lighting_seam_stitch"
+}

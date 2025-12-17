@@ -1,3 +1,4 @@
+use mdminecraft_core::DimensionId;
 use std::fmt;
 
 /// Chunk width (X axis) in voxels.
@@ -93,6 +94,34 @@ impl ChunkPos {
 impl fmt::Display for ChunkPos {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.x, self.z)
+    }
+}
+
+/// Dimension-scoped chunk key.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct ChunkKey {
+    pub dimension: DimensionId,
+    pub pos: ChunkPos,
+}
+
+impl ChunkKey {
+    pub const fn new(dimension: DimensionId, x: i32, z: i32) -> Self {
+        Self {
+            dimension,
+            pos: ChunkPos::new(x, z),
+        }
+    }
+
+    pub const fn from_pos(dimension: DimensionId, pos: ChunkPos) -> Self {
+        Self { dimension, pos }
+    }
+}
+
+impl fmt::Display for ChunkKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.dimension.as_str(), self.pos)
     }
 }
 
@@ -229,7 +258,7 @@ mod tests {
 
         let pos3 = LocalPos { x: 0, y: 1, z: 0 };
         // y=1 means z*x + x offset, then y layer
-        let expected = 1 * CHUNK_SIZE_Z * CHUNK_SIZE_X;
+        let expected = CHUNK_SIZE_Z * CHUNK_SIZE_X;
         assert_eq!(pos3.index(), expected);
     }
 
