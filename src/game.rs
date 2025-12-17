@@ -9,7 +9,8 @@ use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_core::{
-    item::potion_ids, EnchantmentType, ItemStack, ItemType, SimTick, ToolMaterial, ToolType,
+    item::potion_ids, DimensionId, EnchantmentType, ItemStack, ItemType, SimTick, ToolMaterial,
+    ToolType,
 };
 use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, ControlMode, DebugHud, Frustum, InputContext, InputState,
@@ -22,17 +23,22 @@ use mdminecraft_ui3d::render::{
 };
 use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
-    ArmorPiece, ArmorSlot, BlockId, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
-    EnchantingTableState, FluidPos, FluidSimulator, FurnaceState, Inventory,
-    ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PotionType,
-    Projectile, ProjectileManager, RegionStore, SimTime, StatusEffect, StatusEffects,
-    TerrainGenerator, Voxel, WeatherState, WeatherToggle, WorldMeta, WorldState, BLOCK_AIR,
+    ArmorPiece, ArmorSlot, BlockEntitiesState, BlockEntityKey, BlockId, BlockPropertiesRegistry,
+    BrewingStandState, Chunk, ChunkPos, EnchantingTableState, FluidPos, FluidSimulator,
+    FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType,
+    PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager,
+    RegionStore, SimTime, StatusEffect, StatusEffects, TerrainGenerator, Voxel, WeatherState,
+    WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR,
     BLOCK_BREWING_STAND, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE,
     BLOCK_FURNACE_LIT, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+    sync::Arc,
+};
 
 const MAX_PARTICLES: usize = 8_192;
 const PRECIPITATION_SPAWN_RATE: f32 = 480.0;
@@ -724,10 +730,11 @@ struct XPOrb {
 
 impl XPOrb {
     /// Create a new XP orb at the given position
-    fn new(pos: glam::Vec3, value: u32) -> Self {
-        // Small random upward and outward velocity for visual scatter
-        let angle = rand::random::<f32>() * std::f32::consts::TAU;
-        let speed = 0.1 + rand::random::<f32>() * 0.1;
+    fn new(pos: glam::Vec3, value: u32, seed: u64) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
+        // Small deterministic upward and outward velocity for visual scatter.
+        let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+        let speed = rng.gen_range(0.1..0.2);
         let vel = glam::Vec3::new(
             angle.cos() * speed,
             0.3, // Upward pop
@@ -922,8 +929,7 @@ pub struct GameWorld {
     particle_emitter: ParticleEmitter,
     particles: Vec<ParticleInstance>,
     weather: WeatherToggle,
-    weather_timer: f32,
-    next_weather_change: f32,
+    weather_next_change_tick: SimTick,
     precipitation_accumulator: f32,
     rng: StdRng,
     weather_blend: f32,
@@ -973,15 +979,15 @@ pub struct GameWorld {
     /// Whether the furnace UI is open
     furnace_open: bool,
     /// Currently open furnace position (if any)
-    open_furnace_pos: Option<IVec3>,
+    open_furnace_pos: Option<BlockEntityKey>,
     /// Furnace states by position
-    furnaces: HashMap<IVec3, FurnaceState>,
+    furnaces: BTreeMap<BlockEntityKey, FurnaceState>,
     /// Whether enchanting table UI is open
     enchanting_open: bool,
     /// Currently open enchanting table position (if any)
-    open_enchanting_pos: Option<IVec3>,
+    open_enchanting_pos: Option<BlockEntityKey>,
     /// Enchanting table states by position
-    enchanting_tables: HashMap<IVec3, EnchantingTableState>,
+    enchanting_tables: BTreeMap<BlockEntityKey, EnchantingTableState>,
     /// Player armor (helmet, chestplate, leggings, boots)
     player_armor: PlayerArmor,
     /// Projectile manager for arrows and other projectiles
@@ -999,11 +1005,11 @@ pub struct GameWorld {
     /// Player status effects (potions, etc.)
     status_effects: StatusEffects,
     /// Brewing stand states by position
-    brewing_stands: HashMap<IVec3, BrewingStandState>,
+    brewing_stands: BTreeMap<BlockEntityKey, BrewingStandState>,
     /// Whether brewing stand UI is open
     brewing_open: bool,
     /// Currently open brewing stand position (if any)
-    open_brewing_pos: Option<IVec3>,
+    open_brewing_pos: Option<BlockEntityKey>,
 }
 
 impl GameWorld {
@@ -1013,6 +1019,15 @@ impl GameWorld {
         let forward = glam::Vec3::new(yaw.cos(), 0.0, yaw.sin()).normalize_or_zero();
         let right = glam::Vec3::new(-forward.z, 0.0, forward.x).normalize_or_zero();
         (forward, right)
+    }
+
+    fn overworld_block_entity_key(block_pos: IVec3) -> BlockEntityKey {
+        BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: block_pos.x,
+            y: block_pos.y,
+            z: block_pos.z,
+        }
     }
     /// Create a new game world
     pub fn new(
@@ -1119,24 +1134,56 @@ impl GameWorld {
 
         let chunk_manager = ChunkManager::new();
         let chunks = HashMap::new();
-        let mut rng = StdRng::seed_from_u64(world_seed ^ 0x5eed_a11c);
+        let rng = StdRng::seed_from_u64(world_seed ^ 0x5eed_a11c);
 
         let mut sim_tick = SimTick::ZERO;
         let mut sim_time = SimTime::default();
         let mut weather = WeatherToggle::new();
-        let mut weather_timer = 0.0f32;
-        let mut next_weather_change = rng.gen_range(45.0..120.0);
-
-        if let Some(state) = loaded_state {
+        let mut loaded_player: Option<PlayerSave> = None;
+        let mut loaded_entities = WorldEntitiesState::default();
+        let mut loaded_block_entities = BlockEntitiesState::default();
+        let weather_next_change_tick = if let Some(state) = loaded_state {
             sim_tick = state.tick;
             sim_time = state.sim_time;
             weather = state.weather;
-            weather_timer = state.weather_timer_seconds;
-            next_weather_change = state.next_weather_change_seconds;
+            loaded_player = state.player;
+            loaded_entities = state.entities;
+            loaded_block_entities = state.block_entities;
+            state.weather_next_change_tick
+        } else {
+            // Deterministic initial schedule (based on seed + tick).
+            let delay_ticks = Self::weather_delay_ticks(
+                world_seed,
+                sim_tick,
+                900..2400, // 45..120 seconds at 20 TPS
+                0xC0FFEE_u64,
+            );
+            sim_tick.advance(delay_ticks)
+        };
+
+        if let Some(player) = &loaded_player {
+            renderer.camera_mut().position = glam::Vec3::new(
+                player.transform.x as f32,
+                player.transform.y as f32,
+                player.transform.z as f32,
+            );
+            renderer.camera_mut().yaw = player.transform.yaw;
+            renderer.camera_mut().pitch = player.transform.pitch;
+        } else {
+            renderer.camera_mut().position = glam::Vec3::new(0.0, 100.0, 0.0);
+            renderer.camera_mut().yaw = 0.0;
+            renderer.camera_mut().pitch = -0.3;
         }
 
         let mob_spawner = MobSpawner::new(world_seed);
-        let mobs = Vec::new();
+        let WorldEntitiesState {
+            mobs,
+            dropped_items,
+            projectiles,
+        } = loaded_entities;
+        let furnaces = loaded_block_entities.furnaces;
+        let enchanting_tables = loaded_block_entities.enchanting_tables;
+        let brewing_stands = loaded_block_entities.brewing_stands;
 
         // Setup state
         let debug_hud = DebugHud::new(); // Zeroed by default
@@ -1175,8 +1222,7 @@ impl GameWorld {
             particle_emitter: ParticleEmitter::new(),
             particles: Vec::new(),
             weather,
-            weather_timer,
-            next_weather_change,
+            weather_next_change_tick,
             precipitation_accumulator: 0.0,
             rng,
             weather_blend: 0.0,
@@ -1189,7 +1235,7 @@ impl GameWorld {
             billboard_renderer,
             #[cfg(feature = "ui3d_billboards")]
             billboard_emitter: BillboardEmitter::default(),
-            item_manager: ItemManager::new(),
+            item_manager: dropped_items,
             inventory_open: false,
             inventory: Inventory::new(),
             mob_spawner,
@@ -1201,19 +1247,19 @@ impl GameWorld {
             crafting_grid: Default::default(),
             furnace_open: false,
             open_furnace_pos: None,
-            furnaces: HashMap::new(),
+            furnaces,
             enchanting_open: false,
             open_enchanting_pos: None,
-            enchanting_tables: HashMap::new(),
+            enchanting_tables,
             player_armor: PlayerArmor::new(),
-            projectiles: ProjectileManager::new(),
+            projectiles,
             bow_charge: 0.0,
             bow_drawing: false,
             attack_cooldown: 0.0,
             player_xp: PlayerXP::new(),
             xp_orbs: Vec::new(),
             status_effects: StatusEffects::new(),
-            brewing_stands: HashMap::new(),
+            brewing_stands,
             brewing_open: false,
             open_brewing_pos: None,
 
@@ -1224,77 +1270,91 @@ impl GameWorld {
             render_distance,
         };
 
-        world.time_of_day.set_time(world.sim_time.time_of_day() as f32);
+        world
+            .time_of_day
+            .set_time(world.sim_time.time_of_day() as f32);
 
         // Initial chunk load (blocking, load all initial chunks)
         world.update_chunks(usize::MAX);
 
-        // Spawn passive mobs in newly generated chunks
-        for (pos, chunk) in &world.chunks {
-            let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
-            let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
-            let biome = world
-                .terrain_generator
-                .biome_assigner()
-                .get_biome(chunk_center_x, chunk_center_z);
+        let has_loaded_player = loaded_player.is_some();
+        let spawn_test_mobs = std::env::var("MDM_DEBUG_SPAWN_TEST_MOBS")
+            .ok()
+            .is_some_and(|value| value == "1");
 
-            let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
-            for (local_z, row) in surface_heights.iter_mut().enumerate() {
-                for (local_x, height) in row.iter_mut().enumerate() {
-                    for y in (0..CHUNK_SIZE_Y).rev() {
-                        let voxel = chunk.voxel(local_x, y, local_z);
-                        if voxel.id != BLOCK_AIR {
-                            *height = y as i32;
-                            break;
+        // Spawn passive mobs only for brand-new worlds.
+        if !has_loaded_player && world.mobs.is_empty() {
+            let mut positions: Vec<_> = world.chunks.keys().copied().collect();
+            positions.sort();
+
+            for pos in positions {
+                let Some(chunk) = world.chunks.get(&pos) else {
+                    continue;
+                };
+                let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
+                let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
+                let biome = world
+                    .terrain_generator
+                    .biome_assigner()
+                    .get_biome(chunk_center_x, chunk_center_z);
+
+                let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
+                for (local_z, row) in surface_heights.iter_mut().enumerate() {
+                    for (local_x, height) in row.iter_mut().enumerate() {
+                        for y in (0..CHUNK_SIZE_Y).rev() {
+                            let voxel = chunk.voxel(local_x, y, local_z);
+                            if voxel.id != BLOCK_AIR {
+                                *height = y as i32;
+                                break;
+                            }
                         }
                     }
                 }
+
+                let mut new_mobs =
+                    world
+                        .mob_spawner
+                        .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                world.mobs.append(&mut new_mobs);
             }
-
-            let mut new_mobs = world
-                .mob_spawner
-                .generate_spawns(pos.x, pos.z, biome, &surface_heights);
-            world.mobs.append(&mut new_mobs);
         }
 
-        // Determine spawn point
-        let spawn_feet = Self::determine_spawn_point(&world.chunks, &world.registry)
-            .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
-        world.spawn_point = spawn_feet;
+        if let Some(save) = loaded_player {
+            world.apply_player_save(save);
+        } else {
+            // Determine spawn point
+            let spawn_feet = Self::determine_spawn_point(&world.chunks, &world.registry)
+                .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
+            world.spawn_point = spawn_feet;
 
-        // Force spawn test mobs near player for visibility testing
-        let test_mob_types = [
-            MobType::Pig,
-            MobType::Cow,
-            MobType::Sheep,
-            MobType::Chicken,
-            MobType::Villager,
-        ];
-        for (i, mob_type) in test_mob_types.iter().enumerate() {
-            let angle = (i as f32) * std::f32::consts::TAU / test_mob_types.len() as f32;
-            let distance = 8.0; // 8 blocks away from player
-            let mob_x = spawn_feet.x as f64 + (angle.cos() * distance) as f64;
-            let mob_z = spawn_feet.z as f64 + (angle.sin() * distance) as f64;
-            let mob_y = spawn_feet.y as f64 + 1.0; // Spawn at player's ground level + 1
+            // Setup camera
+            world.renderer.camera_mut().position =
+                spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
+            world.renderer.camera_mut().yaw = 0.0;
+            world.renderer.camera_mut().pitch = -0.3;
+            world.player_physics.last_ground_y = spawn_feet.y;
 
-            let mob = Mob::new(mob_x, mob_y, mob_z, *mob_type);
-            tracing::info!(
-                mob_type = ?mob_type,
-                x = mob_x,
-                y = mob_y,
-                z = mob_z,
-                "Force spawned test mob near player"
-            );
-            world.mobs.push(mob);
+            // Optional debug mob spawn for visibility testing.
+            if spawn_test_mobs {
+                let test_mob_types = [
+                    MobType::Pig,
+                    MobType::Cow,
+                    MobType::Sheep,
+                    MobType::Chicken,
+                    MobType::Villager,
+                ];
+                for (i, mob_type) in test_mob_types.iter().enumerate() {
+                    let angle = (i as f32) * std::f32::consts::TAU / test_mob_types.len() as f32;
+                    let distance = 8.0; // 8 blocks away from player
+                    let mob_x = spawn_feet.x as f64 + (angle.cos() * distance) as f64;
+                    let mob_z = spawn_feet.z as f64 + (angle.sin() * distance) as f64;
+                    let mob_y = spawn_feet.y as f64 + 1.0; // Spawn at player's ground level + 1
+
+                    let mob = Mob::new(mob_x, mob_y, mob_z, *mob_type);
+                    world.mobs.push(mob);
+                }
+            }
         }
-        tracing::info!(total_mobs = world.mobs.len(), "Total mobs after forced spawns");
-
-        // Setup camera
-        world.renderer.camera_mut().position =
-            spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
-        world.renderer.camera_mut().yaw = 0.0;
-        world.renderer.camera_mut().pitch = -0.3;
-        world.player_physics.last_ground_y = spawn_feet.y;
 
         let _ = world.input.enter_gameplay(&world.window);
 
@@ -1405,7 +1465,8 @@ impl GameWorld {
 
         // Move along X axis
         if velocity.x != 0.0 {
-            let test_aabb = current_aabb.offset(glam::Vec3::new(velocity.x, 0.0, 0.0) + result_offset);
+            let test_aabb =
+                current_aabb.offset(glam::Vec3::new(velocity.x, 0.0, 0.0) + result_offset);
             if !Self::aabb_collides_with_world(chunks, registry, &test_aabb) {
                 result_offset.x += velocity.x;
             } else {
@@ -1415,7 +1476,8 @@ impl GameWorld {
 
         // Move along Y axis
         if velocity.y != 0.0 {
-            let test_aabb = current_aabb.offset(glam::Vec3::new(0.0, velocity.y, 0.0) + result_offset);
+            let test_aabb =
+                current_aabb.offset(glam::Vec3::new(0.0, velocity.y, 0.0) + result_offset);
             if !Self::aabb_collides_with_world(chunks, registry, &test_aabb) {
                 result_offset.y += velocity.y;
             } else {
@@ -1425,7 +1487,8 @@ impl GameWorld {
 
         // Move along Z axis
         if velocity.z != 0.0 {
-            let test_aabb = current_aabb.offset(glam::Vec3::new(0.0, 0.0, velocity.z) + result_offset);
+            let test_aabb =
+                current_aabb.offset(glam::Vec3::new(0.0, 0.0, velocity.z) + result_offset);
             if !Self::aabb_collides_with_world(chunks, registry, &test_aabb) {
                 result_offset.z += velocity.z;
             } else {
@@ -1477,6 +1540,100 @@ impl GameWorld {
         })
     }
 
+    fn player_save(&self) -> PlayerSave {
+        let camera = self.renderer.camera();
+        PlayerSave {
+            transform: PlayerTransform {
+                dimension: DimensionId::DEFAULT,
+                x: camera.position.x as f64,
+                y: camera.position.y as f64,
+                z: camera.position.z as f64,
+                yaw: camera.yaw,
+                pitch: camera.pitch,
+            },
+            spawn_point: WorldPoint {
+                dimension: DimensionId::DEFAULT,
+                x: self.spawn_point.x as f64,
+                y: self.spawn_point.y as f64,
+                z: self.spawn_point.z as f64,
+            },
+            hotbar: self.hotbar.slots.clone(),
+            hotbar_selected: self.hotbar.selected,
+            inventory: self.inventory.clone(),
+            health: self.player_health.current,
+            hunger: self.player_health.hunger,
+            xp_level: self.player_xp.level,
+            xp_current: self.player_xp.current,
+            xp_next_level_xp: self.player_xp.next_level_xp,
+            armor: self.player_armor.clone(),
+            status_effects: self.status_effects.clone(),
+        }
+    }
+
+    fn apply_player_save(&mut self, save: PlayerSave) {
+        self.spawn_point = glam::Vec3::new(
+            save.spawn_point.x as f32,
+            save.spawn_point.y as f32,
+            save.spawn_point.z as f32,
+        );
+
+        self.hotbar.slots = save.hotbar;
+        self.hotbar.selected = save.hotbar_selected.min(8);
+        self.inventory = save.inventory;
+
+        self.player_health.current = save.health.clamp(0.0, self.player_health.max);
+        self.player_health.hunger = save.hunger.clamp(0.0, self.player_health.max_hunger);
+        self.player_health.time_since_damage = 0.0;
+        self.player_health.invulnerability_time = 0.0;
+        self.player_health.hunger_timer = 0.0;
+        self.player_health.starvation_timer = 0.0;
+        self.player_health.is_active = false;
+
+        if self.player_health.is_dead() {
+            self.player_health.reset();
+        }
+
+        self.player_xp.level = save.xp_level;
+        self.player_xp.current = save.xp_current;
+        self.player_xp.next_level_xp = save.xp_next_level_xp;
+
+        self.player_armor = save.armor;
+        self.status_effects = save.status_effects;
+
+        self.renderer.camera_mut().position = glam::Vec3::new(
+            save.transform.x as f32,
+            save.transform.y as f32,
+            save.transform.z as f32,
+        );
+        self.renderer.camera_mut().yaw = save.transform.yaw;
+        self.renderer.camera_mut().pitch = save.transform.pitch;
+
+        self.player_physics.velocity = glam::Vec3::ZERO;
+        self.player_physics.on_ground = false;
+        self.player_physics.last_ground_y = self.spawn_point.y;
+
+        self.player_state = PlayerState::Alive;
+        self.death_message.clear();
+        self.respawn_requested = false;
+        self.menu_requested = false;
+    }
+
+    fn world_entities_state(&self) -> WorldEntitiesState {
+        WorldEntitiesState {
+            mobs: self.mobs.clone(),
+            dropped_items: self.item_manager.clone(),
+            projectiles: self.projectiles.clone(),
+        }
+    }
+
+    fn block_entities_state(&self) -> BlockEntitiesState {
+        BlockEntitiesState {
+            furnaces: self.furnaces.clone(),
+            enchanting_tables: self.enchanting_tables.clone(),
+            brewing_stands: self.brewing_stands.clone(),
+        }
+    }
+
     fn persist_world(&mut self) {
         self.persist_loaded_chunks();
 
@@ -1491,8 +1648,10 @@ impl GameWorld {
             tick: self.sim_tick,
             sim_time: self.sim_time,
             weather: self.weather,
-            weather_timer_seconds: self.weather_timer,
-            next_weather_change_seconds: self.next_weather_change,
+            weather_next_change_tick: self.weather_next_change_tick,
+            player: Some(self.player_save()),
+            entities: self.world_entities_state(),
+            block_entities: self.block_entities_state(),
         };
         if let Err(err) = self.region_store.save_world_state(&state) {
             tracing::warn!(?err, "Failed to save world state");
@@ -1609,8 +1768,8 @@ impl GameWorld {
             }
             PhysicalKey::Code(KeyCode::BracketLeft) => {
                 // Increase ticks per day to slow down the day/night cycle.
-                self.sim_time.ticks_per_day = (self.sim_time.ticks_per_day.saturating_mul(3) / 2)
-                    .min(240_000);
+                self.sim_time.ticks_per_day =
+                    (self.sim_time.ticks_per_day.saturating_mul(3) / 2).min(240_000);
                 tracing::info!(
                     ticks_per_day = self.sim_time.ticks_per_day,
                     "Simulation day length increased"
@@ -1627,8 +1786,13 @@ impl GameWorld {
             }
             PhysicalKey::Code(KeyCode::KeyO) => {
                 self.weather.toggle();
-                self.weather_timer = 0.0;
-                self.next_weather_change = self.rng.gen_range(45.0..120.0);
+                let delay_ticks = Self::weather_delay_ticks(
+                    self.world_seed,
+                    self.sim_tick,
+                    900..2400, // 45..120 seconds at 20 TPS
+                    0xB16B_00B5_u64,
+                );
+                self.weather_next_change_tick = self.sim_tick.advance(delay_ticks);
                 tracing::info!(state = ?self.weather.state, "Weather toggled");
             }
             PhysicalKey::Code(KeyCode::KeyE) => {
@@ -1705,31 +1869,50 @@ impl GameWorld {
         }
     }
 
-    fn update_weather(&mut self, dt: f32) {
-        self.weather_timer += dt;
-        if self.weather_timer >= self.next_weather_change {
-            self.weather_timer = 0.0;
-            self.next_weather_change = self.rng.gen_range(60.0..150.0);
+    fn weather_delay_ticks(
+        world_seed: u64,
+        tick: SimTick,
+        range: std::ops::Range<u64>,
+        salt: u64,
+    ) -> u64 {
+        let seed = world_seed ^ tick.0.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt;
+        let mut rng = StdRng::seed_from_u64(seed);
+        rng.gen_range(range)
+    }
 
-            let target_state = if self.weather.is_precipitating() {
-                if self.rng.gen_bool(0.7) {
-                    WeatherState::Clear
-                } else {
-                    WeatherState::Precipitation
-                }
-            } else if self.rng.gen_bool(0.55) {
-                WeatherState::Precipitation
-            } else {
-                WeatherState::Clear
-            };
-
-            if target_state != self.weather.state {
-                let previous = self.weather.state;
-                self.weather.set_state(target_state);
-                tracing::info!(?previous, ?target_state, "Weather changed");
-            }
+    fn tick_weather(&mut self) {
+        if self.sim_tick < self.weather_next_change_tick {
+            return;
         }
 
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            ^ 0x0057_4541_5448_4552_u64;
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let delay_ticks = rng.gen_range(1200..3000); // 60..150 seconds at 20 TPS
+        self.weather_next_change_tick = self.sim_tick.advance(delay_ticks);
+
+        let target_state = if self.weather.is_precipitating() {
+            if rng.gen_bool(0.7) {
+                WeatherState::Clear
+            } else {
+                WeatherState::Precipitation
+            }
+        } else if rng.gen_bool(0.55) {
+            WeatherState::Precipitation
+        } else {
+            WeatherState::Clear
+        };
+
+        if target_state != self.weather.state {
+            let previous = self.weather.state;
+            self.weather.set_state(target_state);
+            tracing::info!(?previous, ?target_state, "Weather changed");
+        }
+    }
+
+    fn update_weather(&mut self, dt: f32) {
         if self.weather.is_precipitating() {
             self.spawn_precipitation_particles(dt);
         } else {
@@ -1949,19 +2132,18 @@ impl GameWorld {
 
         // Render mobs
         for mob in &self.mobs {
-            if mob.dead { continue; }
-            
+            if mob.dead {
+                continue;
+            }
+
             let height = match mob.mob_type {
                 MobType::Chicken | MobType::Spider => 0.5,
                 _ => 1.8,
             };
-            
-            let center_pos = glam::Vec3::new(
-                mob.x as f32,
-                mob.y as f32 + height * 0.5,
-                mob.z as f32
-            );
-            
+
+            let center_pos =
+                glam::Vec3::new(mob.x as f32, mob.y as f32 + height * 0.5, mob.z as f32);
+
             let color = match mob.mob_type {
                 MobType::Zombie => [0.0, 0.5, 0.0, 1.0],
                 MobType::Skeleton => [0.8, 0.8, 0.8, 1.0],
@@ -1972,7 +2154,7 @@ impl GameWorld {
                 MobType::Sheep => [0.9, 0.9, 0.9, 1.0],
                 MobType::Chicken => [1.0, 1.0, 1.0, 1.0],
             };
-            
+
             let size = match mob.mob_type {
                 MobType::Chicken => [0.5, 0.5],
                 MobType::Spider => [1.0, 0.5],
@@ -1985,7 +2167,7 @@ impl GameWorld {
                     position: center_pos.to_array(),
                     size,
                     color,
-                    flags: 0, 
+                    flags: 0,
                     ..Default::default()
                 },
             );
@@ -2126,7 +2308,9 @@ impl GameWorld {
             }
 
             // Check if standing on ground (for jump detection)
-            let feet_check_aabb = physics.get_aabb(camera_pos).offset(glam::Vec3::new(0.0, -0.1, 0.0));
+            let feet_check_aabb = physics
+                .get_aabb(camera_pos)
+                .offset(glam::Vec3::new(0.0, -0.1, 0.0));
             if Self::aabb_collides_with_world(&self.chunks, &self.registry, &feet_check_aabb) {
                 physics.on_ground = true;
                 physics.last_ground_y = physics.get_aabb(camera_pos).min.y;
@@ -2181,12 +2365,8 @@ impl GameWorld {
 
             // Apply collision detection for fly mode (like original Minecraft)
             let current_aabb = self.player_physics.get_aabb(position);
-            let (offset, _) = Self::move_with_collision(
-                &self.chunks,
-                &self.registry,
-                &current_aabb,
-                velocity,
-            );
+            let (offset, _) =
+                Self::move_with_collision(&self.chunks, &self.registry, &current_aabb, velocity);
 
             self.renderer.camera_mut().position = position + offset;
         }
@@ -2201,6 +2381,7 @@ impl GameWorld {
         if !self.sim_time_paused {
             self.sim_time.advance();
         }
+        self.tick_weather();
         let dt = TICK_RATE as f32;
 
         // Update dropped items and handle pickup
@@ -2337,8 +2518,11 @@ impl GameWorld {
             if let Some(chunk) = self.chunks.get(&pos) {
                 let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
                 let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
-                let biome = self.terrain_generator.biome_assigner().get_biome(chunk_center_x, chunk_center_z);
-                
+                let biome = self
+                    .terrain_generator
+                    .biome_assigner()
+                    .get_biome(chunk_center_x, chunk_center_z);
+
                 let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
                 for (local_z, row) in surface_heights.iter_mut().enumerate() {
                     for (local_x, height) in row.iter_mut().enumerate() {
@@ -2351,8 +2535,10 @@ impl GameWorld {
                         }
                     }
                 }
-                
-                let mut new_mobs = self.mob_spawner.generate_spawns(pos.x, pos.z, biome, &surface_heights);
+
+                let mut new_mobs =
+                    self.mob_spawner
+                        .generate_spawns(pos.x, pos.z, biome, &surface_heights);
                 if !new_mobs.is_empty() {
                     tracing::info!(
                         chunk_x = pos.x,
@@ -3684,9 +3870,14 @@ impl GameWorld {
         }
 
         // Spawn XP orbs from killed mobs
-        for (x, y, z, xp_value) in xp_orb_spawns {
+        for (spawn_index, (x, y, z, xp_value)) in xp_orb_spawns.into_iter().enumerate() {
             let pos = glam::Vec3::new(x as f32, y as f32, z as f32);
-            self.xp_orbs.push(XPOrb::new(pos, xp_value));
+            let seed = self.world_seed
+                ^ self.sim_tick.0.wrapping_mul(0xA24B_AED4_963E_E407)
+                ^ (spawn_index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                ^ (xp_value as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                ^ 0x5850_5F4F_5242_u64;
+            self.xp_orbs.push(XPOrb::new(pos, xp_value, seed));
         }
 
         // Spawn hostile mobs at night (every ~100 frames, max 10 hostile mobs)
@@ -4287,12 +4478,13 @@ impl GameWorld {
 
     /// Open furnace UI at the given position
     fn open_furnace(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
         self.furnace_open = true;
-        self.open_furnace_pos = Some(block_pos);
+        self.open_furnace_pos = Some(key);
         self.inventory_open = false;
         self.crafting_open = false;
         // Create furnace state if it doesn't exist
-        self.furnaces.entry(block_pos).or_default();
+        self.furnaces.entry(key).or_default();
         // Release cursor for UI interaction
         let _ = self.input.enter_ui_overlay(&self.window);
         tracing::info!("Furnace opened at {:?}", block_pos);
@@ -4309,15 +4501,16 @@ impl GameWorld {
 
     /// Open enchanting table UI at the given position
     fn open_enchanting_table(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
         self.enchanting_open = true;
-        self.open_enchanting_pos = Some(block_pos);
+        self.open_enchanting_pos = Some(key);
         self.inventory_open = false;
         self.crafting_open = false;
         self.furnace_open = false;
         // Count nearby bookshelves first (before borrowing enchanting_tables)
         let bookshelf_count = self.count_nearby_bookshelves(block_pos);
         // Create enchanting table state if it doesn't exist and update bookshelf count
-        let table = self.enchanting_tables.entry(block_pos).or_default();
+        let table = self.enchanting_tables.entry(key).or_default();
         table.set_bookshelf_count(bookshelf_count);
         // Release cursor for UI interaction
         let _ = self.input.enter_ui_overlay(&self.window);
@@ -4339,14 +4532,15 @@ impl GameWorld {
 
     /// Open brewing stand UI at the given position
     fn open_brewing_stand(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
         self.brewing_open = true;
-        self.open_brewing_pos = Some(block_pos);
+        self.open_brewing_pos = Some(key);
         self.inventory_open = false;
         self.crafting_open = false;
         self.furnace_open = false;
         self.enchanting_open = false;
         // Create brewing stand state if it doesn't exist
-        self.brewing_stands.entry(block_pos).or_default();
+        self.brewing_stands.entry(key).or_default();
         // Release cursor for UI interaction
         let _ = self.input.enter_ui_overlay(&self.window);
         tracing::info!("Brewing stand opened at {:?}", block_pos);
@@ -4538,11 +4732,14 @@ impl GameWorld {
     fn update_furnaces(&mut self, dt: f32) {
         let mut lit_changes: Vec<(IVec3, bool)> = Vec::new();
 
-        for (pos, furnace) in &mut self.furnaces {
+        for (key, furnace) in &mut self.furnaces {
+            if key.dimension != DimensionId::Overworld {
+                continue;
+            }
             let was_lit = furnace.is_lit;
             furnace.update(dt);
             if was_lit != furnace.is_lit {
-                lit_changes.push((*pos, furnace.is_lit));
+                lit_changes.push((IVec3::new(key.x, key.y, key.z), furnace.is_lit));
             }
         }
 

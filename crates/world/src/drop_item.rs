@@ -481,7 +481,7 @@ impl ItemType {
 }
 
 /// A dropped item entity in the world.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DroppedItem {
     /// Unique ID for this dropped item.
     pub id: u64,
@@ -624,6 +624,7 @@ impl DroppedItem {
 
 /// Manages all dropped items in the world.
 /// Uses BTreeMap for deterministic iteration order (critical for multiplayer sync).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ItemManager {
     items: BTreeMap<u64, DroppedItem>,
     next_id: u64,
@@ -1088,7 +1089,8 @@ mod tests {
         // Silk touch should drop the block itself instead of the normal drop
         assert_eq!(ItemType::silk_touch_drop(1), Some((ItemType::Stone, 1))); // Stone instead of cobblestone
         assert_eq!(ItemType::silk_touch_drop(3), Some((ItemType::Grass, 1))); // Grass instead of dirt
-        assert_eq!(ItemType::silk_touch_drop(14), Some((ItemType::CoalOre, 1))); // Coal ore instead of coal
+        assert_eq!(ItemType::silk_touch_drop(14), Some((ItemType::CoalOre, 1)));
+        // Coal ore instead of coal
     }
 
     #[test]
@@ -1138,20 +1140,62 @@ mod tests {
     fn test_to_potion_type() {
         use crate::PotionType;
 
-        assert_eq!(ItemType::PotionAwkward.to_potion_type(), Some(PotionType::Awkward));
-        assert_eq!(ItemType::PotionNightVision.to_potion_type(), Some(PotionType::NightVision));
-        assert_eq!(ItemType::PotionInvisibility.to_potion_type(), Some(PotionType::Invisibility));
-        assert_eq!(ItemType::PotionLeaping.to_potion_type(), Some(PotionType::Leaping));
-        assert_eq!(ItemType::PotionFireResistance.to_potion_type(), Some(PotionType::FireResistance));
-        assert_eq!(ItemType::PotionSwiftness.to_potion_type(), Some(PotionType::Swiftness));
-        assert_eq!(ItemType::PotionSlowness.to_potion_type(), Some(PotionType::Slowness));
-        assert_eq!(ItemType::PotionWaterBreathing.to_potion_type(), Some(PotionType::WaterBreathing));
-        assert_eq!(ItemType::PotionHealing.to_potion_type(), Some(PotionType::Healing));
-        assert_eq!(ItemType::PotionHarming.to_potion_type(), Some(PotionType::Harming));
-        assert_eq!(ItemType::PotionPoison.to_potion_type(), Some(PotionType::Poison));
-        assert_eq!(ItemType::PotionRegeneration.to_potion_type(), Some(PotionType::Regeneration));
-        assert_eq!(ItemType::PotionStrength.to_potion_type(), Some(PotionType::Strength));
-        assert_eq!(ItemType::PotionWeakness.to_potion_type(), Some(PotionType::Weakness));
+        assert_eq!(
+            ItemType::PotionAwkward.to_potion_type(),
+            Some(PotionType::Awkward)
+        );
+        assert_eq!(
+            ItemType::PotionNightVision.to_potion_type(),
+            Some(PotionType::NightVision)
+        );
+        assert_eq!(
+            ItemType::PotionInvisibility.to_potion_type(),
+            Some(PotionType::Invisibility)
+        );
+        assert_eq!(
+            ItemType::PotionLeaping.to_potion_type(),
+            Some(PotionType::Leaping)
+        );
+        assert_eq!(
+            ItemType::PotionFireResistance.to_potion_type(),
+            Some(PotionType::FireResistance)
+        );
+        assert_eq!(
+            ItemType::PotionSwiftness.to_potion_type(),
+            Some(PotionType::Swiftness)
+        );
+        assert_eq!(
+            ItemType::PotionSlowness.to_potion_type(),
+            Some(PotionType::Slowness)
+        );
+        assert_eq!(
+            ItemType::PotionWaterBreathing.to_potion_type(),
+            Some(PotionType::WaterBreathing)
+        );
+        assert_eq!(
+            ItemType::PotionHealing.to_potion_type(),
+            Some(PotionType::Healing)
+        );
+        assert_eq!(
+            ItemType::PotionHarming.to_potion_type(),
+            Some(PotionType::Harming)
+        );
+        assert_eq!(
+            ItemType::PotionPoison.to_potion_type(),
+            Some(PotionType::Poison)
+        );
+        assert_eq!(
+            ItemType::PotionRegeneration.to_potion_type(),
+            Some(PotionType::Regeneration)
+        );
+        assert_eq!(
+            ItemType::PotionStrength.to_potion_type(),
+            Some(PotionType::Strength)
+        );
+        assert_eq!(
+            ItemType::PotionWeakness.to_potion_type(),
+            Some(PotionType::Weakness)
+        );
 
         // Non-potion items should return None
         assert_eq!(ItemType::Apple.to_potion_type(), None);
@@ -1162,20 +1206,62 @@ mod tests {
     fn test_from_potion_type() {
         use crate::PotionType;
 
-        assert_eq!(ItemType::from_potion_type(PotionType::Awkward), Some(ItemType::PotionAwkward));
-        assert_eq!(ItemType::from_potion_type(PotionType::NightVision), Some(ItemType::PotionNightVision));
-        assert_eq!(ItemType::from_potion_type(PotionType::Invisibility), Some(ItemType::PotionInvisibility));
-        assert_eq!(ItemType::from_potion_type(PotionType::Leaping), Some(ItemType::PotionLeaping));
-        assert_eq!(ItemType::from_potion_type(PotionType::FireResistance), Some(ItemType::PotionFireResistance));
-        assert_eq!(ItemType::from_potion_type(PotionType::Swiftness), Some(ItemType::PotionSwiftness));
-        assert_eq!(ItemType::from_potion_type(PotionType::Slowness), Some(ItemType::PotionSlowness));
-        assert_eq!(ItemType::from_potion_type(PotionType::WaterBreathing), Some(ItemType::PotionWaterBreathing));
-        assert_eq!(ItemType::from_potion_type(PotionType::Healing), Some(ItemType::PotionHealing));
-        assert_eq!(ItemType::from_potion_type(PotionType::Harming), Some(ItemType::PotionHarming));
-        assert_eq!(ItemType::from_potion_type(PotionType::Poison), Some(ItemType::PotionPoison));
-        assert_eq!(ItemType::from_potion_type(PotionType::Regeneration), Some(ItemType::PotionRegeneration));
-        assert_eq!(ItemType::from_potion_type(PotionType::Strength), Some(ItemType::PotionStrength));
-        assert_eq!(ItemType::from_potion_type(PotionType::Weakness), Some(ItemType::PotionWeakness));
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Awkward),
+            Some(ItemType::PotionAwkward)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::NightVision),
+            Some(ItemType::PotionNightVision)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Invisibility),
+            Some(ItemType::PotionInvisibility)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Leaping),
+            Some(ItemType::PotionLeaping)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::FireResistance),
+            Some(ItemType::PotionFireResistance)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Swiftness),
+            Some(ItemType::PotionSwiftness)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Slowness),
+            Some(ItemType::PotionSlowness)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::WaterBreathing),
+            Some(ItemType::PotionWaterBreathing)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Healing),
+            Some(ItemType::PotionHealing)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Harming),
+            Some(ItemType::PotionHarming)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Poison),
+            Some(ItemType::PotionPoison)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Regeneration),
+            Some(ItemType::PotionRegeneration)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Strength),
+            Some(ItemType::PotionStrength)
+        );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::Weakness),
+            Some(ItemType::PotionWeakness)
+        );
 
         // Base potions have no item type
         assert_eq!(ItemType::from_potion_type(PotionType::Water), None);
@@ -1249,8 +1335,9 @@ mod tests {
         let item2 = DroppedItem::new(100, 0.0, 0.0, 0.0, ItemType::Stone, 1);
 
         // Velocities should differ (based on ID modulo)
-        assert!((item1.vel_x - item2.vel_x).abs() > 0.001 ||
-                (item1.vel_z - item2.vel_z).abs() > 0.001);
+        assert!(
+            (item1.vel_x - item2.vel_x).abs() > 0.001 || (item1.vel_z - item2.vel_z).abs() > 0.001
+        );
     }
 
     #[test]
