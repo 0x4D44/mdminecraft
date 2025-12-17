@@ -4,12 +4,17 @@
 //! Each region file uses zstd compression and CRC32 validation.
 
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_VOLUME};
-use crate::{SimTime, WeatherToggle};
+use crate::{
+    BrewingStandState, EnchantingTableState, FurnaceState, Inventory, ItemManager, Mob,
+    PlayerArmor, ProjectileManager, SimTime, StatusEffects, WeatherToggle,
+};
 use anyhow::{Context, Result};
 use crc32fast::Hasher;
 use mdminecraft_core::DimensionId;
+use mdminecraft_core::ItemStack as CoreItemStack;
 use mdminecraft_core::SimTick;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -32,7 +37,7 @@ const WORLD_META_VERSION: u16 = 1;
 const WORLD_STATE_MAGIC: u32 = 0x4D445753;
 
 /// Current world state file format version.
-const WORLD_STATE_VERSION: u16 = 1;
+const WORLD_STATE_VERSION: u16 = 2;
 
 /// Region size in chunks (32x32 chunks per region).
 const REGION_SIZE: i32 = 32;
@@ -104,7 +109,7 @@ pub struct WorldMeta {
 /// Chunk voxel data is stored separately in region files; this captures
 /// cross-chunk/global simulation state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WorldState {
+struct WorldStateV1 {
     /// Current simulation tick.
     pub tick: SimTick,
     /// Simulation day/night cycle state.
@@ -115,6 +120,109 @@ pub struct WorldState {
     pub weather_timer_seconds: f32,
     /// Next weather transition scheduled after this many seconds.
     pub next_weather_change_seconds: f32,
+}
+
+/// World-space point (no orientation) in a specific dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WorldPoint {
+    pub dimension: DimensionId,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+/// Player transform persisted to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PlayerTransform {
+    pub dimension: DimensionId,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// Persisted player state for singleplayer saves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerSave {
+    pub transform: PlayerTransform,
+    pub spawn_point: WorldPoint,
+    pub hotbar: [Option<CoreItemStack>; 9],
+    pub hotbar_selected: usize,
+    pub inventory: Inventory,
+    pub health: f32,
+    pub hunger: f32,
+    pub xp_level: u32,
+    pub xp_current: u32,
+    pub xp_next_level_xp: u32,
+    pub armor: PlayerArmor,
+    pub status_effects: StatusEffects,
+}
+
+/// World entities persisted outside of chunk voxel data.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorldEntitiesState {
+    pub mobs: Vec<Mob>,
+    pub dropped_items: ItemManager,
+    pub projectiles: ProjectileManager,
+}
+
+/// Key for block-entity state tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct BlockEntityKey {
+    pub dimension: DimensionId,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+/// Block-entity state persisted outside of chunk voxel data.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BlockEntitiesState {
+    pub furnaces: BTreeMap<BlockEntityKey, FurnaceState>,
+    pub enchanting_tables: BTreeMap<BlockEntityKey, EnchantingTableState>,
+    pub brewing_stands: BTreeMap<BlockEntityKey, BrewingStandState>,
+}
+
+/// Global world state that must survive save/load cycles.
+///
+/// Chunk voxel data is stored separately in region files; this captures
+/// cross-chunk/global simulation state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldState {
+    /// Current simulation tick.
+    pub tick: SimTick,
+    /// Simulation day/night cycle state.
+    pub sim_time: SimTime,
+    /// Weather toggle state.
+    pub weather: WeatherToggle,
+    /// Next simulation tick at which the weather may transition.
+    pub weather_next_change_tick: SimTick,
+    /// Player state (singleplayer).
+    pub player: Option<PlayerSave>,
+    /// World entities that need persistence.
+    pub entities: WorldEntitiesState,
+    /// Block-entity state (machines/containers).
+    pub block_entities: BlockEntitiesState,
+}
+
+impl WorldState {
+    fn from_v1(state: WorldStateV1) -> Self {
+        let remaining_seconds =
+            (state.next_weather_change_seconds - state.weather_timer_seconds).max(0.0);
+        let remaining_ticks = (remaining_seconds * 20.0).round().max(0.0) as u64;
+        let weather_next_change_tick = state.tick.advance(remaining_ticks);
+
+        Self {
+            tick: state.tick,
+            sim_time: state.sim_time,
+            weather: state.weather,
+            weather_next_change_tick,
+            player: None,
+            entities: WorldEntitiesState::default(),
+            block_entities: BlockEntitiesState::default(),
+        }
+    }
 }
 
 /// Header for small world save blobs (meta/state).
@@ -241,8 +349,27 @@ impl RegionStore {
     /// Load world state.
     pub fn load_world_state(&self) -> Result<WorldState> {
         let path = self.world_state_path();
-        self.read_world_blob(&path, WORLD_STATE_MAGIC, WORLD_STATE_VERSION)
-            .with_context(|| format!("Failed to load world state from {}", path.display()))
+        let (header, decoded) = self
+            .read_world_blob_payload(&path, WORLD_STATE_MAGIC)
+            .with_context(|| format!("Failed to load world state from {}", path.display()))?;
+
+        match header.version {
+            1 => {
+                let v1: WorldStateV1 =
+                    bincode::deserialize(&decoded).context("Failed to decode world state v1")?;
+                Ok(WorldState::from_v1(v1))
+            }
+            WORLD_STATE_VERSION => {
+                let v2: WorldState =
+                    bincode::deserialize(&decoded).context("Failed to decode world state")?;
+                Ok(v2)
+            }
+            other => anyhow::bail!(
+                "Unsupported world state version {} (expected {}). World upgrade required.",
+                other,
+                WORLD_STATE_VERSION
+            ),
+        }
     }
 
     /// Save a chunk to its region file.
@@ -419,8 +546,9 @@ impl RegionStore {
 
         // Write to file.
         if let Some(parent) = region_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create region directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create region directory {}", parent.display())
+            })?;
         }
         let mut file = File::create(&region_path).context("Failed to create region file")?;
         file.write_all(&header.to_bytes())
@@ -543,6 +671,47 @@ impl RegionStore {
         let decoded = bincode::deserialize(&decompressed).context("Failed to decode world blob")?;
         Ok(decoded)
     }
+
+    fn read_world_blob_payload(
+        &self,
+        path: &Path,
+        expected_magic: u32,
+    ) -> Result<(WorldBlobHeader, Vec<u8>)> {
+        let mut file = File::open(path).context("Failed to open world blob file")?;
+
+        let mut header_bytes = [0u8; 14];
+        file.read_exact(&mut header_bytes)
+            .context("Failed to read world blob header")?;
+        let header = WorldBlobHeader::from_bytes(&header_bytes)?;
+
+        if header.magic != expected_magic {
+            anyhow::bail!(
+                "Invalid world blob magic: expected 0x{:08X}, got 0x{:08X}",
+                expected_magic,
+                header.magic
+            );
+        }
+
+        let mut compressed = vec![0u8; header.payload_len as usize];
+        file.read_exact(&mut compressed)
+            .context("Failed to read world blob payload")?;
+
+        let mut hasher = Hasher::new();
+        hasher.update(&compressed);
+        let computed_crc = hasher.finalize();
+
+        if computed_crc != header.crc32 {
+            anyhow::bail!(
+                "World blob CRC32 mismatch: expected {:08X}, got {:08X}",
+                header.crc32,
+                computed_crc
+            );
+        }
+
+        let decompressed =
+            zstd::decode_all(&compressed[..]).context("Failed to decompress world blob")?;
+        Ok((header, decompressed))
+    }
 }
 
 /// Serialize a chunk to bytes (bincode format).
@@ -585,6 +754,7 @@ mod tests {
     use super::*;
     use crate::chunk::BLOCK_AIR;
     use mdminecraft_core::DimensionId;
+    use mdminecraft_core::ItemType as CoreItemType;
     use std::env;
 
     #[test]
@@ -878,24 +1048,39 @@ mod tests {
         let mut chunk2 = Chunk::new(pos2);
         let mut chunk3 = Chunk::new(pos3);
 
-        chunk1.set_voxel(0, 0, 0, Voxel {
-            id: 1,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk2.set_voxel(0, 0, 0, Voxel {
-            id: 2,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk3.set_voxel(0, 0, 0, Voxel {
-            id: 3,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk1.set_voxel(
+            0,
+            0,
+            0,
+            Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk2.set_voxel(
+            0,
+            0,
+            0,
+            Voxel {
+                id: 2,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk3.set_voxel(
+            0,
+            0,
+            0,
+            Voxel {
+                id: 3,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
 
         store.save_chunk(&chunk1).unwrap();
         store.save_chunk(&chunk2).unwrap();
@@ -988,15 +1173,302 @@ mod tests {
             tick: SimTick(777),
             sim_time: time,
             weather,
-            weather_timer_seconds: 12.5,
-            next_weather_change_seconds: 99.0,
+            weather_next_change_tick: SimTick(900),
+            player: None,
+            entities: WorldEntitiesState::default(),
+            block_entities: BlockEntitiesState::default(),
         };
 
         store.save_world_state(&state).unwrap();
         assert!(store.world_state_exists());
 
         let loaded = store.load_world_state().unwrap();
-        assert_eq!(loaded, state);
+        assert_eq!(loaded.tick, state.tick);
+        assert_eq!(loaded.sim_time, state.sim_time);
+        assert_eq!(loaded.weather, state.weather);
+        assert_eq!(
+            loaded.weather_next_change_tick,
+            state.weather_next_change_tick
+        );
+        assert!(loaded.player.is_none());
+        assert!(loaded.entities.mobs.is_empty());
+        assert_eq!(loaded.entities.dropped_items.count(), 0);
+        assert_eq!(loaded.entities.projectiles.count(), 0);
+        assert!(loaded.block_entities.furnaces.is_empty());
+        assert!(loaded.block_entities.enchanting_tables.is_empty());
+        assert!(loaded.block_entities.brewing_stands.is_empty());
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn world_state_v1_migrates_to_v2() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_state_mig_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        let mut time = SimTime::new(24000);
+        time.tick = SimTick(100);
+        let mut weather = WeatherToggle::new();
+        weather.toggle();
+
+        let v1 = WorldStateV1 {
+            tick: SimTick(100),
+            sim_time: time,
+            weather,
+            weather_timer_seconds: 10.0,
+            next_weather_change_seconds: 50.0,
+        };
+
+        // Write a v1 payload directly, then ensure the public loader migrates it.
+        store
+            .write_world_blob(&store.world_state_path(), WORLD_STATE_MAGIC, 1, &v1)
+            .unwrap();
+
+        let migrated = store.load_world_state().unwrap();
+        assert_eq!(migrated.tick, v1.tick);
+        assert_eq!(migrated.sim_time, v1.sim_time);
+        assert_eq!(migrated.weather, v1.weather);
+        // Remaining seconds = 40s => 800 ticks.
+        assert_eq!(migrated.weather_next_change_tick, SimTick(900));
+        assert!(migrated.player.is_none());
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn world_state_roundtrip_with_content_is_stable_over_cycles() {
+        use mdminecraft_core::Enchantment;
+        use mdminecraft_core::EnchantmentType;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir =
+            env::temp_dir().join(format!("mdminecraft_test_state_content_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        let mut inventory = Inventory::new();
+        inventory.set(
+            0,
+            Some(crate::ItemStack::with_metadata(42, 7, vec![1, 2, 3, 4])),
+        );
+
+        let mut hotbar = std::array::from_fn(|_| None);
+        let mut pickaxe = CoreItemStack::new(
+            CoreItemType::Tool(
+                mdminecraft_core::ToolType::Pickaxe,
+                mdminecraft_core::ToolMaterial::Iron,
+            ),
+            1,
+        );
+        pickaxe.enchantments = Some(vec![Enchantment {
+            enchantment_type: EnchantmentType::Unbreaking,
+            level: 2,
+        }]);
+        hotbar[0] = Some(pickaxe);
+        hotbar[1] = Some(CoreItemStack::new(CoreItemType::Item(7), 12));
+
+        let mut armor = PlayerArmor::new();
+        armor.equip(crate::ArmorPiece::from_item(crate::ItemType::IronHelmet).unwrap());
+
+        let mut status_effects = StatusEffects::new();
+        status_effects.add(crate::StatusEffect::new(
+            crate::StatusEffectType::Speed,
+            1,
+            200,
+        ));
+
+        let player = PlayerSave {
+            transform: PlayerTransform {
+                dimension: DimensionId::Overworld,
+                x: 10.5,
+                y: 64.25,
+                z: -3.75,
+                yaw: 1.25,
+                pitch: -0.5,
+            },
+            spawn_point: WorldPoint {
+                dimension: DimensionId::Overworld,
+                x: 0.0,
+                y: 65.0,
+                z: 0.0,
+            },
+            hotbar,
+            hotbar_selected: 1,
+            inventory,
+            health: 17.0,
+            hunger: 13.0,
+            xp_level: 4,
+            xp_current: 7,
+            xp_next_level_xp: 17,
+            armor,
+            status_effects,
+        };
+
+        let mut dropped_items = ItemManager::new();
+        let dropped_id = dropped_items.spawn_item(1.0, 65.0, 2.0, crate::ItemType::IronIngot, 3);
+
+        let mut projectiles = ProjectileManager::new();
+        projectiles.spawn(crate::Projectile::shoot_arrow(
+            0.0, 70.0, 0.0, 0.0, 0.0, 1.0,
+        ));
+
+        let entities = WorldEntitiesState {
+            mobs: vec![Mob::new(2.0, 65.0, 2.0, crate::MobType::Pig)],
+            dropped_items,
+            projectiles,
+        };
+
+        let mut block_entities = BlockEntitiesState::default();
+        let furnace_key = BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: 4,
+            y: 65,
+            z: 4,
+        };
+        block_entities.furnaces.insert(
+            furnace_key,
+            FurnaceState {
+                input: Some((crate::ItemType::IronOre, 1)),
+                fuel: Some((crate::ItemType::Coal, 1)),
+                output: Some((crate::ItemType::IronIngot, 0)),
+                smelt_progress: 0.25,
+                fuel_remaining: 0.75,
+                is_lit: true,
+            },
+        );
+
+        let enchanting_key = BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: 8,
+            y: 65,
+            z: 8,
+        };
+        block_entities.enchanting_tables.insert(
+            enchanting_key,
+            EnchantingTableState {
+                item: Some((crate::BOW_ID, 1)),
+                lapis_count: 12,
+                bookshelf_count: 7,
+                enchant_seed: 99,
+                enchant_options: [None, None, None],
+            },
+        );
+
+        let brewing_key = BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: -2,
+            y: 65,
+            z: -2,
+        };
+        block_entities.brewing_stands.insert(
+            brewing_key,
+            BrewingStandState {
+                bottles: [Some(crate::PotionType::Water), None, None],
+                ingredient: Some((102, 1)),
+                fuel: 3,
+                brew_progress: 0.5,
+                is_brewing: true,
+            },
+        );
+
+        let mut time = SimTime::new(24000);
+        time.tick = SimTick(123);
+        let mut weather = WeatherToggle::new();
+        weather.toggle();
+
+        let mut current = WorldState {
+            tick: SimTick(123),
+            sim_time: time,
+            weather,
+            weather_next_change_tick: SimTick(456),
+            player: Some(player),
+            entities,
+            block_entities,
+        };
+
+        for cycle in 0..10 {
+            store.save_world_state(&current).unwrap();
+            let loaded = store.load_world_state().unwrap();
+
+            assert_eq!(loaded.tick, SimTick(123), "cycle {cycle}");
+            assert_eq!(
+                loaded.weather_next_change_tick,
+                SimTick(456),
+                "cycle {cycle}"
+            );
+
+            let loaded_player = loaded.player.as_ref().expect("player missing");
+            assert_eq!(loaded_player.transform.dimension, DimensionId::Overworld);
+            assert_eq!(loaded_player.transform.x, 10.5);
+            assert_eq!(loaded_player.hotbar_selected, 1);
+            assert!(loaded_player.hotbar[0].is_some());
+            assert_eq!(
+                loaded_player
+                    .inventory
+                    .get(0)
+                    .expect("inventory slot 0 missing")
+                    .metadata
+                    .as_deref(),
+                Some(&[1, 2, 3, 4][..]),
+            );
+            assert!(loaded_player
+                .status_effects
+                .has(crate::StatusEffectType::Speed));
+            assert_eq!(
+                loaded_player
+                    .status_effects
+                    .amplifier(crate::StatusEffectType::Speed),
+                Some(1)
+            );
+
+            assert_eq!(loaded.entities.mobs.len(), 1);
+            assert_eq!(loaded.entities.dropped_items.count(), 1);
+            assert_eq!(
+                loaded
+                    .entities
+                    .dropped_items
+                    .get(dropped_id)
+                    .expect("dropped item missing")
+                    .item_type,
+                crate::ItemType::IronIngot
+            );
+            assert_eq!(loaded.entities.projectiles.count(), 1);
+            assert_eq!(
+                loaded.entities.projectiles.projectiles[0].projectile_type,
+                crate::ProjectileType::Arrow
+            );
+
+            assert_eq!(loaded.block_entities.furnaces.len(), 1);
+            assert!(loaded.block_entities.furnaces.contains_key(&furnace_key));
+            assert!(
+                loaded
+                    .block_entities
+                    .furnaces
+                    .get(&furnace_key)
+                    .unwrap()
+                    .is_lit
+            );
+            assert_eq!(loaded.block_entities.enchanting_tables.len(), 1);
+            assert!(loaded
+                .block_entities
+                .enchanting_tables
+                .contains_key(&enchanting_key));
+            assert_eq!(loaded.block_entities.brewing_stands.len(), 1);
+            assert!(loaded
+                .block_entities
+                .brewing_stands
+                .contains_key(&brewing_key));
+
+            current = loaded;
+        }
 
         fs::remove_dir_all(&temp_dir).ok();
     }
