@@ -10,6 +10,12 @@
 //! - Update performance at scale
 //! - Mob distribution and density
 //! - Long-running simulation stability
+//!
+//! Defaults are tuned to keep debug test runs reasonable while still exercising
+//! the full mob update pipeline. Override via env vars when you want the full run:
+//! - `MDM_MOB_LIFECYCLE_CHUNK_RADIUS`
+//! - `MDM_MOB_LIFECYCLE_TICKS`
+//! - `MDM_MOB_LIFECYCLE_SPAWN_PROBABILITY`
 
 use mdminecraft_testkit::{
     MetricsReportBuilder, MetricsSink, MobMetrics, TerrainMetrics, TestExecutionMetrics, TestResult,
@@ -17,31 +23,54 @@ use mdminecraft_testkit::{
 use mdminecraft_world::{
     BiomeAssigner, ChunkPos, Mob, MobType, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Z,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 const WORLD_SEED: u64 = 77889900;
-const CHUNK_RADIUS: i32 = 12; // 25×25 grid = 625 chunks
-const SPAWN_PROBABILITY: u64 = 300; // 1 in 300 blocks
-const SIMULATION_TICKS: u64 = 6000; // ~5 minutes at 20 TPS
+const DEFAULT_SPAWN_PROBABILITY: u64 = 300; // 1 in 300 blocks
+
+fn chunk_radius() -> i32 {
+    std::env::var("MDM_MOB_LIFECYCLE_CHUNK_RADIUS")
+        .ok()
+        .and_then(|raw| raw.parse::<i32>().ok())
+        .unwrap_or_else(|| if cfg!(debug_assertions) { 2 } else { 12 })
+}
+
+fn simulation_ticks() -> u64 {
+    std::env::var("MDM_MOB_LIFECYCLE_TICKS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or_else(|| if cfg!(debug_assertions) { 1200 } else { 6000 })
+}
+
+fn spawn_probability() -> u64 {
+    std::env::var("MDM_MOB_LIFECYCLE_SPAWN_PROBABILITY")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_SPAWN_PROBABILITY)
+        .max(1)
+}
 
 #[test]
 fn mob_lifecycle_worldtest() {
     let test_start = Instant::now();
+    let chunk_radius = chunk_radius().max(0);
+    let simulation_ticks = simulation_ticks().max(1);
+    let spawn_probability = spawn_probability();
 
     println!("\n=== Mob Lifecycle Worldtest ===");
     println!("Configuration:");
     println!("  World seed: {}", WORLD_SEED);
     println!(
         "  Chunk radius: {} ({}×{} grid)",
-        CHUNK_RADIUS,
-        CHUNK_RADIUS * 2 + 1,
-        CHUNK_RADIUS * 2 + 1
+        chunk_radius,
+        chunk_radius * 2 + 1,
+        chunk_radius * 2 + 1
     );
     println!(
         "  Simulation ticks: {} (~{:.1} minutes at 20 TPS)",
-        SIMULATION_TICKS,
-        SIMULATION_TICKS as f64 / 20.0 / 60.0
+        simulation_ticks,
+        simulation_ticks as f64 / 20.0 / 60.0
     );
     println!();
 
@@ -56,8 +85,8 @@ fn mob_lifecycle_worldtest() {
     let mut chunks = Vec::new();
     let mut generation_times = Vec::new();
 
-    for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
-        for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
+    for chunk_z in -chunk_radius..=chunk_radius {
+        for chunk_x in -chunk_radius..=chunk_radius {
             let pos = ChunkPos {
                 x: chunk_x,
                 z: chunk_z,
@@ -72,9 +101,9 @@ fn mob_lifecycle_worldtest() {
         }
 
         // Progress indicator every 5 rows
-        if (chunk_z + CHUNK_RADIUS) % 5 == 0 {
+        if (chunk_z + chunk_radius) % 5 == 0 {
             let progress =
-                ((chunk_z + CHUNK_RADIUS + 1) as f64 / (CHUNK_RADIUS * 2 + 1) as f64) * 100.0;
+                ((chunk_z + chunk_radius + 1) as f64 / (chunk_radius * 2 + 1) as f64) * 100.0;
             println!("  Progress: {:.1}%", progress);
         }
     }
@@ -102,6 +131,7 @@ fn mob_lifecycle_worldtest() {
     let mut mobs = Vec::new();
     let mut spawn_by_biome: HashMap<String, usize> = HashMap::new();
     let mut spawn_by_type: HashMap<String, usize> = HashMap::new();
+    let mut possible_types = HashSet::new();
 
     for chunk in &chunks {
         let pos = chunk.position();
@@ -113,18 +143,22 @@ fn mob_lifecycle_worldtest() {
 
         // Get valid mob types for this biome
         let mob_types = MobType::for_biome(biome);
+        for (mob_type, _weight) in &mob_types {
+            possible_types.insert(*mob_type);
+        }
 
         // Spawn mobs randomly throughout the chunk
         for local_z in 0..CHUNK_SIZE_Z {
             for local_x in 0..CHUNK_SIZE_X {
                 let spawn_hash = WORLD_SEED
-                    .wrapping_mul(pos.x as u64)
-                    .wrapping_mul(pos.z as u64)
-                    .wrapping_mul((local_x * 16 + local_z) as u64);
+                    ^ (pos.x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ (pos.z as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                    ^ (local_x as u64).wrapping_mul(0x94D0_49BB_1331_11EB)
+                    ^ (local_z as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93);
 
-                if spawn_hash.is_multiple_of(SPAWN_PROBABILITY) && !mob_types.is_empty() {
-                    // Use weighted selection (for simplicity, just use first mob type)
-                    let (mob_type, _weight) = mob_types[0];
+                if (spawn_hash % spawn_probability) == 0 && !mob_types.is_empty() {
+                    let idx = (spawn_hash as usize) % mob_types.len();
+                    let (mob_type, _weight) = mob_types[idx];
 
                     let world_x = pos.x as f64 * 16.0 + local_x as f64 + 0.5;
                     let world_z = pos.z as f64 * 16.0 + local_z as f64 + 0.5;
@@ -173,7 +207,7 @@ fn mob_lifecycle_worldtest() {
 
     println!(
         "Phase 3: Simulating mob lifecycle ({} ticks)...",
-        SIMULATION_TICKS
+        simulation_ticks
     );
     let phase3_start = Instant::now();
 
@@ -185,9 +219,9 @@ fn mob_lifecycle_worldtest() {
     let initial_positions: Vec<(f64, f64, f64)> = mobs.iter().map(|m| (m.x, m.y, m.z)).collect();
 
     // Run simulation with progress updates
-    let progress_interval = SIMULATION_TICKS / 10;
+    let progress_interval = (simulation_ticks / 10).max(1);
 
-    for tick in 0..SIMULATION_TICKS {
+    for tick in 0..simulation_ticks {
         let tick_start = Instant::now();
 
         for mob in &mut mobs {
@@ -198,7 +232,7 @@ fn mob_lifecycle_worldtest() {
 
         // Progress indicator
         if (tick + 1) % progress_interval == 0 {
-            let progress = ((tick + 1) as f64 / SIMULATION_TICKS as f64) * 100.0;
+            let progress = ((tick + 1) as f64 / simulation_ticks as f64) * 100.0;
             let elapsed = phase3_start.elapsed().as_secs_f64();
             let eta = (elapsed / progress * 100.0) - elapsed;
             println!(
@@ -223,7 +257,7 @@ fn mob_lifecycle_worldtest() {
         }
     }
 
-    let total_updates = total_spawned * SIMULATION_TICKS as usize;
+    let total_updates = total_spawned * simulation_ticks as usize;
     let total_time_ns: u128 = update_times.iter().sum();
     let avg_update_time_ns = total_time_ns as f64 / total_updates as f64;
     let avg_update_time_us = avg_update_time_ns / 1000.0;
@@ -240,7 +274,7 @@ fn mob_lifecycle_worldtest() {
     );
     println!(
         "  Total updates: {} ({} mobs × {} ticks)",
-        total_updates, total_spawned, SIMULATION_TICKS
+        total_updates, total_spawned, simulation_ticks
     );
     println!("  Avg update time: {:.3}μs/update", avg_update_time_us);
     println!(
@@ -430,9 +464,12 @@ fn mob_lifecycle_worldtest() {
         mobs_alive, total_spawned,
         "All mobs should remain alive (no damage system)"
     );
+    let expected_min_types = possible_types.len().min(3).max(1);
     assert!(
-        spawn_by_type.len() >= 3,
-        "At least 3 different mob types should spawn"
+        spawn_by_type.len() >= expected_min_types,
+        "Expected at least {} mob types to spawn (possible: {})",
+        expected_min_types,
+        possible_types.len()
     );
     assert!(
         avg_update_time_us < 1.0,
