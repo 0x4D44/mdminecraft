@@ -32,7 +32,7 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_LARGE_SCALE_TERRAIN_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or_else(|| if cfg!(debug_assertions) { 6 } else { 25 })
+        .unwrap_or_else(|| if cfg!(debug_assertions) { 4 } else { 25 })
 }
 
 #[test]

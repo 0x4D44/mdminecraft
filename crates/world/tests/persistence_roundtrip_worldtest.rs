@@ -20,22 +20,29 @@ use std::env;
 use std::time::Instant;
 
 const WORLD_SEED: u64 = 55667788;
-const CHUNK_RADIUS: i32 = 4; // 9×9 grid = 81 chunks (spread across multiple regions)
+
+fn chunk_radius() -> i32 {
+    std::env::var("MDM_PERSISTENCE_ROUNDTRIP_CHUNK_RADIUS")
+        .ok()
+        .and_then(|raw| raw.parse::<i32>().ok())
+        .unwrap_or_else(|| if cfg!(debug_assertions) { 2 } else { 4 })
+}
 
 #[test]
 fn persistence_roundtrip_worldtest() {
     let test_start = Instant::now();
+    let chunk_radius = chunk_radius().max(0);
 
     println!("\n=== Persistence Round-Trip Worldtest ===");
     println!("Configuration:");
     println!("  World seed: {}", WORLD_SEED);
     println!(
         "  Chunk radius: {} ({}×{} grid)",
-        CHUNK_RADIUS,
-        CHUNK_RADIUS * 2 + 1,
-        CHUNK_RADIUS * 2 + 1
+        chunk_radius,
+        chunk_radius * 2 + 1,
+        chunk_radius * 2 + 1
     );
-    println!("  Total chunks: {}", (CHUNK_RADIUS * 2 + 1).pow(2));
+    println!("  Total chunks: {}", (chunk_radius * 2 + 1).pow(2));
     println!();
 
     // Create temporary directory for region files
@@ -58,8 +65,8 @@ fn persistence_roundtrip_worldtest() {
     let mut chunks = Vec::new();
     let mut generation_times = Vec::new();
 
-    for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
-        for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
+    for chunk_z in -chunk_radius..=chunk_radius {
+        for chunk_x in -chunk_radius..=chunk_radius {
             let pos = ChunkPos {
                 x: chunk_x,
                 z: chunk_z,
