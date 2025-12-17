@@ -4,19 +4,18 @@
 //! for CI/CD integration, performance tracking, and regression detection.
 
 use mdminecraft_testkit::{
-    ItemMetrics, MetricsReport, MetricsReportBuilder, MetricsSink, MobMetrics, SeamValidation,
-    TerrainMetrics, TestExecutionMetrics, TestResult,
+    ItemMetrics, MetricsReportBuilder, MetricsSink, MobMetrics, SeamValidation, TerrainMetrics,
+    TestExecutionMetrics, TestResult,
 };
 use mdminecraft_world::{
-    BiomeAssigner, Chunk, ChunkPos, DroppedItem, ItemType, Mob, MobType, TerrainGenerator,
-    CHUNK_SIZE_X, CHUNK_SIZE_Z,
+    BiomeAssigner, ChunkPos, DroppedItem, ItemType, Mob, MobType, TerrainGenerator, CHUNK_SIZE_X,
+    CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
 
 const WORLD_SEED: u64 = 12345;
 const CHUNK_RADIUS: i32 = 8; // 17×17 grid = 289 chunks
-const MAX_SEAM_DIFF: i32 = 20;
 
 #[test]
 fn stage4_metrics_worldtest() {
@@ -105,7 +104,7 @@ fn stage4_metrics_worldtest() {
                     .wrapping_mul(pos.z as u64)
                     .wrapping_mul((local_x * 16 + local_z) as u64);
 
-                if spawn_hash % 400 == 0 {
+                if spawn_hash.is_multiple_of(400) {
                     let mob_types = MobType::for_biome(biome);
                     if let Some((mob_type, _weight)) = mob_types.first() {
                         let world_x = pos.x as f64 * 16.0 + local_x as f64;

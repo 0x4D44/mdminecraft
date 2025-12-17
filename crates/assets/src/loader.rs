@@ -13,11 +13,11 @@ pub fn registry_from_file(path: &Path) -> Result<BlockRegistry, AssetError> {
 /// Load a block registry from an in-memory JSON string.
 pub fn registry_from_str(input: &str) -> Result<BlockRegistry, AssetError> {
     let defs = crate::load_blocks_from_str(input)?;
-    Ok(BlockRegistry::new(
-        defs.into_iter()
-            .map(BlockDescriptor::from_definition)
-            .collect(),
-    ))
+    let descriptors = defs
+        .into_iter()
+        .map(BlockDescriptor::try_from_definition)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(BlockRegistry::new(descriptors))
 }
 
 /// Load a recipe registry from the provided JSON file path.

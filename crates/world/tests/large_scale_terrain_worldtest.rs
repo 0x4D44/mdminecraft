@@ -118,7 +118,7 @@ fn large_scale_terrain_worldtest() {
                 for z in 0..CHUNK_SIZE_Z {
                     let h1 = heightmap.get(CHUNK_SIZE_X - 1, z);
                     let h2 = right_hm.get(0, z);
-                    let diff = (h1 as i32 - h2 as i32).abs();
+                    let diff = (h1 - h2).abs();
 
                     seam_diffs.push(diff);
                     seams_checked += 1;
@@ -140,7 +140,7 @@ fn large_scale_terrain_worldtest() {
                 for x in 0..CHUNK_SIZE_X {
                     let h1 = heightmap.get(x, CHUNK_SIZE_Z - 1);
                     let h2 = bottom_hm.get(x, 0);
-                    let diff = (h1 as i32 - h2 as i32).abs();
+                    let diff = (h1 - h2).abs();
 
                     seam_diffs.push(diff);
                     seams_checked += 1;

@@ -1,0 +1,308 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 0,
+        "time_required_milli": 1125
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 50,
+        "time_required_milli": 1125
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 100,
+        "time_required_milli": 1125
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 150,
+        "time_required_milli": 1125
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 200,
+        "time_required_milli": 1125
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 250,
+        "time_required_milli": 1125
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 300,
+        "time_required_milli": 1125
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 350,
+        "time_required_milli": 1125
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 400,
+        "time_required_milli": 1125
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 450,
+        "time_required_milli": 1125
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 500,
+        "time_required_milli": 1125
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 550,
+        "time_required_milli": 1125
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 600,
+        "time_required_milli": 1125
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 650,
+        "time_required_milli": 1125
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 700,
+        "time_required_milli": 1125
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 750,
+        "time_required_milli": 1125
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 800,
+        "time_required_milli": 1125
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 850,
+        "time_required_milli": 1125
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 900,
+        "time_required_milli": 1125
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 950,
+        "time_required_milli": 1125
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 1000,
+        "time_required_milli": 1125
+      },
+      "tick": 20
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 1050,
+        "time_required_milli": 1125
+      },
+      "tick": 21
+    },
+    {
+      "snapshot": {
+        "drop": null,
+        "mined": false,
+        "time_mining_milli": 1100,
+        "time_required_milli": 1125
+      },
+      "tick": 22
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 23
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 24
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 25
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 26
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 27
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 28
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 29
+    },
+    {
+      "snapshot": {
+        "drop": [
+          "Cobblestone",
+          1
+        ],
+        "mined": true,
+        "time_mining_milli": 1150,
+        "time_required_milli": 1125
+      },
+      "tick": 30
+    }
+  ],
+  "name": "micro_mining_stone_drops"
+}

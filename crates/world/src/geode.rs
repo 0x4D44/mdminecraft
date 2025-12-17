@@ -162,7 +162,6 @@ mod tests {
     fn test_geode_generator_creation() {
         let _gen = GeodeGenerator::new(12345);
         // Just verify it doesn't crash
-        assert!(true);
     }
 
     #[test]
@@ -224,7 +223,7 @@ mod tests {
             for y in 26..34 {
                 for z in 4..12 {
                     let id = chunk.voxel(x, y, z).id;
-                    if id >= 107 && id <= 110 {
+                    if (107..=110).contains(&id) {
                         has_geode_blocks = true;
                         break;
                     }
@@ -282,7 +281,7 @@ mod tests {
             for y in 44..56 {
                 for z in 0..8 {
                     let id = chunk.voxel(x, y, z).id;
-                    if id >= 107 && id <= 110 || id == 0 {
+                    if (107..=110).contains(&id) || id == 0 {
                         geode_blocks += 1;
                     }
                 }
@@ -380,23 +379,7 @@ mod tests {
         }
 
         gen.try_generate_geode(&mut chunk, 0, 0);
-
-        // Air should not be replaced with geode blocks
-        // (geode carving skips air/water blocks)
-        let mut geode_in_air = false;
-        for x in 0..16 {
-            for y in 1..100 {
-                for z in 0..16 {
-                    let id = chunk.voxel(x, y, z).id;
-                    if id >= 107 && id <= 110 {
-                        geode_in_air = true;
-                    }
-                }
-            }
-        }
-        // Geode blocks can still be placed as part of the shell structure
-        // The test just ensures no crash
-        assert!(true);
+        // Just ensure no crash when the chunk is entirely air.
     }
 
     #[test]
@@ -432,9 +415,6 @@ mod tests {
 
         // Test with negative coordinates
         gen.try_generate_geode(&mut chunk, -10, -10);
-
-        // Should not panic
-        assert!(true);
     }
 
     #[test]
@@ -444,9 +424,6 @@ mod tests {
 
         // Test with very large coordinates
         gen.try_generate_geode(&mut chunk, 10000, 10000);
-
-        // Should not panic
-        assert!(true);
     }
 
     #[test]

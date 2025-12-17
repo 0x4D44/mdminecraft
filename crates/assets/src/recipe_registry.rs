@@ -3,6 +3,8 @@
 use mdminecraft_core::{ItemType, Recipe, ToolMaterial, ToolType};
 use std::collections::HashMap;
 
+use crate::BlockRegistry;
+
 /// Registry of crafting recipes indexed by output item name.
 #[derive(Debug, Clone)]
 pub struct RecipeRegistry {
@@ -54,14 +56,29 @@ impl RecipeRegistry {
 ///
 /// Format:
 /// - "block:id" -> ItemType::Block(id)
+/// - "block:<name-or-key>" -> ItemType::Block(id) (requires a [`BlockRegistry`] for lookup)
 /// - "item:id" -> ItemType::Item(id)
 /// - "tool:type:material" -> ItemType::Tool(ToolType, ToolMaterial)
 pub fn parse_item_type(s: &str) -> Option<ItemType> {
-    let parts: Vec<&str> = s.split(':').collect();
-    match parts.as_slice() {
-        ["block", id_str] => id_str.parse::<u16>().ok().map(ItemType::Block),
-        ["item", id_str] => id_str.parse::<u16>().ok().map(ItemType::Item),
-        ["tool", tool_str, material_str] => {
+    parse_item_type_with_blocks(s, None)
+}
+
+/// Parse an item string into an ItemType, optionally resolving block names via a registry.
+pub fn parse_item_type_with_blocks(s: &str, blocks: Option<&BlockRegistry>) -> Option<ItemType> {
+    let (kind, rest) = s.split_once(':')?;
+    match kind {
+        "block" => {
+            if let Ok(id) = rest.parse::<u16>() {
+                Some(ItemType::Block(id))
+            } else {
+                blocks
+                    .and_then(|registry| registry.id_by_name(rest))
+                    .map(ItemType::Block)
+            }
+        }
+        "item" => rest.parse::<u16>().ok().map(ItemType::Item),
+        "tool" => {
+            let (tool_str, material_str) = rest.split_once(':')?;
             let tool = parse_tool_type(tool_str)?;
             let material = parse_tool_material(material_str)?;
             Some(ItemType::Tool(tool, material))
@@ -96,6 +113,7 @@ fn parse_tool_material(s: &str) -> Option<ToolMaterial> {
 mod tests {
     use super::*;
     use mdminecraft_core::{ItemType, ToolMaterial, ToolType};
+    use crate::{BlockDescriptor, BlockRegistry};
 
     #[test]
     fn test_recipe_registry_creation() {
@@ -181,5 +199,26 @@ mod tests {
         assert_eq!(parse_item_type("invalid"), None);
         assert_eq!(parse_item_type("block:abc"), None);
         assert_eq!(parse_item_type("tool:invalid:wood"), None);
+    }
+
+    #[test]
+    fn test_parse_item_type_with_block_registry() {
+        let blocks = BlockRegistry::new(vec![
+            BlockDescriptor::simple("air", false),
+            BlockDescriptor::simple("stone", true),
+        ]);
+
+        assert_eq!(
+            parse_item_type_with_blocks("block:stone", Some(&blocks)),
+            Some(ItemType::Block(1))
+        );
+        assert_eq!(
+            parse_item_type_with_blocks("block:mdm:stone", Some(&blocks)),
+            Some(ItemType::Block(1))
+        );
+        assert_eq!(
+            parse_item_type_with_blocks("block:missing", Some(&blocks)),
+            None
+        );
     }
 }

@@ -2,6 +2,8 @@
 //! Deterministic testing surfaces (event stream + replay plumbing scaffolding).
 
 mod metrics;
+mod micro_worldtest;
+mod snapshot;
 
 use anyhow::Result;
 use mdminecraft_core::SimTick;
@@ -11,6 +13,8 @@ use std::io::Write;
 use std::path::Path;
 
 pub use metrics::*;
+pub use micro_worldtest::*;
+pub use snapshot::*;
 
 /// Primary event record captured by headless tests.
 #[derive(Debug, Serialize)]

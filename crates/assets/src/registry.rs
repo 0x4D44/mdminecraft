@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use mdminecraft_world::BlockOpacityProvider;
+use mdminecraft_core::RegistryKey;
 
+use crate::AssetError;
 use crate::BlockTextureConfig;
+use std::collections::BTreeSet;
 
 /// Minimum tool tier required to successfully harvest a block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -45,10 +48,14 @@ impl HarvestLevel {
 /// Block metadata loaded from packs.
 #[derive(Debug, Clone)]
 pub struct BlockDescriptor {
+    /// Stable namespaced registry key (e.g., "mdm:stone").
+    pub key: RegistryKey,
     /// Human-readable identifier (e.g., "stone").
     pub name: String,
     /// Whether the block blocks light/vision.
     pub opaque: bool,
+    /// Tag keys applied to this block.
+    pub tags: BTreeSet<RegistryKey>,
     textures: BlockTextures,
     /// Required tool tier to harvest this block (None = no tool required).
     pub harvest_level: Option<HarvestLevel>,
@@ -61,23 +68,48 @@ impl BlockDescriptor {
     }
 
     /// Construct descriptor from the JSON definition.
-    pub fn from_definition(def: crate::BlockDefinition) -> Self {
-        let base_name = def.texture.clone().unwrap_or_else(|| def.name.clone());
+    pub fn try_from_definition(def: crate::BlockDefinition) -> Result<Self, AssetError> {
+        let raw_key = def.key.as_deref().unwrap_or(&def.name);
+        let key = RegistryKey::parse(raw_key)
+            .map_err(|err| AssetError::InvalidRegistryKey(err.to_string()))?;
+
+        // Display name remains the short "path" part.
+        let name = key.path().to_string();
+
+        let base_name = def.texture.clone().unwrap_or_else(|| name.clone());
         let textures = BlockTextures::from_config(&base_name, def.textures);
-        let name = def.name;
         let harvest_level = def.harvest_level.and_then(|s| HarvestLevel::parse(&s));
-        Self {
+
+        let mut tags = BTreeSet::new();
+        for raw_tag in def.tags {
+            let tag = RegistryKey::parse(&raw_tag)
+                .map_err(|err| AssetError::InvalidTagKey(err.to_string()))?;
+            tags.insert(tag);
+        }
+
+        Ok(Self {
+            key,
             name,
             opaque: def.opaque,
+            tags,
             textures,
             harvest_level,
-        }
+        })
+    }
+
+    /// Construct descriptor from the JSON definition.
+    ///
+    /// Prefer [`BlockDescriptor::try_from_definition`] when loading untrusted pack data.
+    pub fn from_definition(def: crate::BlockDefinition) -> Self {
+        Self::try_from_definition(def).expect("invalid BlockDefinition")
     }
 
     /// Helper for tests/examples that need a simple descriptor.
     pub fn simple(name: &str, opaque: bool) -> Self {
         Self::from_definition(crate::BlockDefinition {
             name: name.to_string(),
+            key: None,
+            tags: Vec::new(),
             opaque,
             texture: None,
             textures: None,
@@ -89,19 +121,19 @@ impl BlockDescriptor {
 /// Registry storing block descriptors keyed by id.
 pub struct BlockRegistry {
     descriptors: Vec<BlockDescriptor>,
-    name_to_id: HashMap<String, u16>,
+    key_to_id: HashMap<RegistryKey, u16>,
 }
 
 impl BlockRegistry {
     /// Construct a registry from the supplied descriptors.
     pub fn new(descriptors: Vec<BlockDescriptor>) -> Self {
-        let mut name_to_id = HashMap::new();
+        let mut key_to_id = HashMap::new();
         for (id, desc) in descriptors.iter().enumerate() {
-            name_to_id.insert(desc.name.clone(), id as u16);
+            key_to_id.insert(desc.key.clone(), id as u16);
         }
         Self {
             descriptors,
-            name_to_id,
+            key_to_id,
         }
     }
 
@@ -112,12 +144,38 @@ impl BlockRegistry {
 
     /// Resolve a block id by its name.
     pub fn id_by_name(&self, name: &str) -> Option<u16> {
-        self.name_to_id.get(name).copied()
+        let key = RegistryKey::parse(name).ok()?;
+        self.id_by_key(&key)
+    }
+
+    /// Resolve a block id by its registry key.
+    pub fn id_by_key(&self, key: &RegistryKey) -> Option<u16> {
+        self.key_to_id.get(key).copied()
     }
 
     /// Get the harvest level required for a block (None = no tool required).
     pub fn harvest_level(&self, block_id: u16) -> Option<HarvestLevel> {
         self.descriptor(block_id).and_then(|d| d.harvest_level)
+    }
+
+    /// Get the registry key for a numeric block id.
+    pub fn key_by_id(&self, id: u16) -> Option<&RegistryKey> {
+        self.descriptor(id).map(|d| &d.key)
+    }
+
+    /// Return whether the given block has the supplied tag.
+    pub fn has_tag(&self, block_id: u16, tag: &RegistryKey) -> bool {
+        self.descriptor(block_id)
+            .is_some_and(|descriptor| descriptor.tags.contains(tag))
+    }
+
+    /// List all block ids that have a specific tag.
+    pub fn blocks_with_tag(&self, tag: &RegistryKey) -> Vec<u16> {
+        self.descriptors
+            .iter()
+            .enumerate()
+            .filter_map(|(id, descriptor)| descriptor.tags.contains(tag).then_some(id as u16))
+            .collect()
     }
 }
 
@@ -230,6 +288,7 @@ impl BlockTextures {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BlockDefinition;
 
     #[test]
     fn test_harvest_level_tier() {
@@ -290,5 +349,60 @@ mod tests {
         assert!(HarvestLevel::Diamond > HarvestLevel::Iron);
         assert!(HarvestLevel::Iron > HarvestLevel::Stone);
         assert!(HarvestLevel::Stone > HarvestLevel::Wood);
+    }
+
+    #[test]
+    fn test_block_tags_query() {
+        let defs = vec![
+            BlockDefinition {
+                name: "air".to_string(),
+                key: None,
+                tags: Vec::new(),
+                opaque: false,
+                texture: None,
+                textures: None,
+                harvest_level: None,
+            },
+            BlockDefinition {
+                name: "stone".to_string(),
+                key: Some("mdm:stone".to_string()),
+                tags: vec!["mdm:mineable/pickaxe".to_string()],
+                opaque: true,
+                texture: None,
+                textures: None,
+                harvest_level: Some("wood".to_string()),
+            },
+        ];
+
+        let descriptors = defs
+            .into_iter()
+            .map(BlockDescriptor::try_from_definition)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("valid definitions");
+        let registry = BlockRegistry::new(descriptors);
+
+        let tag = RegistryKey::parse("mdm:mineable/pickaxe").unwrap();
+        assert!(!registry.has_tag(0, &tag));
+        assert!(registry.has_tag(1, &tag));
+        assert_eq!(registry.blocks_with_tag(&tag), vec![1]);
+    }
+
+    #[test]
+    fn test_invalid_tag_key_errors() {
+        let def = BlockDefinition {
+            name: "stone".to_string(),
+            key: None,
+            tags: vec!["NotAllowed".to_string()],
+            opaque: true,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        };
+
+        let err = BlockDescriptor::try_from_definition(def).unwrap_err();
+        match err {
+            AssetError::InvalidTagKey(_) => {}
+            other => panic!("expected InvalidTagKey, got {other:?}"),
+        }
     }
 }

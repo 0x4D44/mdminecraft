@@ -1,0 +1,45 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "lever_active": false,
+        "lever_power": 0,
+        "wire1_power": 0,
+        "wire2_power": 0
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "lamp_lit": true,
+        "lever_active": true,
+        "lever_power": 15,
+        "wire1_power": 14,
+        "wire2_power": 13
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "lamp_lit": true,
+        "lever_active": true,
+        "lever_power": 15,
+        "wire1_power": 14,
+        "wire2_power": 13
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "lamp_lit": true,
+        "lever_active": true,
+        "lever_power": 15,
+        "wire1_power": 14,
+        "wire2_power": 13
+      },
+      "tick": 3
+    }
+  ],
+  "name": "micro_redstone_wire_propagation"
+}

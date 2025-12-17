@@ -6,6 +6,7 @@
 use crate::chunk_encoding::encode_chunk_data;
 use crate::protocol::{BlockId, ChunkDataMessage};
 use anyhow::Result;
+use mdminecraft_core::DimensionId;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 use std::time::{Duration, Instant};
@@ -22,12 +23,13 @@ pub struct ChunkStreamer {
     send_queue: BinaryHeap<ChunkPriority>,
 
     /// Set of chunk coordinates currently queued.
-    queued_chunks: HashSet<(i32, i32)>,
+    queued_chunks: HashSet<(DimensionId, i32, i32)>,
 
     /// Set of chunk coordinates already sent to client.
-    sent_chunks: HashSet<(i32, i32)>,
+    sent_chunks: HashSet<(DimensionId, i32, i32)>,
 
     /// Current player position for priority calculation.
+    player_dimension: DimensionId,
     player_chunk_x: i32,
     player_chunk_z: i32,
 
@@ -43,6 +45,7 @@ pub struct ChunkStreamer {
 /// Priority entry for chunk send queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ChunkPriority {
+    dimension: DimensionId,
     chunk_x: i32,
     chunk_z: i32,
     priority: u32, // Lower = higher priority (distance from player)
@@ -51,7 +54,12 @@ struct ChunkPriority {
 impl Ord for ChunkPriority {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reverse ordering: lower priority value = higher priority
-        other.priority.cmp(&self.priority)
+        other
+            .priority
+            .cmp(&self.priority)
+            .then_with(|| other.dimension.cmp(&self.dimension))
+            .then_with(|| other.chunk_x.cmp(&self.chunk_x))
+            .then_with(|| other.chunk_z.cmp(&self.chunk_z))
     }
 }
 
@@ -95,6 +103,7 @@ impl ChunkStreamer {
             send_queue: BinaryHeap::new(),
             queued_chunks: HashSet::new(),
             sent_chunks: HashSet::new(),
+            player_dimension: DimensionId::DEFAULT,
             player_chunk_x: 0,
             player_chunk_z: 0,
             bandwidth_limit,
@@ -106,14 +115,27 @@ impl ChunkStreamer {
 
     /// Update player position and recalculate priorities.
     pub fn set_player_position(&mut self, chunk_x: i32, chunk_z: i32) {
+        self.set_player_position_in_dimension(DimensionId::DEFAULT, chunk_x, chunk_z);
+    }
+
+    /// Update player dimension and position and recalculate priorities.
+    pub fn set_player_position_in_dimension(
+        &mut self,
+        dimension: DimensionId,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) {
+        self.player_dimension = dimension;
         self.player_chunk_x = chunk_x;
         self.player_chunk_z = chunk_z;
 
         // Rebuild priority queue with updated priorities
         let chunks: Vec<_> = self.send_queue.drain().collect();
         for chunk in chunks {
-            let priority = self.calculate_priority(chunk.chunk_x, chunk.chunk_z);
+            let priority =
+                self.calculate_priority(chunk.dimension, chunk.chunk_x, chunk.chunk_z);
             self.send_queue.push(ChunkPriority {
+                dimension: chunk.dimension,
                 chunk_x: chunk.chunk_x,
                 chunk_z: chunk.chunk_z,
                 priority,
@@ -125,9 +147,21 @@ impl ChunkStreamer {
     ///
     /// Returns false if queue is full or chunk already queued/sent.
     pub fn enqueue_chunk(&mut self, chunk_x: i32, chunk_z: i32) -> bool {
+        self.enqueue_chunk_in_dimension(DimensionId::DEFAULT, chunk_x, chunk_z)
+    }
+
+    /// Enqueue a chunk for sending in a specific dimension.
+    ///
+    /// Returns false if queue is full or chunk already queued/sent.
+    pub fn enqueue_chunk_in_dimension(
+        &mut self,
+        dimension: DimensionId,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> bool {
         // Check if already queued or sent
-        if self.queued_chunks.contains(&(chunk_x, chunk_z))
-            || self.sent_chunks.contains(&(chunk_x, chunk_z))
+        if self.queued_chunks.contains(&(dimension, chunk_x, chunk_z))
+            || self.sent_chunks.contains(&(dimension, chunk_x, chunk_z))
         {
             return false;
         }
@@ -137,14 +171,15 @@ impl ChunkStreamer {
             return false;
         }
 
-        let priority = self.calculate_priority(chunk_x, chunk_z);
+        let priority = self.calculate_priority(dimension, chunk_x, chunk_z);
 
         self.send_queue.push(ChunkPriority {
+            dimension,
             chunk_x,
             chunk_z,
             priority,
         });
-        self.queued_chunks.insert((chunk_x, chunk_z));
+        self.queued_chunks.insert((dimension, chunk_x, chunk_z));
 
         self.metrics.queue_size = self.queued_chunks.len();
 
@@ -157,7 +192,7 @@ impl ChunkStreamer {
     /// or queue is empty.
     pub fn try_send_next_chunk(
         &mut self,
-        chunk_data_provider: &dyn Fn(i32, i32) -> Option<Vec<BlockId>>,
+        chunk_data_provider: &dyn Fn(DimensionId, i32, i32) -> Option<Vec<BlockId>>,
     ) -> Result<Option<ChunkDataMessage>> {
         // Reset bandwidth counter if a second has passed
         if self.last_reset_time.elapsed() >= Duration::from_secs(1) {
@@ -172,23 +207,24 @@ impl ChunkStreamer {
 
         // Peek at next chunk to estimate size
         let next = self.send_queue.peek().unwrap();
+        let dimension = next.dimension;
         let chunk_x = next.chunk_x;
         let chunk_z = next.chunk_z;
 
         // Get chunk data from provider
-        let block_data = match chunk_data_provider(chunk_x, chunk_z) {
+        let block_data = match chunk_data_provider(dimension, chunk_x, chunk_z) {
             Some(data) => data,
             None => {
                 // Chunk not available, remove from queue
                 self.send_queue.pop();
-                self.queued_chunks.remove(&(chunk_x, chunk_z));
+                self.queued_chunks.remove(&(dimension, chunk_x, chunk_z));
                 self.metrics.queue_size = self.queued_chunks.len();
                 return Ok(None);
             }
         };
 
         // Encode chunk data
-        let encoded = encode_chunk_data(chunk_x, chunk_z, &block_data)?;
+        let encoded = encode_chunk_data(dimension, chunk_x, chunk_z, &block_data)?;
 
         // Calculate compressed size
         let uncompressed_size = 65536 * 2; // 2 bytes per BlockId
@@ -202,8 +238,8 @@ impl ChunkStreamer {
 
         // Send chunk (remove from queue)
         self.send_queue.pop();
-        self.queued_chunks.remove(&(chunk_x, chunk_z));
-        self.sent_chunks.insert((chunk_x, chunk_z));
+        self.queued_chunks.remove(&(dimension, chunk_x, chunk_z));
+        self.sent_chunks.insert((dimension, chunk_x, chunk_z));
 
         // Update metrics
         self.bytes_sent_this_second += compressed_size as u64;
@@ -228,7 +264,10 @@ impl ChunkStreamer {
     /// Calculate priority for a chunk based on distance from player.
     ///
     /// Lower value = higher priority (closer to player).
-    fn calculate_priority(&self, chunk_x: i32, chunk_z: i32) -> u32 {
+    fn calculate_priority(&self, dimension: DimensionId, chunk_x: i32, chunk_z: i32) -> u32 {
+        if dimension != self.player_dimension {
+            return u32::MAX;
+        }
         let dx = (chunk_x - self.player_chunk_x).abs();
         let dz = (chunk_z - self.player_chunk_z).abs();
 
@@ -253,7 +292,17 @@ impl ChunkStreamer {
 
     /// Check if a chunk has been sent.
     pub fn is_chunk_sent(&self, chunk_x: i32, chunk_z: i32) -> bool {
-        self.sent_chunks.contains(&(chunk_x, chunk_z))
+        self.is_chunk_sent_in_dimension(DimensionId::DEFAULT, chunk_x, chunk_z)
+    }
+
+    /// Check if a chunk has been sent in a specific dimension.
+    pub fn is_chunk_sent_in_dimension(
+        &self,
+        dimension: DimensionId,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> bool {
+        self.sent_chunks.contains(&(dimension, chunk_x, chunk_z))
     }
 
     /// Clear sent chunk history (useful when client moves far away).
@@ -269,6 +318,7 @@ impl ChunkStreamer {
         self.metrics = StreamingMetrics::default();
         self.bytes_sent_this_second = 0;
         self.last_reset_time = Instant::now();
+        self.player_dimension = DimensionId::DEFAULT;
     }
 }
 
@@ -319,7 +369,8 @@ mod tests {
         let mut streamer = ChunkStreamer::new();
         streamer.enqueue_chunk(0, 0);
 
-        let provider = |x: i32, z: i32| {
+        let provider = |dimension: DimensionId, x: i32, z: i32| {
+            assert_eq!(dimension, DimensionId::DEFAULT);
             if x == 0 && z == 0 {
                 Some(make_uniform_chunk(1))
             } else {
@@ -333,6 +384,7 @@ mod tests {
         assert!(result.is_some());
 
         let chunk_msg = result.unwrap();
+        assert_eq!(chunk_msg.dimension, DimensionId::DEFAULT);
         assert_eq!(chunk_msg.chunk_x, 0);
         assert_eq!(chunk_msg.chunk_z, 0);
 
@@ -352,7 +404,7 @@ mod tests {
             streamer.enqueue_chunk(i, 0);
         }
 
-        let provider = |_: i32, _: i32| Some(make_uniform_chunk(1));
+        let provider = |_: DimensionId, _: i32, _: i32| Some(make_uniform_chunk(1));
 
         // First chunk should send
         let result1 = streamer
@@ -374,7 +426,7 @@ mod tests {
         let mut streamer = ChunkStreamer::new();
         streamer.enqueue_chunk(0, 0);
 
-        let provider = |x: i32, z: i32| {
+        let provider = |_: DimensionId, x: i32, z: i32| {
             if x == 0 && z == 0 {
                 Some(make_uniform_chunk(1))
             } else {
@@ -419,7 +471,7 @@ mod tests {
         streamer.enqueue_chunk(0, 0);
 
         // Provider returns None
-        let provider = |_: i32, _: i32| None;
+        let provider = |_: DimensionId, _: i32, _: i32| None;
 
         let result = streamer
             .try_send_next_chunk(&provider)
@@ -435,7 +487,7 @@ mod tests {
         let mut streamer = ChunkStreamer::new();
         streamer.enqueue_chunk(0, 0);
 
-        let provider = |_: i32, _: i32| Some(make_uniform_chunk(1));
+        let provider = |_: DimensionId, _: i32, _: i32| Some(make_uniform_chunk(1));
 
         streamer
             .try_send_next_chunk(&provider)

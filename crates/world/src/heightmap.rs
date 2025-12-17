@@ -196,7 +196,7 @@ mod tests {
             for x in 0..CHUNK_SIZE_X {
                 let height = hm.get(x, z);
                 assert!(
-                    height >= MIN_HEIGHT && height <= MAX_HEIGHT,
+                    (MIN_HEIGHT..=MAX_HEIGHT).contains(&height),
                     "Height {} at ({}, {}) out of range",
                     height,
                     x,
@@ -308,7 +308,7 @@ mod tests {
             for x in 0..CHUNK_SIZE_X {
                 let height = hm.get(x, z);
                 assert!(
-                    height >= MIN_HEIGHT && height <= MAX_HEIGHT,
+                    (MIN_HEIGHT..=MAX_HEIGHT).contains(&height),
                     "Height out of range with negative coordinates"
                 );
             }
@@ -339,9 +339,9 @@ mod tests {
         let heights = hm.heights();
 
         // Verify it matches get() method
-        for z in 0..CHUNK_SIZE_Z {
-            for x in 0..CHUNK_SIZE_X {
-                assert_eq!(heights[z][x], hm.get(x, z));
+        for (z, row) in heights.iter().enumerate() {
+            for (x, height) in row.iter().enumerate() {
+                assert_eq!(*height, hm.get(x, z));
             }
         }
     }

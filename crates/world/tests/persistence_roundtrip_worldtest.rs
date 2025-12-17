@@ -108,7 +108,7 @@ fn persistence_roundtrip_worldtest() {
     let region_files: Vec<_> = std::fs::read_dir(&temp_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "rg"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rg"))
         .collect();
 
     for entry in &region_files {

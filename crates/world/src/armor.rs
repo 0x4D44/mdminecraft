@@ -690,7 +690,7 @@ mod tests {
         for slot in [ArmorSlot::Helmet, ArmorSlot::Chestplate, ArmorSlot::Leggings, ArmorSlot::Boots] {
             for material in [ArmorMaterial::Leather, ArmorMaterial::Iron, ArmorMaterial::Gold, ArmorMaterial::Diamond] {
                 let defense = get_defense_points(slot, material);
-                assert!(defense >= 1 && defense <= 3);
+                assert!((1..=3).contains(&defense));
             }
         }
     }

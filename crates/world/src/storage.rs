@@ -3,14 +3,16 @@ use std::num::NonZeroUsize;
 
 use lru::LruCache;
 
-use crate::{Chunk, ChunkPos};
+use mdminecraft_core::DimensionId;
+
+use crate::{Chunk, ChunkKey, ChunkPos};
 
 /// In-memory chunk arena with an LRU eviction policy.
 /// Uses BTreeMap for deterministic iteration order (critical for multiplayer sync).
 pub struct ChunkStorage {
     /// Chunks stored with deterministic key ordering.
-    chunks: BTreeMap<ChunkPos, Chunk>,
-    lru: LruCache<ChunkPos, ()>,
+    chunks: BTreeMap<ChunkKey, Chunk>,
+    lru: LruCache<ChunkKey, ()>,
     capacity: usize,
 }
 
@@ -38,35 +40,64 @@ impl ChunkStorage {
 
     /// Obtain mutable access to a chunk, creating it if necessary.
     pub fn ensure_chunk(&mut self, pos: ChunkPos) -> &mut Chunk {
-        if !self.chunks.contains_key(&pos) {
+        self.ensure_chunk_in_dimension(DimensionId::DEFAULT, pos)
+    }
+
+    /// Obtain mutable access to a chunk in the specified dimension, creating it if necessary.
+    pub fn ensure_chunk_in_dimension(&mut self, dimension: DimensionId, pos: ChunkPos) -> &mut Chunk {
+        let key = ChunkKey::from_pos(dimension, pos);
+        if !self.chunks.contains_key(&key) {
             self.evict_if_needed();
             let chunk = Chunk::new(pos);
-            self.chunks.insert(pos, chunk);
+            self.chunks.insert(key, chunk);
         }
-        self.touch(pos);
-        self.chunks.get_mut(&pos).expect("chunk present")
+        self.touch(key);
+        self.chunks.get_mut(&key).expect("chunk present")
     }
 
     /// Attempt to fetch a chunk immutably.
     pub fn get(&self, pos: ChunkPos) -> Option<&Chunk> {
-        self.chunks.get(&pos)
+        self.get_in_dimension(DimensionId::DEFAULT, pos)
+    }
+
+    /// Attempt to fetch a chunk immutably in the specified dimension.
+    pub fn get_in_dimension(&self, dimension: DimensionId, pos: ChunkPos) -> Option<&Chunk> {
+        self.chunks.get(&ChunkKey::from_pos(dimension, pos))
     }
 
     /// Fetch a chunk mutably (without creating it).
     pub fn get_mut(&mut self, pos: ChunkPos) -> Option<&mut Chunk> {
-        if self.chunks.contains_key(&pos) {
-            self.touch(pos);
+        self.get_mut_in_dimension(DimensionId::DEFAULT, pos)
+    }
+
+    /// Fetch a chunk mutably in the specified dimension (without creating it).
+    pub fn get_mut_in_dimension(
+        &mut self,
+        dimension: DimensionId,
+        pos: ChunkPos,
+    ) -> Option<&mut Chunk> {
+        let key = ChunkKey::from_pos(dimension, pos);
+        if self.chunks.contains_key(&key) {
+            self.touch(key);
         }
-        self.chunks.get_mut(&pos)
+        self.chunks.get_mut(&key)
     }
 
     /// Iterate over currently resident chunk positions.
     pub fn iter_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.chunks
+            .keys()
+            .filter(|key| key.dimension == DimensionId::DEFAULT)
+            .map(|key| key.pos)
+    }
+
+    /// Iterate over currently resident chunk keys (all dimensions).
+    pub fn iter_keys(&self) -> impl Iterator<Item = ChunkKey> + '_ {
         self.chunks.keys().copied()
     }
 
-    fn touch(&mut self, pos: ChunkPos) {
-        self.lru.put(pos, ());
+    fn touch(&mut self, key: ChunkKey) {
+        self.lru.put(key, ());
     }
 
     fn evict_if_needed(&mut self) {

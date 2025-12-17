@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use bevy_ecs::schedule::Schedules;
 use bevy_ecs::world::World;
 use mdminecraft_core::SimTick;
+use mdminecraft_core::DimensionId;
 use mdminecraft_ecs::{build_default_schedule, run_tick};
 use mdminecraft_net::{
     ChunkStreamer, EntityReplicationTracker, EventLogger, InputLogger, NetworkEvent,
@@ -106,11 +107,12 @@ impl MultiplayerServer {
         run_tick(&mut self.world, &mut self.schedules, self.current_tick);
 
         // Send server state to all clients
-        for (_addr, client) in &mut self.clients {
+        for client in self.clients.values_mut() {
             // Send server state update
             let state_message = ServerMessage::ServerState {
                 tick: self.current_tick.0,
                 player_transform: Transform {
+                    dimension: DimensionId::DEFAULT,
                     x: 0,
                     y: 0,
                     z: 0,
@@ -193,6 +195,7 @@ impl MultiplayerServer {
                         tick: self.current_tick.0,
                         player_id: player_entity_id,
                         transform: Transform {
+                            dimension: DimensionId::DEFAULT,
                             x: 0,
                             y: 0,
                             z: 0,

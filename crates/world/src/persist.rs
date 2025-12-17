@@ -4,8 +4,12 @@
 //! Each region file uses zstd compression and CRC32 validation.
 
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_VOLUME};
+use crate::{SimTime, WeatherToggle};
 use anyhow::{Context, Result};
 use crc32fast::Hasher;
+use mdminecraft_core::DimensionId;
+use mdminecraft_core::SimTick;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -17,6 +21,18 @@ const REGION_MAGIC: u32 = 0x4D445247;
 
 /// Current region file format version.
 const REGION_VERSION: u16 = 1;
+
+/// Magic number for the world meta file ("MDWM" = mdminecraft world meta).
+const WORLD_META_MAGIC: u32 = 0x4D44574D;
+
+/// Current world meta file format version.
+const WORLD_META_VERSION: u16 = 1;
+
+/// Magic number for the world state file ("MDWS" = mdminecraft world state).
+const WORLD_STATE_MAGIC: u32 = 0x4D445753;
+
+/// Current world state file format version.
+const WORLD_STATE_VERSION: u16 = 1;
 
 /// Region size in chunks (32x32 chunks per region).
 const REGION_SIZE: i32 = 32;
@@ -76,6 +92,78 @@ impl RegionHeader {
     }
 }
 
+/// World meta stored alongside region data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldMeta {
+    /// World seed used for deterministic world generation.
+    pub world_seed: u64,
+}
+
+/// Global world state that must survive save/load cycles.
+///
+/// Chunk voxel data is stored separately in region files; this captures
+/// cross-chunk/global simulation state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorldState {
+    /// Current simulation tick.
+    pub tick: SimTick,
+    /// Simulation day/night cycle state.
+    pub sim_time: SimTime,
+    /// Weather toggle state.
+    pub weather: WeatherToggle,
+    /// Elapsed time since the last weather transition (seconds).
+    pub weather_timer_seconds: f32,
+    /// Next weather transition scheduled after this many seconds.
+    pub next_weather_change_seconds: f32,
+}
+
+/// Header for small world save blobs (meta/state).
+#[derive(Debug, Clone)]
+struct WorldBlobHeader {
+    magic: u32,
+    version: u16,
+    crc32: u32,
+    payload_len: u32,
+}
+
+impl WorldBlobHeader {
+    fn new(magic: u32, version: u16, crc32: u32, payload_len: u32) -> Self {
+        Self {
+            magic,
+            version,
+            crc32,
+            payload_len,
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(14);
+        bytes.extend_from_slice(&self.magic.to_le_bytes());
+        bytes.extend_from_slice(&self.version.to_le_bytes());
+        bytes.extend_from_slice(&self.crc32.to_le_bytes());
+        bytes.extend_from_slice(&self.payload_len.to_le_bytes());
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < 14 {
+            anyhow::bail!("World blob header too short");
+        }
+
+        let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let crc32 = u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
+        let payload_len = u32::from_le_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]);
+
+        Ok(Self {
+            magic,
+            version,
+            crc32,
+            payload_len,
+        })
+    }
+}
+
 /// Converts chunk position to region coordinates.
 fn chunk_to_region(chunk_pos: ChunkPos) -> (i32, i32) {
     (
@@ -97,20 +185,82 @@ impl RegionStore {
         Ok(Self { world_dir })
     }
 
-    /// Get the path to a region file for the given region coordinates.
-    fn region_path(&self, region_x: i32, region_z: i32) -> PathBuf {
-        self.world_dir
-            .join(format!("r.{}.{}.rg", region_x, region_z))
+    fn world_meta_path(&self) -> PathBuf {
+        self.world_dir.join("world.meta")
+    }
+
+    fn world_state_path(&self) -> PathBuf {
+        self.world_dir.join("world.state")
+    }
+
+    /// Get the path to a region file for the given dimension and region coordinates.
+    fn region_path(&self, dimension: DimensionId, region_x: i32, region_z: i32) -> PathBuf {
+        match dimension {
+            DimensionId::Overworld => self
+                .world_dir
+                .join(format!("r.{}.{}.rg", region_x, region_z)),
+            other => self
+                .world_dir
+                .join("dimensions")
+                .join(other.as_str())
+                .join(format!("r.{}.{}.rg", region_x, region_z)),
+        }
+    }
+
+    /// Check if a world meta blob exists on disk.
+    pub fn world_meta_exists(&self) -> bool {
+        self.world_meta_path().exists()
+    }
+
+    /// Save world meta.
+    pub fn save_world_meta(&self, meta: &WorldMeta) -> Result<()> {
+        let path = self.world_meta_path();
+        self.write_world_blob(&path, WORLD_META_MAGIC, WORLD_META_VERSION, meta)
+            .with_context(|| format!("Failed to save world meta to {}", path.display()))
+    }
+
+    /// Load world meta.
+    pub fn load_world_meta(&self) -> Result<WorldMeta> {
+        let path = self.world_meta_path();
+        self.read_world_blob(&path, WORLD_META_MAGIC, WORLD_META_VERSION)
+            .with_context(|| format!("Failed to load world meta from {}", path.display()))
+    }
+
+    /// Check if a world state blob exists on disk.
+    pub fn world_state_exists(&self) -> bool {
+        self.world_state_path().exists()
+    }
+
+    /// Save world state.
+    pub fn save_world_state(&self, state: &WorldState) -> Result<()> {
+        let path = self.world_state_path();
+        self.write_world_blob(&path, WORLD_STATE_MAGIC, WORLD_STATE_VERSION, state)
+            .with_context(|| format!("Failed to save world state to {}", path.display()))
+    }
+
+    /// Load world state.
+    pub fn load_world_state(&self) -> Result<WorldState> {
+        let path = self.world_state_path();
+        self.read_world_blob(&path, WORLD_STATE_MAGIC, WORLD_STATE_VERSION)
+            .with_context(|| format!("Failed to load world state from {}", path.display()))
     }
 
     /// Save a chunk to its region file.
     #[instrument(skip(self, chunk), fields(chunk_pos = ?chunk.position()))]
     pub fn save_chunk(&self, chunk: &Chunk) -> Result<()> {
+        self.save_chunk_in_dimension(DimensionId::DEFAULT, chunk)
+    }
+
+    /// Save a chunk to its region file in the specified dimension.
+    #[instrument(skip(self, chunk), fields(dimension = %dimension.as_str(), chunk_pos = ?chunk.position()))]
+    pub fn save_chunk_in_dimension(&self, dimension: DimensionId, chunk: &Chunk) -> Result<()> {
         let (region_x, region_z) = chunk_to_region(chunk.position());
         debug!(region_x, region_z, "Saving chunk to region");
 
         // Load existing region or create new one.
-        let mut region_data = self.load_region(region_x, region_z).unwrap_or_default();
+        let mut region_data = self
+            .load_region(dimension, region_x, region_z)
+            .unwrap_or_default();
 
         // Serialize chunk data.
         let chunk_data = serialize_chunk(chunk)?;
@@ -120,7 +270,7 @@ impl RegionStore {
         region_data.insert(chunk.position(), chunk_data);
 
         // Write region file.
-        self.write_region(region_x, region_z, &region_data)?;
+        self.write_region(dimension, region_x, region_z, &region_data)?;
 
         debug!(chunk_count = region_data.len(), "Chunk saved successfully");
         Ok(())
@@ -129,10 +279,16 @@ impl RegionStore {
     /// Load a chunk from its region file.
     #[instrument(skip(self), fields(chunk_pos = ?pos))]
     pub fn load_chunk(&self, pos: ChunkPos) -> Result<Chunk> {
+        self.load_chunk_in_dimension(DimensionId::DEFAULT, pos)
+    }
+
+    /// Load a chunk from its region file in the specified dimension.
+    #[instrument(skip(self), fields(dimension = %dimension.as_str(), chunk_pos = ?pos))]
+    pub fn load_chunk_in_dimension(&self, dimension: DimensionId, pos: ChunkPos) -> Result<Chunk> {
         let (region_x, region_z) = chunk_to_region(pos);
         debug!(region_x, region_z, "Loading chunk from region");
 
-        let region_data = self.load_region(region_x, region_z)?;
+        let region_data = self.load_region(dimension, region_x, region_z)?;
 
         let chunk_data = region_data.get(&pos).context("Chunk not found in region")?;
         debug!(
@@ -147,8 +303,13 @@ impl RegionStore {
 
     /// Load an entire region file into memory.
     #[instrument(skip(self), fields(region_x, region_z))]
-    fn load_region(&self, region_x: i32, region_z: i32) -> Result<HashMap<ChunkPos, Vec<u8>>> {
-        let region_path = self.region_path(region_x, region_z);
+    fn load_region(
+        &self,
+        dimension: DimensionId,
+        region_x: i32,
+        region_z: i32,
+    ) -> Result<HashMap<ChunkPos, Vec<u8>>> {
+        let region_path = self.region_path(dimension, region_x, region_z);
         debug!(path = %region_path.display(), "Loading region file");
 
         if !region_path.exists() {
@@ -162,6 +323,13 @@ impl RegionStore {
         file.read_exact(&mut header_bytes)
             .context("Failed to read region header")?;
         let header = RegionHeader::from_bytes(&header_bytes)?;
+        if header.version != REGION_VERSION {
+            anyhow::bail!(
+                "Unsupported region version {} (expected {}). World upgrade required.",
+                header.version,
+                REGION_VERSION
+            );
+        }
         debug!(
             version = header.version,
             payload_len = header.payload_len,
@@ -218,11 +386,12 @@ impl RegionStore {
     #[instrument(skip(self, data), fields(region_x, region_z, chunk_count = data.len()))]
     fn write_region(
         &self,
+        dimension: DimensionId,
         region_x: i32,
         region_z: i32,
         data: &HashMap<ChunkPos, Vec<u8>>,
     ) -> Result<()> {
-        let region_path = self.region_path(region_x, region_z);
+        let region_path = self.region_path(dimension, region_x, region_z);
         debug!(path = %region_path.display(), "Writing region file");
 
         // Serialize region data.
@@ -249,6 +418,10 @@ impl RegionStore {
         let header = RegionHeader::new(crc32, compressed.len() as u32);
 
         // Write to file.
+        if let Some(parent) = region_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create region directory {}", parent.display()))?;
+        }
         let mut file = File::create(&region_path).context("Failed to create region file")?;
         file.write_all(&header.to_bytes())
             .context("Failed to write header")?;
@@ -264,15 +437,20 @@ impl RegionStore {
 
     /// Check if a chunk exists in storage.
     pub fn chunk_exists(&self, pos: ChunkPos) -> bool {
+        self.chunk_exists_in_dimension(DimensionId::DEFAULT, pos)
+    }
+
+    /// Check if a chunk exists in storage in the specified dimension.
+    pub fn chunk_exists_in_dimension(&self, dimension: DimensionId, pos: ChunkPos) -> bool {
         let (region_x, region_z) = chunk_to_region(pos);
-        let region_path = self.region_path(region_x, region_z);
+        let region_path = self.region_path(dimension, region_x, region_z);
 
         if !region_path.exists() {
             return false;
         }
 
         // Try to load region map and verify the chunk key is present. Any parse error -> false.
-        match self.load_region(region_x, region_z) {
+        match self.load_region(dimension, region_x, region_z) {
             Ok(map) => map.contains_key(&pos),
             Err(err) => {
                 tracing::warn!(
@@ -283,6 +461,87 @@ impl RegionStore {
                 false
             }
         }
+    }
+
+    fn write_world_blob<T: Serialize>(
+        &self,
+        path: &Path,
+        magic: u32,
+        version: u16,
+        value: &T,
+    ) -> Result<()> {
+        let serialized = bincode::serialize(value).context("Failed to serialize world blob")?;
+        let compressed =
+            zstd::encode_all(&serialized[..], 3).context("Failed to compress world blob")?;
+
+        let mut hasher = Hasher::new();
+        hasher.update(&compressed);
+        let crc32 = hasher.finalize();
+
+        let header = WorldBlobHeader::new(magic, version, crc32, compressed.len() as u32);
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create save directory {}", parent.display()))?;
+        }
+
+        let mut file = File::create(path).context("Failed to create world blob file")?;
+        file.write_all(&header.to_bytes())
+            .context("Failed to write world blob header")?;
+        file.write_all(&compressed)
+            .context("Failed to write world blob payload")?;
+        Ok(())
+    }
+
+    fn read_world_blob<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &Path,
+        expected_magic: u32,
+        expected_version: u16,
+    ) -> Result<T> {
+        let mut file = File::open(path).context("Failed to open world blob file")?;
+
+        let mut header_bytes = [0u8; 14];
+        file.read_exact(&mut header_bytes)
+            .context("Failed to read world blob header")?;
+        let header = WorldBlobHeader::from_bytes(&header_bytes)?;
+
+        if header.magic != expected_magic {
+            anyhow::bail!(
+                "Invalid world blob magic: expected 0x{:08X}, got 0x{:08X}",
+                expected_magic,
+                header.magic
+            );
+        }
+
+        if header.version != expected_version {
+            anyhow::bail!(
+                "Unsupported world blob version {} (expected {}). World upgrade required.",
+                header.version,
+                expected_version
+            );
+        }
+
+        let mut compressed = vec![0u8; header.payload_len as usize];
+        file.read_exact(&mut compressed)
+            .context("Failed to read world blob payload")?;
+
+        let mut hasher = Hasher::new();
+        hasher.update(&compressed);
+        let computed_crc = hasher.finalize();
+
+        if computed_crc != header.crc32 {
+            anyhow::bail!(
+                "World blob CRC32 mismatch: expected {:08X}, got {:08X}",
+                header.crc32,
+                computed_crc
+            );
+        }
+
+        let decompressed =
+            zstd::decode_all(&compressed[..]).context("Failed to decompress world blob")?;
+        let decoded = bincode::deserialize(&decompressed).context("Failed to decode world blob")?;
+        Ok(decoded)
     }
 }
 
@@ -325,6 +584,7 @@ fn deserialize_chunk(pos: ChunkPos, data: &[u8]) -> Result<Chunk> {
 mod tests {
     use super::*;
     use crate::chunk::BLOCK_AIR;
+    use mdminecraft_core::DimensionId;
     use std::env;
 
     #[test]
@@ -393,6 +653,71 @@ mod tests {
     }
 
     #[test]
+    fn save_and_load_chunk_across_dimensions() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_dims_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        let pos = ChunkPos::new(0, 0);
+
+        let mut overworld = Chunk::new(pos);
+        overworld.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        store
+            .save_chunk_in_dimension(DimensionId::Overworld, &overworld)
+            .unwrap();
+
+        let mut nether = Chunk::new(pos);
+        nether.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: 2,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        store
+            .save_chunk_in_dimension(DimensionId::Nether, &nether)
+            .unwrap();
+
+        assert!(store.chunk_exists_in_dimension(DimensionId::Overworld, pos));
+        assert!(store.chunk_exists_in_dimension(DimensionId::Nether, pos));
+
+        let loaded_overworld = store
+            .load_chunk_in_dimension(DimensionId::Overworld, pos)
+            .unwrap();
+        let loaded_nether = store
+            .load_chunk_in_dimension(DimensionId::Nether, pos)
+            .unwrap();
+
+        assert_eq!(loaded_overworld.voxel(1, 64, 1).id, 1);
+        assert_eq!(loaded_nether.voxel(1, 64, 1).id, 2);
+
+        assert!(
+            temp_dir.join("dimensions").join("nether").exists(),
+            "Nether directory should be created"
+        );
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
     fn multiple_chunks_in_same_region() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -452,7 +777,7 @@ mod tests {
 
         // Save a single chunk in region (0,0)
         let pos_present = ChunkPos::new(0, 0);
-        let mut chunk = Chunk::new(pos_present);
+        let chunk = Chunk::new(pos_present);
         store.save_chunk(&chunk).unwrap();
 
         // Different chunk in same region (0,1) should report false without load error.
@@ -622,5 +947,57 @@ mod tests {
         let (rx2, rz2) = chunk_to_region(pos2);
         assert_eq!(rx2, 1);
         assert_eq!(rz2, 1);
+    }
+
+    #[test]
+    fn world_meta_roundtrip() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_meta_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        let meta = WorldMeta { world_seed: 12345 };
+        store.save_world_meta(&meta).unwrap();
+        assert!(store.world_meta_exists());
+
+        let loaded = store.load_world_meta().unwrap();
+        assert_eq!(loaded, meta);
+
+        fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn world_state_roundtrip() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = env::temp_dir().join(format!("mdminecraft_test_state_{}", timestamp));
+        let store = RegionStore::new(&temp_dir).unwrap();
+
+        let mut time = SimTime::new(24000);
+        time.tick = SimTick(777);
+        let mut weather = WeatherToggle::new();
+        weather.toggle();
+
+        let state = WorldState {
+            tick: SimTick(777),
+            sim_time: time,
+            weather,
+            weather_timer_seconds: 12.5,
+            next_weather_change_seconds: 99.0,
+        };
+
+        store.save_world_state(&state).unwrap();
+        assert!(store.world_state_exists());
+
+        let loaded = store.load_world_state().unwrap();
+        assert_eq!(loaded, state);
+
+        fs::remove_dir_all(&temp_dir).ok();
     }
 }

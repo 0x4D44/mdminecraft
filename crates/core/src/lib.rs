@@ -2,17 +2,26 @@
 //! Core primitives shared across the workspace.
 
 pub mod crafting;
+/// Deterministic metadata components for persistence/networking.
+pub mod components;
+/// Dimension identifiers shared across simulation, persistence, and networking.
+pub mod dimension;
 /// Enchantment types and data structures for the enchanting system.
 pub mod enchantment;
 pub mod item;
+/// Namespaced registry keys for blocks/items/entities/tags.
+pub mod registry;
 
 use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types
 pub use crafting::{Recipe, ToolRecipes};
+pub use components::{ComponentMap, ComponentValue};
+pub use dimension::DimensionId;
 pub use enchantment::{Enchantment, EnchantmentType};
 pub use item::{ItemStack, ItemType, ToolMaterial, ToolType};
+pub use registry::RegistryKey;
 
 /// Fixed tick type (20 TPS => 50 ms per tick).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

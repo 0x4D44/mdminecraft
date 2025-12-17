@@ -1358,7 +1358,7 @@ mod tests {
         for x in 5..11 {
             for z in 5..11 {
                 let block_id = chunk.voxel(x, 9, z).id;
-                if block_id >= 117 && block_id <= 120 {
+                if (117..=120).contains(&block_id) {
                     sculk_count += 1;
                 }
             }
@@ -1436,7 +1436,6 @@ mod tests {
         });
 
         // Decorator should execute
-        assert!(true, "Dripstone generator executed for stalagmites");
     }
 
     #[test]
@@ -1486,7 +1485,7 @@ mod tests {
             .count();
 
         // Multiple carvers should carve more than individual ones
-        assert!(final_stone_count < initial_stone_count || final_stone_count == initial_stone_count);
+        assert!(final_stone_count <= initial_stone_count);
     }
 
     #[test]
@@ -1498,7 +1497,6 @@ mod tests {
         ravine.carve_chunk(&mut chunk, -5, -5);
 
         // Should execute without panic
-        assert!(true, "Ravine carver handles negative coordinates");
     }
 
     #[test]

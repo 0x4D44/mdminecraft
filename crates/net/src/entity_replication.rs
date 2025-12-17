@@ -21,8 +21,11 @@ pub struct EntityReplicationTracker {
 }
 
 /// Cached entity state for delta encoding.
+///
+/// This is deliberately a small, quantized representation suitable for network
+/// delta encoding and deterministic iteration.
 #[derive(Debug, Clone)]
-struct EntityState {
+pub struct EntityState {
     transform: Transform,
     health: Option<(f32, f32)>, // (current, max)
     entity_type: String,
@@ -46,12 +49,16 @@ impl EntityReplicationTracker {
         player_pos: &Transform,
         entity_positions: &BTreeMap<EntityId, Transform>,
     ) {
+        let player_dimension = player_pos.dimension;
         let player_chunk_x = player_pos.x / (16 * 16); // 16 blocks * 16 subunits
         let player_chunk_z = player_pos.z / (16 * 16);
 
         let mut new_visible = BTreeSet::new();
 
         for (&entity_id, entity_pos) in entity_positions {
+            if entity_pos.dimension != player_dimension {
+                continue;
+            }
             let entity_chunk_x = entity_pos.x / (16 * 16);
             let entity_chunk_z = entity_pos.z / (16 * 16);
 
@@ -127,7 +134,8 @@ impl EntityReplicationTracker {
     /// Check if entity state has changed significantly.
     fn has_changed(last: &EntityState, current: &EntityState) -> bool {
         // Check transform (already quantized, so any change matters)
-        if last.transform.x != current.transform.x
+        if last.transform.dimension != current.transform.dimension
+            || last.transform.x != current.transform.x
             || last.transform.y != current.transform.y
             || last.transform.z != current.transform.z
             || last.transform.yaw != current.transform.yaw
@@ -202,9 +210,11 @@ pub fn create_entity_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mdminecraft_core::DimensionId;
 
     fn make_transform(x: i32, y: i32, z: i32) -> Transform {
         Transform {
+            dimension: DimensionId::DEFAULT,
             x,
             y,
             z,

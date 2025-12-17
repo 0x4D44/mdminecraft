@@ -137,7 +137,7 @@ mod tests {
 
         // Midnight: minimum light.
         let midnight_light = time.effective_skylight();
-        assert!(midnight_light >= 3 && midnight_light <= 4); // ~20% of 15
+        assert!((3..=4).contains(&midnight_light)); // ~20% of 15
 
         // Noon: maximum light.
         for _ in 0..12000 {

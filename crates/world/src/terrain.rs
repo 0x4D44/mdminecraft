@@ -92,7 +92,7 @@ impl TerrainGenerator {
                 let world_x = chunk_origin_x + local_x as i32;
                 let world_z = chunk_origin_z + local_z as i32;
                 
-                let base_height = heightmap.get(local_x, local_z) as i32;
+                let base_height = heightmap.get(local_x, local_z);
                 let biome = self.biome_assigner.get_biome(world_x, world_z);
                 let biome_data = BiomeData::get(biome);
                 

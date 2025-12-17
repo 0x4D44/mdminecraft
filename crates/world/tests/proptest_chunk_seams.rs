@@ -34,7 +34,7 @@ proptest! {
         for z in 0..CHUNK_SIZE_Z {
             let h1 = hm1.get(CHUNK_SIZE_X - 1, z);
             let h2 = hm2.get(0, z);
-            let diff = (h1 as i32 - h2 as i32).abs();
+            let diff = (h1 - h2).abs();
 
             prop_assert!(
                 diff <= MAX_SEAM_DIFF,
@@ -61,7 +61,7 @@ proptest! {
         for x in 0..CHUNK_SIZE_X {
             let h1 = hm1.get(x, CHUNK_SIZE_Z - 1);
             let h2 = hm2.get(x, 0);
-            let diff = (h1 as i32 - h2 as i32).abs();
+            let diff = (h1 - h2).abs();
 
             prop_assert!(
                 diff <= MAX_SEAM_DIFF,
@@ -147,7 +147,7 @@ proptest! {
             for x in 0..CHUNK_SIZE_X {
                 let h = hm.get(x, z);
                 prop_assert!(
-                    h >= 0 && h <= 255,
+                    (0..=255).contains(&h),
                     "Height {} out of bounds [0, 255] at chunk ({}, {}) pos ({}, {})",
                     h, chunk_x, chunk_z, x, z
                 );
@@ -199,9 +199,9 @@ proptest! {
         let h_br = hm_br.get(0, 0);
 
         // All corners should be within MAX_SEAM_DIFF of each other
-        let heights = [h_tl as i32, h_tr as i32, h_bl as i32, h_br as i32];
-        let min_h = heights.iter().min().unwrap();
-        let max_h = heights.iter().max().unwrap();
+        let heights = [h_tl, h_tr, h_bl, h_br];
+        let min_h = heights.iter().min().copied().unwrap_or_default();
+        let max_h = heights.iter().max().copied().unwrap_or_default();
         let diff = max_h - min_h;
 
         prop_assert!(
@@ -226,7 +226,7 @@ mod unit_tests {
         for z in 0..CHUNK_SIZE_Z {
             let h1 = hm1.get(CHUNK_SIZE_X - 1, z);
             let h2 = hm2.get(0, z);
-            let diff = (h1 as i32 - h2 as i32).abs();
+            let diff = (h1 - h2).abs();
             assert!(
                 diff <= MAX_SEAM_DIFF,
                 "Known good seam failed at z={}: diff={}",

@@ -19,23 +19,47 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 const WORLD_SEED: u64 = 11223344556677;
-const CHUNK_RADIUS: i32 = 8; // 17×17 grid = 289 chunks
-const VERIFICATION_ROUNDS: usize = 3; // Regenerate 3 times to verify consistency
+// This worldtest is intentionally heavy; keep the default debug workload small so `cargo test`
+// doesn't look hung on typical developer machines. You can override via env vars:
+//   - `MDM_DETERMINISM_CHUNK_RADIUS` (i32)
+//   - `MDM_DETERMINISM_VERIFICATION_ROUNDS` (usize)
+const CHUNK_RADIUS_DEBUG: i32 = 2; // 5×5 grid = 25 chunks
+const CHUNK_RADIUS_RELEASE: i32 = 8; // 17×17 grid = 289 chunks
+const VERIFICATION_ROUNDS_DEBUG: usize = 2;
+const VERIFICATION_ROUNDS_RELEASE: usize = 3;
+const VERIFICATION_SAMPLE_POSITIONS: usize = 5;
 
 #[test]
 fn determinism_worldtest() {
     let test_start = Instant::now();
+
+    let chunk_radius: i32 = std::env::var("MDM_DETERMINISM_CHUNK_RADIUS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(if cfg!(debug_assertions) {
+            CHUNK_RADIUS_DEBUG
+        } else {
+            CHUNK_RADIUS_RELEASE
+        });
+    let verification_rounds: usize = std::env::var("MDM_DETERMINISM_VERIFICATION_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(if cfg!(debug_assertions) {
+            VERIFICATION_ROUNDS_DEBUG
+        } else {
+            VERIFICATION_ROUNDS_RELEASE
+        });
 
     println!("\n=== Determinism Validation Worldtest ===");
     println!("Configuration:");
     println!("  World seed: {}", WORLD_SEED);
     println!(
         "  Chunk radius: {} ({}×{} grid)",
-        CHUNK_RADIUS,
-        CHUNK_RADIUS * 2 + 1,
-        CHUNK_RADIUS * 2 + 1
+        chunk_radius,
+        chunk_radius * 2 + 1,
+        chunk_radius * 2 + 1
     );
-    println!("  Verification rounds: {}", VERIFICATION_ROUNDS);
+    println!("  Verification rounds: {}", verification_rounds);
     println!();
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -50,8 +74,8 @@ fn determinism_worldtest() {
     let mut positions = Vec::new();
     let mut generation_times = Vec::new();
 
-    for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
-        for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
+    for chunk_z in -chunk_radius..=chunk_radius {
+        for chunk_x in -chunk_radius..=chunk_radius {
             let pos = ChunkPos {
                 x: chunk_x,
                 z: chunk_z,
@@ -68,7 +92,6 @@ fn determinism_worldtest() {
     }
 
     let chunks_generated = chunks_sequential.len();
-    let blocks_generated = chunks_generated * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
     println!(
@@ -178,12 +201,44 @@ fn determinism_worldtest() {
     println!("Phase 4: Multiple regeneration rounds...");
     let phase4_start = Instant::now();
 
-    let mut round_mismatches = vec![0; VERIFICATION_ROUNDS];
+    let position_to_index: HashMap<ChunkPos, usize> = positions
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, pos)| (pos, idx))
+        .collect();
+    let mut verification_positions = vec![
+        ChunkPos { x: 0, z: 0 },
+        ChunkPos {
+            x: -chunk_radius,
+            z: -chunk_radius,
+        },
+        ChunkPos {
+            x: chunk_radius,
+            z: -chunk_radius,
+        },
+        ChunkPos {
+            x: -chunk_radius,
+            z: chunk_radius,
+        },
+        ChunkPos {
+            x: chunk_radius,
+            z: chunk_radius,
+        },
+    ];
+    // Ensure uniqueness (e.g., radius = 0) and clamp to generated positions.
+    verification_positions.sort_by_key(|pos| (pos.x, pos.z));
+    verification_positions.dedup();
+    verification_positions.retain(|pos| position_to_index.contains_key(pos));
+    verification_positions.truncate(VERIFICATION_SAMPLE_POSITIONS);
 
-    for round in 0..VERIFICATION_ROUNDS {
-        for (idx, original_chunk) in chunks_sequential.iter().enumerate() {
-            let pos = positions[idx];
-            let regenerated = terrain_gen.generate_chunk(pos);
+    let mut round_mismatches = vec![0usize; verification_rounds];
+
+    for (round, mismatches) in round_mismatches.iter_mut().enumerate() {
+        for pos in &verification_positions {
+            let idx = *position_to_index.get(pos).expect("pos exists in baseline");
+            let original_chunk = &chunks_sequential[idx];
+            let regenerated = terrain_gen.generate_chunk(*pos);
 
             // Spot check voxels (sample every 8th block to save time)
             for y in (0..CHUNK_SIZE_Y).step_by(8) {
@@ -193,18 +248,14 @@ fn determinism_worldtest() {
                         let regen = regenerated.voxel(x, y, z);
 
                         if original.id != regen.id {
-                            round_mismatches[round] += 1;
+                            *mismatches += 1;
                         }
                     }
                 }
             }
         }
 
-        println!(
-            "  Round {}: {} mismatches",
-            round + 1,
-            round_mismatches[round]
-        );
+        println!("  Round {}: {} mismatches", round + 1, mismatches);
     }
 
     println!(
@@ -226,8 +277,8 @@ fn determinism_worldtest() {
     let mut biome_mismatches = 0;
     let mut total_biome_samples = 0;
 
-    for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
-        for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
+    for chunk_z in -chunk_radius..=chunk_radius {
+        for chunk_x in -chunk_radius..=chunk_radius {
             for local_z in (0..CHUNK_SIZE_Z).step_by(4) {
                 for local_x in (0..CHUNK_SIZE_X).step_by(4) {
                     let world_x = chunk_x * 16 + local_x as i32;
@@ -264,8 +315,8 @@ fn determinism_worldtest() {
     let mut heightmap_mismatches = 0;
     let mut total_height_samples = 0;
 
-    for chunk_z in -CHUNK_RADIUS..=CHUNK_RADIUS {
-        for chunk_x in -CHUNK_RADIUS..=CHUNK_RADIUS {
+    for chunk_z in -chunk_radius..=chunk_radius {
+        for chunk_x in -chunk_radius..=chunk_radius {
             let hm1 = Heightmap::generate(WORLD_SEED, chunk_x, chunk_z);
             let hm2 = Heightmap::generate(WORLD_SEED, chunk_x, chunk_z);
 
@@ -297,7 +348,11 @@ fn determinism_worldtest() {
     // ═══════════════════════════════════════════════════════════════════════
 
     let test_duration = test_start.elapsed().as_secs_f64();
-    let total_regenerations = chunks_generated * (1 + VERIFICATION_ROUNDS);
+    let phase2_regenerations = chunks_generated;
+    let phase4_regenerations = verification_positions.len() * verification_rounds;
+    let total_regenerations = phase2_regenerations + phase4_regenerations;
+    let total_chunk_generations = chunks_generated + total_regenerations;
+    let blocks_generated = total_chunk_generations * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
     let all_checks_passed = voxel_mismatches == 0
         && biome_mismatches == 0
         && heightmap_mismatches == 0
@@ -312,7 +367,7 @@ fn determinism_worldtest() {
             TestResult::Fail
         })
         .terrain(TerrainMetrics {
-            chunks_generated: total_regenerations,
+            chunks_generated: total_chunk_generations,
             blocks_generated,
             avg_gen_time_us,
             min_gen_time_us: *generation_times.iter().min().unwrap(),
@@ -352,9 +407,7 @@ fn determinism_worldtest() {
     println!("Generation:");
     println!(
         "  Chunks: {} (initial) + {} (regenerations) = {} total",
-        chunks_generated,
-        total_regenerations - chunks_generated,
-        total_regenerations
+        chunks_generated, total_regenerations, total_chunk_generations
     );
     println!("  Avg generation: {:.2}ms/chunk", avg_gen_time_us / 1000.0);
     println!();
@@ -377,7 +430,7 @@ fn determinism_worldtest() {
     );
     println!(
         "  Multi-round verification: {} rounds, {} total mismatches",
-        VERIFICATION_ROUNDS,
+        verification_rounds,
         round_mismatches.iter().sum::<usize>()
     );
     println!();

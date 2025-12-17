@@ -122,7 +122,7 @@ fn mob_lifecycle_worldtest() {
                     .wrapping_mul(pos.z as u64)
                     .wrapping_mul((local_x * 16 + local_z) as u64);
 
-                if spawn_hash % SPAWN_PROBABILITY == 0 && !mob_types.is_empty() {
+                if spawn_hash.is_multiple_of(SPAWN_PROBABILITY) && !mob_types.is_empty() {
                     // Use weighted selection (for simplicity, just use first mob type)
                     let (mob_type, _weight) = mob_types[0];
 

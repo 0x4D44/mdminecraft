@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::RootCertStore;
-use rustls_native_certs;
 use std::fs::File;
 use std::io::BufReader;
 use std::net::SocketAddr;
@@ -159,7 +158,7 @@ impl ClientEndpoint {
                 let mut root_store = RootCertStore::empty();
                 let native = rustls_native_certs::load_native_certs();
                 let (added, ignored) =
-                    root_store.add_parsable_certificates(native.certs.into_iter());
+                    root_store.add_parsable_certificates(native.certs);
                 if !native.errors.is_empty() {
                     warn!("Some native roots failed to load: {:?}", native.errors);
                 }
