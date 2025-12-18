@@ -12,24 +12,24 @@ use std::collections::{BTreeSet, HashMap};
 pub mod farming_blocks {
     use crate::chunk::BlockId;
 
-    pub const FARMLAND: BlockId = 48;
-    pub const FARMLAND_WET: BlockId = 49;
-    pub const WHEAT_0: BlockId = 50;
-    pub const WHEAT_1: BlockId = 51;
-    pub const WHEAT_2: BlockId = 52;
-    pub const WHEAT_3: BlockId = 53;
-    pub const WHEAT_4: BlockId = 54;
-    pub const WHEAT_5: BlockId = 55;
-    pub const WHEAT_6: BlockId = 56;
-    pub const WHEAT_7: BlockId = 57;
-    pub const CARROTS_0: BlockId = 58;
-    pub const CARROTS_1: BlockId = 59;
-    pub const CARROTS_2: BlockId = 60;
-    pub const CARROTS_3: BlockId = 61;
-    pub const POTATOES_0: BlockId = 62;
-    pub const POTATOES_1: BlockId = 63;
-    pub const POTATOES_2: BlockId = 64;
-    pub const POTATOES_3: BlockId = 65;
+    pub const FARMLAND: BlockId = 47;
+    pub const FARMLAND_WET: BlockId = 48;
+    pub const WHEAT_0: BlockId = 49;
+    pub const WHEAT_1: BlockId = 50;
+    pub const WHEAT_2: BlockId = 51;
+    pub const WHEAT_3: BlockId = 52;
+    pub const WHEAT_4: BlockId = 53;
+    pub const WHEAT_5: BlockId = 54;
+    pub const WHEAT_6: BlockId = 55;
+    pub const WHEAT_7: BlockId = 56;
+    pub const CARROTS_0: BlockId = 57;
+    pub const CARROTS_1: BlockId = 58;
+    pub const CARROTS_2: BlockId = 59;
+    pub const CARROTS_3: BlockId = 60;
+    pub const POTATOES_0: BlockId = 61;
+    pub const POTATOES_1: BlockId = 62;
+    pub const POTATOES_2: BlockId = 63;
+    pub const POTATOES_3: BlockId = 64;
 }
 
 /// Type of crop
@@ -468,7 +468,10 @@ mod tests {
     fn test_crop_type_base_block_ids() {
         assert_eq!(CropType::Wheat.base_block_id(), farming_blocks::WHEAT_0);
         assert_eq!(CropType::Carrots.base_block_id(), farming_blocks::CARROTS_0);
-        assert_eq!(CropType::Potatoes.base_block_id(), farming_blocks::POTATOES_0);
+        assert_eq!(
+            CropType::Potatoes.base_block_id(),
+            farming_blocks::POTATOES_0
+        );
     }
 
     #[test]
@@ -548,18 +551,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Setup: farmland with wheat
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: farming_blocks::FARMLAND_WET,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::WHEAT_0,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND_WET,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = CropPosition {
@@ -592,18 +605,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Setup: wheat on stone (no farmland)
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::WHEAT_0,
-            state: 0,
-            light_sky: 15,
-            light_block: 15,
-        });
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 15,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = CropPosition {
@@ -632,18 +655,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Setup: wheat with farmland but no light
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: farming_blocks::FARMLAND_WET,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::WHEAT_0,
-            state: 0,
-            light_sky: 0, // No light
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND_WET,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 0, // No light
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = CropPosition {
@@ -672,18 +705,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Setup: wheat at max stage
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: farming_blocks::FARMLAND_WET,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::WHEAT_7, // Already fully grown
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND_WET,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_7, // Already fully grown
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = CropPosition {
@@ -711,18 +754,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Setup: wheat on farmland
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: farming_blocks::FARMLAND_WET,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::WHEAT_0,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND_WET,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = CropPosition {
@@ -735,12 +788,17 @@ mod tests {
 
         // Replace crop with stone
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(5, 64, 5, Voxel {
-                id: blocks::STONE,
-                state: 0,
-                light_sky: 0,
-                light_block: 0,
-            });
+            chunk.set_voxel(
+                5,
+                64,
+                5,
+                Voxel {
+                    id: blocks::STONE,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
         }
 
         // After ticking, non-crop block should cause unregister
@@ -785,12 +843,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place crop at y=0 (no farmland possible below)
-        chunk.set_voxel(5, 0, 5, Voxel {
-            id: farming_blocks::WHEAT_0,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            0,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = CropPosition {
@@ -818,18 +881,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place dry farmland with water nearby
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::FARMLAND,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(7, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            7,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Run hydration update (every 20 ticks)
@@ -851,12 +924,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place wet farmland with no water nearby
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::FARMLAND_WET,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND_WET,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Run hydration update
@@ -905,18 +983,28 @@ mod tests {
 
         // Setup multiple crops
         for x in 0..3 {
-            chunk.set_voxel(x, 63, 5, Voxel {
-                id: farming_blocks::FARMLAND_WET,
-                state: 0,
-                light_sky: 15,
-                light_block: 0,
-            });
-            chunk.set_voxel(x, 64, 5, Voxel {
-                id: farming_blocks::WHEAT_0,
-                state: 0,
-                light_sky: 15,
-                light_block: 0,
-            });
+            chunk.set_voxel(
+                x,
+                63,
+                5,
+                Voxel {
+                    id: farming_blocks::FARMLAND_WET,
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                },
+            );
+            chunk.set_voxel(
+                x,
+                64,
+                5,
+                Voxel {
+                    id: farming_blocks::WHEAT_0,
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                },
+            );
             system.register_crop(CropPosition {
                 chunk: ChunkPos::new(0, 0),
                 x: x as u8,
@@ -944,18 +1032,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place dry farmland with water one block below
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::FARMLAND,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Run hydration update
@@ -977,18 +1075,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place dry farmland with water 5 blocks away (too far)
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: farming_blocks::FARMLAND,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(10, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            10,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Run hydration update

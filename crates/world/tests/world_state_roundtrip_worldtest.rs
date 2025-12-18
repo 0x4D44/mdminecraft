@@ -9,14 +9,19 @@
 //! - Player + entities + block-entities survive roundtrips
 //! - Deterministic evolution across save/load boundaries
 
-use mdminecraft_testkit::{MetricsReportBuilder, MetricsSink, PersistenceMetrics, TestExecutionMetrics, TestResult};
+use mdminecraft_core::{
+    DimensionId, ItemStack as CoreItemStack, ItemType as CoreItemType, SimTick, ToolMaterial,
+    ToolType,
+};
+use mdminecraft_testkit::{
+    MetricsReportBuilder, MetricsSink, PersistenceMetrics, TestExecutionMetrics, TestResult,
+};
 use mdminecraft_world::{
     BlockEntitiesState, BlockEntityKey, BrewingStandState, EnchantingTableState, FurnaceState,
     ItemManager, Mob, MobType, Projectile, ProjectileManager, RegionStore, SimTime, StatusEffect,
     StatusEffectType, StatusEffects, WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint,
     WorldState,
 };
-use mdminecraft_core::{DimensionId, ItemStack as CoreItemStack, ItemType as CoreItemType, SimTick, ToolMaterial, ToolType};
 use std::env;
 use std::time::Instant;
 
@@ -44,10 +49,7 @@ fn simulate_tick(state: &mut WorldState) {
     }
 
     // Dropped items (use a deterministic, fixed ground height).
-    let _ = state
-        .entities
-        .dropped_items
-        .update(|_x, _z| 64.0);
+    let _ = state.entities.dropped_items.update(|_x, _z| 64.0);
 
     // Projectiles.
     state.entities.projectiles.update();
@@ -159,8 +161,7 @@ fn make_initial_state() -> WorldState {
         },
     );
 
-    let mut time = SimTime::default();
-    time.tick = SimTick::ZERO;
+    let time = SimTime::default();
 
     WorldState {
         tick: SimTick::ZERO,
@@ -221,11 +222,15 @@ fn world_state_roundtrip_worldtest() {
 
         // Save/load boundary.
         let save_start = Instant::now();
-        store.save_world_state(&state).expect("failed to save world state");
+        store
+            .save_world_state(&state)
+            .expect("failed to save world state");
         save_times_us.push(save_start.elapsed().as_micros());
 
         let load_start = Instant::now();
-        state = store.load_world_state().expect("failed to load world state");
+        state = store
+            .load_world_state()
+            .expect("failed to load world state");
         load_times_us.push(load_start.elapsed().as_micros());
 
         ticks_remaining = ticks_remaining.saturating_sub(ticks_this_cycle);
@@ -245,10 +250,7 @@ fn world_state_roundtrip_worldtest() {
     );
 
     let world_state_path = temp_dir.join("world.state");
-    let bytes_written = world_state_path
-        .metadata()
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let bytes_written = world_state_path.metadata().map(|m| m.len()).unwrap_or(0);
     let bytes_read = bytes_written;
     let uncompressed_size = bincode::serialize(&state)
         .map(|v| v.len() as u64)
@@ -306,4 +308,3 @@ fn world_state_roundtrip_worldtest() {
 
     std::fs::remove_dir_all(&temp_dir).ok();
 }
-

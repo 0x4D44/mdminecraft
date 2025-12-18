@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_ascii_range() {
-        let chars: Vec<char> = ASCII_RANGE.filter_map(|c| char::from_u32(c)).collect();
+        let chars: Vec<char> = ASCII_RANGE.filter_map(char::from_u32).collect();
         assert!(!chars.is_empty());
         assert!(chars.contains(&'A'));
         assert!(chars.contains(&'z'));

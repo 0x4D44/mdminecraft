@@ -140,7 +140,7 @@ fn build_atlas(textures: &[Texture], tile_size: u32, args: &Args) -> Result<Pack
         .columns
         .filter(|&c| c > 0)
         .unwrap_or_else(|| (f64::from(count).sqrt().ceil() as u32).max(1));
-    let rows = ((count + columns - 1) / columns).max(1);
+    let rows = count.div_ceil(columns).max(1);
 
     let width = columns * stride;
     let height = rows * stride;

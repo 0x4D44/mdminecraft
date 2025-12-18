@@ -112,8 +112,8 @@ fn parse_tool_material(s: &str) -> Option<ToolMaterial> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mdminecraft_core::{ItemType, ToolMaterial, ToolType};
     use crate::{BlockDescriptor, BlockRegistry};
+    use mdminecraft_core::{ItemType, ToolMaterial, ToolType};
 
     #[test]
     fn test_recipe_registry_creation() {

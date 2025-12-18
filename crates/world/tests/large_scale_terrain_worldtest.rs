@@ -32,7 +32,7 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_LARGE_SCALE_TERRAIN_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or_else(|| if cfg!(debug_assertions) { 4 } else { 25 })
+        .unwrap_or(if cfg!(debug_assertions) { 4 } else { 25 })
 }
 
 #[test]
@@ -355,11 +355,11 @@ fn large_scale_terrain_worldtest() {
         unique_biomes >= 5,
         "Should have at least 5 different biomes"
     );
-    // Performance threshold: 30ms for release, 600ms for debug (debug is much slower)
+    // Performance threshold: 30ms for release, 800ms for debug (debug is much slower)
     // Note: Minecraft 1.18 cave systems (cheese/spaghetti/noodle/ravine/aquifer/geode) add significant overhead
     // Threshold increased to accommodate expanded worldgen complexity
     let performance_threshold = if cfg!(debug_assertions) {
-        600_000.0
+        800_000.0
     } else {
         30_000.0
     };

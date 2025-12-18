@@ -103,10 +103,12 @@ mod tests {
 
     #[test]
     fn test_effective_volumes() {
-        let mut settings = AudioSettings::default();
-        settings.master = 0.5;
-        settings.music = 0.8;
-        settings.sfx = 0.6;
+        let settings = AudioSettings {
+            master: 0.5,
+            music: 0.8,
+            sfx: 0.6,
+            ..Default::default()
+        };
 
         assert!((settings.effective_music_volume() - 0.4).abs() < 0.001);
         assert!((settings.effective_sfx_volume() - 0.3).abs() < 0.001);

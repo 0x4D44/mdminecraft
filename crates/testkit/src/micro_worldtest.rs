@@ -75,4 +75,3 @@ where
     };
     assert_json_snapshot(config.snapshot_path, &report)
 }
-

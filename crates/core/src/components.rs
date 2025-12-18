@@ -99,4 +99,3 @@ mod tests {
         assert_eq!(keys, vec!["mdm:a".to_string(), "mdm:b".to_string()]);
     }
 }
-

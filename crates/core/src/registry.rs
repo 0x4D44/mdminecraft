@@ -106,7 +106,9 @@ impl FromStr for RegistryKey {
 
 fn validate_namespace(ns: &str) -> Result<(), RegistryKeyError> {
     if ns.is_empty() {
-        return Err(RegistryKeyError::new("RegistryKey namespace cannot be empty"));
+        return Err(RegistryKeyError::new(
+            "RegistryKey namespace cannot be empty",
+        ));
     }
     if ns.len() > 64 {
         return Err(RegistryKeyError::new(
@@ -131,9 +133,10 @@ fn validate_path(path: &str) -> Result<(), RegistryKeyError> {
     if path.len() > 128 {
         return Err(RegistryKeyError::new("RegistryKey path too long (max 128)"));
     }
-    if !path.chars().all(|c| {
-        matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.' | '/' )
-    }) {
+    if !path
+        .chars()
+        .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.' | '/' ))
+    {
         return Err(RegistryKeyError::new(
             "RegistryKey path has invalid characters (allowed: a-z0-9_./-)",
         ));
@@ -174,4 +177,3 @@ mod tests {
         assert!(RegistryKey::parse(":stone").is_err());
     }
 }
-

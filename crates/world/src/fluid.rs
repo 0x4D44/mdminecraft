@@ -754,18 +754,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place water around a position
-        chunk.set_voxel(4, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            4,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = FluidPos::new(5, 64, 5);
@@ -782,12 +792,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place one water source
-        chunk.set_voxel(4, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            4,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = FluidPos::new(5, 64, 5);
@@ -797,12 +812,17 @@ mod tests {
 
         // Add second source
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(6, 64, 5, Voxel {
-                id: blocks::WATER,
-                state: 0,
-                light_sky: 0,
-                light_block: 0,
-            });
+            chunk.set_voxel(
+                6,
+                64,
+                5,
+                Voxel {
+                    id: blocks::WATER,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
         }
 
         // Two sources = infinite
@@ -816,12 +836,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place water source
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Schedule and process update
@@ -843,18 +868,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place water source with air below
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::AIR,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::AIR,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(FluidPos::new(5, 64, 5), 0);
@@ -875,30 +910,50 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place water source on solid ground
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::WATER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: blocks::AIR,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: blocks::AIR,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(FluidPos::new(5, 64, 5), 0);
@@ -919,30 +974,50 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place lava source on solid ground
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: BLOCK_LAVA,
-            state: 0,
-            light_sky: 0,
-            light_block: 15,
-        });
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: blocks::AIR,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: BLOCK_LAVA,
+                state: 0,
+                light_sky: 0,
+                light_block: 15,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: blocks::AIR,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(FluidPos::new(5, 64, 5), 0);
@@ -1041,12 +1116,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place stone (not a fluid)
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(FluidPos::new(5, 64, 5), 0);
@@ -1064,30 +1144,50 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place flowing water with level 5 on solid ground
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: BLOCK_WATER_FLOWING,
-            state: set_fluid_level(0, 5),
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: blocks::AIR,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: BLOCK_WATER_FLOWING,
+                state: set_fluid_level(0, 5),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: blocks::AIR,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(FluidPos::new(5, 64, 5), 0);
@@ -1108,30 +1208,50 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place lava next to wood
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: BLOCK_LAVA,
-            state: 0,
-            light_sky: 0,
-            light_block: 15,
-        });
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: 11, // oak_log (flammable)
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 63, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: BLOCK_LAVA,
+                state: 0,
+                light_sky: 0,
+                light_block: 15,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: 11, // oak_log (flammable)
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            63,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(FluidPos::new(5, 64, 5), 0);

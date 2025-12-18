@@ -23,11 +23,11 @@ pub mod interactive_blocks {
     pub const STONE_STAIRS: BlockId = 35;
     pub const OAK_STAIRS: BlockId = 36;
     pub const GLASS_PANE: BlockId = 37;
-    pub const TRAPDOOR: BlockId = 69;
-    pub const TORCH: BlockId = 70;
-    pub const BED_HEAD: BlockId = 66;
-    pub const BED_FOOT: BlockId = 67;
-    pub const CHEST: BlockId = 68;
+    pub const BED_HEAD: BlockId = 65;
+    pub const BED_FOOT: BlockId = 66;
+    pub const CHEST: BlockId = 67;
+    pub const TRAPDOOR: BlockId = 68;
+    pub const TORCH: BlockId = 69;
 }
 
 /// Facing direction for blocks
@@ -991,18 +991,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place oak door
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::OAK_DOOR_LOWER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 65, 5, Voxel {
-            id: interactive_blocks::OAK_DOOR_UPPER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_DOOR_LOWER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_DOOR_UPPER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Toggle door
@@ -1025,18 +1035,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place oak door
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::OAK_DOOR_LOWER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 65, 5, Voxel {
-            id: interactive_blocks::OAK_DOOR_UPPER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_DOOR_LOWER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_DOOR_UPPER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Toggle door from upper half
@@ -1059,12 +1079,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place iron door
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::IRON_DOOR_LOWER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::IRON_DOOR_LOWER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Iron doors can't be toggled manually
@@ -1079,12 +1104,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place stone
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Should fail
@@ -1099,12 +1129,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place fence gate
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::OAK_FENCE_GATE,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_FENCE_GATE,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Toggle gate
@@ -1130,12 +1165,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1149,12 +1189,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place trapdoor
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::TRAPDOOR,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::TRAPDOOR,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Toggle trapdoor
@@ -1172,12 +1217,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.toggle_trapdoor(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1190,18 +1240,28 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::OAK_DOOR_LOWER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 65, 5, Voxel {
-            id: interactive_blocks::OAK_DOOR_UPPER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_DOOR_LOWER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_DOOR_UPPER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1214,12 +1274,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::OAK_FENCE_GATE,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_FENCE_GATE,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1232,12 +1297,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::TRAPDOOR,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::TRAPDOOR,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1250,12 +1320,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::BED_HEAD,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::BED_HEAD,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1268,12 +1343,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::CHEST,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::CHEST,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1286,12 +1366,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: blocks::STONE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let result = manager.interact(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1313,12 +1398,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::OAK_FENCE_GATE,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::OAK_FENCE_GATE,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         manager.toggle_fence_gate(ChunkPos::new(0, 0), 5, 64, 5, &mut chunks);
@@ -1347,12 +1437,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: interactive_blocks::IRON_DOOR_LOWER,
-            state: 0,
-            light_sky: 15,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: interactive_blocks::IRON_DOOR_LOWER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Iron door requires redstone, so interact should return None

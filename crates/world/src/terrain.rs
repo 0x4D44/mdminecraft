@@ -54,7 +54,7 @@ impl TerrainGenerator {
             frequency: 0.01, // Large scale terrain features
             seed: ((world_seed ^ 0x11111111) as u32),
         };
-        
+
         let cave_config = NoiseConfig {
             octaves: 3,
             lacunarity: 2.0,
@@ -91,24 +91,40 @@ impl TerrainGenerator {
             for local_z in 0..CHUNK_SIZE_Z {
                 let world_x = chunk_origin_x + local_x as i32;
                 let world_z = chunk_origin_z + local_z as i32;
-                
+
                 let base_height = heightmap.get(local_x, local_z);
                 let biome = self.biome_assigner.get_biome(world_x, world_z);
                 let biome_data = BiomeData::get(biome);
-                
+
                 // Adjust base height by biome
                 let target_height = (base_height as f32 + biome_data.height_modifier * 20.0) as i32;
 
                 for y in 0..CHUNK_SIZE_Y {
                     // Always place bedrock at y=0
                     if y == 0 {
-                        chunk.set_voxel(local_x, y, local_z, Voxel { id: blocks::BEDROCK, ..Default::default() });
+                        chunk.set_voxel(
+                            local_x,
+                            y,
+                            local_z,
+                            Voxel {
+                                id: blocks::BEDROCK,
+                                ..Default::default()
+                            },
+                        );
                         continue;
                     }
 
                     // Always place stone at y=1-4 to prevent holes in the world floor
                     if y <= 4 {
-                        chunk.set_voxel(local_x, y, local_z, Voxel { id: blocks::STONE, ..Default::default() });
+                        chunk.set_voxel(
+                            local_x,
+                            y,
+                            local_z,
+                            Voxel {
+                                id: blocks::STONE,
+                                ..Default::default()
+                            },
+                        );
                         continue;
                     }
 
@@ -118,32 +134,61 @@ impl TerrainGenerator {
                     let vertical_gradient = (target_height - y as i32) as f64 / 20.0;
 
                     // 2. 3D Noise: Adds variation/overhangs
-                    let noise_val = self.density_noise.sample_3d(world_x as f64 * 0.02, y as f64 * 0.02, world_z as f64 * 0.02);
+                    let noise_val = self.density_noise.sample_3d(
+                        world_x as f64 * 0.02,
+                        y as f64 * 0.02,
+                        world_z as f64 * 0.02,
+                    );
 
                     // 3. Cave Noise: Subtracts density (but not below y=5 to preserve bedrock area)
-                    let cave_val = self.cave_noise.sample_3d(world_x as f64 * 0.04, y as f64 * 0.04, world_z as f64 * 0.04);
+                    let cave_val = self.cave_noise.sample_3d(
+                        world_x as f64 * 0.04,
+                        y as f64 * 0.04,
+                        world_z as f64 * 0.04,
+                    );
                     // Use absolute value for cave tunnels (worm-like), but don't carve below y=5
-                    let cave_modifier = if y >= 5 && cave_val.abs() < 0.15 { -10.0 } else { 0.0 };
+                    let cave_modifier = if y >= 5 && cave_val.abs() < 0.15 {
+                        -10.0
+                    } else {
+                        0.0
+                    };
 
                     let density = vertical_gradient + noise_val + cave_modifier;
 
                     if density > 0.0 {
                         // Solid block
-                        let block_id = if (y as i32) > target_height - 4 && (y as i32) <= target_height {
-                             if (y as i32) == target_height {
-                                 self.get_surface_block(biome)
-                             } else {
-                                 self.get_subsurface_block(biome)
-                             }
-                        } else {
-                            blocks::STONE
-                        };
+                        let block_id =
+                            if (y as i32) > target_height - 4 && (y as i32) <= target_height {
+                                if (y as i32) == target_height {
+                                    self.get_surface_block(biome)
+                                } else {
+                                    self.get_subsurface_block(biome)
+                                }
+                            } else {
+                                blocks::STONE
+                            };
 
-                        chunk.set_voxel(local_x, y, local_z, Voxel { id: block_id, ..Default::default() });
+                        chunk.set_voxel(
+                            local_x,
+                            y,
+                            local_z,
+                            Voxel {
+                                id: block_id,
+                                ..Default::default()
+                            },
+                        );
                     } else if y < 64 {
                         // Water level
                         if matches!(biome, BiomeId::Ocean | BiomeId::DeepOcean) {
-                             chunk.set_voxel(local_x, y, local_z, Voxel { id: blocks::WATER, ..Default::default() });
+                            chunk.set_voxel(
+                                local_x,
+                                y,
+                                local_z,
+                                Voxel {
+                                    id: blocks::WATER,
+                                    ..Default::default()
+                                },
+                            );
                         }
                     }
                 }
@@ -154,8 +199,10 @@ impl TerrainGenerator {
         self.generate_ores(&mut chunk, chunk_origin_x, chunk_origin_z);
 
         // Structure decoration pass: Aquifers and Geodes
-        self.aquifer_gen.fill_aquifers(&mut chunk, chunk_pos.x, chunk_pos.z);
-        self.geode_gen.try_generate_geode(&mut chunk, chunk_pos.x, chunk_pos.z);
+        self.aquifer_gen
+            .fill_aquifers(&mut chunk, chunk_pos.x, chunk_pos.z);
+        self.geode_gen
+            .try_generate_geode(&mut chunk, chunk_pos.x, chunk_pos.z);
 
         // Population pass: Add trees
         self.populate_trees(&mut chunk, chunk_origin_x, chunk_origin_z);
@@ -165,12 +212,7 @@ impl TerrainGenerator {
     }
 
     /// Populate chunk with trees based on biome.
-    fn populate_trees(
-        &self,
-        chunk: &mut Chunk,
-        chunk_origin_x: i32,
-        chunk_origin_z: i32,
-    ) {
+    fn populate_trees(&self, chunk: &mut Chunk, chunk_origin_x: i32, chunk_origin_z: i32) {
         let chunk_pos = chunk.position();
 
         // Sample biome at chunk center to determine dominant biome
@@ -208,8 +250,10 @@ impl TerrainGenerator {
                     break;
                 }
             }
-            
-            if surface_height == 0 { continue; }
+
+            if surface_height == 0 {
+                continue;
+            }
 
             // Calculate world position
             let world_x = chunk_origin_x + local_x as i32;

@@ -56,21 +56,17 @@ fn should_update_snapshots() -> bool {
 
 fn write_snapshot(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "Failed to create snapshot directory {}",
-                parent.display()
-            )
-        })?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create snapshot directory {}", parent.display()))?;
     }
-    fs::write(path, contents).with_context(|| format!("Failed to write snapshot {}", path.display()))
+    fs::write(path, contents)
+        .with_context(|| format!("Failed to write snapshot {}", path.display()))
 }
 
 fn canonical_json<T: Serialize>(value: &T) -> Result<String> {
     let value = serde_json::to_value(value).context("Failed to serialize snapshot value")?;
     let value = canonicalize_value(value);
-    let mut s =
-        serde_json::to_string_pretty(&value).context("Failed to format snapshot JSON")?;
+    let mut s = serde_json::to_string_pretty(&value).context("Failed to format snapshot JSON")?;
     s.push('\n');
     Ok(s)
 }
@@ -90,4 +86,3 @@ fn canonicalize_value(value: Value) -> Value {
         other => other,
     }
 }
-

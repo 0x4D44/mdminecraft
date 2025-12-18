@@ -307,7 +307,8 @@ fn test_item_type_block_mapping() {
     // No drops
     assert_eq!(ItemType::from_block(6), None); // Water
     assert_eq!(ItemType::from_block(10), None); // Bedrock
-    assert_eq!(ItemType::from_block(13), None); // Crafting table
+    assert_eq!(ItemType::from_block(13), Some((ItemType::CraftingTable, 1))); // Crafting table
+    assert_eq!(ItemType::from_block(69), Some((ItemType::Torch, 1))); // Torch
 }
 
 #[test]

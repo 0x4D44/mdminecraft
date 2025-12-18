@@ -472,8 +472,14 @@ mod tests {
         assert!(armor.get(ArmorSlot::Boots).is_some());
 
         // Verify the retrieved pieces are correct
-        assert_eq!(armor.get(ArmorSlot::Helmet).unwrap().item_type, ItemType::IronHelmet);
-        assert_eq!(armor.get(ArmorSlot::Boots).unwrap().item_type, ItemType::IronBoots);
+        assert_eq!(
+            armor.get(ArmorSlot::Helmet).unwrap().item_type,
+            ItemType::IronHelmet
+        );
+        assert_eq!(
+            armor.get(ArmorSlot::Boots).unwrap().item_type,
+            ItemType::IronBoots
+        );
     }
 
     #[test]
@@ -616,13 +622,19 @@ mod tests {
 
         // Equip leather helmet
         armor.equip(ArmorPiece::from_item(ItemType::LeatherHelmet).unwrap());
-        assert_eq!(armor.get(ArmorSlot::Helmet).unwrap().material, ArmorMaterial::Leather);
+        assert_eq!(
+            armor.get(ArmorSlot::Helmet).unwrap().material,
+            ArmorMaterial::Leather
+        );
 
         // Replace with iron helmet
         let old = armor.equip(ArmorPiece::from_item(ItemType::IronHelmet).unwrap());
         assert!(old.is_some());
         assert_eq!(old.unwrap().material, ArmorMaterial::Leather);
-        assert_eq!(armor.get(ArmorSlot::Helmet).unwrap().material, ArmorMaterial::Iron);
+        assert_eq!(
+            armor.get(ArmorSlot::Helmet).unwrap().material,
+            ArmorMaterial::Iron
+        );
     }
 
     #[test]
@@ -669,8 +681,18 @@ mod tests {
     #[test]
     fn test_max_durability_all_materials() {
         // Verify durability formula for all slots and materials
-        for slot in [ArmorSlot::Helmet, ArmorSlot::Chestplate, ArmorSlot::Leggings, ArmorSlot::Boots] {
-            for material in [ArmorMaterial::Leather, ArmorMaterial::Iron, ArmorMaterial::Gold, ArmorMaterial::Diamond] {
+        for slot in [
+            ArmorSlot::Helmet,
+            ArmorSlot::Chestplate,
+            ArmorSlot::Leggings,
+            ArmorSlot::Boots,
+        ] {
+            for material in [
+                ArmorMaterial::Leather,
+                ArmorMaterial::Iron,
+                ArmorMaterial::Gold,
+                ArmorMaterial::Diamond,
+            ] {
                 let durability = get_max_durability(slot, material);
                 assert!(durability > 0);
 
@@ -687,8 +709,18 @@ mod tests {
     #[test]
     fn test_defense_points_all_combinations() {
         // Test all slot/material combinations
-        for slot in [ArmorSlot::Helmet, ArmorSlot::Chestplate, ArmorSlot::Leggings, ArmorSlot::Boots] {
-            for material in [ArmorMaterial::Leather, ArmorMaterial::Iron, ArmorMaterial::Gold, ArmorMaterial::Diamond] {
+        for slot in [
+            ArmorSlot::Helmet,
+            ArmorSlot::Chestplate,
+            ArmorSlot::Leggings,
+            ArmorSlot::Boots,
+        ] {
+            for material in [
+                ArmorMaterial::Leather,
+                ArmorMaterial::Iron,
+                ArmorMaterial::Gold,
+                ArmorMaterial::Diamond,
+            ] {
                 let defense = get_defense_points(slot, material);
                 assert!((1..=3).contains(&defense));
             }
@@ -699,10 +731,22 @@ mod tests {
     fn test_is_armor_comprehensive() {
         // All armor items should return true
         let armor_items = [
-            ItemType::LeatherHelmet, ItemType::LeatherChestplate, ItemType::LeatherLeggings, ItemType::LeatherBoots,
-            ItemType::IronHelmet, ItemType::IronChestplate, ItemType::IronLeggings, ItemType::IronBoots,
-            ItemType::GoldHelmet, ItemType::GoldChestplate, ItemType::GoldLeggings, ItemType::GoldBoots,
-            ItemType::DiamondHelmet, ItemType::DiamondChestplate, ItemType::DiamondLeggings, ItemType::DiamondBoots,
+            ItemType::LeatherHelmet,
+            ItemType::LeatherChestplate,
+            ItemType::LeatherLeggings,
+            ItemType::LeatherBoots,
+            ItemType::IronHelmet,
+            ItemType::IronChestplate,
+            ItemType::IronLeggings,
+            ItemType::IronBoots,
+            ItemType::GoldHelmet,
+            ItemType::GoldChestplate,
+            ItemType::GoldLeggings,
+            ItemType::GoldBoots,
+            ItemType::DiamondHelmet,
+            ItemType::DiamondChestplate,
+            ItemType::DiamondLeggings,
+            ItemType::DiamondBoots,
         ];
 
         for item in armor_items {

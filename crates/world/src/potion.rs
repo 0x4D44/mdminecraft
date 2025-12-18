@@ -1120,11 +1120,17 @@ mod tests {
 
         // Add same level with longer duration - should extend
         effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 500));
-        assert_eq!(effects.get(StatusEffectType::Speed).unwrap().duration_ticks, 500);
+        assert_eq!(
+            effects.get(StatusEffectType::Speed).unwrap().duration_ticks,
+            500
+        );
 
         // Add same level with shorter duration - should not change
         effects.add(StatusEffect::new(StatusEffectType::Speed, 0, 50));
-        assert_eq!(effects.get(StatusEffectType::Speed).unwrap().duration_ticks, 500);
+        assert_eq!(
+            effects.get(StatusEffectType::Speed).unwrap().duration_ticks,
+            500
+        );
     }
 
     #[test]
@@ -1218,21 +1224,60 @@ mod tests {
         assert!(PotionType::Thick.effect().is_none());
 
         // Effect potions map to correct effect
-        assert_eq!(PotionType::NightVision.effect(), Some(StatusEffectType::NightVision));
-        assert_eq!(PotionType::Invisibility.effect(), Some(StatusEffectType::Invisibility));
-        assert_eq!(PotionType::Leaping.effect(), Some(StatusEffectType::JumpBoost));
-        assert_eq!(PotionType::FireResistance.effect(), Some(StatusEffectType::FireResistance));
-        assert_eq!(PotionType::Swiftness.effect(), Some(StatusEffectType::Speed));
-        assert_eq!(PotionType::Slowness.effect(), Some(StatusEffectType::Slowness));
-        assert_eq!(PotionType::WaterBreathing.effect(), Some(StatusEffectType::WaterBreathing));
-        assert_eq!(PotionType::Healing.effect(), Some(StatusEffectType::InstantHealth));
-        assert_eq!(PotionType::Harming.effect(), Some(StatusEffectType::InstantDamage));
+        assert_eq!(
+            PotionType::NightVision.effect(),
+            Some(StatusEffectType::NightVision)
+        );
+        assert_eq!(
+            PotionType::Invisibility.effect(),
+            Some(StatusEffectType::Invisibility)
+        );
+        assert_eq!(
+            PotionType::Leaping.effect(),
+            Some(StatusEffectType::JumpBoost)
+        );
+        assert_eq!(
+            PotionType::FireResistance.effect(),
+            Some(StatusEffectType::FireResistance)
+        );
+        assert_eq!(
+            PotionType::Swiftness.effect(),
+            Some(StatusEffectType::Speed)
+        );
+        assert_eq!(
+            PotionType::Slowness.effect(),
+            Some(StatusEffectType::Slowness)
+        );
+        assert_eq!(
+            PotionType::WaterBreathing.effect(),
+            Some(StatusEffectType::WaterBreathing)
+        );
+        assert_eq!(
+            PotionType::Healing.effect(),
+            Some(StatusEffectType::InstantHealth)
+        );
+        assert_eq!(
+            PotionType::Harming.effect(),
+            Some(StatusEffectType::InstantDamage)
+        );
         assert_eq!(PotionType::Poison.effect(), Some(StatusEffectType::Poison));
-        assert_eq!(PotionType::Regeneration.effect(), Some(StatusEffectType::Regeneration));
-        assert_eq!(PotionType::Strength.effect(), Some(StatusEffectType::Strength));
-        assert_eq!(PotionType::Weakness.effect(), Some(StatusEffectType::Weakness));
+        assert_eq!(
+            PotionType::Regeneration.effect(),
+            Some(StatusEffectType::Regeneration)
+        );
+        assert_eq!(
+            PotionType::Strength.effect(),
+            Some(StatusEffectType::Strength)
+        );
+        assert_eq!(
+            PotionType::Weakness.effect(),
+            Some(StatusEffectType::Weakness)
+        );
         assert_eq!(PotionType::Luck.effect(), Some(StatusEffectType::Luck));
-        assert_eq!(PotionType::SlowFalling.effect(), Some(StatusEffectType::SlowFalling));
+        assert_eq!(
+            PotionType::SlowFalling.effect(),
+            Some(StatusEffectType::SlowFalling)
+        );
     }
 
     #[test]
@@ -1256,11 +1301,26 @@ mod tests {
         assert!(get_brew_result(PotionType::Awkward, 113).is_some()); // Phantom membrane
 
         // Corruption recipes
-        assert_eq!(get_brew_result(PotionType::Swiftness, 107), Some(PotionType::Slowness));
-        assert_eq!(get_brew_result(PotionType::NightVision, 107), Some(PotionType::Invisibility));
-        assert_eq!(get_brew_result(PotionType::Healing, 107), Some(PotionType::Harming));
-        assert_eq!(get_brew_result(PotionType::Poison, 107), Some(PotionType::Harming));
-        assert_eq!(get_brew_result(PotionType::Water, 107), Some(PotionType::Weakness));
+        assert_eq!(
+            get_brew_result(PotionType::Swiftness, 107),
+            Some(PotionType::Slowness)
+        );
+        assert_eq!(
+            get_brew_result(PotionType::NightVision, 107),
+            Some(PotionType::Invisibility)
+        );
+        assert_eq!(
+            get_brew_result(PotionType::Healing, 107),
+            Some(PotionType::Harming)
+        );
+        assert_eq!(
+            get_brew_result(PotionType::Poison, 107),
+            Some(PotionType::Harming)
+        );
+        assert_eq!(
+            get_brew_result(PotionType::Water, 107),
+            Some(PotionType::Weakness)
+        );
     }
 
     #[test]

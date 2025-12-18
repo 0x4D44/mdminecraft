@@ -59,7 +59,6 @@ fn main() -> Result<()> {
 
     // Run event loop
     event_loop.run(move |event, elwt| {
-        let controls = controls.clone();
         match &mut app_state {
             AppState::Menu(menu) => {
                 match menu.handle_event(&event, elwt) {
@@ -69,7 +68,9 @@ fn main() -> Result<()> {
                     menu::MenuAction::StartGame => {
                         info!("Starting game...");
                         // Transition to game
-                        match GameWorld::new(elwt, controls.clone(), cli.scripted_input.clone()) {
+                        // Reload controls so menu changes take effect immediately.
+                        let controls = Arc::new(ControlsConfig::load());
+                        match GameWorld::new(elwt, controls, cli.scripted_input.clone()) {
                             Ok(game) => {
                                 app_state = AppState::InGame(Box::new(game));
                             }

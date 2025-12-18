@@ -25,7 +25,7 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_PERSISTENCE_ROUNDTRIP_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or_else(|| if cfg!(debug_assertions) { 2 } else { 4 })
+        .unwrap_or(if cfg!(debug_assertions) { 2 } else { 4 })
 }
 
 #[test]

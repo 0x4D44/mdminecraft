@@ -1,20 +1,25 @@
+use anyhow::Result;
 use mdminecraft_assets::{registry_from_file, BlockDescriptor, BlockRegistry};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path};
 use tracing::warn;
 
 const DEFAULT_CONTROLS_PATH: &str = "config/controls.toml";
 const DEFAULT_BLOCKS_PATH: &str = "config/blocks.json";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ControlsConfig {
     pub mouse_sensitivity: f32,
     pub invert_y: bool,
+    /// Field of view in degrees.
+    pub fov_degrees: f32,
+    /// Chunk radius used for loading/unloading the world around the player.
+    pub render_distance: i32,
     pub bindings: BindingOverrides,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct BindingOverrides {
     pub base: HashMap<String, Vec<String>>,
@@ -29,6 +34,8 @@ impl Default for ControlsConfig {
             // Range: 0.001 (very slow) to 0.01 (fast)
             mouse_sensitivity: 0.006,
             invert_y: false,
+            fov_degrees: 70.0,
+            render_distance: 8,
             bindings: BindingOverrides::default(),
         }
     }
@@ -64,6 +71,21 @@ impl ControlsConfig {
                 ControlsConfig::default()
             }
         }
+    }
+
+    /// Save controls configuration to the default path.
+    pub fn save(&self) -> Result<()> {
+        self.save_to_path(Path::new(DEFAULT_CONTROLS_PATH))
+    }
+
+    /// Save controls configuration to an explicit path.
+    pub fn save_to_path(&self, path: &Path) -> Result<()> {
+        let toml = toml::to_string_pretty(self)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, toml)?;
+        Ok(())
     }
 }
 
