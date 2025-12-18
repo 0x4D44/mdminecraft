@@ -659,13 +659,7 @@ mod tests {
         let lookup = BiomeLookup::new();
 
         // Test all corners and center
-        let corners = [
-            (0.0, 0.0),
-            (1.0, 0.0),
-            (0.0, 1.0),
-            (1.0, 1.0),
-            (0.5, 0.5),
-        ];
+        let corners = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5)];
 
         for (temp, hum) in corners {
             let biome = lookup.lookup(temp, hum);

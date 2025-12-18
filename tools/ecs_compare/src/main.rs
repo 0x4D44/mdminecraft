@@ -1,10 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bevy_ecs::{
-    component::Component, prelude::IntoSystemConfigs, schedule::Schedule, system::Query,
-    world::World,
-};
+use bevy_ecs::{component::Component, schedule::Schedule, system::Query, world::World};
 use clap::Parser;
 use hecs::World as HecsWorld;
 use rand::{rngs::StdRng, Rng, SeedableRng};

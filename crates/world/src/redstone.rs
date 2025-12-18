@@ -11,15 +11,15 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 pub mod redstone_blocks {
     use crate::chunk::BlockId;
 
-    pub const LEVER: BlockId = 39;
-    pub const STONE_BUTTON: BlockId = 40;
-    pub const OAK_BUTTON: BlockId = 41;
-    pub const STONE_PRESSURE_PLATE: BlockId = 42;
-    pub const OAK_PRESSURE_PLATE: BlockId = 43;
-    pub const REDSTONE_WIRE: BlockId = 44;
-    pub const REDSTONE_TORCH: BlockId = 45;
-    pub const REDSTONE_LAMP: BlockId = 46;
-    pub const REDSTONE_LAMP_LIT: BlockId = 47;
+    pub const LEVER: BlockId = 38;
+    pub const STONE_BUTTON: BlockId = 39;
+    pub const OAK_BUTTON: BlockId = 40;
+    pub const STONE_PRESSURE_PLATE: BlockId = 41;
+    pub const OAK_PRESSURE_PLATE: BlockId = 42;
+    pub const REDSTONE_WIRE: BlockId = 43;
+    pub const REDSTONE_TORCH: BlockId = 44;
+    pub const REDSTONE_LAMP: BlockId = 45;
+    pub const REDSTONE_LAMP_LIT: BlockId = 46;
 }
 
 /// Maximum redstone power level
@@ -748,12 +748,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place a lever
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::LEVER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -785,12 +790,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place stone instead of lever
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: 1, // Stone
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: 1, // Stone
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -811,12 +821,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place a stone button
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::STONE_BUTTON,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::STONE_BUTTON,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -843,12 +858,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place a stone button
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::STONE_BUTTON,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::STONE_BUTTON,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -872,12 +892,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place a stone pressure plate
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::STONE_PRESSURE_PLATE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::STONE_PRESSURE_PLATE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -906,24 +931,39 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place lever and wire next to each other
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::LEVER,
-            state: set_active(set_power_level(0, MAX_POWER), true),
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: redstone_blocks::REDSTONE_WIRE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(7, 64, 5, Voxel {
-            id: redstone_blocks::REDSTONE_WIRE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: set_active(set_power_level(0, MAX_POWER), true),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::REDSTONE_WIRE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            7,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::REDSTONE_WIRE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Schedule updates for wire positions
@@ -951,18 +991,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place lever and lamp next to each other
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::LEVER,
-            state: set_active(set_power_level(0, MAX_POWER), true),
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(6, 64, 5, Voxel {
-            id: redstone_blocks::REDSTONE_LAMP,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: set_active(set_power_level(0, MAX_POWER), true),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Schedule lamp update
@@ -984,18 +1034,28 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place wire below and torch above
-        chunk.set_voxel(5, 63, 5, Voxel {
-            id: redstone_blocks::REDSTONE_WIRE,
-            state: set_power_level(0, MAX_POWER), // Powered wire
-            light_sky: 0,
-            light_block: 0,
-        });
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::REDSTONE_TORCH,
-            state: set_active(set_power_level(0, MAX_POWER), true), // Initially on
-            light_sky: 0,
-            light_block: 7,
-        });
+        chunk.set_voxel(
+            5,
+            63,
+            5,
+            Voxel {
+                id: redstone_blocks::REDSTONE_WIRE,
+                state: set_power_level(0, MAX_POWER), // Powered wire
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::REDSTONE_TORCH,
+                state: set_active(set_power_level(0, MAX_POWER), true), // Initially on
+                light_sky: 0,
+                light_block: 7,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         // Schedule torch update
@@ -1017,12 +1077,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::LEVER,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.toggle_lever(RedstonePos::new(5, 64, 5), &mut chunks);
@@ -1056,12 +1121,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place an oak button
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::OAK_BUTTON,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::OAK_BUTTON,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -1078,12 +1148,17 @@ mod tests {
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::OAK_PRESSURE_PLATE,
-            state: 0,
-            light_sky: 0,
-            light_block: 0,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::OAK_PRESSURE_PLATE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         let pos = RedstonePos::new(5, 64, 5);
@@ -1155,12 +1230,17 @@ mod tests {
         let mut chunk = create_test_chunk();
 
         // Place a lit lamp with no power source
-        chunk.set_voxel(5, 64, 5, Voxel {
-            id: redstone_blocks::REDSTONE_LAMP_LIT,
-            state: 0,
-            light_sky: 0,
-            light_block: 15,
-        });
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP_LIT,
+                state: 0,
+                light_sky: 0,
+                light_block: 15,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
 
         sim.schedule_update(RedstonePos::new(5, 64, 5));

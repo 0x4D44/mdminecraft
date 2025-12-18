@@ -16,16 +16,13 @@ fn test_fluid_simulation_determinism() {
     // But we need to iterate to compare contents.
     for (pos, chunk1) in &final_chunks1 {
         let chunk2 = final_chunks2.get(pos).expect("Chunk missing in sim2");
-        
+
         for y in 0..CHUNK_SIZE_Y {
             for z in 0..CHUNK_SIZE_Z {
                 for x in 0..CHUNK_SIZE_X {
                     let v1 = chunk1.voxel(x, y, z);
                     let v2 = chunk2.voxel(x, y, z);
-                    assert_eq!(
-                        v1, v2,
-                        "Mismatch at ({},{},{}) in chunk {:?}", x, y, z, pos
-                    );
+                    assert_eq!(v1, v2, "Mismatch at ({},{},{}) in chunk {:?}", x, y, z, pos);
                 }
             }
         }
@@ -36,7 +33,9 @@ fn run_fluid_sim() -> HashMap<ChunkPos, Chunk> {
     let mut chunk = Chunk::new(ChunkPos::new(0, 0));
     // Water source
     chunk.set_voxel(
-        8, 60, 8,
+        8,
+        60,
+        8,
         Voxel {
             id: FluidType::Water.source_block_id(),
             state: 0,
@@ -71,10 +70,7 @@ fn test_redstone_simulation_determinism() {
                 for x in 0..CHUNK_SIZE_X {
                     let v1 = chunk1.voxel(x, y, z);
                     let v2 = chunk2.voxel(x, y, z);
-                    assert_eq!(
-                        v1, v2,
-                        "Mismatch at ({},{},{}) in chunk {:?}", x, y, z, pos
-                    );
+                    assert_eq!(v1, v2, "Mismatch at ({},{},{}) in chunk {:?}", x, y, z, pos);
                 }
             }
         }
@@ -84,10 +80,28 @@ fn test_redstone_simulation_determinism() {
 fn run_redstone_sim() -> HashMap<ChunkPos, Chunk> {
     use mdminecraft_world::redstone_blocks;
     let mut chunk = Chunk::new(ChunkPos::new(0, 0));
-    
+
     // Place lever and wire
-    chunk.set_voxel(8, 60, 8, Voxel { id: redstone_blocks::LEVER, state: 0, ..Default::default() });
-    chunk.set_voxel(9, 60, 8, Voxel { id: redstone_blocks::REDSTONE_WIRE, state: 0, ..Default::default() });
+    chunk.set_voxel(
+        8,
+        60,
+        8,
+        Voxel {
+            id: redstone_blocks::LEVER,
+            state: 0,
+            ..Default::default()
+        },
+    );
+    chunk.set_voxel(
+        9,
+        60,
+        8,
+        Voxel {
+            id: redstone_blocks::REDSTONE_WIRE,
+            state: 0,
+            ..Default::default()
+        },
+    );
 
     let mut chunks = HashMap::new();
     chunks.insert(ChunkPos::new(0, 0), chunk);

@@ -33,14 +33,14 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_MOB_LIFECYCLE_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or_else(|| if cfg!(debug_assertions) { 2 } else { 12 })
+        .unwrap_or(if cfg!(debug_assertions) { 2 } else { 12 })
 }
 
 fn simulation_ticks() -> u64 {
     std::env::var("MDM_MOB_LIFECYCLE_TICKS")
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
-        .unwrap_or_else(|| if cfg!(debug_assertions) { 1200 } else { 6000 })
+        .unwrap_or(if cfg!(debug_assertions) { 1200 } else { 6000 })
 }
 
 fn spawn_probability() -> u64 {
@@ -156,7 +156,7 @@ fn mob_lifecycle_worldtest() {
                     ^ (local_x as u64).wrapping_mul(0x94D0_49BB_1331_11EB)
                     ^ (local_z as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93);
 
-                if (spawn_hash % spawn_probability) == 0 && !mob_types.is_empty() {
+                if spawn_hash.is_multiple_of(spawn_probability) && !mob_types.is_empty() {
                     let idx = (spawn_hash as usize) % mob_types.len();
                     let (mob_type, _weight) = mob_types[idx];
 
@@ -464,7 +464,7 @@ fn mob_lifecycle_worldtest() {
         mobs_alive, total_spawned,
         "All mobs should remain alive (no damage system)"
     );
-    let expected_min_types = possible_types.len().min(3).max(1);
+    let expected_min_types = possible_types.len().clamp(1, 3);
     assert!(
         spawn_by_type.len() >= expected_min_types,
         "Expected at least {} mob types to spawn (possible: {})",

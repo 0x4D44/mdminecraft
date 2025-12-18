@@ -1,9 +1,10 @@
-use mdminecraft_testkit::{run_micro_worldtest, MicroWorldtestConfig};
 use mdminecraft_core::{ToolMaterial, ToolType};
+use mdminecraft_testkit::{run_micro_worldtest, MicroWorldtestConfig};
 use mdminecraft_world::{
+    get_power_level, is_active,
     lighting::{stitch_light_seams, BlockOpacityProvider, LightType},
-    get_power_level, is_active, redstone_blocks, BlockProperties, Chunk, ChunkPos, FurnaceState,
-    ItemType, RedstonePos, RedstoneSimulator, Voxel,
+    redstone_blocks, BlockProperties, Chunk, ChunkPos, FurnaceState, ItemType, RedstonePos,
+    RedstoneSimulator, Voxel,
 };
 use serde::Serialize;
 use std::collections::HashMap;

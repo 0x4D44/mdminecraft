@@ -1027,11 +1027,7 @@ mod tests {
         let registry = MockRegistry;
 
         // Place an opaque block in the middle of the chunk
-        let block_pos = LocalPos {
-            x: 8,
-            y: 128,
-            z: 8,
-        };
+        let block_pos = LocalPos { x: 8, y: 128, z: 8 };
         let mut voxel = chunk.voxel(block_pos.x, block_pos.y, block_pos.z);
         voxel.id = 1; // Opaque
         chunk.set_voxel(block_pos.x, block_pos.y, block_pos.z, voxel);
@@ -1076,10 +1072,7 @@ mod tests {
         }
 
         // Should not panic and should have items
-        assert!(
-            !queue.queue.is_empty(),
-            "Queue should contain corner nodes"
-        );
+        assert!(!queue.queue.is_empty(), "Queue should contain corner nodes");
     }
 
     #[test]
@@ -1090,11 +1083,7 @@ mod tests {
 
         // Add two light sources
         let pos1 = LocalPos { x: 4, y: 64, z: 8 };
-        let pos2 = LocalPos {
-            x: 12,
-            y: 64,
-            z: 8,
-        };
+        let pos2 = LocalPos { x: 12, y: 64, z: 8 };
 
         add_block_light(&mut chunk, pos1, 15, &registry);
         add_block_light(&mut chunk, pos2, 15, &registry);

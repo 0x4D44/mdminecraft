@@ -21,8 +21,17 @@ pub const BLOCK_AIR: BlockId = 0;
 /// ID for stone block.
 pub const BLOCK_STONE: BlockId = 1;
 
+/// ID for oak log.
+pub const BLOCK_OAK_LOG: BlockId = 11;
+
+/// ID for oak planks.
+pub const BLOCK_OAK_PLANKS: BlockId = 12;
+
 /// ID for crafting table (from blocks.json index).
 pub const BLOCK_CRAFTING_TABLE: BlockId = 13;
+
+/// ID for cobblestone.
+pub const BLOCK_COBBLESTONE: BlockId = 24;
 
 /// ID for coal ore (spawns y: 0-128).
 pub const BLOCK_COAL_ORE: BlockId = 14;

@@ -71,4 +71,3 @@ mod tests {
         assert_eq!(DimensionId::from_u8(3), None);
     }
 }
-

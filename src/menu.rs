@@ -68,36 +68,24 @@ impl GameSettings {
         Self {
             mouse_sensitivity: controls.mouse_sensitivity,
             invert_y: controls.invert_y,
+            render_distance: controls.render_distance,
+            fov: controls.fov_degrees,
             ..Default::default()
         }
     }
 
     /// Save settings to the controls config file
     pub fn save(&self) -> Result<()> {
-        use std::fs;
-        let toml_content = format!(
-            r#"# mdminecraft Controls Configuration
+        use crate::config::ControlsConfig;
 
-mouse_sensitivity = {}
-invert_y = {}
+        let mut controls = ControlsConfig::load();
+        controls.mouse_sensitivity = self.mouse_sensitivity;
+        controls.invert_y = self.invert_y;
+        controls.fov_degrees = self.fov;
+        controls.render_distance = self.render_distance;
+        controls.save()?;
 
-# Key bindings can be customized below
-[bindings.base]
-# Example: toggle_cursor = ["Tab"]
-
-[bindings.gameplay]
-# Example: forward = ["W", "Up"]
-
-[bindings.ui]
-# Example: close = ["Escape"]
-"#,
-            self.mouse_sensitivity, self.invert_y
-        );
-
-        // Ensure config directory exists
-        fs::create_dir_all("config")?;
-        fs::write("config/controls.toml", toml_content)?;
-        tracing::info!("Settings saved to config/controls.toml");
+        tracing::info!("Controls saved to config/controls.toml");
         Ok(())
     }
 }

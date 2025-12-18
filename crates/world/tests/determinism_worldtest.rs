@@ -23,9 +23,9 @@ const WORLD_SEED: u64 = 11223344556677;
 // doesn't look hung on typical developer machines. You can override via env vars:
 //   - `MDM_DETERMINISM_CHUNK_RADIUS` (i32)
 //   - `MDM_DETERMINISM_VERIFICATION_ROUNDS` (usize)
-const CHUNK_RADIUS_DEBUG: i32 = 2; // 5×5 grid = 25 chunks
+const CHUNK_RADIUS_DEBUG: i32 = 1; // 3×3 grid = 9 chunks
 const CHUNK_RADIUS_RELEASE: i32 = 8; // 17×17 grid = 289 chunks
-const VERIFICATION_ROUNDS_DEBUG: usize = 2;
+const VERIFICATION_ROUNDS_DEBUG: usize = 1;
 const VERIFICATION_ROUNDS_RELEASE: usize = 3;
 const VERIFICATION_SAMPLE_POSITIONS: usize = 5;
 

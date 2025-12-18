@@ -267,7 +267,7 @@ mod tests {
         let mut data = Vec::new();
         data.extend_from_slice(&malicious_length.to_le_bytes());
         data.push(0); // message type tag
-        // Don't actually allocate the payload - the validation should reject before allocation
+                      // Don't actually allocate the payload - the validation should reject before allocation
 
         let result = decode_client_message(&data);
         assert!(result.is_err());

@@ -132,8 +132,7 @@ impl ChunkStreamer {
         // Rebuild priority queue with updated priorities
         let chunks: Vec<_> = self.send_queue.drain().collect();
         for chunk in chunks {
-            let priority =
-                self.calculate_priority(chunk.dimension, chunk.chunk_x, chunk.chunk_z);
+            let priority = self.calculate_priority(chunk.dimension, chunk.chunk_x, chunk.chunk_z);
             self.send_queue.push(ChunkPriority {
                 dimension: chunk.dimension,
                 chunk_x: chunk.chunk_x,

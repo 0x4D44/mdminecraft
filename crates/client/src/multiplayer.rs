@@ -1,8 +1,8 @@
 //! Multiplayer client with prediction and reconciliation.
 
 use anyhow::{Context, Result};
-use mdminecraft_core::SimTick;
 use mdminecraft_core::DimensionId;
+use mdminecraft_core::SimTick;
 use mdminecraft_net::{
     ClientConnection, ClientEndpoint, ClientMessage, ClientPredictor, EntityInterpolator,
     InputBundle, MovementInput, ReconciliationResult, ServerMessage, ServerSnapshot, TlsMode,

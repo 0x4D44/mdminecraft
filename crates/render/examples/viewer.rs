@@ -4,8 +4,8 @@ use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_render::{
-    mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, RaycastHit, Renderer,
-    RendererConfig, TimeOfDay, UiRenderContext, WindowConfig, WindowManager,
+    mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, Renderer, RendererConfig,
+    TimeOfDay, UiRenderContext, WindowConfig, WindowManager,
 };
 use mdminecraft_world::{BlockId, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
 use std::collections::HashMap;
@@ -67,12 +67,12 @@ impl Hotbar {
 
 /// Axis-Aligned Bounding Box for collision detection
 #[derive(Debug, Clone, Copy)]
-struct AABB {
+struct Aabb {
     min: glam::Vec3,
     max: glam::Vec3,
 }
 
-impl AABB {
+impl Aabb {
     fn new(min: glam::Vec3, max: glam::Vec3) -> Self {
         Self { min, max }
     }
@@ -85,7 +85,7 @@ impl AABB {
         }
     }
 
-    fn intersects(&self, other: &AABB) -> bool {
+    fn intersects(&self, other: &Aabb) -> bool {
         self.min.x < other.max.x
             && self.max.x > other.min.x
             && self.min.y < other.max.y
@@ -129,10 +129,10 @@ impl PlayerPhysics {
         }
     }
 
-    fn get_aabb(&self, position: glam::Vec3) -> AABB {
+    fn get_aabb(&self, position: glam::Vec3) -> Aabb {
         let size = glam::Vec3::new(self.player_width, self.player_height, self.player_width);
         let center = position + glam::Vec3::new(0.0, self.player_height * 0.5, 0.0);
-        AABB::from_center_size(center, size)
+        Aabb::from_center_size(center, size)
     }
 }
 
@@ -191,7 +191,13 @@ fn main() -> Result<()> {
                     .pipeline
                     .create_chunk_bind_group(resources.device, chunk_pos);
 
-                chunk_manager.add_chunk(resources.device, &mesh, chunk_pos, chunk_bind_group);
+                chunk_manager.add_chunk(
+                    resources.device,
+                    resources.queue,
+                    &mesh,
+                    chunk_pos,
+                    chunk_bind_group,
+                );
 
                 // Store chunk data for modification
                 chunks.insert(chunk_pos, chunk);
@@ -226,9 +232,6 @@ fn main() -> Result<()> {
 
     // Time-of-day system
     let mut time_of_day = TimeOfDay::new();
-
-    // Block selection tracking
-    let mut selected_block: Option<RaycastHit> = None;
 
     // Hotbar for block selection
     let mut hotbar = Hotbar::new();
@@ -362,137 +365,127 @@ fn main() -> Result<()> {
                         // Update camera from input
                         update_camera(&mut renderer, &input, &mut player_physics, &chunks, dt);
 
-                        // Raycast for block selection (only when cursor is grabbed)
-                        if input.cursor_captured {
+                        // Raycast for block selection (only when cursor is grabbed).
+                        let selected_block = if input.cursor_captured {
                             let camera = renderer.camera();
                             let ray_origin = camera.position;
                             let ray_dir = camera.forward();
 
-                            selected_block = raycast(ray_origin, ray_dir, 8.0, |block_pos| {
-                                // Convert world position to chunk+local coordinates
+                            raycast(ray_origin, ray_dir, 8.0, |block_pos| {
+                                // Convert world position to chunk+local coordinates.
                                 let chunk_x = block_pos.x.div_euclid(16);
                                 let chunk_z = block_pos.z.div_euclid(16);
                                 let local_x = block_pos.x.rem_euclid(16) as usize;
                                 let local_y = block_pos.y as usize;
                                 let local_z = block_pos.z.rem_euclid(16) as usize;
 
-                                // Check bounds
+                                // Check bounds.
                                 if local_y >= 256 {
                                     return false;
                                 }
 
-                                // Get chunk and check block
-                                if let Some(chunk) = chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
-                                    let voxel = chunk.voxel(local_x, local_y, local_z);
-                                    voxel.id != BLOCK_AIR
-                                } else {
-                                    false
-                                }
-                            });
+                                // Get chunk and check block.
+                                chunks
+                                    .get(&ChunkPos::new(chunk_x, chunk_z))
+                                    .is_some_and(|chunk| {
+                                        chunk.voxel(local_x, local_y, local_z).id != BLOCK_AIR
+                                    })
+                            })
+                        } else {
+                            None
+                        };
 
-                            // Handle block breaking/placing
-                            if let Some(hit) = selected_block {
-                                // Left click: break block
-                                if input.is_mouse_clicked(MouseButton::Left) {
-                                    let chunk_x = hit.block_pos.x.div_euclid(16);
-                                    let chunk_z = hit.block_pos.z.div_euclid(16);
-                                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                        // Handle block breaking/placing.
+                        if let Some(hit) = selected_block {
+                            // Left click: break block.
+                            if input.is_mouse_clicked(MouseButton::Left) {
+                                let chunk_x = hit.block_pos.x.div_euclid(16);
+                                let chunk_z = hit.block_pos.z.div_euclid(16);
+                                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
 
-                                    if let Some(chunk) = chunks.get_mut(&chunk_pos) {
-                                        let local_x = hit.block_pos.x.rem_euclid(16) as usize;
-                                        let local_y = hit.block_pos.y as usize;
-                                        let local_z = hit.block_pos.z.rem_euclid(16) as usize;
+                                if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+                                    let local_x = hit.block_pos.x.rem_euclid(16) as usize;
+                                    let local_y = hit.block_pos.y as usize;
+                                    let local_z = hit.block_pos.z.rem_euclid(16) as usize;
 
-                                        // Set block to air
-                                        chunk.set_voxel(
-                                            local_x,
-                                            local_y,
-                                            local_z,
-                                            Voxel::default(),
+                                    // Set block to air.
+                                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+
+                                    // Regenerate mesh.
+                                    let mesh =
+                                        mesh_chunk(chunk, &registry, renderer.atlas_metadata());
+                                    if let Some(resources) = renderer.render_resources() {
+                                        let chunk_bind_group = resources
+                                            .pipeline
+                                            .create_chunk_bind_group(resources.device, chunk_pos);
+                                        chunk_manager.add_chunk(
+                                            resources.device,
+                                            resources.queue,
+                                            &mesh,
+                                            chunk_pos,
+                                            chunk_bind_group,
                                         );
-
-                                        // Regenerate mesh
-                                        let mesh =
-                                            mesh_chunk(chunk, &registry, renderer.atlas_metadata());
-                                        if let Some(resources) = renderer.render_resources() {
-                                            let chunk_bind_group =
-                                                resources.pipeline.create_chunk_bind_group(
-                                                    resources.device,
-                                                    chunk_pos,
-                                                );
-                                            chunk_manager.add_chunk(
-                                                resources.device,
-                                                &mesh,
-                                                chunk_pos,
-                                                chunk_bind_group,
-                                            );
-                                        }
-                                        tracing::info!("Broke block at {:?}", hit.block_pos);
                                     }
+                                    tracing::info!("Broke block at {:?}", hit.block_pos);
                                 }
+                            }
 
-                                // Right click: place block
-                                if input.is_mouse_clicked(MouseButton::Right) {
-                                    // Place block adjacent to hit face
-                                    let place_pos = IVec3::new(
-                                        hit.block_pos.x + hit.face_normal.x,
-                                        hit.block_pos.y + hit.face_normal.y,
-                                        hit.block_pos.z + hit.face_normal.z,
-                                    );
+                            // Right click: place block.
+                            if input.is_mouse_clicked(MouseButton::Right) {
+                                // Place block adjacent to hit face.
+                                let place_pos = IVec3::new(
+                                    hit.block_pos.x + hit.face_normal.x,
+                                    hit.block_pos.y + hit.face_normal.y,
+                                    hit.block_pos.z + hit.face_normal.z,
+                                );
 
-                                    let chunk_x = place_pos.x.div_euclid(16);
-                                    let chunk_z = place_pos.z.div_euclid(16);
-                                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                                let chunk_x = place_pos.x.div_euclid(16);
+                                let chunk_z = place_pos.z.div_euclid(16);
+                                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
 
-                                    if let Some(chunk) = chunks.get_mut(&chunk_pos) {
-                                        let local_x = place_pos.x.rem_euclid(16) as usize;
-                                        let local_y = place_pos.y as usize;
-                                        let local_z = place_pos.z.rem_euclid(16) as usize;
+                                if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+                                    let local_x = place_pos.x.rem_euclid(16) as usize;
+                                    let local_y = place_pos.y as usize;
+                                    let local_z = place_pos.z.rem_euclid(16) as usize;
 
-                                        // Only place if within bounds and target is air
-                                        if local_y < 256 {
-                                            let current = chunk.voxel(local_x, local_y, local_z);
-                                            if current.id == BLOCK_AIR {
-                                                // Place selected block from hotbar
-                                                let new_voxel = Voxel {
-                                                    id: hotbar.selected_block(),
-                                                    state: 0,
-                                                    light_sky: 0,
-                                                    light_block: 0,
-                                                };
-                                                chunk.set_voxel(
-                                                    local_x, local_y, local_z, new_voxel,
-                                                );
+                                    // Only place if within bounds and target is air.
+                                    if local_y < 256 {
+                                        let current = chunk.voxel(local_x, local_y, local_z);
+                                        if current.id == BLOCK_AIR {
+                                            // Place selected block from hotbar.
+                                            let new_voxel = Voxel {
+                                                id: hotbar.selected_block(),
+                                                state: 0,
+                                                light_sky: 0,
+                                                light_block: 0,
+                                            };
+                                            chunk.set_voxel(local_x, local_y, local_z, new_voxel);
 
-                                                // Regenerate mesh
-                                                let mesh = mesh_chunk(
-                                                    chunk,
-                                                    &registry,
-                                                    renderer.atlas_metadata(),
-                                                );
-                                                if let Some(resources) = renderer.render_resources()
-                                                {
-                                                    let chunk_bind_group =
-                                                        resources.pipeline.create_chunk_bind_group(
-                                                            resources.device,
-                                                            chunk_pos,
-                                                        );
-                                                    chunk_manager.add_chunk(
+                                            // Regenerate mesh.
+                                            let mesh = mesh_chunk(
+                                                chunk,
+                                                &registry,
+                                                renderer.atlas_metadata(),
+                                            );
+                                            if let Some(resources) = renderer.render_resources() {
+                                                let chunk_bind_group =
+                                                    resources.pipeline.create_chunk_bind_group(
                                                         resources.device,
-                                                        &mesh,
                                                         chunk_pos,
-                                                        chunk_bind_group,
                                                     );
-                                                }
-                                                tracing::info!("Placed block at {:?}", place_pos);
+                                                chunk_manager.add_chunk(
+                                                    resources.device,
+                                                    resources.queue,
+                                                    &mesh,
+                                                    chunk_pos,
+                                                    chunk_bind_group,
+                                                );
                                             }
+                                            tracing::info!("Placed block at {:?}", place_pos);
                                         }
                                     }
                                 }
                             }
-                        } else {
-                            // Clear selection when cursor not grabbed
-                            selected_block = None;
                         }
 
                         // Render
@@ -808,7 +801,7 @@ fn update_camera_with_physics(
     camera.position = new_position;
 }
 
-fn check_collision(player_aabb: &AABB, chunks: &HashMap<ChunkPos, Chunk>) -> bool {
+fn check_collision(player_aabb: &Aabb, chunks: &HashMap<ChunkPos, Chunk>) -> bool {
     // Get range of blocks to check
     let min_block = player_aabb.min.floor().as_ivec3();
     let max_block = player_aabb.max.ceil().as_ivec3();
@@ -833,7 +826,7 @@ fn check_collision(player_aabb: &AABB, chunks: &HashMap<ChunkPos, Chunk>) -> boo
                     let voxel = chunk.voxel(local_x, local_y, local_z);
                     if voxel.id != BLOCK_AIR {
                         // Block is solid, check AABB intersection
-                        let block_aabb = AABB::new(
+                        let block_aabb = Aabb::new(
                             glam::Vec3::new(x as f32, y as f32, z as f32),
                             glam::Vec3::new(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0),
                         );

@@ -44,7 +44,11 @@ impl ChunkStorage {
     }
 
     /// Obtain mutable access to a chunk in the specified dimension, creating it if necessary.
-    pub fn ensure_chunk_in_dimension(&mut self, dimension: DimensionId, pos: ChunkPos) -> &mut Chunk {
+    pub fn ensure_chunk_in_dimension(
+        &mut self,
+        dimension: DimensionId,
+        pos: ChunkPos,
+    ) -> &mut Chunk {
         let key = ChunkKey::from_pos(dimension, pos);
         if !self.chunks.contains_key(&key) {
             self.evict_if_needed();

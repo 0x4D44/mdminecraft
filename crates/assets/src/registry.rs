@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use mdminecraft_world::BlockOpacityProvider;
 use mdminecraft_core::RegistryKey;
+use mdminecraft_world::BlockOpacityProvider;
 
 use crate::AssetError;
 use crate::BlockTextureConfig;

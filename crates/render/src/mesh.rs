@@ -469,8 +469,15 @@ mod tests {
         let mesh = mesh_chunk(&chunk, &registry, None);
 
         // Transparent block surrounded by air should have 6 faces
-        assert!(!mesh.vertices.is_empty(), "Transparent block should generate mesh vertices");
-        assert_eq!(mesh.indices.len(), 36, "Transparent block should have 6 faces (36 indices)");
+        assert!(
+            !mesh.vertices.is_empty(),
+            "Transparent block should generate mesh vertices"
+        );
+        assert_eq!(
+            mesh.indices.len(),
+            36,
+            "Transparent block should have 6 faces (36 indices)"
+        );
     }
 
     #[test]
@@ -497,10 +504,16 @@ mod tests {
         // So we get: 2 merged Z faces (front+back) + 4 individual side faces per block merged
         // = fewer total quads due to greedy meshing
         // The key test is that SOME mesh is generated (transparent blocks render)
-        assert!(!mesh.vertices.is_empty(), "Should generate mesh for adjacent transparent blocks");
+        assert!(
+            !mesh.vertices.is_empty(),
+            "Should generate mesh for adjacent transparent blocks"
+        );
         // With greedy meshing, the exact count depends on merge opportunities
         // Just verify we have less than 12 faces (would be 72 indices if no merging)
-        assert!(mesh.indices.len() > 0 && mesh.indices.len() < 72,
-            "Greedy meshing should reduce face count for adjacent blocks, got {} indices", mesh.indices.len());
+        assert!(
+            !mesh.indices.is_empty() && mesh.indices.len() < 72,
+            "Greedy meshing should reduce face count for adjacent blocks, got {} indices",
+            mesh.indices.len()
+        );
     }
 }

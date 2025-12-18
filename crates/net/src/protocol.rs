@@ -2,8 +2,8 @@
 //!
 //! All messages use postcard serialization for compact binary encoding.
 
-use serde::{Deserialize, Serialize};
 use mdminecraft_core::DimensionId;
+use serde::{Deserialize, Serialize};
 
 /// Protocol version for compatibility checking.
 pub const PROTOCOL_VERSION: u16 = 2;

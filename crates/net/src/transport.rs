@@ -157,8 +157,7 @@ impl ClientEndpoint {
             TlsMode::Secure => {
                 let mut root_store = RootCertStore::empty();
                 let native = rustls_native_certs::load_native_certs();
-                let (added, ignored) =
-                    root_store.add_parsable_certificates(native.certs);
+                let (added, ignored) = root_store.add_parsable_certificates(native.certs);
                 if !native.errors.is_empty() {
                     warn!("Some native roots failed to load: {:?}", native.errors);
                 }

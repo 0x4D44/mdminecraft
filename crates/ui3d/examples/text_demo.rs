@@ -1,7 +1,7 @@
 //! Text rendering demo - Shows 3D text in world space
 
 use anyhow::Result;
-use mdminecraft_render::{Camera, Renderer, RendererConfig, WindowConfig, WindowManager};
+use mdminecraft_render::{Renderer, RendererConfig, WindowConfig, WindowManager};
 use mdminecraft_ui3d::{
     render::{FontAtlasBuilder, TextRenderer},
     Text3D,

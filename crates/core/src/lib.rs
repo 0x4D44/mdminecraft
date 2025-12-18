@@ -1,9 +1,9 @@
 #![warn(missing_docs)]
 //! Core primitives shared across the workspace.
 
-pub mod crafting;
 /// Deterministic metadata components for persistence/networking.
 pub mod components;
+pub mod crafting;
 /// Dimension identifiers shared across simulation, persistence, and networking.
 pub mod dimension;
 /// Enchantment types and data structures for the enchanting system.
@@ -16,8 +16,8 @@ use rand::{rngs::StdRng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types
-pub use crafting::{Recipe, ToolRecipes};
 pub use components::{ComponentMap, ComponentValue};
+pub use crafting::{Recipe, ToolRecipes};
 pub use dimension::DimensionId;
 pub use enchantment::{Enchantment, EnchantmentType};
 pub use item::{ItemStack, ItemType, ToolMaterial, ToolType};

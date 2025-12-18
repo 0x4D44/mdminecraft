@@ -127,6 +127,10 @@ pub enum ItemType {
     PotionRegeneration,
     PotionStrength,
     PotionWeakness,
+
+    // Placeable utility blocks (appended to preserve stable IDs)
+    CraftingTable,
+    Torch,
 }
 
 impl ItemType {
@@ -178,7 +182,9 @@ impl ItemType {
             | ItemType::Sapling
             | ItemType::Flint
             | ItemType::Arrow
-            | ItemType::LapisLazuli => 64,
+            | ItemType::LapisLazuli
+            | ItemType::CraftingTable
+            | ItemType::Torch => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -254,10 +260,12 @@ impl ItemType {
     /// - 15: Iron Ore
     /// - 16: Gold Ore
     /// - 17: Diamond Ore
+    /// - 24: Cobblestone
     pub fn from_block(block_id: u16) -> Option<(ItemType, u32)> {
         match block_id {
             // Terrain blocks
             1 => Some((ItemType::Cobblestone, 1)), // Stone drops cobblestone (like Minecraft)
+            24 => Some((ItemType::Cobblestone, 1)),
             2 => Some((ItemType::Dirt, 1)),
             3 => Some((ItemType::Dirt, 1)), // Grass drops dirt (like Minecraft)
             4 => Some((ItemType::Sand, 1)),
@@ -269,6 +277,7 @@ impl ItemType {
             // Tree blocks
             11 => Some((ItemType::OakLog, 1)),
             12 => Some((ItemType::OakPlanks, 1)),
+            13 => Some((ItemType::CraftingTable, 1)),
 
             // Ore blocks - coal drops coal, others drop ore blocks
             14 => Some((ItemType::Coal, 1)),
@@ -283,7 +292,10 @@ impl ItemType {
             // Lapis ore (drops 4-9 lapis, using 6 as average for now)
             98 => Some((ItemType::LapisLazuli, 6)),
 
-            // No drops: Air (0), Water (6), Bedrock (10), Crafting Table (13), Enchanting Table (99)
+            // Torch
+            69 => Some((ItemType::Torch, 1)),
+
+            // No drops: Air (0), Water (6), Bedrock (10), Enchanting Table (99)
             _ => None,
         }
     }
@@ -301,7 +313,7 @@ impl ItemType {
     /// Some((item_type, count)) if a special drop occurs, None otherwise.
     pub fn from_leaves_random(block_id: u16, random_value: f64) -> Option<(ItemType, u32)> {
         match block_id {
-            12 => {
+            70 => {
                 // Oak leaves: 1/200 apple, 1/16 sapling
                 if random_value < 0.005 {
                     Some((ItemType::Apple, 1))
@@ -311,8 +323,8 @@ impl ItemType {
                     None
                 }
             }
-            14 | 16 => {
-                // Birch/Pine leaves: 1/16 sapling
+            72 | 74 => {
+                // Birch/Spruce leaves: 1/16 sapling
                 if random_value < 0.0625 {
                     Some((ItemType::Sapling, 1))
                 } else {
@@ -389,7 +401,7 @@ impl ItemType {
     pub fn to_block(&self) -> Option<u16> {
         match self {
             ItemType::Stone => Some(1),
-            ItemType::Cobblestone => Some(1), // Cobblestone places as stone (until separate block added)
+            ItemType::Cobblestone => Some(24),
             ItemType::Dirt => Some(2),
             ItemType::Grass => Some(3),
             ItemType::Sand => Some(4),
@@ -399,13 +411,43 @@ impl ItemType {
             ItemType::Clay => Some(9),
             ItemType::OakLog => Some(11),
             ItemType::OakPlanks => Some(12),
+            ItemType::CraftingTable => Some(13),
             ItemType::CoalOre => Some(14),
             ItemType::IronOre => Some(15),
             ItemType::GoldOre => Some(16),
             ItemType::DiamondOre => Some(17),
             ItemType::Furnace => Some(18),
+            ItemType::Torch => Some(69),
             ItemType::LapisOre => Some(98),
             // Non-placeable items (leaves, mob drops, food, crafted items)
+            _ => None,
+        }
+    }
+
+    /// Convert a placeable block ID into the corresponding item type (if any).
+    ///
+    /// This is the inverse of [`ItemType::to_block`] for block items.
+    pub fn from_placeable_block(block_id: u16) -> Option<ItemType> {
+        match block_id {
+            1 => Some(ItemType::Stone),
+            24 => Some(ItemType::Cobblestone),
+            2 => Some(ItemType::Dirt),
+            3 => Some(ItemType::Grass),
+            4 => Some(ItemType::Sand),
+            5 => Some(ItemType::Gravel),
+            7 => Some(ItemType::Ice),
+            8 => Some(ItemType::Snow),
+            9 => Some(ItemType::Clay),
+            11 => Some(ItemType::OakLog),
+            12 => Some(ItemType::OakPlanks),
+            13 => Some(ItemType::CraftingTable),
+            14 => Some(ItemType::CoalOre),
+            15 => Some(ItemType::IronOre),
+            16 => Some(ItemType::GoldOre),
+            17 => Some(ItemType::DiamondOre),
+            18 | 19 => Some(ItemType::Furnace),
+            69 => Some(ItemType::Torch),
+            98 => Some(ItemType::LapisOre),
             _ => None,
         }
     }
@@ -838,7 +880,8 @@ mod tests {
         assert_eq!(ItemType::from_block(0), None); // Air
         assert_eq!(ItemType::from_block(6), None); // Water
         assert_eq!(ItemType::from_block(10), None); // Bedrock
-        assert_eq!(ItemType::from_block(13), None); // Crafting table
+        assert_eq!(ItemType::from_block(13), Some((ItemType::CraftingTable, 1))); // Crafting table
+        assert_eq!(ItemType::from_block(69), Some((ItemType::Torch, 1))); // Torch
     }
 
     #[test]
@@ -860,35 +903,30 @@ mod tests {
 
     #[test]
     fn test_leaves_random_drops() {
-        // Note: Block IDs in from_leaves_random still reference the old tree leaf IDs
-        // from trees.rs which uses different IDs than blocks.json.
-        // This function works with the trees.rs leaf block IDs:
-        // 12 = oak leaves (trees.rs), 14 = birch leaves, 16 = pine leaves
-
         // Oak leaves - apple drop (< 0.005)
         assert_eq!(
-            ItemType::from_leaves_random(12, 0.001),
+            ItemType::from_leaves_random(70, 0.001),
             Some((ItemType::Apple, 1))
         );
 
         // Oak leaves - sapling drop (0.005 to 0.0675)
         assert_eq!(
-            ItemType::from_leaves_random(12, 0.01),
+            ItemType::from_leaves_random(70, 0.01),
             Some((ItemType::Sapling, 1))
         );
 
         // Oak leaves - no drop (> 0.0675)
-        assert_eq!(ItemType::from_leaves_random(12, 0.1), None);
+        assert_eq!(ItemType::from_leaves_random(70, 0.1), None);
 
-        // Birch leaves - sapling drop (trees.rs ID 14)
+        // Birch leaves - sapling drop
         assert_eq!(
-            ItemType::from_leaves_random(14, 0.03),
+            ItemType::from_leaves_random(72, 0.03),
             Some((ItemType::Sapling, 1))
         );
 
-        // Pine leaves - sapling drop (trees.rs ID 16)
+        // Spruce leaves - sapling drop
         assert_eq!(
-            ItemType::from_leaves_random(16, 0.05),
+            ItemType::from_leaves_random(74, 0.05),
             Some((ItemType::Sapling, 1))
         );
 
@@ -1392,7 +1430,9 @@ mod tests {
         assert!(ItemType::Clay.to_block().is_some());
         assert!(ItemType::OakLog.to_block().is_some());
         assert!(ItemType::OakPlanks.to_block().is_some());
+        assert!(ItemType::CraftingTable.to_block().is_some());
         assert!(ItemType::Furnace.to_block().is_some());
+        assert!(ItemType::Torch.to_block().is_some());
     }
 
     #[test]

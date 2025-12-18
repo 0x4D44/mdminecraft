@@ -27,6 +27,14 @@ pub const SMELT_RECIPES: &[SmeltRecipe] = &[
         output: ItemType::GoldIngot,
     },
     SmeltRecipe {
+        input: ItemType::OakLog,
+        output: ItemType::Coal, // Treat charcoal as coal for now.
+    },
+    SmeltRecipe {
+        input: ItemType::Cobblestone,
+        output: ItemType::Stone,
+    },
+    SmeltRecipe {
         input: ItemType::RawPork,
         output: ItemType::CookedPork,
     },
@@ -317,6 +325,11 @@ mod tests {
         assert_eq!(
             get_smelt_output(ItemType::GoldOre),
             Some(ItemType::GoldIngot)
+        );
+        assert_eq!(get_smelt_output(ItemType::OakLog), Some(ItemType::Coal));
+        assert_eq!(
+            get_smelt_output(ItemType::Cobblestone),
+            Some(ItemType::Stone)
         );
         assert_eq!(
             get_smelt_output(ItemType::RawPork),
@@ -631,7 +644,7 @@ mod tests {
     #[test]
     fn test_smelt_recipe_constants() {
         // Verify all recipes in SMELT_RECIPES
-        assert_eq!(SMELT_RECIPES.len(), 4);
+        assert_eq!(SMELT_RECIPES.len(), 6);
 
         for recipe in SMELT_RECIPES {
             // Each recipe should have valid input and output

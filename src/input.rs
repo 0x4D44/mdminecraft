@@ -18,6 +18,7 @@ pub enum Action {
     Crouch,
     ToggleFly,
     ToggleCursor,
+    DropItem,
     HotbarSlot(u8),
     HotbarScrollUp,
     HotbarScrollDown,
@@ -101,6 +102,8 @@ pub struct ActionState {
     pub jump_pressed: bool,
     pub toggle_fly: bool,
     pub toggle_cursor: bool,
+    pub drop_item: bool,
+    pub drop_stack: bool,
     pub hotbar_slot: Option<u8>,
     pub hotbar_scroll: i32,
     #[allow(dead_code)]
@@ -122,6 +125,8 @@ impl Default for ActionState {
             jump_pressed: false,
             toggle_fly: false,
             toggle_cursor: false,
+            drop_item: false,
+            drop_stack: false,
             hotbar_slot: None,
             hotbar_scroll: 0,
             scroll_delta: 0.0,
@@ -190,6 +195,10 @@ impl InputProcessor {
         state.jump_pressed = self.action_triggered(Action::Jump, snapshot);
         state.toggle_fly = self.action_triggered(Action::ToggleFly, snapshot);
         state.toggle_cursor = self.action_triggered(Action::ToggleCursor, snapshot);
+        state.drop_item = self.action_triggered(Action::DropItem, snapshot);
+        state.drop_stack = state.drop_item
+            && (snapshot.keys_pressed.contains(&KeyCode::ControlLeft)
+                || snapshot.keys_pressed.contains(&KeyCode::ControlRight));
         state.hotbar_slot = self.detect_hotbar_slot(snapshot);
         state.hotbar_scroll = self.detect_hotbar_scroll(snapshot);
 
@@ -266,10 +275,7 @@ fn binding_active(binding: &InputBinding, snapshot: &InputSnapshot) -> bool {
     }
 }
 
-fn binding_triggered(
-    binding: &InputBinding,
-    snapshot: &InputSnapshot,
-) -> bool {
+fn binding_triggered(binding: &InputBinding, snapshot: &InputSnapshot) -> bool {
     match binding {
         InputBinding::Key(code) => snapshot.keys_just_pressed.contains(code),
         InputBinding::Mouse(btn) => snapshot.mouse_clicks.contains(btn),
@@ -284,7 +290,7 @@ fn default_base_bindings() -> Vec<(Action, Vec<InputBinding>)> {
     // - Left Shift = Sneak/Crouch AND Fly Down (same key, context-dependent)
     // - Left Control = Sprint
     // - E = Inventory (not bound here)
-    // - Q = Drop item (not bound here)
+    // - Q = Drop item
     use InputBinding::Key;
     vec![
         (Action::MoveForward, vec![Key(KeyCode::KeyW)]),
@@ -300,6 +306,7 @@ fn default_base_bindings() -> Vec<(Action, Vec<InputBinding>)> {
         (Action::Crouch, vec![Key(KeyCode::ShiftLeft)]),
         (Action::ToggleFly, vec![Key(KeyCode::F4)]),
         (Action::ToggleCursor, vec![Key(KeyCode::Tab)]),
+        (Action::DropItem, vec![Key(KeyCode::KeyQ)]),
         (Action::HotbarScrollUp, vec![InputBinding::ScrollUp]),
         (Action::HotbarScrollDown, vec![InputBinding::ScrollDown]),
         (Action::HotbarSlot(0), vec![Key(KeyCode::Digit1)]),
@@ -412,6 +419,7 @@ fn parse_action(name: &str) -> Option<Action> {
         "Crouch" => Some(Action::Crouch),
         "ToggleFly" => Some(Action::ToggleFly),
         "ToggleCursor" => Some(Action::ToggleCursor),
+        "DropItem" => Some(Action::DropItem),
         "HotbarScrollUp" => Some(Action::HotbarScrollUp),
         "HotbarScrollDown" => Some(Action::HotbarScrollDown),
         _ => {

@@ -86,6 +86,8 @@ impl ScriptedStep {
             jump_pressed: self.jump,
             toggle_fly: self.toggle_fly,
             toggle_cursor: false,
+            drop_item: false,
+            drop_stack: false,
             hotbar_slot: None,
             hotbar_scroll: 0,
             scroll_delta: 0.0,

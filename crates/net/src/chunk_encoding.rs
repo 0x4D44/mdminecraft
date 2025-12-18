@@ -311,8 +311,8 @@ mod tests {
     #[test]
     fn test_encode_decode_uniform_chunk() {
         let block_data = vec![1u16; 65536];
-        let encoded = encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data)
-            .expect("Failed to encode");
+        let encoded =
+            encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data).expect("Failed to encode");
         assert_eq!(encoded.dimension, DimensionId::DEFAULT);
 
         assert_eq!(encoded.palette.len(), 1);
@@ -331,12 +331,12 @@ mod tests {
     fn test_encode_decode_varied_chunk() {
         let mut block_data = vec![0u16; 65536];
         // Create some variation
-        for i in 0..1000 {
-            block_data[i] = (i % 10) as u16;
+        for (i, value) in block_data.iter_mut().take(1000).enumerate() {
+            *value = (i % 10) as u16;
         }
 
-        let encoded = encode_chunk_data(DimensionId::DEFAULT, 5, -3, &block_data)
-            .expect("Failed to encode");
+        let encoded =
+            encode_chunk_data(DimensionId::DEFAULT, 5, -3, &block_data).expect("Failed to encode");
 
         assert_eq!(encoded.dimension, DimensionId::DEFAULT);
         assert_eq!(encoded.chunk_x, 5);
@@ -350,8 +350,8 @@ mod tests {
     #[test]
     fn test_crc32_validation() {
         let block_data = vec![1u16; 65536];
-        let mut encoded = encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data)
-            .expect("Failed to encode");
+        let mut encoded =
+            encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data).expect("Failed to encode");
 
         // Corrupt the CRC
         encoded.crc32 ^= 0xFFFFFFFF;
@@ -390,7 +390,7 @@ mod tests {
         let mut malicious_data = Vec::new();
         for _ in 0..600 {
             malicious_data.push(255); // 128 + 127 = run of 127
-            malicious_data.push(0);   // value to repeat
+            malicious_data.push(0); // value to repeat
         }
 
         let result = rle_decompress(&malicious_data);
@@ -426,7 +426,7 @@ mod tests {
         let mut valid_data = Vec::new();
         for _ in 0..516 {
             valid_data.push(255); // 128 + 127 = run of 127
-            valid_data.push(0);   // value to repeat
+            valid_data.push(0); // value to repeat
         }
         // Add remaining 4 bytes as a short run
         valid_data.push(128 + 4); // run of 4

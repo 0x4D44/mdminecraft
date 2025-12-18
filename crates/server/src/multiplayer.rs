@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use bevy_ecs::schedule::Schedules;
 use bevy_ecs::world::World;
-use mdminecraft_core::SimTick;
 use mdminecraft_core::DimensionId;
+use mdminecraft_core::SimTick;
 use mdminecraft_ecs::{build_default_schedule, run_tick};
 use mdminecraft_net::{
     ChunkStreamer, EntityReplicationTracker, EventLogger, InputLogger, NetworkEvent,

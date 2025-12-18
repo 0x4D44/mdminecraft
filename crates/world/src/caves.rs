@@ -933,7 +933,10 @@ mod tests {
         // Higher positions should vary based on noise
         let mid_biome = carver.get_biome(100, 40, 100);
         // Just verify it returns a valid biome
-        assert!(matches!(mid_biome, CaveBiome::Stone | CaveBiome::Lush | CaveBiome::Dripstone | CaveBiome::Flooded));
+        assert!(matches!(
+            mid_biome,
+            CaveBiome::Stone | CaveBiome::Lush | CaveBiome::Dripstone | CaveBiome::Flooded
+        ));
     }
 
     #[test]
@@ -1215,15 +1218,33 @@ mod tests {
     #[test]
     fn test_cave_biome_ceiling_decoration_with_surface() {
         // Surface connected
-        assert_eq!(CaveBiome::Lush.ceiling_decoration_with_surface(true), Some(116)); // hanging_roots
-        assert_eq!(CaveBiome::Dripstone.ceiling_decoration_with_surface(true), Some(103));
+        assert_eq!(
+            CaveBiome::Lush.ceiling_decoration_with_surface(true),
+            Some(116)
+        ); // hanging_roots
+        assert_eq!(
+            CaveBiome::Dripstone.ceiling_decoration_with_surface(true),
+            Some(103)
+        );
         assert_eq!(CaveBiome::Stone.ceiling_decoration_with_surface(true), None);
-        assert_eq!(CaveBiome::DeepDark.ceiling_decoration_with_surface(true), None);
+        assert_eq!(
+            CaveBiome::DeepDark.ceiling_decoration_with_surface(true),
+            None
+        );
 
         // Not surface connected (underground)
-        assert_eq!(CaveBiome::Lush.ceiling_decoration_with_surface(false), Some(102));
-        assert_eq!(CaveBiome::Dripstone.ceiling_decoration_with_surface(false), Some(103));
-        assert_eq!(CaveBiome::DeepDark.ceiling_decoration_with_surface(false), Some(104));
+        assert_eq!(
+            CaveBiome::Lush.ceiling_decoration_with_surface(false),
+            Some(102)
+        );
+        assert_eq!(
+            CaveBiome::Dripstone.ceiling_decoration_with_surface(false),
+            Some(103)
+        );
+        assert_eq!(
+            CaveBiome::DeepDark.ceiling_decoration_with_surface(false),
+            Some(104)
+        );
     }
 
     #[test]
@@ -1268,7 +1289,11 @@ mod tests {
         for x in 5..10 {
             for z in 5..10 {
                 for y in 5..12 {
-                    assert_eq!(chunk.voxel(x, y, z).id, 14, "Air should be flooded with water");
+                    assert_eq!(
+                        chunk.voxel(x, y, z).id,
+                        14,
+                        "Air should be flooded with water"
+                    );
                 }
             }
         }
@@ -1321,7 +1346,10 @@ mod tests {
                 }
             }
         }
-        assert!(decoration_count >= 0, "Lush decorator executed successfully");
+        assert!(
+            decoration_count >= 0,
+            "Lush decorator executed successfully"
+        );
     }
 
     #[test]
@@ -1363,7 +1391,10 @@ mod tests {
                 }
             }
         }
-        assert!(sculk_count >= 0, "Deep dark decorator executed successfully");
+        assert!(
+            sculk_count >= 0,
+            "Deep dark decorator executed successfully"
+        );
     }
 
     #[test]

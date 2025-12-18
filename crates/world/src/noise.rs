@@ -460,11 +460,7 @@ mod tests {
             for y in 0..5 {
                 for z in 0..5 {
                     let val = gen.sample_3d(x as f64 * 0.5, y as f64 * 0.5, z as f64 * 0.5);
-                    assert!(
-                        (-1.0..=1.0).contains(&val),
-                        "3D value {} out of range",
-                        val
-                    );
+                    assert!((-1.0..=1.0).contains(&val), "3D value {} out of range", val);
                 }
             }
         }
@@ -489,7 +485,11 @@ mod tests {
                 for z in 0..5 {
                     let val1 = gen1.sample_3d(x as f64, y as f64, z as f64);
                     let val2 = gen2.sample_3d(x as f64, y as f64, z as f64);
-                    assert_eq!(val1, val2, "3D noise not deterministic at ({}, {}, {})", x, y, z);
+                    assert_eq!(
+                        val1, val2,
+                        "3D noise not deterministic at ({}, {}, {})",
+                        x, y, z
+                    );
                 }
             }
         }

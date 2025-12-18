@@ -57,13 +57,8 @@ impl MobType {
             ],
             BiomeId::Hills => vec![(MobType::Sheep, 15.0), (MobType::Cow, 5.0)],
             BiomeId::Savanna => vec![(MobType::Cow, 6.0), (MobType::Chicken, 8.0)],
-            BiomeId::RainForest => vec![
-                (MobType::Pig, 6.0),
-                (MobType::Chicken, 12.0),
-            ],
-            BiomeId::Mountains => vec![
-                (MobType::Sheep, 10.0),
-            ],
+            BiomeId::RainForest => vec![(MobType::Pig, 6.0), (MobType::Chicken, 12.0)],
+            BiomeId::Mountains => vec![(MobType::Sheep, 10.0)],
             // No mobs in cold, ocean, or swamp biomes
             _ => vec![],
         }
@@ -903,7 +898,7 @@ mod tests {
         // Test normalized direction
         let mut mob2 = Mob::new(0.0, 64.0, 0.0, MobType::Cow);
         mob2.apply_knockback(3.0, 4.0, 5.0); // 3-4-5 triangle
-        // Direction should be normalized
+                                             // Direction should be normalized
         assert!((mob2.vel_x - 3.0).abs() < 0.1);
         assert!((mob2.vel_z - 4.0).abs() < 0.1);
     }
