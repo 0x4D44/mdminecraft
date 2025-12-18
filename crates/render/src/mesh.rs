@@ -1,10 +1,16 @@
 use blake3::Hasher;
 use mdminecraft_assets::{BlockFace, BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_world::{
-    BlockId, Chunk, Voxel, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    interactive_blocks, BlockId, Chunk, Voxel, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
+use std::sync::OnceLock;
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
+
+fn default_block_properties() -> &'static mdminecraft_world::BlockPropertiesRegistry {
+    static PROPERTIES: OnceLock<mdminecraft_world::BlockPropertiesRegistry> = OnceLock::new();
+    PROPERTIES.get_or_init(mdminecraft_world::BlockPropertiesRegistry::new)
+}
 
 /// Hash of the combined vertex/index buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,8 +62,59 @@ pub fn mesh_chunk(
     registry: &BlockRegistry,
     atlas: Option<&TextureAtlasMetadata>,
 ) -> MeshBuffers {
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    mesh_chunk_with_voxel_at(chunk, registry, atlas, |world_x, world_y, world_z| {
+        if world_y < 0 || world_y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let local_x = world_x - origin_x;
+        let local_z = world_z - origin_z;
+        if !(0..CHUNK_SIZE_X as i32).contains(&local_x)
+            || !(0..CHUNK_SIZE_Z as i32).contains(&local_z)
+        {
+            return None;
+        }
+
+        Some(chunk.voxel(local_x as usize, world_y as usize, local_z as usize))
+    })
+}
+
+/// Generate buffers for the given chunk, with access to a world-voxel sampler for neighbor-aware blocks.
+pub fn mesh_chunk_with_voxel_at<F>(
+    chunk: &Chunk,
+    registry: &BlockRegistry,
+    atlas: Option<&TextureAtlasMetadata>,
+    voxel_at_world: F,
+) -> MeshBuffers
+where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
     let mut builder = MeshBuilder::new(registry, atlas);
     GreedyMesher::mesh(chunk, &mut builder);
+    mesh_glass_panes(chunk, &mut builder, registry, &voxel_at_world);
+    mesh_oak_fences(chunk, &mut builder, registry, &voxel_at_world);
+    mesh_oak_fence_gates(chunk, &mut builder);
+    mesh_stairs(chunk, &mut builder);
+    mesh_slabs(chunk, &mut builder);
+    mesh_trapdoors(chunk, &mut builder);
+    mesh_doors(chunk, &mut builder);
+    mesh_ladders(chunk, &mut builder);
+    mesh_torches(chunk, &mut builder);
+    mesh_redstone_wires(chunk, &mut builder, &voxel_at_world);
+    mesh_pressure_plates(chunk, &mut builder);
+    mesh_buttons(chunk, &mut builder);
+    mesh_levers(chunk, &mut builder);
+    mesh_crops(chunk, &mut builder);
+    mesh_cave_decorations(chunk, &mut builder);
+    mesh_beds(chunk, &mut builder);
+    mesh_chests(chunk, &mut builder);
+    mesh_enchanting_tables(chunk, &mut builder);
+    mesh_brewing_stands(chunk, &mut builder);
+    mesh_farmland(chunk, &mut builder);
     builder.finish()
 }
 
@@ -383,11 +440,1261 @@ impl FaceDesc {
     }
 }
 
+fn mesh_glass_panes<F>(
+    chunk: &Chunk,
+    builder: &mut MeshBuilder,
+    _registry: &BlockRegistry,
+    voxel_at_world: &F,
+) where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    let thickness = 2.0 / 16.0;
+    let half = thickness * 0.5;
+
+    let post_min = 0.5 - half;
+    let post_max = 0.5 + half;
+
+    let block_properties = default_block_properties();
+    let connects_to = |voxel: Voxel| -> bool {
+        voxel.id == interactive_blocks::GLASS_PANE
+            || voxel.id == interactive_blocks::GLASS
+            || block_properties.get(voxel.id).is_solid
+    };
+
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != interactive_blocks::GLASS_PANE {
+                    continue;
+                }
+
+                let world_x = origin_x + x as i32;
+                let world_y = y as i32;
+                let world_z = origin_z + z as i32;
+
+                let connect_west =
+                    voxel_at_world(world_x - 1, world_y, world_z).is_some_and(connects_to);
+                let connect_east =
+                    voxel_at_world(world_x + 1, world_y, world_z).is_some_and(connects_to);
+                let connect_north =
+                    voxel_at_world(world_x, world_y, world_z - 1).is_some_and(connects_to);
+                let connect_south =
+                    voxel_at_world(world_x, world_y, world_z + 1).is_some_and(connects_to);
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                // Center post.
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + post_min, base_y, base_z + post_min],
+                    [base_x + post_max, base_y + 1.0, base_z + post_max],
+                    light,
+                );
+
+                if connect_west {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x, base_y, base_z + post_min],
+                        [base_x + 0.5, base_y + 1.0, base_z + post_max],
+                        light,
+                    );
+                }
+                if connect_east {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + 0.5, base_y, base_z + post_min],
+                        [base_x + 1.0, base_y + 1.0, base_z + post_max],
+                        light,
+                    );
+                }
+                if connect_north {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + post_min, base_y, base_z],
+                        [base_x + post_max, base_y + 1.0, base_z + 0.5],
+                        light,
+                    );
+                }
+                if connect_south {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + post_min, base_y, base_z + 0.5],
+                        [base_x + post_max, base_y + 1.0, base_z + 1.0],
+                        light,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mesh_oak_fences<F>(
+    chunk: &Chunk,
+    builder: &mut MeshBuilder,
+    _registry: &BlockRegistry,
+    voxel_at_world: &F,
+) where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    let post_min = 6.0 / 16.0;
+    let post_max = 10.0 / 16.0;
+
+    let rail_thickness = 2.0 / 16.0;
+    let rail_half = rail_thickness * 0.5;
+    let rail_min_x = 0.5 - rail_half;
+    let rail_max_x = 0.5 + rail_half;
+    let rail_min_z = 0.5 - rail_half;
+    let rail_max_z = 0.5 + rail_half;
+
+    let lower_rail_min_y = 6.0 / 16.0;
+    let lower_rail_max_y = 9.0 / 16.0;
+    let upper_rail_min_y = 12.0 / 16.0;
+    let upper_rail_max_y = 15.0 / 16.0;
+
+    let block_properties = default_block_properties();
+    let connects_to = |voxel: Voxel| -> bool {
+        voxel.id == interactive_blocks::OAK_FENCE
+            || voxel.id == interactive_blocks::OAK_FENCE_GATE
+            || block_properties.get(voxel.id).is_solid
+    };
+
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != interactive_blocks::OAK_FENCE {
+                    continue;
+                }
+
+                let world_x = origin_x + x as i32;
+                let world_y = y as i32;
+                let world_z = origin_z + z as i32;
+
+                let connect_west =
+                    voxel_at_world(world_x - 1, world_y, world_z).is_some_and(connects_to);
+                let connect_east =
+                    voxel_at_world(world_x + 1, world_y, world_z).is_some_and(connects_to);
+                let connect_north =
+                    voxel_at_world(world_x, world_y, world_z - 1).is_some_and(connects_to);
+                let connect_south =
+                    voxel_at_world(world_x, world_y, world_z + 1).is_some_and(connects_to);
+
+                let light = voxel.light_sky.max(voxel.light_block);
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                // Post (tall).
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + post_min, base_y, base_z + post_min],
+                    [base_x + post_max, base_y + 1.5, base_z + post_max],
+                    light,
+                );
+
+                let rails = [
+                    (lower_rail_min_y, lower_rail_max_y),
+                    (upper_rail_min_y, upper_rail_max_y),
+                ];
+
+                for (rail_y0, rail_y1) in rails {
+                    if connect_west {
+                        emit_box(
+                            builder,
+                            voxel.id,
+                            [base_x, base_y + rail_y0, base_z + rail_min_z],
+                            [base_x + 0.5, base_y + rail_y1, base_z + rail_max_z],
+                            light,
+                        );
+                    }
+                    if connect_east {
+                        emit_box(
+                            builder,
+                            voxel.id,
+                            [base_x + 0.5, base_y + rail_y0, base_z + rail_min_z],
+                            [base_x + 1.0, base_y + rail_y1, base_z + rail_max_z],
+                            light,
+                        );
+                    }
+                    if connect_north {
+                        emit_box(
+                            builder,
+                            voxel.id,
+                            [base_x + rail_min_x, base_y + rail_y0, base_z],
+                            [base_x + rail_max_x, base_y + rail_y1, base_z + 0.5],
+                            light,
+                        );
+                    }
+                    if connect_south {
+                        emit_box(
+                            builder,
+                            voxel.id,
+                            [base_x + rail_min_x, base_y + rail_y0, base_z + 0.5],
+                            [base_x + rail_max_x, base_y + rail_y1, base_z + 1.0],
+                            light,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn mesh_oak_fence_gates(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let thickness = 3.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != interactive_blocks::OAK_FENCE_GATE {
+                    continue;
+                }
+
+                let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                let open = mdminecraft_world::is_fence_gate_open(voxel.state);
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let (min, max) = if open {
+                    // Simplified hinge: gates always swing "left" from their facing direction.
+                    match facing {
+                        mdminecraft_world::Facing::North => (
+                            [base_x, base_y, base_z],
+                            [base_x + thickness, base_y + 1.5, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [base_x + 1.0 - thickness, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.5, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [base_x, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.5, base_z + thickness],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [base_x, base_y, base_z + 1.0 - thickness],
+                            [base_x + 1.0, base_y + 1.5, base_z + 1.0],
+                        ),
+                    }
+                } else {
+                    let half = thickness * 0.5;
+                    match facing {
+                        mdminecraft_world::Facing::North | mdminecraft_world::Facing::South => (
+                            [base_x, base_y, base_z + 0.5 - half],
+                            [base_x + 1.0, base_y + 1.5, base_z + 0.5 + half],
+                        ),
+                        mdminecraft_world::Facing::East | mdminecraft_world::Facing::West => (
+                            [base_x + 0.5 - half, base_y, base_z],
+                            [base_x + 0.5 + half, base_y + 1.5, base_z + 1.0],
+                        ),
+                    }
+                };
+
+                emit_box(builder, voxel.id, min, max, light);
+            }
+        }
+    }
+}
+
+fn mesh_stairs(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let half = 0.5;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !matches!(
+                    voxel.id,
+                    interactive_blocks::STONE_STAIRS | interactive_blocks::OAK_STAIRS
+                ) {
+                    continue;
+                }
+
+                let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                let top = (voxel.state & 0x04) != 0;
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let (half_min, half_max) = match facing {
+                    mdminecraft_world::Facing::North => ([0.0, 0.0, 0.0], [1.0, 1.0, half]),
+                    mdminecraft_world::Facing::South => ([0.0, 0.0, half], [1.0, 1.0, 1.0]),
+                    mdminecraft_world::Facing::East => ([half, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                    mdminecraft_world::Facing::West => ([0.0, 0.0, 0.0], [half, 1.0, 1.0]),
+                };
+
+                if top {
+                    // Upper full block.
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x, base_y + half, base_z],
+                        [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        light,
+                    );
+
+                    // Lower half-footprint.
+                    emit_box_masked(
+                        builder,
+                        voxel.id,
+                        [base_x + half_min[0], base_y, base_z + half_min[2]],
+                        [base_x + half_max[0], base_y + half, base_z + half_max[2]],
+                        light,
+                        FACES_ALL & !FACE_UP,
+                    );
+                } else {
+                    // Bottom full block.
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x, base_y, base_z],
+                        [base_x + 1.0, base_y + half, base_z + 1.0],
+                        light,
+                    );
+
+                    // Upper half-footprint.
+                    emit_box_masked(
+                        builder,
+                        voxel.id,
+                        [base_x + half_min[0], base_y + half, base_z + half_min[2]],
+                        [base_x + half_max[0], base_y + 1.0, base_z + half_max[2]],
+                        light,
+                        FACES_ALL & !FACE_DOWN,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mesh_slabs(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let half = 0.5;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_slab(voxel.id) {
+                    continue;
+                }
+
+                let top = matches!(
+                    mdminecraft_world::SlabPosition::from_state(voxel.state),
+                    mdminecraft_world::SlabPosition::Top
+                );
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let (min_y, max_y) = if top { (half, 1.0) } else { (0.0, half) };
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x, base_y + min_y, base_z],
+                    [base_x + 1.0, base_y + max_y, base_z + 1.0],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_trapdoors(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let thickness = 3.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_trapdoor(voxel.id) {
+                    continue;
+                }
+
+                let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                let open = mdminecraft_world::is_trapdoor_open(voxel.state);
+                let top = mdminecraft_world::is_trapdoor_top(voxel.state);
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let (min, max) = if open {
+                    match facing {
+                        mdminecraft_world::Facing::North => (
+                            [base_x, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + thickness],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [base_x, base_y, base_z + 1.0 - thickness],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [base_x + 1.0 - thickness, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [base_x, base_y, base_z],
+                            [base_x + thickness, base_y + 1.0, base_z + 1.0],
+                        ),
+                    }
+                } else if top {
+                    (
+                        [base_x, base_y + 1.0 - thickness, base_z],
+                        [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                    )
+                } else {
+                    (
+                        [base_x, base_y, base_z],
+                        [base_x + 1.0, base_y + thickness, base_z + 1.0],
+                    )
+                };
+
+                emit_box(builder, voxel.id, min, max, light);
+            }
+        }
+    }
+}
+
+fn mesh_doors(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let thickness = 3.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_door(voxel.id) {
+                    continue;
+                }
+
+                let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                let open = mdminecraft_world::is_door_open(voxel.state);
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let (min, max) = if open {
+                    // Simplified hinge: doors always swing "left" from their facing direction.
+                    match facing {
+                        mdminecraft_world::Facing::North => (
+                            [base_x, base_y, base_z],
+                            [base_x + thickness, base_y + 1.0, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [base_x + 1.0 - thickness, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [base_x, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + thickness],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [base_x, base_y, base_z + 1.0 - thickness],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        ),
+                    }
+                } else {
+                    match facing {
+                        mdminecraft_world::Facing::North => (
+                            [base_x, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + thickness],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [base_x, base_y, base_z + 1.0 - thickness],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [base_x + 1.0 - thickness, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [base_x, base_y, base_z],
+                            [base_x + thickness, base_y + 1.0, base_z + 1.0],
+                        ),
+                    }
+                };
+
+                let mut faces = FACES_ALL;
+                if mdminecraft_world::is_door_lower(voxel.id) && y + 1 < CHUNK_SIZE_Y {
+                    let above = chunk.voxel(x, y + 1, z);
+                    if mdminecraft_world::is_door(above.id) {
+                        faces &= !FACE_UP;
+                    }
+                }
+                if mdminecraft_world::is_door_upper(voxel.id) && y > 0 {
+                    let below = chunk.voxel(x, y - 1, z);
+                    if mdminecraft_world::is_door(below.id) {
+                        faces &= !FACE_DOWN;
+                    }
+                }
+
+                emit_box_masked(builder, voxel.id, min, max, light, faces);
+            }
+        }
+    }
+}
+
+fn mesh_ladders(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let thickness = 1.0 / 16.0;
+    let inset = 1.0 / 512.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_ladder(voxel.id) {
+                    continue;
+                }
+
+                let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let (min, max) = match facing {
+                    mdminecraft_world::Facing::North => (
+                        [base_x, base_y, base_z + inset],
+                        [base_x + 1.0, base_y + 1.0, base_z + inset + thickness],
+                    ),
+                    mdminecraft_world::Facing::South => (
+                        [base_x, base_y, base_z + 1.0 - inset - thickness],
+                        [base_x + 1.0, base_y + 1.0, base_z + 1.0 - inset],
+                    ),
+                    mdminecraft_world::Facing::East => (
+                        [base_x + 1.0 - inset - thickness, base_y, base_z],
+                        [base_x + 1.0 - inset, base_y + 1.0, base_z + 1.0],
+                    ),
+                    mdminecraft_world::Facing::West => (
+                        [base_x + inset, base_y, base_z],
+                        [base_x + inset + thickness, base_y + 1.0, base_z + 1.0],
+                    ),
+                };
+
+                emit_box(builder, voxel.id, min, max, light);
+            }
+        }
+    }
+}
+
+fn mesh_torches(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let half_width = 1.0 / 16.0;
+    let height = 10.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != interactive_blocks::TORCH
+                    && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_TORCH
+                {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + 0.5 - half_width, base_y, base_z + 0.5 - half_width],
+                    [
+                        base_x + 0.5 + half_width,
+                        base_y + height,
+                        base_z + 0.5 + half_width,
+                    ],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_crops(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let inv_sqrt2 = 0.70710677_f32;
+    let min_height = 4.0 / 16.0;
+    let max_height = 1.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                let Some((crop_type, stage)) = mdminecraft_world::CropType::from_block_id(voxel.id)
+                else {
+                    continue;
+                };
+
+                let max_stage = crop_type.max_stage() as f32;
+                let t = if max_stage > 0.0 {
+                    (stage as f32 / max_stage).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let height = min_height + t * (max_height - min_height);
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let x0 = base_x;
+                let x1 = base_x + 1.0;
+                let y0 = base_y;
+                let y1 = base_y + height;
+                let z0 = base_z;
+                let z1 = base_z + 1.0;
+
+                let planes = [
+                    (
+                        [[x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0]],
+                        [inv_sqrt2, 0.0, -inv_sqrt2],
+                    ),
+                    (
+                        [[x0, y0, z1], [x1, y0, z0], [x1, y1, z0], [x0, y1, z1]],
+                        [inv_sqrt2, 0.0, inv_sqrt2],
+                    ),
+                ];
+
+                for (corners, normal) in planes {
+                    builder.push_quad(voxel.id, BlockFace::North, normal, corners, true, light);
+                    builder.push_quad(
+                        voxel.id,
+                        BlockFace::North,
+                        [-normal[0], -normal[1], -normal[2]],
+                        corners,
+                        false,
+                        light,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mesh_redstone_wires<F>(chunk: &Chunk, builder: &mut MeshBuilder, voxel_at_world: &F)
+where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    let thickness = 1.0 / 16.0;
+    let half_width = 1.0 / 16.0;
+
+    let connects_to = |voxel: Voxel| -> bool {
+        matches!(
+            voxel.id,
+            mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+                | mdminecraft_world::redstone_blocks::LEVER
+                | mdminecraft_world::redstone_blocks::STONE_BUTTON
+                | mdminecraft_world::redstone_blocks::OAK_BUTTON
+                | mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                | mdminecraft_world::redstone_blocks::REDSTONE_TORCH
+                | mdminecraft_world::redstone_blocks::REDSTONE_LAMP
+                | mdminecraft_world::redstone_blocks::REDSTONE_LAMP_LIT
+        )
+    };
+
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_WIRE {
+                    continue;
+                }
+
+                let world_x = origin_x + x as i32;
+                let world_y = y as i32;
+                let world_z = origin_z + z as i32;
+
+                let connect_west =
+                    voxel_at_world(world_x - 1, world_y, world_z).is_some_and(connects_to);
+                let connect_east =
+                    voxel_at_world(world_x + 1, world_y, world_z).is_some_and(connects_to);
+                let connect_north =
+                    voxel_at_world(world_x, world_y, world_z - 1).is_some_and(connects_to);
+                let connect_south =
+                    voxel_at_world(world_x, world_y, world_z + 1).is_some_and(connects_to);
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let min_y = base_y;
+                let max_y = base_y + thickness;
+
+                let center_min_x = base_x + 0.5 - half_width;
+                let center_max_x = base_x + 0.5 + half_width;
+                let center_min_z = base_z + 0.5 - half_width;
+                let center_max_z = base_z + 0.5 + half_width;
+
+                let any_x = connect_west || connect_east;
+                let any_z = connect_north || connect_south;
+
+                if any_x {
+                    let min_x = if connect_west { base_x } else { center_min_x };
+                    let max_x = if connect_east {
+                        base_x + 1.0
+                    } else {
+                        center_max_x
+                    };
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [min_x, min_y, center_min_z],
+                        [max_x, max_y, center_max_z],
+                        light,
+                    );
+                }
+
+                if any_z {
+                    let min_z = if connect_north { base_z } else { center_min_z };
+                    let max_z = if connect_south {
+                        base_z + 1.0
+                    } else {
+                        center_max_z
+                    };
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [center_min_x, min_y, min_z],
+                        [center_max_x, max_y, max_z],
+                        light,
+                    );
+                }
+
+                if !any_x && !any_z {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [center_min_x, min_y, center_min_z],
+                        [center_max_x, max_y, center_max_z],
+                        light,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mesh_pressure_plates(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let pad = 1.0 / 16.0;
+    let unpressed_height = 1.0 / 16.0;
+    let pressed_height = 1.0 / 32.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !matches!(
+                    voxel.id,
+                    mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                        | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                ) {
+                    continue;
+                }
+
+                let pressed = mdminecraft_world::is_active(voxel.state);
+                let height = if pressed {
+                    pressed_height
+                } else {
+                    unpressed_height
+                };
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + pad, base_y, base_z + pad],
+                    [base_x + 1.0 - pad, base_y + height, base_z + 1.0 - pad],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_buttons(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let half = 3.0 / 16.0;
+    let unpressed_depth = 2.0 / 16.0;
+    let pressed_depth = 1.0 / 16.0;
+    let min_y = 6.0 / 16.0;
+    let max_y = 10.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !matches!(
+                    voxel.id,
+                    mdminecraft_world::redstone_blocks::STONE_BUTTON
+                        | mdminecraft_world::redstone_blocks::OAK_BUTTON
+                ) {
+                    continue;
+                }
+
+                // No orientation stored yet; render on the north face by default.
+                let pressed = mdminecraft_world::is_active(voxel.state);
+                let depth = if pressed {
+                    pressed_depth
+                } else {
+                    unpressed_depth
+                };
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + 0.5 - half, base_y + min_y, base_z],
+                    [base_x + 0.5 + half, base_y + max_y, base_z + depth],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_levers(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let base_half = 3.0 / 16.0;
+    let base_height = 1.0 / 16.0;
+    let handle_half = 1.0 / 16.0;
+    let handle_height = 10.0 / 16.0;
+    let handle_shift = 2.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::redstone_blocks::LEVER {
+                    continue;
+                }
+
+                let active = mdminecraft_world::is_active(voxel.state);
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                // Base plate.
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + 0.5 - base_half, base_y, base_z + 0.5 - base_half],
+                    [
+                        base_x + 0.5 + base_half,
+                        base_y + base_height,
+                        base_z + 0.5 + base_half,
+                    ],
+                    light,
+                );
+
+                // Handle (simplified: offset to indicate active state).
+                let shift = if active { handle_shift } else { -handle_shift };
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [
+                        base_x + 0.5 - handle_half + shift,
+                        base_y + base_height,
+                        base_z + 0.5 - handle_half,
+                    ],
+                    [
+                        base_x + 0.5 + handle_half + shift,
+                        base_y + base_height + handle_height,
+                        base_z + 0.5 + handle_half,
+                    ],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_cave_decorations(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let cross_inset = 0.1;
+    let dripstone_half_width = 2.0 / 16.0;
+    let carpet_height = 1.0 / 16.0;
+
+    let inv_sqrt2 = 0.70710677_f32;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+
+                let light = voxel.light_sky.max(voxel.light_block);
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                match voxel.id {
+                    mdminecraft_world::BLOCK_MOSS_CARPET => {
+                        emit_box(
+                            builder,
+                            voxel.id,
+                            [base_x, base_y, base_z],
+                            [base_x + 1.0, base_y + carpet_height, base_z + 1.0],
+                            light,
+                        );
+                    }
+                    mdminecraft_world::BLOCK_POINTED_DRIPSTONE => {
+                        emit_box(
+                            builder,
+                            voxel.id,
+                            [
+                                base_x + 0.5 - dripstone_half_width,
+                                base_y,
+                                base_z + 0.5 - dripstone_half_width,
+                            ],
+                            [
+                                base_x + 0.5 + dripstone_half_width,
+                                base_y + 1.0,
+                                base_z + 0.5 + dripstone_half_width,
+                            ],
+                            light,
+                        );
+                    }
+                    mdminecraft_world::BLOCK_GLOW_LICHEN
+                    | mdminecraft_world::BLOCK_CAVE_VINES
+                    | mdminecraft_world::BLOCK_SPORE_BLOSSOM
+                    | mdminecraft_world::BLOCK_HANGING_ROOTS
+                    | mdminecraft_world::BLOCK_SCULK_VEIN => {
+                        let x0 = base_x + cross_inset;
+                        let x1 = base_x + 1.0 - cross_inset;
+                        let y0 = base_y;
+                        let y1 = base_y + 1.0;
+                        let z0 = base_z + cross_inset;
+                        let z1 = base_z + 1.0 - cross_inset;
+
+                        let planes = [
+                            (
+                                [[x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0]],
+                                [inv_sqrt2, 0.0, -inv_sqrt2],
+                            ),
+                            (
+                                [[x0, y0, z1], [x1, y0, z0], [x1, y1, z0], [x0, y1, z1]],
+                                [inv_sqrt2, 0.0, inv_sqrt2],
+                            ),
+                        ];
+
+                        for (corners, normal) in planes {
+                            builder.push_quad(
+                                voxel.id,
+                                BlockFace::North,
+                                normal,
+                                corners,
+                                true,
+                                light,
+                            );
+                            builder.push_quad(
+                                voxel.id,
+                                BlockFace::North,
+                                [-normal[0], -normal[1], -normal[2]],
+                                corners,
+                                false,
+                                light,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn mesh_beds(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let height = 0.5625;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_bed(voxel.id) {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x, base_y, base_z],
+                    [base_x + 1.0, base_y + height, base_z + 1.0],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_chests(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let height = 0.875;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_chest(voxel.id) {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x, base_y, base_z],
+                    [base_x + 1.0, base_y + height, base_z + 1.0],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_enchanting_tables(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let height = 12.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::BLOCK_ENCHANTING_TABLE {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x, base_y, base_z],
+                    [base_x + 1.0, base_y + height, base_z + 1.0],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_brewing_stands(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let height = 14.0 / 16.0;
+    let pad = 4.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::BLOCK_BREWING_STAND {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + pad, base_y, base_z + pad],
+                    [base_x + 1.0 - pad, base_y + height, base_z + 1.0 - pad],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_farmland(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let height = 15.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !mdminecraft_world::is_farmland(voxel.id) {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x, base_y, base_z],
+                    [base_x + 1.0, base_y + height, base_z + 1.0],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+const FACE_UP: u8 = 1 << 0;
+const FACE_DOWN: u8 = 1 << 1;
+const FACE_NORTH: u8 = 1 << 2;
+const FACE_SOUTH: u8 = 1 << 3;
+const FACE_EAST: u8 = 1 << 4;
+const FACE_WEST: u8 = 1 << 5;
+const FACES_ALL: u8 = FACE_UP | FACE_DOWN | FACE_NORTH | FACE_SOUTH | FACE_EAST | FACE_WEST;
+
+fn emit_box(builder: &mut MeshBuilder, block_id: BlockId, min: [f32; 3], max: [f32; 3], light: u8) {
+    emit_box_masked(builder, block_id, min, max, light, FACES_ALL);
+}
+
+fn emit_box_masked(
+    builder: &mut MeshBuilder,
+    block_id: BlockId,
+    min: [f32; 3],
+    max: [f32; 3],
+    light: u8,
+    faces: u8,
+) {
+    let (x0, y0, z0) = (min[0], min[1], min[2]);
+    let (x1, y1, z1) = (max[0], max[1], max[2]);
+
+    if (faces & FACE_WEST) != 0 {
+        builder.push_quad(
+            block_id,
+            BlockFace::West,
+            [-1.0, 0.0, 0.0],
+            [[x0, y0, z0], [x0, y1, z0], [x0, y1, z1], [x0, y0, z1]],
+            false,
+            light,
+        );
+    }
+    if (faces & FACE_EAST) != 0 {
+        builder.push_quad(
+            block_id,
+            BlockFace::East,
+            [1.0, 0.0, 0.0],
+            [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
+            true,
+            light,
+        );
+    }
+    if (faces & FACE_NORTH) != 0 {
+        builder.push_quad(
+            block_id,
+            BlockFace::North,
+            [0.0, 0.0, -1.0],
+            [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0]],
+            false,
+            light,
+        );
+    }
+    if (faces & FACE_SOUTH) != 0 {
+        builder.push_quad(
+            block_id,
+            BlockFace::South,
+            [0.0, 0.0, 1.0],
+            [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+            true,
+            light,
+        );
+    }
+    if (faces & FACE_DOWN) != 0 {
+        builder.push_quad(
+            block_id,
+            BlockFace::Down,
+            [0.0, -1.0, 0.0],
+            [[x0, y0, z0], [x0, y0, z1], [x1, y0, z1], [x1, y0, z0]],
+            false,
+            light,
+        );
+    }
+    if (faces & FACE_UP) != 0 {
+        builder.push_quad(
+            block_id,
+            BlockFace::Up,
+            [0.0, 1.0, 0.0],
+            [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+            true,
+            light,
+        );
+    }
+}
+
 fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
 
 fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
+    if mdminecraft_world::is_stairs(voxel.id)
+        || mdminecraft_world::is_slab(voxel.id)
+        || mdminecraft_world::is_farmland(voxel.id)
+        || matches!(
+            voxel.id,
+            mdminecraft_world::BLOCK_ENCHANTING_TABLE | mdminecraft_world::BLOCK_BREWING_STAND
+        )
+    {
+        return false;
+    }
     registry
         .descriptor(voxel.id)
         .map(|d| d.opaque)
@@ -397,12 +1704,41 @@ fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
 /// Check if a voxel is a solid (non-air) block that should be rendered
 fn is_solid(voxel: Voxel) -> bool {
     voxel.id != BLOCK_AIR
+        && !mdminecraft_world::is_stairs(voxel.id)
+        && !mdminecraft_world::is_slab(voxel.id)
+        && !mdminecraft_world::is_trapdoor(voxel.id)
+        && !mdminecraft_world::is_door(voxel.id)
+        && !mdminecraft_world::is_ladder(voxel.id)
+        && !mdminecraft_world::CropType::is_crop(voxel.id)
+        && !mdminecraft_world::is_bed(voxel.id)
+        && !mdminecraft_world::is_chest(voxel.id)
+        && !mdminecraft_world::is_farmland(voxel.id)
+        && voxel.id != mdminecraft_world::BLOCK_ENCHANTING_TABLE
+        && voxel.id != mdminecraft_world::BLOCK_BREWING_STAND
+        && voxel.id != mdminecraft_world::BLOCK_GLOW_LICHEN
+        && voxel.id != mdminecraft_world::BLOCK_POINTED_DRIPSTONE
+        && voxel.id != mdminecraft_world::BLOCK_CAVE_VINES
+        && voxel.id != mdminecraft_world::BLOCK_MOSS_CARPET
+        && voxel.id != mdminecraft_world::BLOCK_SPORE_BLOSSOM
+        && voxel.id != mdminecraft_world::BLOCK_HANGING_ROOTS
+        && voxel.id != mdminecraft_world::BLOCK_SCULK_VEIN
+        && voxel.id != mdminecraft_world::redstone_blocks::LEVER
+        && voxel.id != mdminecraft_world::redstone_blocks::STONE_BUTTON
+        && voxel.id != mdminecraft_world::redstone_blocks::OAK_BUTTON
+        && voxel.id != mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+        && voxel.id != mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+        && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+        && voxel.id != interactive_blocks::TORCH
+        && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_TORCH
+        && voxel.id != interactive_blocks::GLASS_PANE
+        && voxel.id != interactive_blocks::OAK_FENCE
+        && voxel.id != interactive_blocks::OAK_FENCE_GATE
 }
 
 #[cfg(test)]
 mod tests {
     use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
-    use mdminecraft_world::{Chunk, ChunkPos, Voxel};
+    use mdminecraft_world::{interactive_blocks, Chunk, ChunkPos, Voxel};
 
     use super::*;
 
@@ -515,5 +1851,285 @@ mod tests {
             "Greedy meshing should reduce face count for adjacent blocks, got {} indices",
             mesh.indices.len()
         );
+    }
+
+    #[test]
+    fn glass_pane_connects_across_chunk_seam_with_sampler() {
+        let pane_id = interactive_blocks::GLASS_PANE as usize;
+        let mut descriptors = Vec::with_capacity(pane_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for _ in 1..pane_id {
+            descriptors.push(BlockDescriptor::simple("solid", true));
+        }
+        descriptors.push(BlockDescriptor::simple("glass_pane", false));
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        chunk_a.set_voxel(
+            15,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::GLASS_PANE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk_b.set_voxel(
+            0,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::GLASS_PANE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |_wx, _wy, _wz| None);
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wx == 16 && wy == 1 && wz == 1 {
+                Some(chunk_b.voxel(0, 1, 1))
+            } else {
+                None
+            }
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            36,
+            "Disconnected pane should render only the center post"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            72,
+            "Connected pane should render an extra arm (one more box)"
+        );
+    }
+
+    #[test]
+    fn oak_fence_connects_across_chunk_seam_with_sampler() {
+        let fence_id = interactive_blocks::OAK_FENCE as usize;
+        let mut descriptors = Vec::with_capacity(fence_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for _ in 1..fence_id {
+            descriptors.push(BlockDescriptor::simple("solid", true));
+        }
+        descriptors.push(BlockDescriptor::simple("oak_fence", false));
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        let fence_voxel = Voxel {
+            id: interactive_blocks::OAK_FENCE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+
+        chunk_a.set_voxel(15, 1, 1, fence_voxel);
+        chunk_b.set_voxel(0, 1, 1, fence_voxel);
+
+        let origin_a_x = chunk_a.position().x * CHUNK_SIZE_X as i32;
+        let origin_a_z = chunk_a.position().z * CHUNK_SIZE_Z as i32;
+        let origin_b_x = chunk_b.position().x * CHUNK_SIZE_X as i32;
+        let origin_b_z = chunk_b.position().z * CHUNK_SIZE_Z as i32;
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                    return None;
+                }
+
+                let ax = wx - origin_a_x;
+                let az = wz - origin_a_z;
+                if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
+                {
+                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                }
+
+                None
+            });
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+
+            let ax = wx - origin_a_x;
+            let az = wz - origin_a_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
+                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+            }
+
+            let bx = wx - origin_b_x;
+            let bz = wz - origin_b_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
+                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+            }
+
+            None
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            36,
+            "Disconnected fence should render only the center post"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            108,
+            "Connected fence should render a post plus two rail boxes"
+        );
+    }
+
+    #[test]
+    fn redstone_wire_connects_across_chunk_seam_with_sampler() {
+        let wire_id = mdminecraft_world::redstone_blocks::REDSTONE_WIRE as usize;
+        let mut descriptors = Vec::with_capacity(wire_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for _ in 1..wire_id {
+            descriptors.push(BlockDescriptor::simple("solid", true));
+        }
+        descriptors.push(BlockDescriptor::simple("redstone_wire", false));
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        let wire_voxel = Voxel {
+            id: mdminecraft_world::redstone_blocks::REDSTONE_WIRE,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+
+        // Wire at x=15 has an internal +Z neighbor; the seam +X neighbor is only visible to the sampler.
+        chunk_a.set_voxel(15, 1, 1, wire_voxel);
+        chunk_a.set_voxel(15, 1, 2, wire_voxel);
+        chunk_b.set_voxel(0, 1, 1, wire_voxel);
+
+        let origin_a_x = chunk_a.position().x * CHUNK_SIZE_X as i32;
+        let origin_a_z = chunk_a.position().z * CHUNK_SIZE_Z as i32;
+        let origin_b_x = chunk_b.position().x * CHUNK_SIZE_X as i32;
+        let origin_b_z = chunk_b.position().z * CHUNK_SIZE_Z as i32;
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                    return None;
+                }
+
+                let ax = wx - origin_a_x;
+                let az = wz - origin_a_z;
+                if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
+                {
+                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                }
+
+                None
+            });
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+
+            let ax = wx - origin_a_x;
+            let az = wz - origin_a_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
+                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+            }
+
+            let bx = wx - origin_b_x;
+            let bz = wz - origin_b_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
+                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+            }
+
+            None
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            72,
+            "Disconnected wires should render two segments (one per voxel)"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            108,
+            "Connected seam adds an extra segment on the edge wire"
+        );
+    }
+
+    #[test]
+    fn enchanting_table_renders_as_partial_height() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry();
+
+        chunk.set_voxel(
+            1,
+            0,
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_ENCHANTING_TABLE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(
+            !mesh.vertices.is_empty(),
+            "Enchanting table should generate vertices"
+        );
+
+        let max_y = mesh
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert_eq!(max_y, 12.0 / 16.0);
+    }
+
+    #[test]
+    fn brewing_stand_renders_as_partial_height() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry();
+
+        chunk.set_voxel(
+            1,
+            0,
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_BREWING_STAND,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(
+            !mesh.vertices.is_empty(),
+            "Brewing stand should generate vertices"
+        );
+
+        let max_y = mesh
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert_eq!(max_y, 14.0 / 16.0);
     }
 }

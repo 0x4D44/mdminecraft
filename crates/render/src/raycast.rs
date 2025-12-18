@@ -11,6 +11,8 @@ pub struct RaycastHit {
     pub face_normal: IVec3,
     /// The distance from the ray origin to the hit point.
     pub distance: f32,
+    /// World-space position of the hit point.
+    pub hit_pos: Vec3,
 }
 
 /// Performs a DDA raycast through the voxel world.
@@ -104,10 +106,13 @@ where
     for _ in 0..max_steps {
         // Check if current voxel is solid
         if is_solid(voxel) {
+            let distance = t_max.min_element() - delta.min_element();
+            let hit_pos = origin + direction * distance;
             return Some(RaycastHit {
                 block_pos: voxel,
                 face_normal,
-                distance: t_max.min_element() - delta.min_element(),
+                distance,
+                hit_pos,
             });
         }
 

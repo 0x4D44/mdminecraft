@@ -16,6 +16,16 @@ pub struct ControlsConfig {
     pub fov_degrees: f32,
     /// Chunk radius used for loading/unloading the world around the player.
     pub render_distance: i32,
+    /// Master volume (0.0 to 1.0).
+    pub master_volume: f32,
+    /// Music volume (0.0 to 1.0).
+    pub music_volume: f32,
+    /// Sound effects volume (0.0 to 1.0).
+    pub sfx_volume: f32,
+    /// Ambient sounds volume (0.0 to 1.0).
+    pub ambient_volume: f32,
+    /// Whether audio is muted.
+    pub audio_muted: bool,
     pub bindings: BindingOverrides,
 }
 
@@ -36,6 +46,11 @@ impl Default for ControlsConfig {
             invert_y: false,
             fov_degrees: 70.0,
             render_distance: 8,
+            master_volume: 1.0,
+            music_volume: 0.5,
+            sfx_volume: 1.0,
+            ambient_volume: 0.7,
+            audio_muted: false,
             bindings: BindingOverrides::default(),
         }
     }

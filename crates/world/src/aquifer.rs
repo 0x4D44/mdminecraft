@@ -1,7 +1,8 @@
 // Aquifer system for Minecraft 1.18+ style water and lava lakes
 // Creates underground water bodies above y=30 and lava lakes below y=10
 
-use crate::chunk::Chunk;
+use crate::chunk::{Chunk, BLOCK_AIR, BLOCK_MAGMA_BLOCK, BLOCK_WATER};
+use crate::fluid::BLOCK_LAVA;
 use crate::noise::{NoiseConfig, NoiseGenerator};
 
 /// Aquifer generator creates underground water and lava lakes
@@ -53,7 +54,7 @@ impl AquiferGenerator {
                     let voxel = chunk.voxel(local_x, y, local_z);
 
                     // Only fill air pockets
-                    if voxel.id != 0 {
+                    if voxel.id != BLOCK_AIR {
                         continue;
                     }
 
@@ -62,15 +63,15 @@ impl AquiferGenerator {
                         if y <= self.lava_level as usize {
                             // Lava lakes at deep levels - lava can exist anywhere deep
                             let mut new_voxel = voxel;
-                            new_voxel.id = 106; // lava block ID
+                            new_voxel.id = BLOCK_LAVA;
                             chunk.set_voxel(local_x, y, local_z, new_voxel);
 
                             // Place magma blocks under lava
                             if y > 1 {
                                 let below_voxel = chunk.voxel(local_x, y - 1, local_z);
-                                if below_voxel.id == 0 || below_voxel.id == 106 {
+                                if below_voxel.id == BLOCK_AIR || below_voxel.id == BLOCK_LAVA {
                                     let mut magma_voxel = below_voxel;
-                                    magma_voxel.id = 105; // magma_block ID
+                                    magma_voxel.id = BLOCK_MAGMA_BLOCK;
                                     chunk.set_voxel(local_x, y - 1, local_z, magma_voxel);
                                 }
                             }
@@ -81,11 +82,11 @@ impl AquiferGenerator {
 
                             // Water needs support: solid block below OR water below
                             // Air (0) and other non-solid blocks don't provide support
-                            let is_supported = below_id != 0; // Any non-air block provides support
+                            let is_supported = below_id != BLOCK_AIR; // Any non-air block provides support
 
                             if is_supported {
                                 let mut new_voxel = voxel;
-                                new_voxel.id = 6; // water block ID
+                                new_voxel.id = BLOCK_WATER;
                                 chunk.set_voxel(local_x, y, local_z, new_voxel);
                             }
                         }
@@ -114,7 +115,7 @@ impl AquiferGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::ChunkPos;
+    use crate::chunk::{ChunkPos, BLOCK_STONE};
 
     #[test]
     fn test_aquifer_generator_creation() {
@@ -132,7 +133,7 @@ mod tests {
             for z in 0..16 {
                 for y in 1..50 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 0; // Air
+                    voxel.id = BLOCK_AIR;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -148,9 +149,9 @@ mod tests {
             for z in 0..16 {
                 for y in 1..50 {
                     let block_id = chunk.voxel(x, y, z).id;
-                    if block_id == 6 {
+                    if block_id == BLOCK_WATER {
                         water_count += 1;
-                    } else if block_id == 106 {
+                    } else if block_id == BLOCK_LAVA {
                         lava_count += 1;
                     }
                 }
@@ -173,23 +174,23 @@ mod tests {
             for z in 0..16 {
                 // Solid ground below
                 let mut ground_voxel = chunk.voxel(x, 39, z);
-                ground_voxel.id = 1; // stone
+                ground_voxel.id = BLOCK_STONE;
                 chunk.set_voxel(x, 39, z, ground_voxel);
                 // Air above
                 let mut air_voxel = chunk.voxel(x, 40, z);
-                air_voxel.id = 0;
+                air_voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 40, z, air_voxel);
             }
         }
 
         gen.fill_aquifers(&mut chunk, 0, 0);
 
-        // If any fluid is placed at y=40, it should be water (6), not lava (106)
+        // If any fluid is placed at y=40, it should be water, not lava.
         for x in 0..16 {
             for z in 0..16 {
                 let block_id = chunk.voxel(x, 40, z).id;
-                if block_id != 0 {
-                    assert_eq!(block_id, 6, "Fluid at y=40 should be water");
+                if block_id != BLOCK_AIR {
+                    assert_eq!(block_id, BLOCK_WATER, "Fluid at y=40 should be water");
                 }
             }
         }
@@ -204,19 +205,19 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 let mut voxel = chunk.voxel(x, 5, z);
-                voxel.id = 0;
+                voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 5, z, voxel);
             }
         }
 
         gen.fill_aquifers(&mut chunk, 0, 0);
 
-        // If any fluid is placed at y=5, it should be lava (106), not water (6)
+        // If any fluid is placed at y=5, it should be lava, not water.
         for x in 0..16 {
             for z in 0..16 {
                 let block_id = chunk.voxel(x, 5, z).id;
-                if block_id != 0 && block_id != 105 {
-                    assert_eq!(block_id, 106, "Fluid at y=5 should be lava");
+                if block_id != BLOCK_AIR && block_id != BLOCK_MAGMA_BLOCK {
+                    assert_eq!(block_id, BLOCK_LAVA, "Fluid at y=5 should be lava");
                 }
             }
         }
@@ -232,7 +233,7 @@ mod tests {
             for z in 0..16 {
                 for y in 2..10 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 0; // Air
+                    voxel.id = BLOCK_AIR;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -240,16 +241,16 @@ mod tests {
 
         gen.fill_aquifers(&mut chunk, 0, 0);
 
-        // Check for magma blocks (ID 105) placed under lava
+        // Check for magma blocks placed under lava
         let mut magma_count = 0;
         let mut lava_count = 0;
         for x in 0..16 {
             for z in 0..16 {
                 for y in 2..10 {
                     let block_id = chunk.voxel(x, y, z).id;
-                    if block_id == 105 {
+                    if block_id == BLOCK_MAGMA_BLOCK {
                         magma_count += 1;
-                    } else if block_id == 106 {
+                    } else if block_id == BLOCK_LAVA {
                         lava_count += 1;
                     }
                 }
@@ -274,11 +275,11 @@ mod tests {
             for z in 0..16 {
                 for y in 1..50 {
                     let mut voxel1 = chunk1.voxel(x, y, z);
-                    voxel1.id = 0;
+                    voxel1.id = BLOCK_AIR;
                     chunk1.set_voxel(x, y, z, voxel1);
 
                     let mut voxel2 = chunk2.voxel(x, y, z);
-                    voxel2.id = 0;
+                    voxel2.id = BLOCK_AIR;
                     chunk2.set_voxel(x, y, z, voxel2);
                 }
             }
@@ -317,11 +318,11 @@ mod tests {
             for z in 0..16 {
                 for y in 1..50 {
                     let mut voxel1 = chunk1.voxel(x, y, z);
-                    voxel1.id = 0;
+                    voxel1.id = BLOCK_AIR;
                     chunk1.set_voxel(x, y, z, voxel1);
 
                     let mut voxel2 = chunk2.voxel(x, y, z);
-                    voxel2.id = 0;
+                    voxel2.id = BLOCK_AIR;
                     chunk2.set_voxel(x, y, z, voxel2);
                 }
             }
