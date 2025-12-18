@@ -2877,6 +2877,7 @@ impl GameWorld {
             furnaces: self.furnaces.clone(),
             enchanting_tables: self.enchanting_tables.clone(),
             brewing_stands: self.brewing_stands.clone(),
+            chests: self.chests.clone(),
         }
     }
 
@@ -3080,7 +3081,15 @@ impl GameWorld {
                 tracing::info!(state = ?self.weather.state, "Weather toggled");
             }
             PhysicalKey::Code(KeyCode::KeyE) => {
-                if self.crafting_open {
+                if self.chest_open {
+                    self.close_chest();
+                } else if self.brewing_open {
+                    self.close_brewing_stand();
+                } else if self.enchanting_open {
+                    self.close_enchanting_table();
+                } else if self.furnace_open {
+                    self.close_furnace();
+                } else if self.crafting_open {
                     self.close_crafting();
                 } else {
                     self.toggle_inventory();
@@ -4330,6 +4339,10 @@ impl GameWorld {
                 self.open_brewing_stand(hit.block_pos);
                 true
             }
+            Some(interactive_blocks::CHEST) => {
+                self.open_chest(hit.block_pos);
+                true
+            }
             Some(interactive_blocks::BED_HEAD) | Some(interactive_blocks::BED_FOOT) => {
                 self.try_sleep_in_bed(hit.block_pos);
                 true
@@ -4529,6 +4542,8 @@ impl GameWorld {
                 }
 
                 if mined {
+                    self.on_block_entity_removed(hit.block_pos, block_id);
+
                     let mut changed_positions = vec![hit.block_pos];
                     if let Some(extra) = removed_extra {
                         changed_positions.push(extra);
@@ -4552,6 +4567,8 @@ impl GameWorld {
                     let mut affected_chunks = std::collections::BTreeSet::new();
                     affected_chunks.insert(chunk_pos);
                     for (pos, removed_block_id) in &removed_support {
+                        self.on_block_entity_removed(*pos, *removed_block_id);
+
                         affected_chunks.insert(ChunkPos::new(
                             pos.x.div_euclid(CHUNK_SIZE_X as i32),
                             pos.z.div_euclid(CHUNK_SIZE_Z as i32),
@@ -5309,6 +5326,7 @@ impl GameWorld {
         let mut close_furnace_requested = false;
         let mut close_enchanting_requested = false;
         let mut close_brewing_requested = false;
+        let mut close_chest_requested = false;
         let mut enchanting_result: Option<EnchantingResult> = None;
         let mut spill_items: Vec<ItemStack> = Vec::new();
         let mut pause_action = PauseMenuAction::None;
@@ -5463,6 +5481,7 @@ impl GameWorld {
             let crafting_open = self.crafting_open;
             let furnace_open = self.furnace_open;
             let enchanting_open = self.enchanting_open;
+            let chest_open = self.chest_open;
             let mut respawn_clicked = false;
             let mut menu_clicked = false;
 
@@ -5572,6 +5591,22 @@ impl GameWorld {
                             }
                         }
 
+                        // Show chest if open
+                        if chest_open {
+                            if let Some(pos) = self.open_chest_pos {
+                                if let Some(chest) = self.chests.get_mut(&pos) {
+                                    close_chest_requested = render_chest(
+                                        ctx,
+                                        chest,
+                                        &mut self.hotbar,
+                                        &mut self.main_inventory,
+                                        &mut self.ui_cursor_stack,
+                                        &mut self.ui_drag_state,
+                                    );
+                                }
+                            }
+                        }
+
                         // Show pause menu if open (singleplayer pause).
                         if self.pause_menu_open && !is_dead {
                             pause_action = render_pause_menu(
@@ -5640,6 +5675,11 @@ impl GameWorld {
         // Handle brewing stand close
         if close_brewing_requested {
             self.close_brewing_stand();
+        }
+
+        // Handle chest close
+        if close_chest_requested {
+            self.close_chest();
         }
 
         match pause_action {
@@ -6372,7 +6412,7 @@ impl GameWorld {
     fn destroy_blocks_in_radius(&mut self, cx: f64, cy: f64, cz: f64, radius: f32) {
         let radius_i = radius.ceil() as i32;
         let mut affected_chunks = std::collections::BTreeSet::new();
-        let mut removed_positions: Vec<IVec3> = Vec::new();
+        let mut removed_blocks: Vec<(IVec3, BlockId)> = Vec::new();
 
         // Iterate over all blocks in the explosion radius
         for dx in -radius_i..=radius_i {
@@ -6404,16 +6444,19 @@ impl GameWorld {
                         let voxel = chunk.voxel(local_x, local_y, local_z);
                         // Don't destroy bedrock (block 10) or air
                         if voxel.id != BLOCK_AIR && voxel.id != 10 {
+                            let removed_id = voxel.id;
                             chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
                             affected_chunks.insert(chunk_pos);
-                            removed_positions.push(IVec3::new(block_x, block_y, block_z));
+                            removed_blocks
+                                .push((IVec3::new(block_x, block_y, block_z), removed_id));
                         }
                     }
                 }
             }
         }
 
-        for pos in &removed_positions {
+        for (pos, removed_id) in &removed_blocks {
+            self.on_block_entity_removed(*pos, *removed_id);
             self.fluid_sim
                 .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
             self.schedule_redstone_updates_around(*pos);
@@ -6422,9 +6465,10 @@ impl GameWorld {
         let removed_support = Self::remove_unsupported_blocks(
             &mut self.chunks,
             &self.block_properties,
-            removed_positions.iter().copied(),
+            removed_blocks.iter().map(|(pos, _)| *pos),
         );
-        for (pos, _removed_block_id) in removed_support {
+        for (pos, removed_block_id) in removed_support {
+            self.on_block_entity_removed(pos, removed_block_id);
             affected_chunks.insert(ChunkPos::new(
                 pos.x.div_euclid(CHUNK_SIZE_X as i32),
                 pos.z.div_euclid(CHUNK_SIZE_Z as i32),
@@ -6903,6 +6947,161 @@ impl GameWorld {
         tracing::info!("Brewing stand closed");
     }
 
+    /// Open chest UI at the given position
+    fn open_chest(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
+        self.chest_open = true;
+        self.open_chest_pos = Some(key);
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        self.enchanting_open = false;
+        self.brewing_open = false;
+        self.ui_drag_state.reset();
+        // Create chest state if it doesn't exist
+        self.chests.entry(key).or_default();
+        // Release cursor for UI interaction
+        let _ = self.input.enter_ui_overlay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryOpen);
+        tracing::info!("Chest opened at {:?}", block_pos);
+    }
+
+    /// Close chest UI
+    fn close_chest(&mut self) {
+        self.chest_open = false;
+        self.open_chest_pos = None;
+        self.ui_drag_state.reset();
+        if let Some(stack) = self.ui_cursor_stack.take() {
+            self.return_stack_to_storage_or_spill(stack);
+        }
+        // Capture cursor for gameplay
+        let _ = self.input.enter_gameplay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryClose);
+        tracing::info!("Chest closed");
+    }
+
+    fn on_block_entity_removed(&mut self, block_pos: IVec3, removed_block_id: BlockId) {
+        let key = Self::overworld_block_entity_key(block_pos);
+
+        let drop_pos = (
+            block_pos.x as f64 + 0.5,
+            block_pos.y as f64 + 0.5,
+            block_pos.z as f64 + 0.5,
+        );
+
+        match removed_block_id {
+            interactive_blocks::CHEST => {
+                if self.chest_open && self.open_chest_pos == Some(key) {
+                    self.close_chest();
+                }
+
+                let Some(chest) = self.chests.remove(&key) else {
+                    return;
+                };
+
+                for (slot_idx, stack) in chest.slots.into_iter().enumerate() {
+                    let Some(stack) = stack else {
+                        continue;
+                    };
+
+                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
+                    else {
+                        tracing::warn!(
+                            slot = slot_idx,
+                            item = ?stack.item_type,
+                            "Chest contained an undroppable item type"
+                        );
+                        continue;
+                    };
+
+                    self.item_manager.spawn_item(
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        drop_type,
+                        stack.count,
+                    );
+                }
+            }
+            BLOCK_FURNACE | BLOCK_FURNACE_LIT => {
+                if self.furnace_open && self.open_furnace_pos == Some(key) {
+                    self.close_furnace();
+                }
+
+                let Some(furnace) = self.furnaces.remove(&key) else {
+                    return;
+                };
+
+                for (drop_type, count) in [furnace.input, furnace.fuel, furnace.output]
+                    .into_iter()
+                    .flatten()
+                {
+                    self.item_manager
+                        .spawn_item(drop_pos.0, drop_pos.1, drop_pos.2, drop_type, count);
+                }
+            }
+            BLOCK_BREWING_STAND => {
+                if self.brewing_open && self.open_brewing_pos == Some(key) {
+                    self.close_brewing_stand();
+                }
+
+                let Some(stand) = self.brewing_stands.remove(&key) else {
+                    return;
+                };
+
+                if stand.fuel > 0 {
+                    self.item_manager.spawn_item(
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        DroppedItemType::BlazePowder,
+                        stand.fuel,
+                    );
+                }
+
+                if let Some((ingredient_id, count)) = stand.ingredient {
+                    if let Some(core_item) = brew_ingredient_id_to_core_item_type(ingredient_id) {
+                        if let Some(drop_type) = Self::convert_core_item_type_to_dropped(core_item)
+                        {
+                            self.item_manager
+                                .spawn_item(drop_pos.0, drop_pos.1, drop_pos.2, drop_type, count);
+                        }
+                    }
+                }
+
+                for bottle in stand.bottles.into_iter().flatten() {
+                    let core_stack = bottle_to_core_item_stack(bottle);
+                    if let Some(drop_type) =
+                        Self::convert_core_item_type_to_dropped(core_stack.item_type)
+                    {
+                        self.item_manager
+                            .spawn_item(drop_pos.0, drop_pos.1, drop_pos.2, drop_type, 1);
+                    }
+                }
+            }
+            BLOCK_ENCHANTING_TABLE => {
+                if self.enchanting_open && self.open_enchanting_pos == Some(key) {
+                    self.close_enchanting_table();
+                }
+
+                let Some(table) = self.enchanting_tables.remove(&key) else {
+                    return;
+                };
+
+                if table.lapis_count > 0 {
+                    self.item_manager.spawn_item(
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        DroppedItemType::LapisLazuli,
+                        table.lapis_count,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn open_pause_menu(&mut self) {
         self.pause_menu_open = true;
         self.pause_menu_view = PauseMenuView::Main;
@@ -6924,6 +7123,10 @@ impl GameWorld {
             return;
         }
 
+        if self.chest_open {
+            self.close_chest();
+            return;
+        }
         if self.brewing_open {
             self.close_brewing_stand();
             return;
@@ -8463,7 +8666,7 @@ fn render_inventory(
                                                     personal_crafting_grid,
                                                     hotbar,
                                                     main_inventory,
-                                                    &recipe.inputs,
+                                                    recipe,
                                                 );
                                             }
                                         },
@@ -8531,39 +8734,31 @@ fn render_inventory(
                             if clicked {
                                 let shift = ui.input(|i| i.modifiers.shift);
                                 if shift {
-                                    let crafts = crafting_max_crafts_2x2(
-                                        personal_crafting_grid,
-                                        &recipe.inputs,
-                                    );
-                                    if crafts > 0 {
-                                        for _ in 0..crafts {
-                                            let ok = consume_crafting_inputs_2x2(
-                                                personal_crafting_grid,
-                                                &recipe.inputs,
-                                            );
-                                            debug_assert!(ok, "recipe matched but consume failed");
-                                            if !ok {
-                                                break;
-                                            }
+                                    let crafts =
+                                        crafting_max_crafts_2x2(personal_crafting_grid, recipe);
+                                    let mut crafted = 0_u32;
+                                    for _ in 0..crafts {
+                                        if consume_crafting_inputs_2x2(personal_crafting_grid, recipe)
+                                        {
+                                            crafted += 1;
+                                        } else {
+                                            break;
                                         }
+                                    }
 
-                                        let total = recipe.output_count.saturating_mul(crafts);
+                                    if crafted > 0 {
+                                        let total = recipe.output_count.saturating_mul(crafted);
                                         let output_stack = ItemStack::new(recipe.output, total);
-                                        if let Some(remainder) = add_stack_to_storage(
-                                            hotbar,
-                                            main_inventory,
-                                            output_stack,
-                                        ) {
+                                        if let Some(remainder) =
+                                            add_stack_to_storage(hotbar, main_inventory, output_stack)
+                                        {
                                             spill_items.push(remainder);
                                         }
                                     }
                                 } else if cursor_can_accept_full_stack(
                                     ui_cursor_stack,
                                     &result_stack,
-                                ) && consume_crafting_inputs_2x2(
-                                    personal_crafting_grid,
-                                    &recipe.inputs,
-                                ) {
+                                ) && consume_crafting_inputs_2x2(personal_crafting_grid, recipe) {
                                     cursor_add_full_stack(ui_cursor_stack, result_stack);
                                 }
                             }
@@ -8620,6 +8815,7 @@ enum UiSlotClick {
 enum UiCoreSlotId {
     Hotbar(usize),
     MainInventory(usize),
+    Chest(usize),
     PersonalCrafting(usize),
     CraftingGrid(usize),
 }
@@ -9018,6 +9214,7 @@ fn apply_primary_drag_distribution(
                         false
                     }
                 }
+                UiCoreSlotId::Chest(_) => false,
                 UiCoreSlotId::PersonalCrafting(i) => {
                     let row = i / 2;
                     let col = i % 2;
@@ -9039,6 +9236,60 @@ fn apply_primary_drag_distribution(
                         false
                     }
                 }
+            };
+
+            if moved {
+                progress = true;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+        }
+
+        if !progress {
+            break;
+        }
+    }
+}
+
+fn apply_primary_drag_distribution_with_chest(
+    cursor: &mut Option<ItemStack>,
+    visited: &[UiCoreSlotId],
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    chest: &mut ChestState,
+) {
+    if visited.is_empty() {
+        return;
+    }
+
+    while cursor.as_ref().is_some_and(|stack| stack.count > 0) {
+        let mut progress = false;
+
+        for slot_id in visited {
+            let moved = match *slot_id {
+                UiCoreSlotId::Hotbar(i) => {
+                    if i < hotbar.slots.len() {
+                        try_drag_place_one_from_cursor(&mut hotbar.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::MainInventory(i) => {
+                    if i < main_inventory.slots.len() {
+                        try_drag_place_one_from_cursor(&mut main_inventory.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Chest(i) => {
+                    if i < chest.slots.len() {
+                        try_drag_place_one_from_cursor(&mut chest.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::PersonalCrafting(_) | UiCoreSlotId::CraftingGrid(_) => false,
             };
 
             if moved {
@@ -9633,6 +9884,58 @@ fn try_shift_move_core_stack_into_enchanting_table(
     moved > 0
 }
 
+fn try_shift_move_core_stack_into_chest(stack: &mut ItemStack, chest: &mut ChestState) -> bool {
+    if stack.count == 0 {
+        return false;
+    }
+
+    let before = stack.count;
+
+    // Merge into existing stacks first.
+    for existing in chest.slots.iter_mut().flatten() {
+        if stack.count == 0 {
+            break;
+        }
+        if !stacks_match_for_merge(existing, stack) {
+            continue;
+        }
+
+        let max = existing.max_stack_size();
+        if existing.count >= max {
+            continue;
+        }
+
+        let space = max - existing.count;
+        let to_add = space.min(stack.count);
+        existing.count += to_add;
+        stack.count -= to_add;
+    }
+
+    // Then fill empty slots, splitting if needed.
+    for slot in &mut chest.slots {
+        if stack.count == 0 {
+            break;
+        }
+        if slot.is_some() {
+            continue;
+        }
+
+        let max = stack.max_stack_size();
+        if stack.count <= max {
+            *slot = Some(stack.clone());
+            stack.count = 0;
+            break;
+        }
+
+        let mut placed = stack.clone();
+        placed.count = max;
+        *slot = Some(placed);
+        stack.count -= max;
+    }
+
+    stack.count != before
+}
+
 fn render_core_slot_interactive_shift_moves_to_furnace_or_hotbar(
     ui: &mut egui::Ui,
     slot_id: UiCoreSlotId,
@@ -9915,6 +10218,104 @@ fn render_core_slot_interactive_shift_moves_to_enchanting_or_main_inventory(
     apply_slot_click(slot, cursor, click);
 }
 
+fn render_core_slot_interactive_shift_moves_to_chest(
+    ui: &mut egui::Ui,
+    slot_id: UiCoreSlotId,
+    slot: &mut Option<ItemStack>,
+    cursor: &mut Option<ItemStack>,
+    chest: &mut ChestState,
+    drag: &mut UiDragState,
+    visual: UiSlotVisual,
+) {
+    let response = render_core_slot_visual(ui, slot, visual.size, visual.is_selected);
+    if ui_drag_handle_slot(ui, &response, slot_id, slot, cursor, drag) {
+        return;
+    }
+    if drag.suppress_clicks {
+        return;
+    }
+
+    let click = if response.clicked_by(egui::PointerButton::Primary) {
+        Some(UiSlotClick::Primary)
+    } else if response.clicked_by(egui::PointerButton::Secondary) {
+        Some(UiSlotClick::Secondary)
+    } else {
+        None
+    };
+
+    let Some(click) = click else {
+        return;
+    };
+
+    let shift = ui.input(|i| i.modifiers.shift);
+    if shift {
+        let Some(mut stack) = slot.take() else {
+            return;
+        };
+
+        let moved_any = try_shift_move_core_stack_into_chest(&mut stack, chest);
+        if !moved_any || stack.count > 0 {
+            *slot = Some(stack);
+        }
+        return;
+    }
+
+    apply_slot_click(slot, cursor, click);
+}
+
+fn render_player_storage_for_chest(
+    ui: &mut egui::Ui,
+    chest: &mut ChestState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    cursor: &mut Option<ItemStack>,
+    drag: &mut UiDragState,
+) {
+    ui.label(
+        egui::RichText::new("Inventory")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    for row in 0..3 {
+        ui.horizontal(|ui| {
+            for col in 0..9 {
+                let slot_idx = row * 9 + col;
+                render_core_slot_interactive_shift_moves_to_chest(
+                    ui,
+                    UiCoreSlotId::MainInventory(slot_idx),
+                    &mut main_inventory.slots[slot_idx],
+                    cursor,
+                    &mut *chest,
+                    drag,
+                    UiSlotVisual::new(36.0, false),
+                );
+            }
+        });
+    }
+
+    ui.add_space(6.0);
+
+    ui.label(
+        egui::RichText::new("Hotbar")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    ui.horizontal(|ui| {
+        for i in 0..9 {
+            let is_selected = i == hotbar.selected;
+            render_core_slot_interactive_shift_moves_to_chest(
+                ui,
+                UiCoreSlotId::Hotbar(i),
+                &mut hotbar.slots[i],
+                cursor,
+                &mut *chest,
+                drag,
+                UiSlotVisual::new(36.0, is_selected),
+            );
+        }
+    });
+}
+
 fn render_player_storage_for_furnace(
     ui: &mut egui::Ui,
     furnace: &mut FurnaceState,
@@ -10075,10 +10476,18 @@ fn render_player_storage_for_enchanting_table(
 }
 
 #[derive(Debug, Clone)]
+struct CraftingPattern {
+    width: usize,
+    height: usize,
+    cells: [[Option<ItemType>; 3]; 3],
+}
+
+#[derive(Debug, Clone)]
 struct CraftingRecipe {
     inputs: Vec<(ItemType, u32)>,
     output: ItemType,
     output_count: u32,
+    pattern: Option<CraftingPattern>,
     min_grid_size: CraftingGridSize,
     /// If true, allow extra counts of the required item types (no extra item types).
     ///
@@ -10110,6 +10519,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_COBBLESTONE), 8)],
             output: ItemType::Block(BLOCK_FURNACE),
             output_count: 1,
+            pattern: None,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Chest: 8 planks → chest
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 8)],
+            output: ItemType::Block(interactive_blocks::CHEST),
+            output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
@@ -10118,6 +10537,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_OAK_LOG), 1)],
             output: ItemType::Block(BLOCK_OAK_PLANKS),
             output_count: 4,
+            pattern: None,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: true,
         },
@@ -10126,6 +10546,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 4)],
             output: ItemType::Block(BLOCK_CRAFTING_TABLE),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         },
@@ -10134,6 +10555,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 2)],
             output: ItemType::Item(3),
             output_count: 4,
+            pattern: None,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         }, // Item(3) = Stick
@@ -10142,6 +10564,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(8), 1), (ItemType::Item(3), 1)], // Item(8) = Coal
             output: ItemType::Block(interactive_blocks::TORCH),
             output_count: 4,
+            pattern: None,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         },
@@ -10150,6 +10573,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(3), 3), (ItemType::Item(4), 3)],
             output: ItemType::Item(1),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(4) = String
@@ -10162,6 +10586,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             ],
             output: ItemType::Item(2),
             output_count: 4,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(5) = Flint, Item(6) = Feather
@@ -10171,6 +10596,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 5)],
             output: ItemType::Item(20),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(20) = LeatherHelmet
@@ -10179,6 +10605,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 8)],
             output: ItemType::Item(21),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(21) = LeatherChestplate
@@ -10187,6 +10614,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 7)],
             output: ItemType::Item(22),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(22) = LeatherLeggings
@@ -10195,6 +10623,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 4)],
             output: ItemType::Item(23),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(23) = LeatherBoots
@@ -10204,6 +10633,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 5)],
             output: ItemType::Item(10),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(10) = IronHelmet
@@ -10212,6 +10642,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 8)],
             output: ItemType::Item(11),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(11) = IronChestplate
@@ -10220,6 +10651,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 7)],
             output: ItemType::Item(12),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(12) = IronLeggings
@@ -10228,6 +10660,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 4)],
             output: ItemType::Item(13),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(13) = IronBoots
@@ -10237,6 +10670,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 5)],
             output: ItemType::Item(30),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(30) = DiamondHelmet
@@ -10245,6 +10679,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 8)],
             output: ItemType::Item(31),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(31) = DiamondChestplate
@@ -10253,6 +10688,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 7)],
             output: ItemType::Item(32),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(32) = DiamondLeggings
@@ -10261,6 +10697,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 4)],
             output: ItemType::Item(33),
             output_count: 1,
+            pattern: None,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(33) = DiamondBoots
@@ -10271,6 +10708,18 @@ fn match_crafting_recipe(
     crafting_grid: &[[Option<ItemStack>; 3]; 3],
     grid_size: CraftingGridSize,
 ) -> Option<CraftingRecipe> {
+    let grid_dim = grid_size.dimension();
+    // Treat any items outside the active grid size as an automatic mismatch.
+    for r in 0..3 {
+        for c in 0..3 {
+            if r >= grid_dim || c >= grid_dim {
+                if crafting_grid[r][c].is_some() {
+                    return None;
+                }
+            }
+        }
+    }
+
     // Gather items from grid
     let mut grid_items: std::collections::HashMap<ItemType, u32> = std::collections::HashMap::new();
     for row in crafting_grid {
@@ -10279,9 +10728,54 @@ fn match_crafting_recipe(
         }
     }
 
+    let mut pattern_matches = |pattern: &CraftingPattern| -> bool {
+        if pattern.width > grid_dim || pattern.height > grid_dim {
+            return false;
+        }
+
+        for row_offset in 0..=grid_dim.saturating_sub(pattern.height) {
+            for col_offset in 0..=grid_dim.saturating_sub(pattern.width) {
+                let mut ok = true;
+                for r in 0..grid_dim {
+                    for c in 0..grid_dim {
+                        let expected = if (row_offset..row_offset + pattern.height).contains(&r)
+                            && (col_offset..col_offset + pattern.width).contains(&c)
+                        {
+                            pattern.cells[r - row_offset][c - col_offset]
+                        } else {
+                            None
+                        };
+
+                        let actual = crafting_grid[r][c].as_ref().map(|stack| stack.item_type);
+                        if expected != actual {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if !ok {
+                        break;
+                    }
+                }
+
+                if ok {
+                    return true;
+                }
+            }
+        }
+
+        false
+    };
+
     // Check each recipe
     for recipe in get_crafting_recipes() {
         if recipe.min_grid_size.dimension() > grid_size.dimension() {
+            continue;
+        }
+
+        if let Some(pattern) = recipe.pattern.as_ref() {
+            if pattern_matches(pattern) {
+                return Some(recipe);
+            }
             continue;
         }
 
@@ -10418,12 +10912,56 @@ fn try_autofill_crafting_grid<const N: usize>(
     grid: &mut [[Option<ItemStack>; N]; N],
     hotbar: &mut Hotbar,
     main_inventory: &mut MainInventory,
-    inputs: &[(ItemType, u32)],
+    recipe: &CraftingRecipe,
 ) -> bool {
     if !crafting_grid_is_empty(grid) {
         return false;
     }
 
+    if let Some(pattern) = recipe.pattern.as_ref() {
+        if pattern.width > N || pattern.height > N {
+            return false;
+        }
+
+        let mut required: std::collections::HashMap<ItemType, u32> =
+            std::collections::HashMap::new();
+        for r in 0..pattern.height {
+            for c in 0..pattern.width {
+                let Some(item_type) = pattern.cells[r][c] else {
+                    continue;
+                };
+                *required.entry(item_type).or_insert(0) += 1;
+            }
+        }
+
+        for (item_type, needed) in required.iter() {
+            let have = storage_count_item_type(hotbar, main_inventory, *item_type);
+            if have < *needed {
+                return false;
+            }
+        }
+
+        for (item_type, needed) in required.iter() {
+            let ok = take_items_from_storage(hotbar, main_inventory, *item_type, *needed);
+            debug_assert!(ok, "pre-checked storage but take_items_from_storage failed");
+            if !ok {
+                return false;
+            }
+        }
+
+        for r in 0..pattern.height {
+            for c in 0..pattern.width {
+                let Some(item_type) = pattern.cells[r][c] else {
+                    continue;
+                };
+                grid[r][c] = Some(ItemStack::new(item_type, 1));
+            }
+        }
+
+        return true;
+    }
+
+    let inputs = &recipe.inputs;
     let mut required: std::collections::HashMap<ItemType, u32> = std::collections::HashMap::new();
     for (item_type, count) in inputs.iter().copied() {
         if count == 0 {
@@ -10509,9 +11047,38 @@ fn clear_crafting_grid_to_storage<const N: usize>(
 
 fn consume_crafting_inputs_3x3(
     crafting_grid: &mut [[Option<ItemStack>; 3]; 3],
-    inputs: &[(ItemType, u32)],
+    recipe: &CraftingRecipe,
 ) -> bool {
-    for (item_type, mut remaining) in inputs.iter().copied() {
+    if let Some(pattern) = recipe.pattern.as_ref() {
+        let required_cells: usize = (0..pattern.height)
+            .flat_map(|r| (0..pattern.width).map(move |c| pattern.cells[r][c]))
+            .flatten()
+            .count();
+        if required_cells == 0 {
+            return false;
+        }
+
+        let non_empty_cells = crafting_grid.iter().flatten().filter(|slot| slot.is_some()).count();
+        if non_empty_cells != required_cells {
+            return false;
+        }
+
+        for row in crafting_grid.iter_mut() {
+            for slot in row.iter_mut() {
+                let Some(stack) = slot.as_mut() else {
+                    continue;
+                };
+                stack.count = stack.count.saturating_sub(1);
+                if stack.count == 0 {
+                    *slot = None;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    for (item_type, mut remaining) in recipe.inputs.iter().copied() {
         if remaining == 0 {
             continue;
         }
@@ -10549,9 +11116,38 @@ fn consume_crafting_inputs_3x3(
 
 fn consume_crafting_inputs_2x2(
     crafting_grid: &mut [[Option<ItemStack>; 2]; 2],
-    inputs: &[(ItemType, u32)],
+    recipe: &CraftingRecipe,
 ) -> bool {
-    for (item_type, mut remaining) in inputs.iter().copied() {
+    if let Some(pattern) = recipe.pattern.as_ref() {
+        let required_cells: usize = (0..pattern.height)
+            .flat_map(|r| (0..pattern.width).map(move |c| pattern.cells[r][c]))
+            .flatten()
+            .count();
+        if required_cells == 0 {
+            return false;
+        }
+
+        let non_empty_cells = crafting_grid.iter().flatten().filter(|slot| slot.is_some()).count();
+        if non_empty_cells != required_cells {
+            return false;
+        }
+
+        for row in crafting_grid.iter_mut() {
+            for slot in row.iter_mut() {
+                let Some(stack) = slot.as_mut() else {
+                    continue;
+                };
+                stack.count = stack.count.saturating_sub(1);
+                if stack.count == 0 {
+                    *slot = None;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    for (item_type, mut remaining) in recipe.inputs.iter().copied() {
         if remaining == 0 {
             continue;
         }
@@ -10619,10 +11215,35 @@ fn cursor_add_full_stack(cursor: &mut Option<ItemStack>, stack: ItemStack) {
 
 fn crafting_max_crafts_3x3(
     crafting_grid: &[[Option<ItemStack>; 3]; 3],
-    inputs: &[(ItemType, u32)],
+    recipe: &CraftingRecipe,
 ) -> u32 {
+    if let Some(pattern) = recipe.pattern.as_ref() {
+        let required_cells: usize = (0..pattern.height)
+            .flat_map(|r| (0..pattern.width).map(move |c| pattern.cells[r][c]))
+            .flatten()
+            .count();
+        if required_cells == 0 {
+            return 0;
+        }
+
+        let mut min_count = u32::MAX;
+        let mut non_empty_cells = 0_usize;
+        for stack in crafting_grid.iter().flatten().flatten() {
+            non_empty_cells += 1;
+            min_count = min_count.min(stack.count);
+        }
+        if non_empty_cells != required_cells {
+            return 0;
+        }
+
+        if min_count == u32::MAX {
+            0
+        } else {
+            min_count
+        }
+    } else {
     let mut crafts = u32::MAX;
-    for (item_type, needed) in inputs.iter().copied() {
+    for (item_type, needed) in recipe.inputs.iter().copied() {
         if needed == 0 {
             continue;
         }
@@ -10641,15 +11262,41 @@ fn crafting_max_crafts_3x3(
         0
     } else {
         crafts
+    }
     }
 }
 
 fn crafting_max_crafts_2x2(
     crafting_grid: &[[Option<ItemStack>; 2]; 2],
-    inputs: &[(ItemType, u32)],
+    recipe: &CraftingRecipe,
 ) -> u32 {
+    if let Some(pattern) = recipe.pattern.as_ref() {
+        let required_cells: usize = (0..pattern.height)
+            .flat_map(|r| (0..pattern.width).map(move |c| pattern.cells[r][c]))
+            .flatten()
+            .count();
+        if required_cells == 0 {
+            return 0;
+        }
+
+        let mut min_count = u32::MAX;
+        let mut non_empty_cells = 0_usize;
+        for stack in crafting_grid.iter().flatten().flatten() {
+            non_empty_cells += 1;
+            min_count = min_count.min(stack.count);
+        }
+        if non_empty_cells != required_cells {
+            return 0;
+        }
+
+        if min_count == u32::MAX {
+            0
+        } else {
+            min_count
+        }
+    } else {
     let mut crafts = u32::MAX;
-    for (item_type, needed) in inputs.iter().copied() {
+    for (item_type, needed) in recipe.inputs.iter().copied() {
         if needed == 0 {
             continue;
         }
@@ -10668,6 +11315,7 @@ fn crafting_max_crafts_2x2(
         0
     } else {
         crafts
+    }
     }
 }
 
@@ -10815,7 +11463,7 @@ fn render_crafting(
                                                     crafting_grid,
                                                     hotbar,
                                                     main_inventory,
-                                                    &recipe.inputs,
+                                                    recipe,
                                                 );
                                             }
                                         },
@@ -10898,40 +11546,29 @@ fn render_crafting(
                                 if clicked {
                                     let shift = ui.input(|i| i.modifiers.shift);
                                     if shift {
-                                        let crafts =
-                                            crafting_max_crafts_3x3(crafting_grid, &recipe.inputs);
-                                        if crafts > 0 {
-                                            for _ in 0..crafts {
-                                                let ok = consume_crafting_inputs_3x3(
-                                                    crafting_grid,
-                                                    &recipe.inputs,
-                                                );
-                                                debug_assert!(
-                                                    ok,
-                                                    "recipe matched but consume failed"
-                                                );
-                                                if !ok {
-                                                    break;
-                                                }
+                                        let crafts = crafting_max_crafts_3x3(crafting_grid, recipe);
+                                        let mut crafted = 0_u32;
+                                        for _ in 0..crafts {
+                                            if consume_crafting_inputs_3x3(crafting_grid, recipe) {
+                                                crafted += 1;
+                                            } else {
+                                                break;
                                             }
+                                        }
 
-                                            let total = recipe.output_count.saturating_mul(crafts);
+                                        if crafted > 0 {
+                                            let total = recipe.output_count.saturating_mul(crafted);
                                             let output_stack = ItemStack::new(recipe.output, total);
-                                            if let Some(remainder) = add_stack_to_storage(
-                                                hotbar,
-                                                main_inventory,
-                                                output_stack,
-                                            ) {
+                                            if let Some(remainder) =
+                                                add_stack_to_storage(hotbar, main_inventory, output_stack)
+                                            {
                                                 spill_items.push(remainder);
                                             }
                                         }
                                     } else if cursor_can_accept_full_stack(
                                         ui_cursor_stack,
                                         &result_stack,
-                                    ) && consume_crafting_inputs_3x3(
-                                        crafting_grid,
-                                        &recipe.inputs,
-                                    ) {
+                                    ) && consume_crafting_inputs_3x3(crafting_grid, recipe) {
                                         cursor_add_full_stack(ui_cursor_stack, result_stack);
                                     }
                                 }
@@ -11058,6 +11695,132 @@ fn render_crafting_output_slot_interactive(
     }
 
     response
+}
+
+/// Render the chest UI
+/// Returns true if the close button was clicked
+fn render_chest(
+    ctx: &egui::Context,
+    chest: &mut ChestState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    ui_cursor_stack: &mut Option<ItemStack>,
+    ui_drag: &mut UiDragState,
+) -> bool {
+    let mut close_clicked = false;
+    ui_drag.begin_frame();
+
+    if ui_cursor_stack.is_none() {
+        ui_drag.reset();
+    } else if let Some(button) = ui_drag.active_button {
+        let primary_down = ctx.input(|i| i.pointer.primary_down());
+        let secondary_down = ctx.input(|i| i.pointer.secondary_down());
+        match button {
+            UiDragButton::Primary if !primary_down => {
+                let visited = std::mem::take(&mut ui_drag.visited);
+                apply_primary_drag_distribution_with_chest(
+                    ui_cursor_stack,
+                    &visited,
+                    hotbar,
+                    main_inventory,
+                    chest,
+                );
+                ui_drag.finish_drag();
+            }
+            UiDragButton::Secondary if !secondary_down => {
+                ui_drag.finish_drag();
+            }
+            _ => {}
+        }
+    }
+
+    // Semi-transparent dark overlay
+    egui::Area::new(egui::Id::new("chest_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    // Chest window
+    egui::Window::new("Chest")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(420.0);
+
+            // Close button
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Chest").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Cursor:");
+                render_crafting_slot(ui, ui_cursor_stack.as_ref());
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Shift: quick-move. Drag: distribute.")
+                        .size(11.0)
+                        .color(egui::Color32::GRAY),
+                );
+            });
+
+            ui.add_space(10.0);
+
+            ui.label(
+                egui::RichText::new("Chest")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+            for row in 0..3 {
+                ui.horizontal(|ui| {
+                    for col in 0..9 {
+                        let slot_idx = row * 9 + col;
+                        render_core_slot_interactive_shift_moves_to_storage(
+                            ui,
+                            UiCoreSlotId::Chest(slot_idx),
+                            &mut chest.slots[slot_idx],
+                            ui_cursor_stack,
+                            (hotbar, main_inventory),
+                            ui_drag,
+                            UiSlotVisual::new(36.0, false),
+                        );
+                    }
+                });
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            render_player_storage_for_chest(
+                ui,
+                chest,
+                hotbar,
+                main_inventory,
+                ui_cursor_stack,
+                ui_drag,
+            );
+
+            ui.add_space(5.0);
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
 }
 
 /// Render the furnace UI
@@ -12365,13 +13128,14 @@ mod tests {
         cursor_can_accept_full_stack, frames_to_complete, furnace_try_insert, interactive_blocks,
         item_ids, match_crafting_recipe, potion_ids, try_add_stack_to_cursor,
         try_autofill_crafting_grid, try_shift_move_core_stack_into_brewing_stand,
-        try_shift_move_core_stack_into_enchanting_table, try_shift_move_core_stack_into_furnace,
-        ArmorPiece, ArmorSlot, BlockPropertiesRegistry, BrewingStandState, Chunk, ChunkPos,
-        CraftingGridSize, DroppedItemType, EnchantingTableState, Enchantment, EnchantmentType,
-        FurnaceSlotKind, FurnaceState, GameWorld, Hotbar, ItemStack, ItemType, MainInventory,
-        PlayerHealth, PlayerPhysics, ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel,
-        AABB, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG,
-        BLOCK_OAK_PLANKS, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_NETHER_WART, CORE_ITEM_WATER_BOTTLE,
+        try_shift_move_core_stack_into_chest, try_shift_move_core_stack_into_enchanting_table,
+        try_shift_move_core_stack_into_furnace, ArmorPiece, ArmorSlot, BlockPropertiesRegistry,
+        BrewingStandState, ChestState, Chunk, ChunkPos, CraftingGridSize, DroppedItemType,
+        EnchantingTableState, Enchantment, EnchantmentType, FurnaceSlotKind, FurnaceState,
+        GameWorld, Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth, PlayerPhysics,
+        ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_COBBLESTONE,
+        BLOCK_CRAFTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
+        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_NETHER_WART, CORE_ITEM_WATER_BOTTLE,
     };
 
     #[test]
@@ -13816,6 +14580,23 @@ mod tests {
             selected: 0,
         };
         let mut main_inventory = MainInventory::new();
+        let recipes = get_crafting_recipes();
+        let planks_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Block(BLOCK_OAK_PLANKS))
+            .expect("planks recipe exists");
+        let crafting_table_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Block(BLOCK_CRAFTING_TABLE))
+            .expect("crafting table recipe exists");
+        let sticks_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Item(3))
+            .expect("sticks recipe exists");
+        let torches_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Block(interactive_blocks::TORCH))
+            .expect("torches recipe exists");
 
         // "Gather": give the player a couple logs + some coal.
         assert!(add_stack_to_storage(
@@ -13838,12 +14619,12 @@ mod tests {
                 &mut grid,
                 &mut hotbar,
                 &mut main_inventory,
-                &[(ItemType::Block(BLOCK_OAK_LOG), 1)],
+                planks_recipe,
             ));
             let recipe = match_crafting_recipe(&grid, CraftingGridSize::TwoByTwo)
                 .expect("planks recipe matches");
             assert_eq!(recipe.output, ItemType::Block(BLOCK_OAK_PLANKS));
-            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe.inputs));
+            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe));
             assert!(add_stack_to_storage(
                 &mut hotbar,
                 &mut main_inventory,
@@ -13859,12 +14640,12 @@ mod tests {
                 &mut grid,
                 &mut hotbar,
                 &mut main_inventory,
-                &[(ItemType::Block(BLOCK_OAK_PLANKS), 4)],
+                crafting_table_recipe,
             ));
             let recipe = match_crafting_recipe(&grid, CraftingGridSize::TwoByTwo)
                 .expect("table recipe matches");
             assert_eq!(recipe.output, ItemType::Block(BLOCK_CRAFTING_TABLE));
-            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe.inputs));
+            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe));
             assert!(add_stack_to_storage(
                 &mut hotbar,
                 &mut main_inventory,
@@ -13880,12 +14661,12 @@ mod tests {
                 &mut grid,
                 &mut hotbar,
                 &mut main_inventory,
-                &[(ItemType::Block(BLOCK_OAK_PLANKS), 2)],
+                sticks_recipe,
             ));
             let recipe = match_crafting_recipe(&grid, CraftingGridSize::TwoByTwo)
                 .expect("sticks recipe matches");
             assert_eq!(recipe.output, ItemType::Item(3));
-            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe.inputs));
+            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe));
             assert!(add_stack_to_storage(
                 &mut hotbar,
                 &mut main_inventory,
@@ -13901,12 +14682,12 @@ mod tests {
                 &mut grid,
                 &mut hotbar,
                 &mut main_inventory,
-                &[(ItemType::Item(8), 1), (ItemType::Item(3), 1)],
+                torches_recipe,
             ));
             let recipe = match_crafting_recipe(&grid, CraftingGridSize::TwoByTwo)
                 .expect("torch recipe matches");
             assert_eq!(recipe.output, ItemType::Block(interactive_blocks::TORCH));
-            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe.inputs));
+            assert!(consume_crafting_inputs_3x3(&mut grid, &recipe));
             assert!(add_stack_to_storage(
                 &mut hotbar,
                 &mut main_inventory,
@@ -14277,6 +15058,33 @@ mod tests {
     }
 
     #[test]
+    fn shift_move_core_stack_into_chest_merges_then_fills_empty_slots() {
+        let mut chest = ChestState::default();
+        chest.slots[0] = Some(ItemStack::new(ItemType::Item(3), 60));
+
+        let mut stack = ItemStack::new(ItemType::Item(3), 10);
+        assert!(try_shift_move_core_stack_into_chest(&mut stack, &mut chest));
+        assert_eq!(stack.count, 0);
+        assert_eq!(chest.slots[0].as_ref().unwrap().count, 64);
+        assert_eq!(chest.slots[1].as_ref().unwrap().count, 6);
+    }
+
+    #[test]
+    fn shift_move_core_stack_into_chest_returns_false_when_full() {
+        let mut chest = ChestState::default();
+        let full_stack = ItemStack::new(ItemType::Item(3), 64);
+        for slot in &mut chest.slots {
+            *slot = Some(full_stack.clone());
+        }
+
+        let mut stack = ItemStack::new(ItemType::Item(3), 1);
+        assert!(!try_shift_move_core_stack_into_chest(
+            &mut stack, &mut chest
+        ));
+        assert_eq!(stack.count, 1);
+    }
+
+    #[test]
     fn crafting_planks_to_sticks() {
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
         grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
@@ -14318,6 +15126,24 @@ mod tests {
     }
 
     #[test]
+    fn crafting_planks_to_chest() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for (r, row) in grid.iter_mut().enumerate() {
+            for (c, slot) in row.iter_mut().enumerate() {
+                if r == 1 && c == 1 {
+                    continue;
+                }
+                *slot = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::CHEST), 1))
+        );
+    }
+
+    #[test]
     fn crafting_recipes_respect_grid_size() {
         // Furnace is a 3x3-only recipe (crafting table required).
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
@@ -14334,6 +15160,11 @@ mod tests {
         let mut hotbar = Hotbar::new();
         hotbar.slots = Default::default();
         hotbar.selected = 0;
+        let recipes = get_crafting_recipes();
+        let furnace_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Block(BLOCK_FURNACE))
+            .expect("furnace recipe exists");
 
         let mut main_inventory = MainInventory::new();
         main_inventory.slots[0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 8));
@@ -14343,7 +15174,7 @@ mod tests {
             &mut grid,
             &mut hotbar,
             &mut main_inventory,
-            &[(ItemType::Block(BLOCK_COBBLESTONE), 8)]
+            furnace_recipe
         ));
         assert!(main_inventory.slots[0].is_none());
         assert_eq!(
@@ -14359,7 +15190,7 @@ mod tests {
             &mut grid,
             &mut hotbar,
             &mut main_inventory,
-            &[(ItemType::Block(BLOCK_COBBLESTONE), 8)]
+            furnace_recipe
         ));
         assert_eq!(
             main_inventory.slots[0],
@@ -14393,7 +15224,7 @@ mod tests {
             (recipe.output, recipe.output_count),
             (ItemType::Block(BLOCK_OAK_PLANKS), 4)
         );
-        assert!(consume_crafting_inputs_3x3(&mut grid, &recipe.inputs));
+        assert!(consume_crafting_inputs_3x3(&mut grid, &recipe));
         let remaining_logs: u32 = grid
             .iter()
             .flatten()
@@ -14408,7 +15239,7 @@ mod tests {
         grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_LOG), 2));
         let recipe = match_crafting_recipe(&grid, CraftingGridSize::ThreeByThree)
             .expect("planks recipe should match");
-        assert!(consume_crafting_inputs_3x3(&mut grid, &recipe.inputs));
+        assert!(consume_crafting_inputs_3x3(&mut grid, &recipe));
         let remaining_logs: u32 = grid
             .iter()
             .flatten()
