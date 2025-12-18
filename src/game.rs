@@ -9,7 +9,8 @@ use anyhow::Result;
 use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_core::{
-    item::potion_ids, DimensionId, EnchantmentType, ItemStack, ItemType, SimTick, ToolMaterial,
+    item::{item_ids, potion_ids},
+    DimensionId, Enchantment, EnchantmentType, ItemStack, ItemType, SimTick, ToolMaterial,
     ToolType,
 };
 use mdminecraft_render::{
@@ -48,6 +49,15 @@ const PRECIPITATION_RADIUS: f32 = 18.0;
 const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
+
+// Core `ItemType::Item` IDs used by the client for brewing-related items.
+// These are intentionally kept separate from the world brewing ingredient IDs
+// (see `mdminecraft_core::item::item_ids`) to avoid collisions with legacy
+// saves and other in-game item IDs.
+const CORE_ITEM_GLASS_BOTTLE: u16 = 2000;
+const CORE_ITEM_WATER_BOTTLE: u16 = 2001;
+const CORE_ITEM_NETHER_WART: u16 = 2002;
+const CORE_ITEM_BLAZE_POWDER: u16 = 2003;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -90,6 +100,11 @@ enum PauseMenuAction {
 struct Hotbar {
     slots: [Option<ItemStack>; 9],
     selected: usize,
+}
+
+/// Main inventory storage (27 slots; excludes hotbar).
+struct MainInventory {
+    slots: [Option<ItemStack>; 27],
 }
 
 impl Hotbar {
@@ -230,7 +245,7 @@ impl Hotbar {
 
         // Merge into existing stacks first.
         for existing in self.slots.iter_mut().flatten() {
-            if existing.item_type != stack.item_type {
+            if !stacks_match_for_merge(existing, &stack) {
                 continue;
             }
 
@@ -355,6 +370,10 @@ impl Hotbar {
                     103 => "Wool".to_string(),
                     104 => "Egg".to_string(),
                     105 => "Sapling".to_string(),
+                    CORE_ITEM_GLASS_BOTTLE => "Glass Bottle".to_string(),
+                    CORE_ITEM_WATER_BOTTLE => "Water Bottle".to_string(),
+                    CORE_ITEM_NETHER_WART => "Nether Wart".to_string(),
+                    CORE_ITEM_BLAZE_POWDER => "Blaze Powder".to_string(),
                     _ => format!("Item({})", id),
                 },
                 ItemType::Potion(id) => potion_name(id),
@@ -363,6 +382,64 @@ impl Hotbar {
         } else {
             "Empty".to_string()
         }
+    }
+}
+
+impl MainInventory {
+    fn new() -> Self {
+        Self {
+            slots: std::array::from_fn(|_| None),
+        }
+    }
+
+    fn add_stack(&mut self, mut stack: ItemStack) -> Option<ItemStack> {
+        if stack.count == 0 {
+            return None;
+        }
+
+        // Merge into existing stacks first.
+        for existing in self.slots.iter_mut().flatten() {
+            if !stacks_match_for_merge(existing, &stack) {
+                continue;
+            }
+
+            let max = existing.max_stack_size();
+            if existing.count >= max {
+                continue;
+            }
+
+            let space = max - existing.count;
+            let to_add = space.min(stack.count);
+            existing.count += to_add;
+            stack.count -= to_add;
+
+            if stack.count == 0 {
+                return None;
+            }
+        }
+
+        // Then fill empty slots, splitting if needed.
+        for slot in &mut self.slots {
+            if stack.count == 0 {
+                return None;
+            }
+            if slot.is_some() {
+                continue;
+            }
+
+            let max = stack.max_stack_size();
+            if stack.count <= max {
+                *slot = Some(stack);
+                return None;
+            }
+
+            let mut placed = stack.clone();
+            placed.count = max;
+            *slot = Some(placed);
+            stack.count -= max;
+        }
+
+        Some(stack)
     }
 }
 
@@ -774,6 +851,96 @@ fn potion_name(potion_id: u16) -> String {
     }
 }
 
+fn brew_ingredient_label(ingredient_id: u16) -> &'static str {
+    match ingredient_id {
+        item_ids::NETHER_WART => "Nether Wart",
+        item_ids::BLAZE_POWDER => "Blaze Powder",
+        item_ids::GHAST_TEAR => "Ghast Tear",
+        item_ids::MAGMA_CREAM => "Magma Cream",
+        item_ids::SPIDER_EYE => "Spider Eye",
+        item_ids::FERMENTED_SPIDER_EYE => "Fermented Spider Eye",
+        item_ids::GLISTERING_MELON => "Glistering Melon",
+        item_ids::GOLDEN_CARROT => "Golden Carrot",
+        item_ids::RABBIT_FOOT => "Rabbit Foot",
+        item_ids::PHANTOM_MEMBRANE => "Phantom Membrane",
+        item_ids::REDSTONE_DUST => "Redstone Dust",
+        item_ids::GLOWSTONE_DUST => "Glowstone Dust",
+        item_ids::GUNPOWDER => "Gunpowder",
+        item_ids::DRAGON_BREATH => "Dragon Breath",
+        item_ids::SUGAR => "Sugar",
+        _ => "Unknown",
+    }
+}
+
+fn core_item_type_to_brew_ingredient_id(item_type: ItemType) -> Option<u16> {
+    match item_type {
+        ItemType::Item(CORE_ITEM_NETHER_WART) => Some(item_ids::NETHER_WART),
+        ItemType::Item(CORE_ITEM_BLAZE_POWDER) => Some(item_ids::BLAZE_POWDER),
+        _ => None,
+    }
+}
+
+fn brew_ingredient_id_to_core_item_type(ingredient_id: u16) -> Option<ItemType> {
+    match ingredient_id {
+        item_ids::NETHER_WART => Some(ItemType::Item(CORE_ITEM_NETHER_WART)),
+        item_ids::BLAZE_POWDER => Some(ItemType::Item(CORE_ITEM_BLAZE_POWDER)),
+        _ => None,
+    }
+}
+
+fn core_item_stack_to_bottle(stack: &ItemStack) -> Option<PotionType> {
+    match stack.item_type {
+        ItemType::Item(CORE_ITEM_WATER_BOTTLE) => Some(PotionType::Water),
+        ItemType::Potion(id) => match id {
+            potion_ids::AWKWARD => Some(PotionType::Awkward),
+            potion_ids::NIGHT_VISION => Some(PotionType::NightVision),
+            potion_ids::INVISIBILITY => Some(PotionType::Invisibility),
+            potion_ids::LEAPING => Some(PotionType::Leaping),
+            potion_ids::FIRE_RESISTANCE => Some(PotionType::FireResistance),
+            potion_ids::SWIFTNESS => Some(PotionType::Swiftness),
+            potion_ids::SLOWNESS => Some(PotionType::Slowness),
+            potion_ids::WATER_BREATHING => Some(PotionType::WaterBreathing),
+            potion_ids::HEALING => Some(PotionType::Healing),
+            potion_ids::HARMING => Some(PotionType::Harming),
+            potion_ids::POISON => Some(PotionType::Poison),
+            potion_ids::REGENERATION => Some(PotionType::Regeneration),
+            potion_ids::STRENGTH => Some(PotionType::Strength),
+            potion_ids::WEAKNESS => Some(PotionType::Weakness),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn bottle_to_core_item_stack(potion: PotionType) -> ItemStack {
+    match potion {
+        PotionType::Water => ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1),
+        PotionType::Awkward => ItemStack::new(ItemType::Potion(potion_ids::AWKWARD), 1),
+        PotionType::NightVision => ItemStack::new(ItemType::Potion(potion_ids::NIGHT_VISION), 1),
+        PotionType::Invisibility => ItemStack::new(ItemType::Potion(potion_ids::INVISIBILITY), 1),
+        PotionType::Leaping => ItemStack::new(ItemType::Potion(potion_ids::LEAPING), 1),
+        PotionType::FireResistance => {
+            ItemStack::new(ItemType::Potion(potion_ids::FIRE_RESISTANCE), 1)
+        }
+        PotionType::Swiftness => ItemStack::new(ItemType::Potion(potion_ids::SWIFTNESS), 1),
+        PotionType::Slowness => ItemStack::new(ItemType::Potion(potion_ids::SLOWNESS), 1),
+        PotionType::WaterBreathing => {
+            ItemStack::new(ItemType::Potion(potion_ids::WATER_BREATHING), 1)
+        }
+        PotionType::Healing => ItemStack::new(ItemType::Potion(potion_ids::HEALING), 1),
+        PotionType::Harming => ItemStack::new(ItemType::Potion(potion_ids::HARMING), 1),
+        PotionType::Poison => ItemStack::new(ItemType::Potion(potion_ids::POISON), 1),
+        PotionType::Regeneration => ItemStack::new(ItemType::Potion(potion_ids::REGENERATION), 1),
+        PotionType::Strength => ItemStack::new(ItemType::Potion(potion_ids::STRENGTH), 1),
+        PotionType::Weakness => ItemStack::new(ItemType::Potion(potion_ids::WEAKNESS), 1),
+
+        // Base/unsupported potions don't have a client-side representation yet.
+        PotionType::Mundane | PotionType::Thick | PotionType::Luck | PotionType::SlowFalling => {
+            ItemStack::new(ItemType::Item(9999), 1)
+        }
+    }
+}
+
 /// Player experience points (visual only - XP not functional yet)
 struct PlayerXP {
     /// Current XP points
@@ -1096,8 +1263,8 @@ pub struct GameWorld {
     inventory_open: bool,
     /// Temporary cursor-held stack for UI drag/drop interactions.
     ui_cursor_stack: Option<ItemStack>,
-    /// Full player inventory (36 slots: 9 hotbar + 27 main)
-    inventory: mdminecraft_world::Inventory,
+    /// Main inventory storage (27 slots; excludes hotbar).
+    main_inventory: MainInventory,
     /// Mob spawner for passive mobs
     #[allow(dead_code)]
     mob_spawner: MobSpawner,
@@ -1393,7 +1560,7 @@ impl GameWorld {
             item_manager: dropped_items,
             inventory_open: false,
             ui_cursor_stack: None,
-            inventory: Inventory::new(),
+            main_inventory: MainInventory::new(),
             mob_spawner,
             mobs,
             fluid_sim: FluidSimulator::new(),
@@ -1720,7 +1887,7 @@ impl GameWorld {
             },
             hotbar: self.hotbar.slots.clone(),
             hotbar_selected: self.hotbar.selected,
-            inventory: self.inventory.clone(),
+            inventory: Self::persisted_inventory_from_main_inventory(&self.main_inventory),
             health: self.player_health.current,
             hunger: self.player_health.hunger,
             xp_level: self.player_xp.level,
@@ -1729,6 +1896,87 @@ impl GameWorld {
             armor: self.player_armor.clone(),
             status_effects: self.status_effects.clone(),
         }
+    }
+
+    /// Persistent inventory item-id used for "full core stack encoded in metadata" fallback.
+    const PERSISTED_CORE_STACK_SENTINEL_ID: u16 = u16::MAX;
+
+    fn persisted_inventory_from_main_inventory(main_inventory: &MainInventory) -> Inventory {
+        let mut inventory = Inventory::new();
+        for (idx, slot) in main_inventory.slots.iter().enumerate() {
+            let Some(stack) = slot.as_ref() else {
+                continue;
+            };
+
+            let world_stack = Self::persisted_world_stack_from_core(stack);
+            let _ = inventory.set(9 + idx, Some(world_stack));
+        }
+        inventory
+    }
+
+    fn main_inventory_from_persisted_inventory(mut inventory: Inventory) -> MainInventory {
+        let mut main = MainInventory::new();
+
+        // Prefer canonical layout: slots 9-35.
+        let has_any_main = (9..36).any(|slot| inventory.get(slot).is_some());
+        if has_any_main {
+            for idx in 0..27 {
+                if let Some(world_stack) = inventory.take(9 + idx) {
+                    main.slots[idx] = Self::core_stack_from_persisted_world_stack(world_stack);
+                }
+            }
+        } else {
+            // Legacy layout fallback: slots 0-26.
+            for idx in 0..27 {
+                if let Some(world_stack) = inventory.take(idx) {
+                    main.slots[idx] = Self::core_stack_from_persisted_world_stack(world_stack);
+                }
+            }
+        }
+
+        main
+    }
+
+    fn persisted_world_stack_from_core(stack: &ItemStack) -> mdminecraft_world::ItemStack {
+        if stack.count > u8::MAX as u32 {
+            return Self::persisted_fallback_world_stack(stack);
+        }
+
+        let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type) else {
+            return Self::persisted_fallback_world_stack(stack);
+        };
+
+        let mut world_stack = mdminecraft_world::ItemStack::new(drop_type.id(), stack.count as u8);
+        world_stack.metadata = encode_inventory_stack_metadata(stack);
+        world_stack
+    }
+
+    fn persisted_fallback_world_stack(stack: &ItemStack) -> mdminecraft_world::ItemStack {
+        let metadata = serde_json::to_vec(stack).unwrap_or_default();
+        mdminecraft_world::ItemStack::with_metadata(
+            Self::PERSISTED_CORE_STACK_SENTINEL_ID,
+            1,
+            metadata,
+        )
+    }
+
+    fn core_stack_from_persisted_world_stack(
+        stack: mdminecraft_world::ItemStack,
+    ) -> Option<ItemStack> {
+        if stack.item_id == Self::PERSISTED_CORE_STACK_SENTINEL_ID {
+            let bytes = stack.metadata.as_ref()?;
+            return serde_json::from_slice::<ItemStack>(bytes).ok();
+        }
+
+        let drop_type = DroppedItemType::from_id(stack.item_id)?;
+        let core_item_type = Self::convert_dropped_item_type(drop_type)?;
+        let mut core_stack = ItemStack::new(core_item_type, stack.count as u32);
+
+        if let Some(metadata) = stack.metadata.as_ref() {
+            apply_inventory_stack_metadata(&mut core_stack, metadata);
+        }
+
+        Some(core_stack)
     }
 
     fn apply_player_save(&mut self, save: PlayerSave) {
@@ -1751,7 +1999,7 @@ impl GameWorld {
                 }
             }
         }
-        self.inventory = save.inventory;
+        self.main_inventory = Self::main_inventory_from_persisted_inventory(save.inventory);
 
         self.player_health.current = save.health.clamp(0.0, self.player_health.max);
         self.player_health.hunger = save.hunger.clamp(0.0, self.player_health.max_hunger);
@@ -1830,7 +2078,7 @@ impl GameWorld {
         }
 
         for stack in returned {
-            self.return_stack_to_hotbar(stack);
+            self.return_stack_to_storage_or_spill(stack);
         }
     }
 
@@ -2955,9 +3203,45 @@ impl GameWorld {
         self.player_health.set_active(is_moving || actions.sprint);
     }
 
+    fn player_has_arrows(&self) -> bool {
+        if self.hotbar.has_arrows() {
+            return true;
+        }
+
+        self.main_inventory.slots.iter().any(|slot| {
+            slot.as_ref()
+                .is_some_and(|item| matches!(item.item_type, ItemType::Item(2)))
+        })
+    }
+
+    fn player_consume_arrow(&mut self) -> bool {
+        if self.hotbar.consume_arrow() {
+            return true;
+        }
+
+        for slot in &mut self.main_inventory.slots {
+            let Some(item) = slot.as_mut() else {
+                continue;
+            };
+
+            if !matches!(item.item_type, ItemType::Item(2)) {
+                continue;
+            }
+
+            if item.count > 1 {
+                item.count -= 1;
+            } else {
+                *slot = None;
+            }
+            return true;
+        }
+
+        false
+    }
+
     fn handle_block_interaction(&mut self, dt: f32) {
         // Handle bow charging and shooting (before other interactions)
-        if self.hotbar.has_bow_selected() && self.hotbar.has_arrows() {
+        if self.hotbar.has_bow_selected() && self.player_has_arrows() {
             if self.input.is_mouse_pressed(MouseButton::Right) {
                 // Charging bow
                 if !self.bow_drawing {
@@ -2970,7 +3254,7 @@ impl GameWorld {
                 // Released - shoot arrow!
                 if self.bow_charge >= 0.1 {
                     // Consume an arrow
-                    if self.hotbar.consume_arrow() {
+                    if self.player_consume_arrow() {
                         // Get camera position and direction
                         let camera = self.renderer.camera();
                         let arrow = Projectile::shoot_arrow(
@@ -3702,7 +3986,7 @@ impl GameWorld {
                             let (close, item) = render_inventory(
                                 ctx,
                                 &mut self.hotbar,
-                                &self.inventory,
+                                &mut self.main_inventory,
                                 &mut self.personal_crafting_grid,
                                 &mut self.ui_cursor_stack,
                             );
@@ -3759,7 +4043,12 @@ impl GameWorld {
                         if self.brewing_open {
                             if let Some(pos) = self.open_brewing_pos {
                                 if let Some(stand) = self.brewing_stands.get_mut(&pos) {
-                                    close_brewing_requested = render_brewing_stand(ctx, stand);
+                                    close_brewing_requested = render_brewing_stand(
+                                        ctx,
+                                        stand,
+                                        &mut self.hotbar,
+                                        &mut self.ui_cursor_stack,
+                                    );
                                 }
                             }
                         }
@@ -3994,15 +4283,15 @@ impl GameWorld {
         // Check for item pickup
         let picked_up = self.item_manager.pickup_items(player_x, player_y, player_z);
 
-        // Add picked up items to hotbar
+        // Add picked up items to player storage (hotbar → main inventory)
         for (drop_type, count) in picked_up {
             if let Some(core_item_type) = Self::convert_dropped_item_type(drop_type) {
                 let stack = ItemStack::new(core_item_type, count);
-                if let Some(remainder) = self.hotbar.add_stack(stack) {
+                if let Some(remainder) = self.try_add_stack_to_storage(stack) {
                     tracing::warn!(
                         item = ?remainder.item_type,
                         count = remainder.count,
-                        "Hotbar full; re-spawning picked up items"
+                        "Inventory full; re-spawning picked up items"
                     );
                     // `pickup_items` already removed the drop from the world; re-spawn any remainder
                     // just outside the pickup radius to avoid immediate re-pickup loops.
@@ -4805,12 +5094,14 @@ impl GameWorld {
         false
     }
 
-    fn return_stack_to_hotbar(&mut self, stack: ItemStack) {
-        let remainder = self.hotbar.add_stack(stack);
-        if let Some(remainder) = remainder {
-            if let Some(remainder) = try_add_stack_to_cursor(&mut self.ui_cursor_stack, remainder) {
-                self.spill_stack_to_world(remainder);
-            }
+    fn try_add_stack_to_storage(&mut self, stack: ItemStack) -> Option<ItemStack> {
+        let remainder = self.hotbar.add_stack(stack)?;
+        self.main_inventory.add_stack(remainder)
+    }
+
+    fn return_stack_to_storage_or_spill(&mut self, stack: ItemStack) {
+        if let Some(remainder) = self.try_add_stack_to_storage(stack) {
+            self.spill_stack_to_world(remainder);
         }
     }
 
@@ -4906,7 +5197,7 @@ impl GameWorld {
             tracing::info!("Inventory opened");
         } else {
             if let Some(stack) = self.ui_cursor_stack.take() {
-                self.return_stack_to_hotbar(stack);
+                self.return_stack_to_storage_or_spill(stack);
             }
 
             // Capture cursor when inventory is closed
@@ -4942,7 +5233,7 @@ impl GameWorld {
         }
 
         for stack in returned {
-            self.return_stack_to_hotbar(stack);
+            self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
@@ -4968,7 +5259,7 @@ impl GameWorld {
         self.furnace_open = false;
         self.open_furnace_pos = None;
         if let Some(stack) = self.ui_cursor_stack.take() {
-            self.return_stack_to_hotbar(stack);
+            self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
@@ -5002,7 +5293,7 @@ impl GameWorld {
         self.enchanting_open = false;
         self.open_enchanting_pos = None;
         if let Some(stack) = self.ui_cursor_stack.take() {
-            self.return_stack_to_hotbar(stack);
+            self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
@@ -5030,7 +5321,7 @@ impl GameWorld {
         self.brewing_open = false;
         self.open_brewing_pos = None;
         if let Some(stack) = self.ui_cursor_stack.take() {
-            self.return_stack_to_hotbar(stack);
+            self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
@@ -5352,6 +5643,83 @@ impl GameWorld {
             DroppedItemType::Wool => Some(ItemType::Item(103)),
             DroppedItemType::Egg => Some(ItemType::Item(104)),
             DroppedItemType::Sapling => Some(ItemType::Item(105)),
+            DroppedItemType::GlassBottle => Some(ItemType::Item(CORE_ITEM_GLASS_BOTTLE)),
+            DroppedItemType::WaterBottle => Some(ItemType::Item(CORE_ITEM_WATER_BOTTLE)),
+            DroppedItemType::NetherWart => Some(ItemType::Item(CORE_ITEM_NETHER_WART)),
+            DroppedItemType::BlazePowder => Some(ItemType::Item(CORE_ITEM_BLAZE_POWDER)),
+            DroppedItemType::PotionAwkward => Some(ItemType::Potion(potion_ids::AWKWARD)),
+            DroppedItemType::PotionNightVision => Some(ItemType::Potion(potion_ids::NIGHT_VISION)),
+            DroppedItemType::PotionInvisibility => Some(ItemType::Potion(potion_ids::INVISIBILITY)),
+            DroppedItemType::PotionLeaping => Some(ItemType::Potion(potion_ids::LEAPING)),
+            DroppedItemType::PotionFireResistance => {
+                Some(ItemType::Potion(potion_ids::FIRE_RESISTANCE))
+            }
+            DroppedItemType::PotionSwiftness => Some(ItemType::Potion(potion_ids::SWIFTNESS)),
+            DroppedItemType::PotionSlowness => Some(ItemType::Potion(potion_ids::SLOWNESS)),
+            DroppedItemType::PotionWaterBreathing => {
+                Some(ItemType::Potion(potion_ids::WATER_BREATHING))
+            }
+            DroppedItemType::PotionHealing => Some(ItemType::Potion(potion_ids::HEALING)),
+            DroppedItemType::PotionHarming => Some(ItemType::Potion(potion_ids::HARMING)),
+            DroppedItemType::PotionPoison => Some(ItemType::Potion(potion_ids::POISON)),
+            DroppedItemType::PotionRegeneration => Some(ItemType::Potion(potion_ids::REGENERATION)),
+            DroppedItemType::PotionStrength => Some(ItemType::Potion(potion_ids::STRENGTH)),
+            DroppedItemType::PotionWeakness => Some(ItemType::Potion(potion_ids::WEAKNESS)),
+            DroppedItemType::WoodenPickaxe => {
+                Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood))
+            }
+            DroppedItemType::StonePickaxe => {
+                Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone))
+            }
+            DroppedItemType::IronPickaxe => {
+                Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron))
+            }
+            DroppedItemType::DiamondPickaxe => {
+                Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond))
+            }
+            DroppedItemType::GoldPickaxe => {
+                Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Gold))
+            }
+            DroppedItemType::WoodenAxe => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Wood)),
+            DroppedItemType::StoneAxe => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Stone)),
+            DroppedItemType::IronAxe => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Iron)),
+            DroppedItemType::DiamondAxe => {
+                Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Diamond))
+            }
+            DroppedItemType::GoldAxe => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Gold)),
+            DroppedItemType::WoodenShovel => {
+                Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood))
+            }
+            DroppedItemType::StoneShovel => {
+                Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Stone))
+            }
+            DroppedItemType::IronShovel => {
+                Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Iron))
+            }
+            DroppedItemType::DiamondShovel => {
+                Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Diamond))
+            }
+            DroppedItemType::GoldShovel => {
+                Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Gold))
+            }
+            DroppedItemType::WoodenSword => {
+                Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Wood))
+            }
+            DroppedItemType::StoneSword => {
+                Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Stone))
+            }
+            DroppedItemType::IronSword => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Iron)),
+            DroppedItemType::DiamondSword => {
+                Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond))
+            }
+            DroppedItemType::GoldSword => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Gold)),
+            DroppedItemType::WoodenHoe => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Wood)),
+            DroppedItemType::StoneHoe => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Stone)),
+            DroppedItemType::IronHoe => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Iron)),
+            DroppedItemType::DiamondHoe => {
+                Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Diamond))
+            }
+            DroppedItemType::GoldHoe => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Gold)),
             _ => None,
         }
     }
@@ -5386,9 +5754,57 @@ impl GameWorld {
                 103 => Some(DroppedItemType::Wool),
                 104 => Some(DroppedItemType::Egg),
                 105 => Some(DroppedItemType::Sapling),
+                CORE_ITEM_GLASS_BOTTLE => Some(DroppedItemType::GlassBottle),
+                CORE_ITEM_WATER_BOTTLE => Some(DroppedItemType::WaterBottle),
+                CORE_ITEM_NETHER_WART => Some(DroppedItemType::NetherWart),
+                CORE_ITEM_BLAZE_POWDER => Some(DroppedItemType::BlazePowder),
                 _ => None,
             },
-            ItemType::Tool(_, _) | ItemType::Potion(_) | ItemType::SplashPotion(_) => None,
+            ItemType::Tool(tool, material) => Some(match (tool, material) {
+                (ToolType::Pickaxe, ToolMaterial::Wood) => DroppedItemType::WoodenPickaxe,
+                (ToolType::Pickaxe, ToolMaterial::Stone) => DroppedItemType::StonePickaxe,
+                (ToolType::Pickaxe, ToolMaterial::Iron) => DroppedItemType::IronPickaxe,
+                (ToolType::Pickaxe, ToolMaterial::Diamond) => DroppedItemType::DiamondPickaxe,
+                (ToolType::Pickaxe, ToolMaterial::Gold) => DroppedItemType::GoldPickaxe,
+                (ToolType::Axe, ToolMaterial::Wood) => DroppedItemType::WoodenAxe,
+                (ToolType::Axe, ToolMaterial::Stone) => DroppedItemType::StoneAxe,
+                (ToolType::Axe, ToolMaterial::Iron) => DroppedItemType::IronAxe,
+                (ToolType::Axe, ToolMaterial::Diamond) => DroppedItemType::DiamondAxe,
+                (ToolType::Axe, ToolMaterial::Gold) => DroppedItemType::GoldAxe,
+                (ToolType::Shovel, ToolMaterial::Wood) => DroppedItemType::WoodenShovel,
+                (ToolType::Shovel, ToolMaterial::Stone) => DroppedItemType::StoneShovel,
+                (ToolType::Shovel, ToolMaterial::Iron) => DroppedItemType::IronShovel,
+                (ToolType::Shovel, ToolMaterial::Diamond) => DroppedItemType::DiamondShovel,
+                (ToolType::Shovel, ToolMaterial::Gold) => DroppedItemType::GoldShovel,
+                (ToolType::Sword, ToolMaterial::Wood) => DroppedItemType::WoodenSword,
+                (ToolType::Sword, ToolMaterial::Stone) => DroppedItemType::StoneSword,
+                (ToolType::Sword, ToolMaterial::Iron) => DroppedItemType::IronSword,
+                (ToolType::Sword, ToolMaterial::Diamond) => DroppedItemType::DiamondSword,
+                (ToolType::Sword, ToolMaterial::Gold) => DroppedItemType::GoldSword,
+                (ToolType::Hoe, ToolMaterial::Wood) => DroppedItemType::WoodenHoe,
+                (ToolType::Hoe, ToolMaterial::Stone) => DroppedItemType::StoneHoe,
+                (ToolType::Hoe, ToolMaterial::Iron) => DroppedItemType::IronHoe,
+                (ToolType::Hoe, ToolMaterial::Diamond) => DroppedItemType::DiamondHoe,
+                (ToolType::Hoe, ToolMaterial::Gold) => DroppedItemType::GoldHoe,
+            }),
+            ItemType::Potion(id) => match id {
+                potion_ids::AWKWARD => Some(DroppedItemType::PotionAwkward),
+                potion_ids::NIGHT_VISION => Some(DroppedItemType::PotionNightVision),
+                potion_ids::INVISIBILITY => Some(DroppedItemType::PotionInvisibility),
+                potion_ids::LEAPING => Some(DroppedItemType::PotionLeaping),
+                potion_ids::FIRE_RESISTANCE => Some(DroppedItemType::PotionFireResistance),
+                potion_ids::SWIFTNESS => Some(DroppedItemType::PotionSwiftness),
+                potion_ids::SLOWNESS => Some(DroppedItemType::PotionSlowness),
+                potion_ids::WATER_BREATHING => Some(DroppedItemType::PotionWaterBreathing),
+                potion_ids::HEALING => Some(DroppedItemType::PotionHealing),
+                potion_ids::HARMING => Some(DroppedItemType::PotionHarming),
+                potion_ids::POISON => Some(DroppedItemType::PotionPoison),
+                potion_ids::REGENERATION => Some(DroppedItemType::PotionRegeneration),
+                potion_ids::STRENGTH => Some(DroppedItemType::PotionStrength),
+                potion_ids::WEAKNESS => Some(DroppedItemType::PotionWeakness),
+                _ => None,
+            },
+            ItemType::SplashPotion(_) => None,
         }
     }
 }
@@ -6198,7 +6614,7 @@ fn render_death_screen(ctx: &egui::Context, death_message: &str) -> (bool, bool)
 fn render_inventory(
     ctx: &egui::Context,
     hotbar: &mut Hotbar,
-    inventory: &Inventory,
+    main_inventory: &mut MainInventory,
     personal_crafting_grid: &mut [[Option<ItemStack>; 2]; 2],
     ui_cursor_stack: &mut Option<ItemStack>,
 ) -> (bool, Option<ItemStack>) {
@@ -6242,8 +6658,15 @@ fn render_inventory(
             for row in 0..3 {
                 ui.horizontal(|ui| {
                     for col in 0..9 {
-                        let slot_idx = 9 + row * 9 + col; // Slots 9-35 are main inventory
-                        render_inventory_slot_world(ui, inventory.get(slot_idx), false);
+                        let slot_idx = row * 9 + col;
+                        render_core_slot_interactive_shift_moves_to_hotbar(
+                            ui,
+                            &mut main_inventory.slots[slot_idx],
+                            ui_cursor_stack,
+                            hotbar,
+                            36.0,
+                            false,
+                        );
                     }
                 });
             }
@@ -6307,7 +6730,7 @@ fn render_inventory(
                         let response = render_crafting_output_slot_interactive(
                             ui,
                             Some(&result_stack),
-                            "Click to craft\nShift-click: craft all to hotbar",
+                            "Click to craft\nShift-click: craft all to inventory",
                         );
                         let clicked = response.clicked_by(egui::PointerButton::Primary)
                             || response.clicked_by(egui::PointerButton::Secondary);
@@ -6331,7 +6754,10 @@ fn render_inventory(
                                     let total = recipe.output_count.saturating_mul(crafts);
                                     let output_stack = ItemStack::new(recipe.output, total);
                                     if let Some(remainder) = hotbar.add_stack(output_stack) {
-                                        spill_item = Some(remainder);
+                                        if let Some(remainder) = main_inventory.add_stack(remainder)
+                                        {
+                                            spill_item = Some(remainder);
+                                        }
                                     }
                                 }
                             } else if cursor_can_accept_full_stack(ui_cursor_stack, &result_stack)
@@ -6362,10 +6788,11 @@ fn render_inventory(
             ui.horizontal(|ui| {
                 for i in 0..9 {
                     let is_selected = i == hotbar.selected;
-                    render_core_slot_interactive(
+                    render_core_slot_interactive_shift_moves_to_main_inventory(
                         ui,
                         &mut hotbar.slots[i],
                         ui_cursor_stack,
+                        main_inventory,
                         36.0,
                         is_selected,
                     );
@@ -6391,6 +6818,162 @@ enum UiSlotClick {
 
 fn stacks_match_for_merge(a: &ItemStack, b: &ItemStack) -> bool {
     a.item_type == b.item_type && a.durability == b.durability && a.enchantments == b.enchantments
+}
+
+const INVENTORY_STACK_METADATA_VERSION_V1: u8 = 1;
+const INVENTORY_STACK_METADATA_FLAG_DURABILITY: u8 = 1 << 0;
+const INVENTORY_STACK_METADATA_FLAG_ENCHANTMENTS: u8 = 1 << 1;
+
+fn enchantment_type_to_id(enchantment_type: EnchantmentType) -> u8 {
+    match enchantment_type {
+        EnchantmentType::Efficiency => 1,
+        EnchantmentType::SilkTouch => 2,
+        EnchantmentType::Fortune => 3,
+        EnchantmentType::Sharpness => 4,
+        EnchantmentType::Knockback => 5,
+        EnchantmentType::FireAspect => 6,
+        EnchantmentType::Protection => 7,
+        EnchantmentType::FireProtection => 8,
+        EnchantmentType::BlastProtection => 9,
+        EnchantmentType::ProjectileProtection => 10,
+        EnchantmentType::Unbreaking => 11,
+        EnchantmentType::Mending => 12,
+    }
+}
+
+fn enchantment_type_from_id(id: u8) -> Option<EnchantmentType> {
+    match id {
+        1 => Some(EnchantmentType::Efficiency),
+        2 => Some(EnchantmentType::SilkTouch),
+        3 => Some(EnchantmentType::Fortune),
+        4 => Some(EnchantmentType::Sharpness),
+        5 => Some(EnchantmentType::Knockback),
+        6 => Some(EnchantmentType::FireAspect),
+        7 => Some(EnchantmentType::Protection),
+        8 => Some(EnchantmentType::FireProtection),
+        9 => Some(EnchantmentType::BlastProtection),
+        10 => Some(EnchantmentType::ProjectileProtection),
+        11 => Some(EnchantmentType::Unbreaking),
+        12 => Some(EnchantmentType::Mending),
+        _ => None,
+    }
+}
+
+fn encode_inventory_stack_metadata(stack: &ItemStack) -> Option<Vec<u8>> {
+    let durability = stack.durability.and_then(|current| {
+        let max = stack.max_durability()?;
+        if current < max {
+            Some(current)
+        } else {
+            None
+        }
+    });
+    let enchantments = stack
+        .enchantments
+        .as_ref()
+        .filter(|enchants| !enchants.is_empty());
+
+    if durability.is_none() && enchantments.is_none() {
+        return None;
+    }
+
+    let mut bytes = Vec::with_capacity(2 + 4 + 1 + 2 * enchantments.map_or(0, |v| v.len()));
+    bytes.push(INVENTORY_STACK_METADATA_VERSION_V1);
+
+    let mut flags = 0u8;
+    if durability.is_some() {
+        flags |= INVENTORY_STACK_METADATA_FLAG_DURABILITY;
+    }
+    if enchantments.is_some() {
+        flags |= INVENTORY_STACK_METADATA_FLAG_ENCHANTMENTS;
+    }
+    bytes.push(flags);
+
+    if let Some(durability) = durability {
+        bytes.extend_from_slice(&durability.to_le_bytes());
+    }
+
+    if let Some(enchantments) = enchantments {
+        let count = u8::try_from(enchantments.len()).unwrap_or(u8::MAX);
+        bytes.push(count);
+        for enchantment in enchantments.iter().take(count as usize) {
+            bytes.push(enchantment_type_to_id(enchantment.enchantment_type));
+            bytes.push(enchantment.level);
+        }
+    }
+
+    Some(bytes)
+}
+
+fn decode_inventory_stack_metadata(
+    metadata: &[u8],
+) -> Option<(Option<u32>, Option<Vec<Enchantment>>)> {
+    if metadata.len() < 2 {
+        return None;
+    }
+
+    let version = metadata[0];
+    if version != INVENTORY_STACK_METADATA_VERSION_V1 {
+        return None;
+    }
+
+    let flags = metadata[1];
+    let mut offset = 2usize;
+
+    let durability = if flags & INVENTORY_STACK_METADATA_FLAG_DURABILITY != 0 {
+        let end = offset.checked_add(4)?;
+        if end > metadata.len() {
+            return None;
+        }
+        let durability = u32::from_le_bytes(metadata[offset..end].try_into().ok()?);
+        offset = end;
+        Some(durability)
+    } else {
+        None
+    };
+
+    let enchantments = if flags & INVENTORY_STACK_METADATA_FLAG_ENCHANTMENTS != 0 {
+        let count = *metadata.get(offset)? as usize;
+        offset = offset.checked_add(1)?;
+        let end = offset.checked_add(count.checked_mul(2)?)?;
+        if end > metadata.len() {
+            return None;
+        }
+
+        let mut enchants = Vec::with_capacity(count);
+        for _ in 0..count {
+            let type_id = metadata.get(offset).copied()?;
+            let level = metadata.get(offset + 1).copied()?;
+            offset += 2;
+
+            let enchantment_type = enchantment_type_from_id(type_id)?;
+            enchants.push(Enchantment::new(enchantment_type, level));
+        }
+
+        Some(enchants)
+    } else {
+        None
+    };
+
+    Some((durability, enchantments))
+}
+
+fn apply_inventory_stack_metadata(stack: &mut ItemStack, metadata: &[u8]) {
+    let Some((durability, enchantments)) = decode_inventory_stack_metadata(metadata) else {
+        return;
+    };
+
+    if let Some(durability) = durability {
+        if let Some(max) = stack.max_durability() {
+            stack.durability = Some(durability.min(max));
+        }
+    }
+
+    if let Some(enchantments) = enchantments {
+        if !enchantments.is_empty() {
+            stack.enchantments = Some(enchantments);
+        }
+    }
 }
 
 fn apply_slot_click(
@@ -6666,53 +7249,36 @@ fn render_core_slot_interactive_shift_moves_to_hotbar(
     apply_slot_click(slot, cursor, click);
 }
 
-/// Render a single inventory slot with world::ItemStack
-fn render_inventory_slot_world(
+fn render_core_slot_interactive_shift_moves_to_main_inventory(
     ui: &mut egui::Ui,
-    item: Option<&mdminecraft_world::ItemStack>,
+    slot: &mut Option<ItemStack>,
+    cursor: &mut Option<ItemStack>,
+    main_inventory: &mut MainInventory,
+    size: f32,
     is_selected: bool,
 ) {
-    let frame = if is_selected {
-        egui::Frame::none()
-            .fill(egui::Color32::from_rgba_unmultiplied(80, 80, 80, 200))
-            .stroke(egui::Stroke::new(2.0, egui::Color32::WHITE))
-            .inner_margin(4.0)
+    let response = render_core_slot_visual(ui, slot, size, is_selected);
+    let click = if response.clicked_by(egui::PointerButton::Primary) {
+        Some(UiSlotClick::Primary)
+    } else if response.clicked_by(egui::PointerButton::Secondary) {
+        Some(UiSlotClick::Secondary)
     } else {
-        egui::Frame::none()
-            .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 40, 180))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
-            .inner_margin(4.0)
+        None
     };
 
-    let inner = frame.show(ui, |ui| {
-        ui.set_min_size(egui::vec2(36.0, 36.0));
-        ui.set_max_size(egui::vec2(36.0, 36.0));
+    let Some(click) = click else {
+        return;
+    };
 
-        if let Some(stack) = item {
-            ui.vertical_centered(|ui| {
-                // Show item ID
-                ui.label(
-                    egui::RichText::new(format!("#{}", stack.item_id))
-                        .size(9.0)
-                        .color(egui::Color32::WHITE),
-                );
-
-                // Count
-                if stack.count > 1 {
-                    ui.label(
-                        egui::RichText::new(format!("{}", stack.count))
-                            .size(10.0)
-                            .color(egui::Color32::YELLOW),
-                    );
-                }
-            });
+    let shift = ui.input(|i| i.modifiers.shift);
+    if shift {
+        if let Some(stack) = slot.take() {
+            *slot = main_inventory.add_stack(stack);
         }
-    });
-
-    if let Some(stack) = item {
-        let tooltip = format!("Item #{}\nCount: {}", stack.item_id, stack.count);
-        let _ = inner.response.on_hover_text(tooltip);
+        return;
     }
+
+    apply_slot_click(slot, cursor, click);
 }
 
 #[derive(Debug, Clone)]
@@ -8151,7 +8717,12 @@ fn render_enchanting_lapis_slot(
 
 /// Render the brewing stand UI
 /// Returns true if close was requested
-fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> bool {
+fn render_brewing_stand(
+    ctx: &egui::Context,
+    stand: &mut BrewingStandState,
+    hotbar: &mut Hotbar,
+    ui_cursor_stack: &mut Option<ItemStack>,
+) -> bool {
     let mut close_clicked = false;
 
     // Semi-transparent dark overlay
@@ -8172,7 +8743,7 @@ fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> b
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.set_min_width(350.0);
+            ui.set_min_width(420.0);
 
             // Close button
             ui.horizontal(|ui| {
@@ -8186,40 +8757,86 @@ fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> b
 
             ui.separator();
 
-            // Fuel and status info
             ui.horizontal(|ui| {
-                // Fuel indicator
-                let fuel_color = if stand.fuel > 0 {
-                    egui::Color32::from_rgb(255, 200, 50)
-                } else {
-                    egui::Color32::DARK_GRAY
-                };
+                ui.label("Cursor:");
+                render_crafting_slot(ui, ui_cursor_stack.as_ref());
+                ui.add_space(8.0);
                 ui.label(
-                    egui::RichText::new(format!("Fuel: {}", stand.fuel))
-                        .size(14.0)
-                        .color(fuel_color),
+                    egui::RichText::new("Left: pick/place/swap, Right: split/place one.")
+                        .size(11.0)
+                        .color(egui::Color32::GRAY),
                 );
-
-                ui.add_space(20.0);
-
-                // Brewing status
-                if stand.is_brewing {
-                    ui.label(
-                        egui::RichText::new("Brewing...")
-                            .size(14.0)
-                            .color(egui::Color32::from_rgb(100, 200, 255)),
-                    );
-                }
             });
 
             ui.add_space(10.0);
 
             // Main brewing layout
             ui.horizontal(|ui| {
-                // Left side: Ingredient slot
+                // Left side: Fuel + Ingredient
                 ui.vertical(|ui| {
+                    ui.label("Fuel (Blaze Powder)");
+                    let mut fuel_stack = if stand.fuel > 0 {
+                        Some(ItemStack::new(
+                            ItemType::Item(CORE_ITEM_BLAZE_POWDER),
+                            stand.fuel,
+                        ))
+                    } else {
+                        None
+                    };
+                    let response = render_core_slot_visual(ui, &fuel_stack, 48.0, false)
+                        .on_hover_text("Fuel: Blaze Powder");
+                    let click = if response.clicked_by(egui::PointerButton::Primary) {
+                        Some(UiSlotClick::Primary)
+                    } else if response.clicked_by(egui::PointerButton::Secondary) {
+                        Some(UiSlotClick::Secondary)
+                    } else {
+                        None
+                    };
+                    if let Some(click) = click {
+                        if ui_cursor_stack.as_ref().is_some_and(|stack| {
+                            stack.item_type != ItemType::Item(CORE_ITEM_BLAZE_POWDER)
+                        }) {
+                            // Fuel slot only accepts blaze powder.
+                        } else {
+                            apply_slot_click(&mut fuel_stack, ui_cursor_stack, click);
+                        }
+                    }
+                    stand.fuel = fuel_stack.as_ref().map(|s| s.count).unwrap_or(0);
+
+                    ui.add_space(10.0);
+
                     ui.label("Ingredient");
-                    render_brewing_ingredient_slot(ui, stand.ingredient.as_ref());
+                    let mut ingredient_stack =
+                        stand.ingredient.and_then(|(ingredient_id, count)| {
+                            brew_ingredient_id_to_core_item_type(ingredient_id)
+                                .map(|item_type| ItemStack::new(item_type, count))
+                        });
+                    let ingredient_hover = stand
+                        .ingredient
+                        .map(|(id, count)| format!("{} x{}", brew_ingredient_label(id), count))
+                        .unwrap_or_else(|| "Empty".to_string());
+                    let response = render_core_slot_visual(ui, &ingredient_stack, 48.0, false)
+                        .on_hover_text(ingredient_hover);
+                    let click = if response.clicked_by(egui::PointerButton::Primary) {
+                        Some(UiSlotClick::Primary)
+                    } else if response.clicked_by(egui::PointerButton::Secondary) {
+                        Some(UiSlotClick::Secondary)
+                    } else {
+                        None
+                    };
+                    if let Some(click) = click {
+                        if ui_cursor_stack.as_ref().is_some_and(|stack| {
+                            core_item_type_to_brew_ingredient_id(stack.item_type).is_none()
+                        }) {
+                            // Ingredient slot only accepts valid brewing ingredients.
+                        } else {
+                            apply_slot_click(&mut ingredient_stack, ui_cursor_stack, click);
+                        }
+                    }
+                    stand.ingredient = ingredient_stack.and_then(|stack| {
+                        core_item_type_to_brew_ingredient_id(stack.item_type)
+                            .map(|ingredient_id| (ingredient_id, stack.count))
+                    });
                 });
 
                 ui.add_space(20.0);
@@ -8251,8 +8868,31 @@ fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> b
                 ui.vertical(|ui| {
                     ui.label("Bottles");
                     ui.horizontal(|ui| {
-                        for (i, bottle) in stand.bottles.iter().enumerate() {
-                            render_brewing_bottle_slot(ui, bottle.as_ref(), i);
+                        for (i, bottle) in stand.bottles.iter_mut().enumerate() {
+                            let before = *bottle;
+                            let mut bottle_stack = (*bottle).map(bottle_to_core_item_stack);
+                            let response = render_core_slot_visual(ui, &bottle_stack, 52.0, false);
+                            let click = if response.clicked_by(egui::PointerButton::Primary) {
+                                Some(UiSlotClick::Primary)
+                            } else if response.clicked_by(egui::PointerButton::Secondary) {
+                                Some(UiSlotClick::Secondary)
+                            } else {
+                                None
+                            };
+                            if let Some(click) = click {
+                                apply_brewing_bottle_slot_click(
+                                    &mut bottle_stack,
+                                    ui_cursor_stack,
+                                    click,
+                                );
+                            }
+
+                            let mapped = bottle_stack.as_ref().and_then(core_item_stack_to_bottle);
+                            *bottle = if mapped.is_some() || bottle_stack.is_none() {
+                                mapped
+                            } else {
+                                before
+                            };
                             if i < 2 {
                                 ui.add_space(4.0);
                             }
@@ -8286,26 +8926,52 @@ fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> b
                     }),
             );
 
-            ui.add_space(5.0);
+            ui.add_space(10.0);
+            ui.separator();
 
-            // Quick-add buttons (for testing)
+            ui.label(
+                egui::RichText::new("Hotbar")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
             ui.horizontal(|ui| {
-                if ui.button("+ Water Bottle").clicked() {
-                    // Add water bottle to first empty slot
-                    for bottle in &mut stand.bottles {
-                        if bottle.is_none() {
-                            *bottle = Some(PotionType::Water);
-                            break;
-                        }
-                    }
-                }
-                if ui.button("+ Nether Wart").clicked() {
-                    stand.add_ingredient(102, 1); // Nether wart item ID
-                }
-                if ui.button("+ Fuel").clicked() {
-                    stand.add_fuel(1);
+                for i in 0..9 {
+                    let is_selected = i == hotbar.selected;
+                    render_core_slot_interactive(
+                        ui,
+                        &mut hotbar.slots[i],
+                        ui_cursor_stack,
+                        36.0,
+                        is_selected,
+                    );
                 }
             });
+
+            if std::env::var("MDM_DEBUG_BREWING_QUICK_ADD").as_deref() == Ok("1") {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.label(
+                    egui::RichText::new("Debug: quick add")
+                        .size(12.0)
+                        .color(egui::Color32::DARK_GRAY),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("+ Water Bottle").clicked() {
+                        for bottle in &mut stand.bottles {
+                            if bottle.is_none() {
+                                *bottle = Some(PotionType::Water);
+                                break;
+                            }
+                        }
+                    }
+                    if ui.button("+ Nether Wart").clicked() {
+                        stand.add_ingredient(item_ids::NETHER_WART, 1);
+                    }
+                    if ui.button("+ Fuel").clicked() {
+                        stand.add_fuel(1);
+                    }
+                });
+            }
 
             ui.label(
                 egui::RichText::new("Escape or X to close")
@@ -8317,119 +8983,65 @@ fn render_brewing_stand(ctx: &egui::Context, stand: &mut BrewingStandState) -> b
     close_clicked
 }
 
-/// Render a brewing ingredient slot
-fn render_brewing_ingredient_slot(ui: &mut egui::Ui, ingredient: Option<&(u16, u32)>) {
-    let frame = egui::Frame::none()
-        .fill(egui::Color32::from_rgba_unmultiplied(60, 60, 60, 200))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
-        .inner_margin(4.0);
+fn apply_brewing_bottle_slot_click(
+    slot: &mut Option<ItemStack>,
+    cursor: &mut Option<ItemStack>,
+    _click: UiSlotClick,
+) {
+    let is_bottle = |stack: &ItemStack| -> bool { core_item_stack_to_bottle(stack).is_some() };
 
-    frame.show(ui, |ui| {
-        ui.set_min_size(egui::vec2(48.0, 48.0));
-        ui.set_max_size(egui::vec2(48.0, 48.0));
-
-        if let Some((item_id, count)) = ingredient {
-            ui.vertical_centered(|ui| {
-                // Item name based on ID
-                let name = match *item_id {
-                    102 => "Nether Wart",
-                    103 => "Blaze Powder",
-                    104 => "Ghast Tear",
-                    105 => "Magma Cream",
-                    106 => "Spider Eye",
-                    107 => "Fermented Eye",
-                    108 => "Glistering Melon",
-                    109 => "Golden Carrot",
-                    110 => "Pufferfish",
-                    111 => "Rabbit Foot",
-                    112 => "Phantom Membrane",
-                    113 => "Redstone",
-                    114 => "Glowstone Dust",
-                    115 => "Gunpowder",
-                    116 => "Dragon Breath",
-                    117 => "Sugar",
-                    _ => "Unknown",
-                };
-                ui.label(
-                    egui::RichText::new(name)
-                        .size(10.0)
-                        .color(egui::Color32::WHITE),
-                );
-                ui.label(
-                    egui::RichText::new(format!("x{}", count))
-                        .size(10.0)
-                        .color(egui::Color32::YELLOW),
-                );
-            });
-        } else {
-            ui.centered_and_justified(|ui| {
-                ui.label(
-                    egui::RichText::new("-")
-                        .size(14.0)
-                        .color(egui::Color32::DARK_GRAY),
-                );
-            });
-        }
-    });
-}
-
-/// Render a brewing bottle slot
-fn render_brewing_bottle_slot(ui: &mut egui::Ui, potion: Option<&PotionType>, _slot_idx: usize) {
-    let frame = egui::Frame::none()
-        .fill(egui::Color32::from_rgba_unmultiplied(40, 40, 60, 200))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 120)))
-        .inner_margin(4.0);
-
-    frame.show(ui, |ui| {
-        ui.set_min_size(egui::vec2(52.0, 52.0));
-        ui.set_max_size(egui::vec2(52.0, 52.0));
-
-        if let Some(potion_type) = potion {
-            ui.vertical_centered(|ui| {
-                // Potion color based on type
-                let (name, color) = potion_type_display(*potion_type);
-                ui.label(egui::RichText::new("🧪").size(18.0).color(color));
-                ui.label(
-                    egui::RichText::new(name)
-                        .size(9.0)
-                        .color(egui::Color32::WHITE),
-                );
-            });
-        } else {
-            ui.centered_and_justified(|ui| {
-                ui.label(
-                    egui::RichText::new("🫙")
-                        .size(18.0)
-                        .color(egui::Color32::DARK_GRAY),
-                );
-            });
-        }
-    });
-}
-
-/// Get display name and color for a potion type
-fn potion_type_display(potion: PotionType) -> (&'static str, egui::Color32) {
-    match potion {
-        PotionType::Water => ("Water", egui::Color32::from_rgb(64, 64, 255)),
-        PotionType::Awkward => ("Awkward", egui::Color32::from_rgb(128, 128, 200)),
-        PotionType::Mundane => ("Mundane", egui::Color32::from_rgb(128, 128, 128)),
-        PotionType::Thick => ("Thick", egui::Color32::from_rgb(100, 100, 150)),
-        PotionType::NightVision => ("Night Vis", egui::Color32::from_rgb(30, 30, 160)),
-        PotionType::Invisibility => ("Invis", egui::Color32::from_rgb(200, 200, 200)),
-        PotionType::Leaping => ("Leaping", egui::Color32::from_rgb(80, 200, 80)),
-        PotionType::FireResistance => ("Fire Res", egui::Color32::from_rgb(255, 128, 0)),
-        PotionType::Swiftness => ("Speed", egui::Color32::from_rgb(100, 200, 255)),
-        PotionType::Slowness => ("Slow", egui::Color32::from_rgb(100, 100, 140)),
-        PotionType::WaterBreathing => ("Water Br", egui::Color32::from_rgb(50, 150, 200)),
-        PotionType::Healing => ("Healing", egui::Color32::from_rgb(255, 50, 50)),
-        PotionType::Harming => ("Harming", egui::Color32::from_rgb(100, 0, 0)),
-        PotionType::Poison => ("Poison", egui::Color32::from_rgb(80, 150, 50)),
-        PotionType::Regeneration => ("Regen", egui::Color32::from_rgb(200, 100, 200)),
-        PotionType::Strength => ("Strength", egui::Color32::from_rgb(150, 50, 50)),
-        PotionType::Weakness => ("Weakness", egui::Color32::from_rgb(100, 100, 100)),
-        PotionType::Luck => ("Luck", egui::Color32::from_rgb(50, 200, 50)),
-        PotionType::SlowFalling => ("Slow Fall", egui::Color32::from_rgb(200, 200, 255)),
+    if cursor.is_none() {
+        *cursor = slot.take();
+        return;
     }
+
+    let Some(cursor_stack) = cursor.as_mut() else {
+        return;
+    };
+
+    if !is_bottle(cursor_stack) {
+        return;
+    }
+
+    if slot.is_none() {
+        // Place one water bottle out of a stack; potions already have max stack size 1.
+        if cursor_stack.item_type == ItemType::Item(CORE_ITEM_WATER_BOTTLE)
+            && cursor_stack.count > 1
+        {
+            let mut placed = cursor_stack.clone();
+            placed.count = 1;
+            cursor_stack.count -= 1;
+            if cursor_stack.count == 0 {
+                *cursor = None;
+            }
+            *slot = Some(placed);
+            return;
+        }
+
+        *slot = cursor.take();
+        return;
+    }
+
+    // Merge extra water bottles into the cursor stack when possible.
+    if let Some(slot_stack) = slot.as_ref() {
+        if slot_stack.item_type == ItemType::Item(CORE_ITEM_WATER_BOTTLE)
+            && cursor_stack.item_type == ItemType::Item(CORE_ITEM_WATER_BOTTLE)
+        {
+            let max = cursor_stack.max_stack_size();
+            if cursor_stack.count < max {
+                cursor_stack.count += 1;
+                *slot = None;
+            }
+            return;
+        }
+    }
+
+    // Only allow swapping if the cursor holds a single bottle.
+    if cursor_stack.count != 1 {
+        return;
+    }
+
+    std::mem::swap(slot, cursor);
 }
 
 /// Convert an ItemType to DroppedItemType for armor pieces
@@ -8462,13 +9074,14 @@ fn item_type_to_armor_dropped(item_type: ItemType) -> Option<DroppedItemType> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_furnace_slot_click, apply_slot_click, check_crafting_recipe,
-        consume_crafting_inputs_3x3, core_item_to_enchanting_id, crafting_max_crafts_2x2,
-        crafting_max_crafts_3x3, cursor_can_accept_full_stack, frames_to_complete,
-        interactive_blocks, match_crafting_recipe, try_add_stack_to_cursor, DroppedItemType,
-        FurnaceSlotKind, GameWorld, ItemStack, ItemType, PlayerHealth, ToolMaterial, ToolType,
-        UiSlotClick, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG,
-        BLOCK_OAK_PLANKS,
+        apply_brewing_bottle_slot_click, apply_furnace_slot_click, apply_slot_click,
+        check_crafting_recipe, consume_crafting_inputs_3x3, core_item_to_enchanting_id,
+        crafting_max_crafts_2x2, crafting_max_crafts_3x3, cursor_can_accept_full_stack,
+        frames_to_complete, interactive_blocks, match_crafting_recipe, potion_ids,
+        try_add_stack_to_cursor, DroppedItemType, FurnaceSlotKind, GameWorld, ItemStack, ItemType,
+        PlayerHealth, ToolMaterial, ToolType, UiSlotClick, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
+        BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, CORE_ITEM_BLAZE_POWDER,
+        CORE_ITEM_NETHER_WART, CORE_ITEM_WATER_BOTTLE,
     };
 
     #[test]
@@ -8861,6 +9474,132 @@ mod tests {
         assert_eq!(
             GameWorld::convert_core_item_type_to_dropped(ItemType::Item(15)),
             Some(DroppedItemType::LapisLazuli)
+        );
+    }
+
+    #[test]
+    fn tools_convert_between_dropped_and_core_item_types() {
+        let tool = ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron);
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(tool),
+            Some(DroppedItemType::IronPickaxe)
+        );
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::IronPickaxe),
+            Some(tool)
+        );
+
+        let tool = ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood);
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(tool),
+            Some(DroppedItemType::WoodenShovel)
+        );
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::WoodenShovel),
+            Some(tool)
+        );
+    }
+
+    #[test]
+    fn brewing_items_convert_between_dropped_and_core_item_types() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::NetherWart),
+            Some(ItemType::Item(CORE_ITEM_NETHER_WART))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_NETHER_WART)),
+            Some(DroppedItemType::NetherWart)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::BlazePowder),
+            Some(ItemType::Item(CORE_ITEM_BLAZE_POWDER))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_BLAZE_POWDER)),
+            Some(DroppedItemType::BlazePowder)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::PotionAwkward),
+            Some(ItemType::Potion(potion_ids::AWKWARD))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Potion(potion_ids::AWKWARD)),
+            Some(DroppedItemType::PotionAwkward)
+        );
+    }
+
+    #[test]
+    fn main_inventory_persists_via_world_inventory_roundtrip() {
+        let mut main = super::MainInventory::new();
+        main.slots[0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 64));
+
+        let mut tool = ItemStack::new(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron), 1);
+        tool.durability = Some(7);
+        tool.enchantments = Some(vec![
+            mdminecraft_core::Enchantment::new(mdminecraft_core::EnchantmentType::Efficiency, 3),
+            mdminecraft_core::Enchantment::new(mdminecraft_core::EnchantmentType::Unbreaking, 2),
+        ]);
+        main.slots[1] = Some(tool.clone());
+
+        let bread = ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 3);
+        main.slots[2] = Some(bread.clone());
+
+        let persisted = GameWorld::persisted_inventory_from_main_inventory(&main);
+        let loaded = GameWorld::main_inventory_from_persisted_inventory(persisted);
+
+        assert_eq!(loaded.slots[0], main.slots[0]);
+        assert_eq!(loaded.slots[1], main.slots[1]);
+        assert_eq!(loaded.slots[2], main.slots[2]);
+    }
+
+    #[test]
+    fn brewing_bottle_slot_places_only_one_water_bottle_from_stack() {
+        let mut slot = None;
+        let mut cursor = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 5));
+        apply_brewing_bottle_slot_click(&mut slot, &mut cursor, UiSlotClick::Primary);
+        assert_eq!(
+            slot,
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1))
+        );
+        assert_eq!(
+            cursor,
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 4))
+        );
+
+        let mut slot = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1));
+        let mut cursor = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 3));
+        apply_brewing_bottle_slot_click(&mut slot, &mut cursor, UiSlotClick::Primary);
+        assert!(slot.is_none());
+        assert_eq!(
+            cursor,
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 4))
+        );
+
+        let mut slot = Some(ItemStack::new(ItemType::Potion(potion_ids::AWKWARD), 1));
+        let mut cursor = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1));
+        apply_brewing_bottle_slot_click(&mut slot, &mut cursor, UiSlotClick::Primary);
+        assert_eq!(
+            slot,
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1))
+        );
+        assert_eq!(
+            cursor,
+            Some(ItemStack::new(ItemType::Potion(potion_ids::AWKWARD), 1))
+        );
+
+        // Cursor stacks with >1 bottles can't be swapped into an occupied bottle slot.
+        let mut slot = Some(ItemStack::new(ItemType::Potion(potion_ids::AWKWARD), 1));
+        let mut cursor = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 2));
+        apply_brewing_bottle_slot_click(&mut slot, &mut cursor, UiSlotClick::Primary);
+        assert_eq!(
+            slot,
+            Some(ItemStack::new(ItemType::Potion(potion_ids::AWKWARD), 1))
+        );
+        assert_eq!(
+            cursor,
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 2))
         );
     }
 
