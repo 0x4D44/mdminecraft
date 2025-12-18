@@ -102,6 +102,94 @@ impl Facing {
     }
 }
 
+const WALL_MOUNT_BIT: BlockState = 0x20;
+const WALL_MOUNT_FACING_SHIFT: u32 = 6;
+const WALL_MOUNT_FACING_MASK: BlockState = 0x03u16 << WALL_MOUNT_FACING_SHIFT;
+const CEILING_MOUNT_BIT: BlockState = 0x100;
+
+/// Check if a block is wall-mounted.
+///
+/// When wall-mounted, the facing bits indicate the direction the block points *away* from the wall.
+pub fn is_wall_mounted(state: BlockState) -> bool {
+    (state & WALL_MOUNT_BIT) != 0
+}
+
+/// Get the facing direction for a wall-mounted block.
+///
+/// Note: only meaningful when [`is_wall_mounted`] is true.
+pub fn wall_mounted_facing(state: BlockState) -> Facing {
+    Facing::from_state((state & WALL_MOUNT_FACING_MASK) >> WALL_MOUNT_FACING_SHIFT)
+}
+
+/// Set whether a block is wall-mounted.
+///
+/// When setting `wall = true`, clears the ceiling-mount bit to keep the mount mode unambiguous.
+pub fn set_wall_mounted(state: BlockState, wall: bool) -> BlockState {
+    if wall {
+        (state | WALL_MOUNT_BIT) & !CEILING_MOUNT_BIT
+    } else {
+        state & !WALL_MOUNT_BIT
+    }
+}
+
+/// Set the facing direction for a wall-mounted block.
+pub fn set_wall_mounted_facing(state: BlockState, facing: Facing) -> BlockState {
+    (state & !WALL_MOUNT_FACING_MASK) | ((facing.to_state() & 0x03) << WALL_MOUNT_FACING_SHIFT)
+}
+
+/// Build a wall-mounted state for the given facing.
+pub fn wall_mount_state(facing: Facing) -> BlockState {
+    set_wall_mounted_facing(set_wall_mounted(0, true), facing)
+}
+
+/// Check if a block is ceiling-mounted.
+pub fn is_ceiling_mounted(state: BlockState) -> bool {
+    (state & CEILING_MOUNT_BIT) != 0
+}
+
+/// Set whether a block is ceiling-mounted.
+///
+/// When setting `ceiling = true`, clears the wall-mount bit to keep the mount mode unambiguous.
+pub fn set_ceiling_mounted(state: BlockState, ceiling: bool) -> BlockState {
+    if ceiling {
+        (state | CEILING_MOUNT_BIT) & !WALL_MOUNT_BIT
+    } else {
+        state & !CEILING_MOUNT_BIT
+    }
+}
+
+/// Build a ceiling-mounted state.
+pub fn ceiling_mount_state() -> BlockState {
+    set_ceiling_mounted(0, true)
+}
+
+/// Check if a torch/redstone torch is wall-mounted.
+pub fn is_torch_wall(state: BlockState) -> bool {
+    is_wall_mounted(state)
+}
+
+/// Get the facing direction for a torch/redstone torch.
+///
+/// Note: only meaningful when [`is_torch_wall`] is true.
+pub fn torch_facing(state: BlockState) -> Facing {
+    wall_mounted_facing(state)
+}
+
+/// Set whether a torch/redstone torch is wall-mounted.
+pub fn set_torch_wall(state: BlockState, wall: bool) -> BlockState {
+    set_wall_mounted(state, wall)
+}
+
+/// Set the facing direction for a torch/redstone torch.
+pub fn set_torch_facing(state: BlockState, facing: Facing) -> BlockState {
+    set_wall_mounted_facing(state, facing)
+}
+
+/// Build a wall-mounted torch state for the given facing.
+pub fn torch_wall_state(facing: Facing) -> BlockState {
+    wall_mount_state(facing)
+}
+
 /// Slab position (top or bottom half of block)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlabPosition {

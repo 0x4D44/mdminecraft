@@ -1009,6 +1009,8 @@ fn mesh_ladders(chunk: &Chunk, builder: &mut MeshBuilder) {
 fn mesh_torches(chunk: &Chunk, builder: &mut MeshBuilder) {
     let half_width = 1.0 / 16.0;
     let height = 10.0 / 16.0;
+    let wall_offset = 5.0 / 16.0;
+    let wall_base = 4.0 / 16.0;
 
     for y in 0..CHUNK_SIZE_Y {
         for z in 0..CHUNK_SIZE_Z {
@@ -1026,17 +1028,32 @@ fn mesh_torches(chunk: &Chunk, builder: &mut MeshBuilder) {
                 let base_y = y as f32;
                 let base_z = z as f32;
 
-                emit_box(
-                    builder,
-                    voxel.id,
-                    [base_x + 0.5 - half_width, base_y, base_z + 0.5 - half_width],
-                    [
-                        base_x + 0.5 + half_width,
-                        base_y + height,
-                        base_z + 0.5 + half_width,
-                    ],
-                    light,
-                );
+                if mdminecraft_world::is_torch_wall(voxel.state) {
+                    let facing = mdminecraft_world::torch_facing(voxel.state);
+                    let (dx, dz) = facing.offset();
+                    let center_x = base_x + 0.5 - dx as f32 * wall_offset;
+                    let center_z = base_z + 0.5 - dz as f32 * wall_offset;
+                    let min_y = base_y + wall_base;
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [center_x - half_width, min_y, center_z - half_width],
+                        [center_x + half_width, min_y + height, center_z + half_width],
+                        light,
+                    );
+                } else {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + 0.5 - half_width, base_y, base_z + 0.5 - half_width],
+                        [
+                            base_x + 0.5 + half_width,
+                            base_y + height,
+                            base_z + 0.5 + half_width,
+                        ],
+                        light,
+                    );
+                }
             }
         }
     }
@@ -1259,8 +1276,8 @@ fn mesh_buttons(chunk: &Chunk, builder: &mut MeshBuilder) {
     let half = 3.0 / 16.0;
     let unpressed_depth = 2.0 / 16.0;
     let pressed_depth = 1.0 / 16.0;
-    let min_y = 6.0 / 16.0;
-    let max_y = 10.0 / 16.0;
+    let wall_min_y = 6.0 / 16.0;
+    let wall_max_y = 10.0 / 16.0;
 
     for y in 0..CHUNK_SIZE_Y {
         for z in 0..CHUNK_SIZE_Z {
@@ -1274,7 +1291,6 @@ fn mesh_buttons(chunk: &Chunk, builder: &mut MeshBuilder) {
                     continue;
                 }
 
-                // No orientation stored yet; render on the north face by default.
                 let pressed = mdminecraft_world::is_active(voxel.state);
                 let depth = if pressed {
                     pressed_depth
@@ -1287,13 +1303,51 @@ fn mesh_buttons(chunk: &Chunk, builder: &mut MeshBuilder) {
                 let base_y = y as f32;
                 let base_z = z as f32;
 
-                emit_box(
-                    builder,
-                    voxel.id,
-                    [base_x + 0.5 - half, base_y + min_y, base_z],
-                    [base_x + 0.5 + half, base_y + max_y, base_z + depth],
-                    light,
-                );
+                let (min, max) = if mdminecraft_world::is_wall_mounted(voxel.state) {
+                    let facing = mdminecraft_world::wall_mounted_facing(voxel.state);
+                    match facing {
+                        mdminecraft_world::Facing::North => (
+                            [
+                                base_x + 0.5 - half,
+                                base_y + wall_min_y,
+                                base_z + 1.0 - depth,
+                            ],
+                            [base_x + 0.5 + half, base_y + wall_max_y, base_z + 1.0],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [base_x + 0.5 - half, base_y + wall_min_y, base_z],
+                            [base_x + 0.5 + half, base_y + wall_max_y, base_z + depth],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [base_x, base_y + wall_min_y, base_z + 0.5 - half],
+                            [base_x + depth, base_y + wall_max_y, base_z + 0.5 + half],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [
+                                base_x + 1.0 - depth,
+                                base_y + wall_min_y,
+                                base_z + 0.5 - half,
+                            ],
+                            [base_x + 1.0, base_y + wall_max_y, base_z + 0.5 + half],
+                        ),
+                    }
+                } else if mdminecraft_world::is_ceiling_mounted(voxel.state) {
+                    (
+                        [
+                            base_x + 0.5 - half,
+                            base_y + 1.0 - depth,
+                            base_z + 0.5 - half,
+                        ],
+                        [base_x + 0.5 + half, base_y + 1.0, base_z + 0.5 + half],
+                    )
+                } else {
+                    (
+                        [base_x + 0.5 - half, base_y, base_z + 0.5 - half],
+                        [base_x + 0.5 + half, base_y + depth, base_z + 0.5 + half],
+                    )
+                };
+
+                emit_box(builder, voxel.id, min, max, light);
             }
         }
     }
@@ -1321,36 +1375,175 @@ fn mesh_levers(chunk: &Chunk, builder: &mut MeshBuilder) {
                 let base_y = y as f32;
                 let base_z = z as f32;
 
-                // Base plate.
-                emit_box(
-                    builder,
-                    voxel.id,
-                    [base_x + 0.5 - base_half, base_y, base_z + 0.5 - base_half],
-                    [
-                        base_x + 0.5 + base_half,
-                        base_y + base_height,
-                        base_z + 0.5 + base_half,
-                    ],
-                    light,
-                );
-
-                // Handle (simplified: offset to indicate active state).
                 let shift = if active { handle_shift } else { -handle_shift };
-                emit_box(
-                    builder,
-                    voxel.id,
-                    [
-                        base_x + 0.5 - handle_half + shift,
-                        base_y + base_height,
-                        base_z + 0.5 - handle_half,
-                    ],
-                    [
-                        base_x + 0.5 + handle_half + shift,
-                        base_y + base_height + handle_height,
-                        base_z + 0.5 + handle_half,
-                    ],
-                    light,
-                );
+
+                if mdminecraft_world::is_wall_mounted(voxel.state) {
+                    let facing = mdminecraft_world::wall_mounted_facing(voxel.state);
+
+                    // Base plate.
+                    let (base_min, base_max) = match facing {
+                        mdminecraft_world::Facing::North => (
+                            [
+                                base_x + 0.5 - base_half,
+                                base_y + 0.5 - base_half,
+                                base_z + 1.0 - base_height,
+                            ],
+                            [
+                                base_x + 0.5 + base_half,
+                                base_y + 0.5 + base_half,
+                                base_z + 1.0,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [base_x + 0.5 - base_half, base_y + 0.5 - base_half, base_z],
+                            [
+                                base_x + 0.5 + base_half,
+                                base_y + 0.5 + base_half,
+                                base_z + base_height,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [base_x, base_y + 0.5 - base_half, base_z + 0.5 - base_half],
+                            [
+                                base_x + base_height,
+                                base_y + 0.5 + base_half,
+                                base_z + 0.5 + base_half,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [
+                                base_x + 1.0 - base_height,
+                                base_y + 0.5 - base_half,
+                                base_z + 0.5 - base_half,
+                            ],
+                            [
+                                base_x + 1.0,
+                                base_y + 0.5 + base_half,
+                                base_z + 0.5 + base_half,
+                            ],
+                        ),
+                    };
+                    emit_box(builder, voxel.id, base_min, base_max, light);
+
+                    // Handle (simplified: protrudes from the wall; y-shift indicates active state).
+                    let (handle_min, handle_max) = match facing {
+                        mdminecraft_world::Facing::North => (
+                            [
+                                base_x + 0.5 - handle_half,
+                                base_y + 0.5 - handle_half + shift,
+                                base_z + 1.0 - base_height - handle_height,
+                            ],
+                            [
+                                base_x + 0.5 + handle_half,
+                                base_y + 0.5 + handle_half + shift,
+                                base_z + 1.0 - base_height,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            [
+                                base_x + 0.5 - handle_half,
+                                base_y + 0.5 - handle_half + shift,
+                                base_z + base_height,
+                            ],
+                            [
+                                base_x + 0.5 + handle_half,
+                                base_y + 0.5 + handle_half + shift,
+                                base_z + base_height + handle_height,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            [
+                                base_x + base_height,
+                                base_y + 0.5 - handle_half + shift,
+                                base_z + 0.5 - handle_half,
+                            ],
+                            [
+                                base_x + base_height + handle_height,
+                                base_y + 0.5 + handle_half + shift,
+                                base_z + 0.5 + handle_half,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            [
+                                base_x + 1.0 - base_height - handle_height,
+                                base_y + 0.5 - handle_half + shift,
+                                base_z + 0.5 - handle_half,
+                            ],
+                            [
+                                base_x + 1.0 - base_height,
+                                base_y + 0.5 + handle_half + shift,
+                                base_z + 0.5 + handle_half,
+                            ],
+                        ),
+                    };
+                    emit_box(builder, voxel.id, handle_min, handle_max, light);
+                } else if mdminecraft_world::is_ceiling_mounted(voxel.state) {
+                    // Base plate.
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [
+                            base_x + 0.5 - base_half,
+                            base_y + 1.0 - base_height,
+                            base_z + 0.5 - base_half,
+                        ],
+                        [
+                            base_x + 0.5 + base_half,
+                            base_y + 1.0,
+                            base_z + 0.5 + base_half,
+                        ],
+                        light,
+                    );
+
+                    // Handle (simplified: offset to indicate active state).
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [
+                            base_x + 0.5 - handle_half + shift,
+                            base_y + 1.0 - base_height - handle_height,
+                            base_z + 0.5 - handle_half,
+                        ],
+                        [
+                            base_x + 0.5 + handle_half + shift,
+                            base_y + 1.0 - base_height,
+                            base_z + 0.5 + handle_half,
+                        ],
+                        light,
+                    );
+                } else {
+                    // Floor-mounted lever (default).
+
+                    // Base plate.
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + 0.5 - base_half, base_y, base_z + 0.5 - base_half],
+                        [
+                            base_x + 0.5 + base_half,
+                            base_y + base_height,
+                            base_z + 0.5 + base_half,
+                        ],
+                        light,
+                    );
+
+                    // Handle (simplified: offset to indicate active state).
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [
+                            base_x + 0.5 - handle_half + shift,
+                            base_y + base_height,
+                            base_z + 0.5 - handle_half,
+                        ],
+                        [
+                            base_x + 0.5 + handle_half + shift,
+                            base_y + base_height + handle_height,
+                            base_z + 0.5 + handle_half,
+                        ],
+                        light,
+                    );
+                }
             }
         }
     }

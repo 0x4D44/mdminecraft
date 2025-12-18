@@ -186,6 +186,8 @@ pub struct FluidSimulator {
     current_tick: u64,
     /// Dirty chunks that need mesh rebuilding
     dirty_chunks: HashSet<ChunkPos>,
+    /// Dirty chunks that need block-light recomputation
+    dirty_light_chunks: HashSet<ChunkPos>,
 }
 
 impl FluidSimulator {
@@ -195,6 +197,7 @@ impl FluidSimulator {
             pending_updates: BTreeMap::new(),
             current_tick: 0,
             dirty_chunks: HashSet::new(),
+            dirty_light_chunks: HashSet::new(),
         }
     }
 
@@ -433,14 +436,28 @@ impl FluidSimulator {
 
         let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
         if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+            let old = chunk.voxel(local_x, local_y, local_z);
+            let old_emissive = matches!(old.id, BLOCK_LAVA | BLOCK_LAVA_FLOWING);
+            let new_emissive = matches!(voxel.id, BLOCK_LAVA | BLOCK_LAVA_FLOWING);
+            let old_opaque = matches!(old.id, blocks::STONE | BLOCK_OBSIDIAN);
+            let new_opaque = matches!(voxel.id, blocks::STONE | BLOCK_OBSIDIAN);
+
             chunk.set_voxel(local_x, local_y, local_z, voxel);
             self.dirty_chunks.insert(chunk_pos);
+            if old_emissive != new_emissive || old_opaque != new_opaque {
+                self.dirty_light_chunks.insert(chunk_pos);
+            }
         }
     }
 
     /// Take the set of dirty chunks (clears internal state)
     pub fn take_dirty_chunks(&mut self) -> HashSet<ChunkPos> {
         std::mem::take(&mut self.dirty_chunks)
+    }
+
+    /// Take the set of chunks that need block-light recomputation.
+    pub fn take_dirty_light_chunks(&mut self) -> HashSet<ChunkPos> {
+        std::mem::take(&mut self.dirty_light_chunks)
     }
 
     /// Get pending update count

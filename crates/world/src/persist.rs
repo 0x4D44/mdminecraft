@@ -182,6 +182,8 @@ pub struct BlockEntitiesState {
     pub furnaces: BTreeMap<BlockEntityKey, FurnaceState>,
     pub enchanting_tables: BTreeMap<BlockEntityKey, EnchantingTableState>,
     pub brewing_stands: BTreeMap<BlockEntityKey, BrewingStandState>,
+    #[serde(default)]
+    pub chests: BTreeMap<BlockEntityKey, crate::ChestState>,
 }
 
 /// Global world state that must survive save/load cycles.
@@ -1379,6 +1381,17 @@ mod tests {
             },
         );
 
+        let chest_key = BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: 12,
+            y: 65,
+            z: 12,
+        };
+        let mut chest = crate::ChestState::default();
+        chest.slots[0] = Some(CoreItemStack::new(CoreItemType::Item(3), 32));
+        chest.slots[1] = Some(CoreItemStack::new(CoreItemType::Block(12), 5));
+        block_entities.chests.insert(chest_key, chest);
+
         let mut time = SimTime::new(24000);
         time.tick = SimTick(123);
         let mut weather = WeatherToggle::new();
@@ -1466,6 +1479,17 @@ mod tests {
                 .block_entities
                 .brewing_stands
                 .contains_key(&brewing_key));
+            assert_eq!(loaded.block_entities.chests.len(), 1);
+            assert!(loaded.block_entities.chests.contains_key(&chest_key));
+            let loaded_chest = loaded.block_entities.chests.get(&chest_key).unwrap();
+            assert_eq!(
+                loaded_chest.slots[0],
+                Some(CoreItemStack::new(CoreItemType::Item(3), 32))
+            );
+            assert_eq!(
+                loaded_chest.slots[1],
+                Some(CoreItemStack::new(CoreItemType::Block(12), 5))
+            );
 
             current = loaded;
         }

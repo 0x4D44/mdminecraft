@@ -28,7 +28,7 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_STAGE4_INTEGRATION_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or(if cfg!(debug_assertions) { 4 } else { 8 })
+        .unwrap_or(if cfg!(debug_assertions) { 3 } else { 8 })
 }
 
 #[test]

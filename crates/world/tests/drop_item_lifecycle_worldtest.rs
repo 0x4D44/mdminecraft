@@ -294,7 +294,8 @@ fn test_item_type_block_mapping() {
     assert_eq!(ItemType::from_block(3), Some((ItemType::Dirt, 1))); // Grass drops dirt
     assert_eq!(ItemType::from_block(4), Some((ItemType::Sand, 1)));
     assert_eq!(ItemType::from_block(5), Some((ItemType::Gravel, 1)));
-    assert_eq!(ItemType::from_block(7), Some((ItemType::Ice, 1)));
+    assert_eq!(ItemType::from_block(7), None); // Ice requires Silk Touch
+    assert_eq!(ItemType::silk_touch_drop(7), Some((ItemType::Ice, 1)));
     assert_eq!(ItemType::from_block(8), Some((ItemType::Snow, 1)));
     assert_eq!(ItemType::from_block(9), Some((ItemType::Clay, 1)));
     assert_eq!(ItemType::from_block(11), Some((ItemType::OakLog, 1)));

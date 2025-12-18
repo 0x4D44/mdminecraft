@@ -27,9 +27,10 @@ use mdminecraft_world::{
     get_fluid_type, interactive_blocks,
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockEntitiesState, BlockEntityKey, BlockId, BlockPropertiesRegistry,
-    BlockState, BrewingStandState, Chunk, ChunkPos, EnchantingTableState, FluidPos, FluidSimulator,
-    FluidType, FurnaceState, Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner,
-    MobType, PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager,
+    BlockState, BrewingStandState, ChestState, Chunk, ChunkPos, EnchantingTableState, FluidPos,
+    FluidSimulator, FluidType, FurnaceState, InteractionManager, Inventory, ItemManager,
+    ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PlayerSave,
+    PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos, RedstoneSimulator,
     RegionStore, SimTime, StatusEffect, StatusEffectType, StatusEffects, TerrainGenerator, Voxel,
     WeatherState, WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR,
     BLOCK_BREWING_STAND, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
@@ -1287,6 +1288,12 @@ pub struct GameWorld {
     mobs: Vec<Mob>,
     /// Fluid simulation
     fluid_sim: FluidSimulator,
+    /// Redstone simulation
+    redstone_sim: RedstoneSimulator,
+    /// Block interaction manager (doors/trapdoors/etc)
+    interaction_manager: InteractionManager,
+    /// Pressure plate currently pressed by the player (if any)
+    pressed_pressure_plate: Option<RedstonePos>,
     /// Simulation tick counter
     sim_tick: SimTick,
     /// Time accumulator for fixed timestep loop
@@ -1339,6 +1346,12 @@ pub struct GameWorld {
     brewing_open: bool,
     /// Currently open brewing stand position (if any)
     open_brewing_pos: Option<BlockEntityKey>,
+    /// Chest inventories by position
+    chests: BTreeMap<BlockEntityKey, ChestState>,
+    /// Whether chest UI is open
+    chest_open: bool,
+    /// Currently open chest position (if any)
+    open_chest_pos: Option<BlockEntityKey>,
 
     /// Whether the in-game pause menu is open.
     pause_menu_open: bool,
@@ -1622,6 +1635,7 @@ impl GameWorld {
         let furnaces = loaded_block_entities.furnaces;
         let enchanting_tables = loaded_block_entities.enchanting_tables;
         let brewing_stands = loaded_block_entities.brewing_stands;
+        let chests = loaded_block_entities.chests;
 
         // Setup state
         let debug_hud = DebugHud::new(); // Zeroed by default
@@ -1682,6 +1696,9 @@ impl GameWorld {
             mob_spawner,
             mobs,
             fluid_sim: FluidSimulator::new(),
+            redstone_sim: RedstoneSimulator::new(),
+            interaction_manager: InteractionManager::new(),
+            pressed_pressure_plate: None,
             sim_tick,
             accumulator: 0.0,
             crafting_open: false,
@@ -1704,6 +1721,9 @@ impl GameWorld {
             brewing_stands,
             brewing_open: false,
             open_brewing_pos: None,
+            chests,
+            chest_open: false,
+            open_chest_pos: None,
             pause_menu_open: false,
             pause_menu_view: PauseMenuView::Main,
             pause_controls_dirty: false,
@@ -3693,6 +3713,7 @@ impl GameWorld {
         // Update fluids
         self.fluid_sim.tick(&mut self.chunks);
         let dirty_fluids = self.fluid_sim.take_dirty_chunks();
+        let dirty_fluid_lighting = self.fluid_sim.take_dirty_light_chunks();
         let mut mesh_refresh = std::collections::BTreeSet::new();
         for chunk_pos in dirty_fluids {
             self.recompute_chunk_lighting(chunk_pos);
@@ -3700,6 +3721,34 @@ impl GameWorld {
             for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
                 mesh_refresh.insert(neighbor);
             }
+        }
+        for chunk_pos in dirty_fluid_lighting {
+            let affected = mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                chunk_pos,
+            );
+            mesh_refresh.extend(affected);
+        }
+
+        // Update redstone
+        self.update_player_pressure_plate();
+        self.redstone_sim.tick(&mut self.chunks);
+        let dirty_redstone = self.redstone_sim.take_dirty_chunks();
+        let dirty_redstone_lighting = self.redstone_sim.take_dirty_light_chunks();
+        for chunk_pos in dirty_redstone {
+            mesh_refresh.insert(chunk_pos);
+            for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
+                mesh_refresh.insert(neighbor);
+            }
+        }
+        for chunk_pos in dirty_redstone_lighting {
+            let affected = mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                chunk_pos,
+            );
+            mesh_refresh.extend(affected);
         }
         for chunk_pos in mesh_refresh {
             let _ = self.upload_chunk_mesh(chunk_pos);
@@ -3864,7 +3913,18 @@ impl GameWorld {
 
             self.chunks.insert(pos, chunk);
             self.recompute_chunk_lighting(pos);
-            let _ = self.upload_chunk_mesh_and_neighbors(pos);
+            let affected = mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                pos,
+            );
+            let mut mesh_refresh = std::collections::BTreeSet::new();
+            mesh_refresh.insert(pos);
+            mesh_refresh.extend(Self::neighbor_chunk_positions(pos));
+            mesh_refresh.extend(affected);
+            for chunk_pos in mesh_refresh {
+                let _ = self.upload_chunk_mesh(chunk_pos);
+            }
 
             // Spawn mobs in new chunk
             if let Some(chunk) = self.chunks.get(&pos) {
@@ -4120,6 +4180,10 @@ impl GameWorld {
 
             // Right click: equip armor, eat food, interact with block, or place block
             if self.input.is_mouse_clicked(MouseButton::Right) {
+                if self.try_interact_with_target_block(hit) {
+                    return;
+                }
+
                 // First, check if we're holding armor and try to equip it
                 let mut equipped_armor = false;
                 if let Some(stack) = self.hotbar.slots[self.hotbar.selected].clone() {
@@ -4167,43 +4231,7 @@ impl GameWorld {
                     self.hotbar.consume_selected();
                     // Skip other interactions when throwing
                 } else {
-                    // Check if the block is a crafting table or furnace
-                    let chunk_x = hit.block_pos.x.div_euclid(16);
-                    let chunk_z = hit.block_pos.z.div_euclid(16);
-                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
-                    let block_id = if let Some(chunk) = self.chunks.get(&chunk_pos) {
-                        let local_x = hit.block_pos.x.rem_euclid(16) as usize;
-                        let local_y = hit.block_pos.y as usize;
-                        let local_z = hit.block_pos.z.rem_euclid(16) as usize;
-                        if local_y < 256 {
-                            Some(chunk.voxel(local_x, local_y, local_z).id)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    match block_id {
-                        Some(BLOCK_CRAFTING_TABLE) => {
-                            self.open_crafting();
-                        }
-                        Some(BLOCK_FURNACE) | Some(BLOCK_FURNACE_LIT) => {
-                            self.open_furnace(hit.block_pos);
-                        }
-                        Some(BLOCK_ENCHANTING_TABLE) => {
-                            self.open_enchanting_table(hit.block_pos);
-                        }
-                        Some(BLOCK_BREWING_STAND) => {
-                            self.open_brewing_stand(hit.block_pos);
-                        }
-                        Some(interactive_blocks::BED_HEAD) | Some(interactive_blocks::BED_FOOT) => {
-                            self.try_sleep_in_bed(hit.block_pos);
-                        }
-                        _ => {
-                            self.handle_block_placement(hit);
-                        }
-                    }
+                    self.handle_block_placement(hit);
                 }
             }
         } else {
@@ -4267,6 +4295,95 @@ impl GameWorld {
             bed_pos,
             advance
         );
+    }
+
+    fn try_interact_with_target_block(&mut self, hit: RaycastHit) -> bool {
+        let chunk_x = hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32);
+        let chunk_z = hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32);
+        let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+        let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_y = hit.block_pos.y as usize;
+        let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        let block_id = self.chunks.get(&chunk_pos).and_then(|chunk| {
+            if local_y < CHUNK_SIZE_Y {
+                Some(chunk.voxel(local_x, local_y, local_z).id)
+            } else {
+                None
+            }
+        });
+
+        match block_id {
+            Some(BLOCK_CRAFTING_TABLE) => {
+                self.open_crafting();
+                true
+            }
+            Some(BLOCK_FURNACE) | Some(BLOCK_FURNACE_LIT) => {
+                self.open_furnace(hit.block_pos);
+                true
+            }
+            Some(BLOCK_ENCHANTING_TABLE) => {
+                self.open_enchanting_table(hit.block_pos);
+                true
+            }
+            Some(BLOCK_BREWING_STAND) => {
+                self.open_brewing_stand(hit.block_pos);
+                true
+            }
+            Some(interactive_blocks::BED_HEAD) | Some(interactive_blocks::BED_FOOT) => {
+                self.try_sleep_in_bed(hit.block_pos);
+                true
+            }
+            Some(id)
+                if mdminecraft_world::is_door(id)
+                    || mdminecraft_world::is_trapdoor(id)
+                    || mdminecraft_world::is_fence_gate(id) =>
+            {
+                let result = self.interaction_manager.interact(
+                    chunk_pos,
+                    local_x,
+                    local_y,
+                    local_z,
+                    &mut self.chunks,
+                );
+                if result == mdminecraft_world::InteractionResult::None {
+                    return false;
+                }
+
+                let mut mesh_refresh = std::collections::BTreeSet::new();
+                for dirty in self.interaction_manager.take_dirty_chunks() {
+                    mesh_refresh.insert(dirty);
+                    for neighbor in Self::neighbor_chunk_positions(dirty) {
+                        mesh_refresh.insert(neighbor);
+                    }
+                }
+                for dirty_chunk in mesh_refresh {
+                    self.debug_hud.chunk_uploads_last_frame +=
+                        self.upload_chunk_mesh(dirty_chunk) as u32;
+                }
+                true
+            }
+            Some(mdminecraft_world::redstone_blocks::LEVER) => {
+                self.redstone_sim.toggle_lever(
+                    RedstonePos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
+                    &mut self.chunks,
+                );
+                self.debug_hud.chunk_uploads_last_frame +=
+                    self.upload_chunk_mesh_and_neighbors(chunk_pos);
+                true
+            }
+            Some(mdminecraft_world::redstone_blocks::STONE_BUTTON)
+            | Some(mdminecraft_world::redstone_blocks::OAK_BUTTON) => {
+                self.redstone_sim.activate_button(
+                    RedstonePos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
+                    &mut self.chunks,
+                );
+                self.debug_hud.chunk_uploads_last_frame +=
+                    self.upload_chunk_mesh_and_neighbors(chunk_pos);
+                true
+            }
+            _ => false,
+        }
     }
 
     fn handle_mining(&mut self, hit: RaycastHit, dt: f32) {
@@ -4346,6 +4463,7 @@ impl GameWorld {
                 // Mine the block!
                 let mut spawn_particles_at: Option<glam::Vec3> = None;
                 let mut mined = false;
+                let mut removed_extra: Option<IVec3> = None;
 
                 if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
@@ -4372,7 +4490,7 @@ impl GameWorld {
                     // Remove the block
                     chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
 
-                    let removed_extra = Self::try_remove_other_door_half(
+                    removed_extra = Self::try_remove_other_door_half(
                         chunk, local_x, local_y, local_z, block_id,
                     )
                     .map(|other_local_y| {
@@ -4411,13 +4529,79 @@ impl GameWorld {
                 }
 
                 if mined {
-                    // Update lighting (skylight + seams)
-                    self.recompute_chunk_lighting(chunk_pos);
+                    let mut changed_positions = vec![hit.block_pos];
+                    if let Some(extra) = removed_extra {
+                        changed_positions.push(extra);
+                    }
 
-                    // Regenerate mesh with updated lighting/geometry (and refresh neighbors
-                    // to keep neighbor-aware blocks consistent across chunk seams).
-                    self.debug_hud.chunk_uploads_last_frame +=
-                        self.upload_chunk_mesh_and_neighbors(chunk_pos);
+                    let removed_support = Self::remove_unsupported_blocks(
+                        &mut self.chunks,
+                        &self.block_properties,
+                        changed_positions,
+                    );
+
+                    // Notify redstone sim for any neighbor-dependent updates.
+                    self.schedule_redstone_updates_around(hit.block_pos);
+                    if let Some(extra) = removed_extra {
+                        self.schedule_redstone_updates_around(extra);
+                    }
+                    for (pos, _) in &removed_support {
+                        self.schedule_redstone_updates_around(*pos);
+                    }
+
+                    let mut affected_chunks = std::collections::BTreeSet::new();
+                    affected_chunks.insert(chunk_pos);
+                    for (pos, removed_block_id) in &removed_support {
+                        affected_chunks.insert(ChunkPos::new(
+                            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                        ));
+
+                        self.fluid_sim
+                            .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+
+                        let should_drop = if mdminecraft_world::is_door_upper(*removed_block_id) {
+                            let lower_pos = IVec3::new(pos.x, pos.y - 1, pos.z);
+                            !removed_support.iter().any(|(other_pos, other_id)| {
+                                *other_pos == lower_pos
+                                    && mdminecraft_world::is_door_lower(*other_id)
+                            })
+                        } else {
+                            true
+                        };
+
+                        if should_drop {
+                            if let Some((drop_type, count)) =
+                                DroppedItemType::from_block(*removed_block_id)
+                            {
+                                let drop_x = pos.x as f64 + 0.5;
+                                let drop_y = pos.y as f64 + 0.5;
+                                let drop_z = pos.z as f64 + 0.5;
+                                self.item_manager
+                                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                            }
+                        }
+                    }
+
+                    let mut mesh_refresh = std::collections::BTreeSet::new();
+                    for dirty_chunk in affected_chunks {
+                        self.recompute_chunk_lighting(dirty_chunk);
+                        mesh_refresh.insert(dirty_chunk);
+                        mesh_refresh.extend(Self::neighbor_chunk_positions(dirty_chunk));
+
+                        let affected = mdminecraft_world::recompute_block_light_local(
+                            &mut self.chunks,
+                            &self.registry,
+                            dirty_chunk,
+                        );
+                        mesh_refresh.extend(affected);
+                    }
+
+                    for chunk_pos in mesh_refresh {
+                        if self.upload_chunk_mesh(chunk_pos) {
+                            self.debug_hud.chunk_uploads_last_frame += 1;
+                        }
+                    }
 
                     // Spawn dropped item if harvested successfully
                     let tool = self.hotbar.selected_tool();
@@ -4455,7 +4639,7 @@ impl GameWorld {
                         // Determine what to drop based on enchantments.
                         let drop = if is_leaf_block {
                             if has_silk_touch {
-                                None
+                                DroppedItemType::silk_touch_drop(block_id)
                             } else {
                                 DroppedItemType::from_leaves_random(block_id, random)
                             }
@@ -4521,11 +4705,45 @@ impl GameWorld {
                 hit.block_pos.z + hit.face_normal.z,
             );
 
+            if matches!(
+                block_id,
+                interactive_blocks::LADDER
+                    | interactive_blocks::TORCH
+                    | mdminecraft_world::redstone_blocks::REDSTONE_TORCH
+                    | mdminecraft_world::redstone_blocks::LEVER
+                    | mdminecraft_world::redstone_blocks::STONE_BUTTON
+                    | mdminecraft_world::redstone_blocks::OAK_BUTTON
+                    | mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                    | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                    | mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+            ) {
+                let support_chunk_pos = ChunkPos::new(
+                    hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                    hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                let Some(chunk) = self.chunks.get(&support_chunk_pos) else {
+                    return;
+                };
+
+                let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_y = hit.block_pos.y as usize;
+                let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                if local_y >= CHUNK_SIZE_Y {
+                    return;
+                }
+
+                let support_voxel = chunk.voxel(local_x, local_y, local_z);
+                if !self.block_properties.get(support_voxel.id).is_solid {
+                    return;
+                }
+            }
+
             let chunk_x = place_pos.x.div_euclid(16);
             let chunk_z = place_pos.z.div_euclid(16);
             let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
             let mut spawn_particles_at: Option<glam::Vec3> = None;
             let mut placed = false;
+            let mut placed_extra: Option<IVec3> = None;
 
             if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                 let local_x = place_pos.x.rem_euclid(16) as usize;
@@ -4544,6 +4762,8 @@ impl GameWorld {
                                 block_id,
                                 place_state,
                             ) {
+                                placed_extra =
+                                    Some(IVec3::new(place_pos.x, place_pos.y + 1, place_pos.z));
                                 spawn_particles_at = Some(glam::Vec3::new(
                                     place_pos.x as f32 + 0.5,
                                     place_pos.y as f32 + 0.5,
@@ -4581,6 +4801,12 @@ impl GameWorld {
                                 );
                             }
 
+                            // Notify redstone sim for any neighbor-dependent updates.
+                            self.schedule_redstone_updates_around(place_pos);
+                            if let Some(extra) = placed_extra {
+                                self.schedule_redstone_updates_around(extra);
+                            }
+
                             if let Some(item) = self.hotbar.selected_item_mut() {
                                 if item.count > 0 {
                                     item.count -= 1;
@@ -4598,10 +4824,24 @@ impl GameWorld {
                 // Update lighting (skylight + seams)
                 self.recompute_chunk_lighting(chunk_pos);
 
-                // Regenerate mesh using updated chunk data (and refresh neighbors to keep
-                // neighbor-aware blocks consistent across chunk seams).
-                self.debug_hud.chunk_uploads_last_frame +=
-                    self.upload_chunk_mesh_and_neighbors(chunk_pos);
+                // Update blocklight and refresh affected meshes.
+                let affected = mdminecraft_world::recompute_block_light_local(
+                    &mut self.chunks,
+                    &self.registry,
+                    chunk_pos,
+                );
+
+                // Refresh the changed chunk + neighbors (geometry/connectivity) and any chunks
+                // touched by lighting updates (includes diagonals).
+                let mut mesh_refresh = std::collections::BTreeSet::new();
+                mesh_refresh.insert(chunk_pos);
+                mesh_refresh.extend(Self::neighbor_chunk_positions(chunk_pos));
+                mesh_refresh.extend(affected);
+                for pos in mesh_refresh {
+                    if self.upload_chunk_mesh(pos) {
+                        self.debug_hud.chunk_uploads_last_frame += 1;
+                    }
+                }
             }
 
             if let Some(center) = spawn_particles_at {
@@ -4616,6 +4856,63 @@ impl GameWorld {
         face_normal: IVec3,
         hit_local_y: f32,
     ) -> Option<BlockState> {
+        if matches!(
+            block_id,
+            interactive_blocks::TORCH | mdminecraft_world::redstone_blocks::REDSTONE_TORCH
+        ) {
+            if face_normal.y == 1 {
+                return Some(0);
+            }
+            // Torches cannot be mounted on ceilings.
+            if face_normal.y == -1 {
+                return None;
+            }
+
+            let facing = match (face_normal.x, face_normal.z) {
+                (1, 0) => mdminecraft_world::Facing::East,
+                (-1, 0) => mdminecraft_world::Facing::West,
+                (0, 1) => mdminecraft_world::Facing::South,
+                (0, -1) => mdminecraft_world::Facing::North,
+                _ => return None,
+            };
+            return Some(mdminecraft_world::torch_wall_state(facing));
+        }
+
+        if matches!(
+            block_id,
+            mdminecraft_world::redstone_blocks::LEVER
+                | mdminecraft_world::redstone_blocks::STONE_BUTTON
+                | mdminecraft_world::redstone_blocks::OAK_BUTTON
+        ) {
+            if face_normal.y == 1 {
+                return Some(0);
+            }
+            if face_normal.y == -1 {
+                return Some(mdminecraft_world::ceiling_mount_state());
+            }
+
+            let facing = match (face_normal.x, face_normal.z) {
+                (1, 0) => mdminecraft_world::Facing::East,
+                (-1, 0) => mdminecraft_world::Facing::West,
+                (0, 1) => mdminecraft_world::Facing::South,
+                (0, -1) => mdminecraft_world::Facing::North,
+                _ => return None,
+            };
+            return Some(mdminecraft_world::wall_mount_state(facing));
+        }
+
+        if matches!(
+            block_id,
+            mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                | mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+        ) {
+            if face_normal.y != 1 {
+                return None;
+            }
+            return Some(0);
+        }
+
         if mdminecraft_world::is_slab(block_id) {
             let top = if face_normal.y < 0 {
                 true
@@ -4674,11 +4971,67 @@ impl GameWorld {
             return Some(state);
         }
 
-        if mdminecraft_world::is_fence_gate(block_id) || mdminecraft_world::is_door(block_id) {
+        if mdminecraft_world::is_door(block_id) {
+            // Only lower halves are placeable; doors must be placed on a top face.
+            if !mdminecraft_world::is_door_lower(block_id) {
+                return None;
+            }
+            if face_normal.y != 1 {
+                return None;
+            }
+            return Some(mdminecraft_world::Facing::from_yaw(camera_yaw).to_state());
+        }
+
+        if mdminecraft_world::is_fence_gate(block_id) {
             return Some(mdminecraft_world::Facing::from_yaw(camera_yaw).to_state());
         }
 
         Some(0)
+    }
+
+    fn schedule_redstone_updates_around(&mut self, pos: IVec3) {
+        let center = RedstonePos::new(pos.x, pos.y, pos.z);
+        self.redstone_sim.schedule_update(center);
+        for neighbor in center.neighbors() {
+            self.redstone_sim.schedule_update(neighbor);
+        }
+    }
+
+    fn update_player_pressure_plate(&mut self) {
+        let mut new_plate = None;
+        if self.player_state == PlayerState::Alive {
+            let camera_pos = self.renderer.camera().position;
+            let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
+            let sample = feet_pos - glam::Vec3::new(0.0, 0.01, 0.0);
+            let x = sample.x.floor() as i32;
+            let y = sample.y.floor() as i32;
+            let z = sample.z.floor() as i32;
+            let pos = IVec3::new(x, y, z);
+            if matches!(
+                self.get_block_at(pos),
+                Some(
+                    mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                        | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                )
+            ) {
+                new_plate = Some(RedstonePos::new(x, y, z));
+            }
+        }
+
+        if new_plate == self.pressed_pressure_plate {
+            return;
+        }
+
+        if let Some(old) = self.pressed_pressure_plate {
+            self.redstone_sim
+                .update_pressure_plate(old, false, &mut self.chunks);
+        }
+        if let Some(new) = new_plate {
+            self.redstone_sim
+                .update_pressure_plate(new, true, &mut self.chunks);
+        }
+
+        self.pressed_pressure_plate = new_plate;
     }
 
     fn door_upper_id(lower_id: BlockId) -> Option<BlockId> {
@@ -4766,6 +5119,162 @@ impl GameWorld {
         } else {
             None
         }
+    }
+
+    fn remove_unsupported_blocks(
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        changed_positions: impl IntoIterator<Item = IVec3>,
+    ) -> Vec<(IVec3, BlockId)> {
+        let mut queue: std::collections::VecDeque<IVec3> = changed_positions.into_iter().collect();
+        let mut removed = Vec::new();
+
+        let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> Option<Voxel> {
+            if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+
+            let chunk_pos = ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let chunk = chunks.get(&chunk_pos)?;
+            let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            Some(chunk.voxel(local_x, pos.y as usize, local_z))
+        };
+
+        let is_solid_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> bool {
+            voxel_at(chunks, pos).is_some_and(|voxel| block_properties.get(voxel.id).is_solid)
+        };
+
+        let neighbor_offsets = [
+            IVec3::new(0, 1, 0),
+            IVec3::new(0, -1, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(-1, 0, 0),
+            IVec3::new(0, 0, 1),
+            IVec3::new(0, 0, -1),
+        ];
+
+        while let Some(pos) = queue.pop_front() {
+            for offset in neighbor_offsets {
+                let candidate = pos + offset;
+                let Some(voxel) = voxel_at(chunks, candidate) else {
+                    continue;
+                };
+                if voxel.id == BLOCK_AIR {
+                    continue;
+                }
+
+                let unsupported = match voxel.id {
+                    interactive_blocks::LADDER => {
+                        let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                        let (dx, dz) = facing.offset();
+                        let support_pos =
+                            IVec3::new(candidate.x + dx, candidate.y, candidate.z + dz);
+                        !is_solid_at(chunks, support_pos)
+                    }
+                    id if mdminecraft_world::is_door(id) => {
+                        if mdminecraft_world::is_door_lower(id) {
+                            let support_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                            if !is_solid_at(chunks, support_pos) {
+                                true
+                            } else {
+                                let upper_pos =
+                                    IVec3::new(candidate.x, candidate.y + 1, candidate.z);
+                                let expected_upper = match id {
+                                    mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER => {
+                                        Some(mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER)
+                                    }
+                                    mdminecraft_world::interactive_blocks::IRON_DOOR_LOWER => {
+                                        Some(mdminecraft_world::interactive_blocks::IRON_DOOR_UPPER)
+                                    }
+                                    _ => None,
+                                };
+                                match expected_upper {
+                                    Some(expected_upper) => voxel_at(chunks, upper_pos)
+                                        .is_none_or(|upper| upper.id != expected_upper),
+                                    None => true,
+                                }
+                            }
+                        } else {
+                            let lower_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                            let expected_lower = match id {
+                                mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER => {
+                                    Some(mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER)
+                                }
+                                mdminecraft_world::interactive_blocks::IRON_DOOR_UPPER => {
+                                    Some(mdminecraft_world::interactive_blocks::IRON_DOOR_LOWER)
+                                }
+                                _ => None,
+                            };
+                            match expected_lower {
+                                Some(expected_lower) => voxel_at(chunks, lower_pos)
+                                    .is_none_or(|lower| lower.id != expected_lower),
+                                None => true,
+                            }
+                        }
+                    }
+                    interactive_blocks::TORCH
+                    | mdminecraft_world::redstone_blocks::REDSTONE_TORCH => {
+                        let support_pos = if mdminecraft_world::is_torch_wall(voxel.state) {
+                            let facing = mdminecraft_world::torch_facing(voxel.state);
+                            let (dx, dz) = facing.offset();
+                            IVec3::new(candidate.x - dx, candidate.y, candidate.z - dz)
+                        } else {
+                            IVec3::new(candidate.x, candidate.y - 1, candidate.z)
+                        };
+                        !is_solid_at(chunks, support_pos)
+                    }
+                    mdminecraft_world::redstone_blocks::LEVER
+                    | mdminecraft_world::redstone_blocks::STONE_BUTTON
+                    | mdminecraft_world::redstone_blocks::OAK_BUTTON => {
+                        let support_pos = if mdminecraft_world::is_wall_mounted(voxel.state) {
+                            let facing = mdminecraft_world::wall_mounted_facing(voxel.state);
+                            let (dx, dz) = facing.offset();
+                            IVec3::new(candidate.x - dx, candidate.y, candidate.z - dz)
+                        } else if mdminecraft_world::is_ceiling_mounted(voxel.state) {
+                            IVec3::new(candidate.x, candidate.y + 1, candidate.z)
+                        } else {
+                            IVec3::new(candidate.x, candidate.y - 1, candidate.z)
+                        };
+                        !is_solid_at(chunks, support_pos)
+                    }
+                    mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                    | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                    | mdminecraft_world::redstone_blocks::REDSTONE_WIRE => {
+                        let support_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                        !is_solid_at(chunks, support_pos)
+                    }
+                    _ => false,
+                };
+
+                if !unsupported {
+                    continue;
+                }
+
+                let chunk_pos = ChunkPos::new(
+                    candidate.x.div_euclid(CHUNK_SIZE_X as i32),
+                    candidate.z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+                    continue;
+                };
+                let local_x = candidate.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = candidate.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                let local_y = candidate.y as usize;
+                if local_y >= CHUNK_SIZE_Y {
+                    continue;
+                }
+
+                chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                removed.push((candidate, voxel.id));
+                queue.push_back(candidate);
+            }
+        }
+
+        removed
     }
 
     /// Recompute skylight for a chunk and stitch across neighboring seams.
@@ -5863,6 +6372,7 @@ impl GameWorld {
     fn destroy_blocks_in_radius(&mut self, cx: f64, cy: f64, cz: f64, radius: f32) {
         let radius_i = radius.ceil() as i32;
         let mut affected_chunks = std::collections::BTreeSet::new();
+        let mut removed_positions: Vec<IVec3> = Vec::new();
 
         // Iterate over all blocks in the explosion radius
         for dx in -radius_i..=radius_i {
@@ -5896,10 +6406,32 @@ impl GameWorld {
                         if voxel.id != BLOCK_AIR && voxel.id != 10 {
                             chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
                             affected_chunks.insert(chunk_pos);
+                            removed_positions.push(IVec3::new(block_x, block_y, block_z));
                         }
                     }
                 }
             }
+        }
+
+        for pos in &removed_positions {
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+            self.schedule_redstone_updates_around(*pos);
+        }
+
+        let removed_support = Self::remove_unsupported_blocks(
+            &mut self.chunks,
+            &self.block_properties,
+            removed_positions.iter().copied(),
+        );
+        for (pos, _removed_block_id) in removed_support {
+            affected_chunks.insert(ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            ));
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+            self.schedule_redstone_updates_around(pos);
         }
 
         // Update lighting and meshes for affected chunks
@@ -5910,6 +6442,13 @@ impl GameWorld {
             for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
                 mesh_refresh.insert(neighbor);
             }
+
+            let affected = mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                chunk_pos,
+            );
+            mesh_refresh.extend(affected);
         }
         for chunk_pos in mesh_refresh {
             let _ = self.upload_chunk_mesh(chunk_pos);
@@ -11903,6 +12442,401 @@ mod tests {
     }
 
     #[test]
+    fn torch_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            65,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::TORCH,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::interactive_blocks::TORCH
+            )),
+            "Expected torch to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(0, 65, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Torch should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn wall_torch_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::TORCH,
+                state: mdminecraft_world::torch_wall_state(mdminecraft_world::Facing::East),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(1, 64, 0),
+                mdminecraft_world::interactive_blocks::TORCH
+            )),
+            "Expected wall torch to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(1, 64, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Wall torch should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn wall_button_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::STONE_BUTTON,
+                state: mdminecraft_world::wall_mount_state(mdminecraft_world::Facing::East),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(1, 64, 0),
+                mdminecraft_world::redstone_blocks::STONE_BUTTON
+            )),
+            "Expected wall button to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(1, 64, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Wall button should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn ceiling_lever_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            63,
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::LEVER,
+                state: mdminecraft_world::ceiling_mount_state(),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(0, 63, 0),
+                mdminecraft_world::redstone_blocks::LEVER
+            )),
+            "Expected ceiling lever to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(0, 63, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Ceiling lever should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn ladder_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::LADDER,
+                state: mdminecraft_world::Facing::West.to_state(),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(1, 64, 0),
+                mdminecraft_world::interactive_blocks::LADDER
+            )),
+            "Expected ladder to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(1, 64, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Ladder should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn redstone_wire_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            65,
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::REDSTONE_WIRE,
+                state: 0,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+            )),
+            "Expected redstone wire to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(0, 65, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Redstone wire should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn door_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+
+        let door_state = mdminecraft_world::Facing::North.to_state();
+        chunk.set_voxel(
+            0,
+            65,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
+                state: door_state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            66,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER,
+                state: door_state,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER
+            )),
+            "Expected door lower to be removed, got: {:?}",
+            removed
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(0, 66, 0),
+                mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER
+            )),
+            "Expected door upper to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(0, 65, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Door lower should be cleared when its support is removed"
+        );
+        assert_eq!(
+            chunk.voxel(0, 66, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Door upper should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
     fn collision_shapes_respect_slabs_and_trapdoors() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -12635,6 +13569,76 @@ mod tests {
             0.0,
         )
         .is_none());
+    }
+
+    #[test]
+    fn torch_placement_state_allows_wall_mounts() {
+        let floor = GameWorld::placement_state_for_block(
+            mdminecraft_world::interactive_blocks::TORCH,
+            0.0,
+            glam::IVec3::new(0, 1, 0),
+            0.0,
+        )
+        .expect("torch placement should produce a state on top faces");
+        assert!(!mdminecraft_world::is_torch_wall(floor));
+
+        let wall = GameWorld::placement_state_for_block(
+            mdminecraft_world::interactive_blocks::TORCH,
+            0.0,
+            glam::IVec3::new(1, 0, 0),
+            0.0,
+        )
+        .expect("torch placement should produce a state on side faces");
+        assert!(mdminecraft_world::is_torch_wall(wall));
+        assert_eq!(
+            mdminecraft_world::torch_facing(wall),
+            mdminecraft_world::Facing::East
+        );
+
+        assert!(GameWorld::placement_state_for_block(
+            mdminecraft_world::interactive_blocks::TORCH,
+            0.0,
+            glam::IVec3::new(0, -1, 0),
+            0.0,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn button_placement_state_allows_wall_and_ceiling_mounts() {
+        let floor = GameWorld::placement_state_for_block(
+            mdminecraft_world::redstone_blocks::STONE_BUTTON,
+            0.0,
+            glam::IVec3::new(0, 1, 0),
+            0.0,
+        )
+        .expect("button placement should produce a state on top faces");
+        assert!(!mdminecraft_world::is_wall_mounted(floor));
+        assert!(!mdminecraft_world::is_ceiling_mounted(floor));
+
+        let wall = GameWorld::placement_state_for_block(
+            mdminecraft_world::redstone_blocks::STONE_BUTTON,
+            0.0,
+            glam::IVec3::new(1, 0, 0),
+            0.0,
+        )
+        .expect("button placement should produce a state on side faces");
+        assert!(mdminecraft_world::is_wall_mounted(wall));
+        assert_eq!(
+            mdminecraft_world::wall_mounted_facing(wall),
+            mdminecraft_world::Facing::East
+        );
+        assert!(!mdminecraft_world::is_ceiling_mounted(wall));
+
+        let ceiling = GameWorld::placement_state_for_block(
+            mdminecraft_world::redstone_blocks::STONE_BUTTON,
+            0.0,
+            glam::IVec3::new(0, -1, 0),
+            0.0,
+        )
+        .expect("button placement should produce a state on bottom faces");
+        assert!(!mdminecraft_world::is_wall_mounted(ceiling));
+        assert!(mdminecraft_world::is_ceiling_mounted(ceiling));
     }
 
     #[test]
