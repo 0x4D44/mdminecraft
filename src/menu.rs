@@ -41,6 +41,7 @@ pub struct GameSettings {
     pub music_volume: f32,
     pub sfx_volume: f32,
     pub ambient_volume: f32,
+    pub audio_muted: bool,
 }
 
 impl Default for GameSettings {
@@ -56,6 +57,7 @@ impl Default for GameSettings {
             music_volume: 0.5,
             sfx_volume: 1.0,
             ambient_volume: 0.7,
+            audio_muted: false,
         }
     }
 }
@@ -70,6 +72,11 @@ impl GameSettings {
             invert_y: controls.invert_y,
             render_distance: controls.render_distance,
             fov: controls.fov_degrees,
+            master_volume: controls.master_volume,
+            music_volume: controls.music_volume,
+            sfx_volume: controls.sfx_volume,
+            ambient_volume: controls.ambient_volume,
+            audio_muted: controls.audio_muted,
             ..Default::default()
         }
     }
@@ -83,9 +90,14 @@ impl GameSettings {
         controls.invert_y = self.invert_y;
         controls.fov_degrees = self.fov;
         controls.render_distance = self.render_distance;
+        controls.master_volume = self.master_volume;
+        controls.music_volume = self.music_volume;
+        controls.sfx_volume = self.sfx_volume;
+        controls.ambient_volume = self.ambient_volume;
+        controls.audio_muted = self.audio_muted;
         controls.save()?;
 
-        tracing::info!("Controls saved to config/controls.toml");
+        tracing::info!("Settings saved to config/controls.toml");
         Ok(())
     }
 }
@@ -638,6 +650,21 @@ fn render_settings_menu_ui(
                         .size(20.0)
                         .color(egui::Color32::WHITE),
                 );
+                ui.add_space(10.0);
+
+                // Mute
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Mute:")
+                            .size(16.0)
+                            .color(egui::Color32::LIGHT_GRAY),
+                    );
+                    ui.add_space(20.0);
+                    if ui.checkbox(&mut settings.audio_muted, "").changed() {
+                        *settings_dirty = true;
+                    }
+                });
+
                 ui.add_space(10.0);
 
                 // Master volume

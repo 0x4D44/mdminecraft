@@ -2,7 +2,11 @@
 //!
 //! Implements block-specific behaviors and state management.
 
-use crate::chunk::{BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_Y};
+use crate::chunk::{
+    BlockId, BlockState, Chunk, ChunkPos, Voxel, BLOCK_BREWING_STAND, BLOCK_ENCHANTING_TABLE,
+    CHUNK_SIZE_Y,
+};
+use crate::farming_blocks;
 use crate::terrain::blocks;
 use std::collections::{HashMap, HashSet};
 
@@ -211,6 +215,20 @@ pub fn set_trapdoor_open(state: BlockState, open: bool) -> BlockState {
     }
 }
 
+/// Check if trapdoor is the top half when closed.
+pub fn is_trapdoor_top(state: BlockState) -> bool {
+    (state & 0x04) != 0
+}
+
+/// Set whether trapdoor occupies the top half when closed.
+pub fn set_trapdoor_top(state: BlockState, top: bool) -> BlockState {
+    if top {
+        state | 0x04
+    } else {
+        state & !0x04
+    }
+}
+
 /// Check if a block is a ladder
 pub fn is_ladder(block_id: BlockId) -> bool {
     block_id == interactive_blocks::LADDER
@@ -273,6 +291,21 @@ pub fn get_collision_type(block_id: BlockId, state: BlockState) -> CollisionType
         blocks::AIR => CollisionType::None,
         blocks::WATER => CollisionType::None,
 
+        farming_blocks::FARMLAND | farming_blocks::FARMLAND_WET => CollisionType::Partial {
+            min_y: 0.0,
+            max_y: 15.0 / 16.0,
+        },
+
+        BLOCK_ENCHANTING_TABLE => CollisionType::Partial {
+            min_y: 0.0,
+            max_y: 12.0 / 16.0,
+        },
+
+        BLOCK_BREWING_STAND => CollisionType::Partial {
+            min_y: 0.0,
+            max_y: 14.0 / 16.0,
+        },
+
         id if is_door(id) => CollisionType::Door {
             open: is_door_open(state),
         },
@@ -293,10 +326,13 @@ pub fn get_collision_type(block_id: BlockId, state: BlockState) -> CollisionType
             if is_trapdoor_open(state) {
                 CollisionType::None
             } else {
-                CollisionType::Partial {
-                    min_y: 0.0,
-                    max_y: 0.1875,
-                }
+                let thickness = 0.1875;
+                let (min_y, max_y) = if is_trapdoor_top(state) {
+                    (1.0 - thickness, 1.0)
+                } else {
+                    (0.0, thickness)
+                };
+                CollisionType::Partial { min_y, max_y }
             }
         }
 
@@ -315,10 +351,11 @@ pub fn get_collision_type(block_id: BlockId, state: BlockState) -> CollisionType
         }
 
         id if is_stairs(id) => {
-            // Simplified stairs collision
+            // Simplified stairs collision: treat stairs as a 0.5-block step so the player can
+            // traverse them via step-up.
             CollisionType::Partial {
                 min_y: 0.0,
-                max_y: 1.0,
+                max_y: 0.5,
             }
         }
 
@@ -772,12 +809,18 @@ mod tests {
     fn test_trapdoor_state() {
         let state: BlockState = 0;
         assert!(!is_trapdoor_open(state));
+        assert!(!is_trapdoor_top(state));
 
         let open_state = set_trapdoor_open(state, true);
         assert!(is_trapdoor_open(open_state));
+        assert!(!is_trapdoor_top(open_state));
 
         let closed_state = set_trapdoor_open(open_state, false);
         assert!(!is_trapdoor_open(closed_state));
+
+        let top_state = set_trapdoor_top(state, true);
+        assert!(is_trapdoor_top(top_state));
+        assert!(!is_trapdoor_open(top_state));
     }
 
     #[test]
@@ -891,6 +934,17 @@ mod tests {
             _ => panic!("Expected Partial collision for closed trapdoor"),
         }
 
+        // Closed trapdoor (top)
+        let top_state = set_trapdoor_top(0, true);
+        let collision = get_collision_type(interactive_blocks::TRAPDOOR, top_state);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.8125);
+                assert_eq!(max_y, 1.0);
+            }
+            _ => panic!("Expected Partial collision for top trapdoor"),
+        }
+
         // Open trapdoor
         let open_state = set_trapdoor_open(0, true);
         let collision = get_collision_type(interactive_blocks::TRAPDOOR, open_state);
@@ -915,7 +969,7 @@ mod tests {
         let collision = get_collision_type(interactive_blocks::OAK_STAIRS, 0);
         match collision {
             CollisionType::Partial { min_y: _, max_y } => {
-                assert_eq!(max_y, 1.0);
+                assert_eq!(max_y, 0.5);
             }
             _ => panic!("Expected Partial collision for stairs"),
         }
@@ -949,6 +1003,42 @@ mod tests {
     fn test_torch_collision() {
         let collision = get_collision_type(interactive_blocks::TORCH, 0);
         assert_eq!(collision, CollisionType::None);
+    }
+
+    #[test]
+    fn test_farmland_collision() {
+        let collision = get_collision_type(farming_blocks::FARMLAND, 0);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert_eq!(max_y, 15.0 / 16.0);
+            }
+            _ => panic!("Expected Partial collision for farmland"),
+        }
+    }
+
+    #[test]
+    fn test_enchanting_table_collision() {
+        let collision = get_collision_type(crate::chunk::BLOCK_ENCHANTING_TABLE, 0);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert_eq!(max_y, 12.0 / 16.0);
+            }
+            _ => panic!("Expected Partial collision for enchanting table"),
+        }
+    }
+
+    #[test]
+    fn test_brewing_stand_collision() {
+        let collision = get_collision_type(crate::chunk::BLOCK_BREWING_STAND, 0);
+        match collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert_eq!(max_y, 14.0 / 16.0);
+            }
+            _ => panic!("Expected Partial collision for brewing stand"),
+        }
     }
 
     #[test]

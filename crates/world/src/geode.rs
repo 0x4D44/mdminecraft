@@ -1,7 +1,10 @@
 // Amethyst geode generation for Minecraft 1.18+
 // Creates rare spherical structures with smooth basalt, calcite, and amethyst layers
 
-use crate::chunk::Chunk;
+use crate::chunk::{
+    Chunk, BLOCK_AIR, BLOCK_AMETHYST_BLOCK, BLOCK_BUDDING_AMETHYST, BLOCK_CALCITE,
+    BLOCK_SMOOTH_BASALT, BLOCK_WATER,
+};
 use crate::noise::{NoiseConfig, NoiseGenerator};
 
 /// Geode generator creates rare spherical amethyst structures
@@ -102,7 +105,7 @@ impl GeodeGenerator {
                     let voxel = chunk.voxel(x, y as usize, z);
 
                     // Skip if already air or water
-                    if voxel.id == 0 || voxel.id == 6 {
+                    if voxel.id == BLOCK_AIR || voxel.id == BLOCK_WATER {
                         continue;
                     }
 
@@ -110,27 +113,27 @@ impl GeodeGenerator {
 
                     // Layer 1: Outer shell - smooth basalt
                     if modified_dist > radius - 0.5 && modified_dist <= radius + 1.0 {
-                        new_voxel.id = 107; // smooth_basalt
+                        new_voxel.id = BLOCK_SMOOTH_BASALT;
                         chunk.set_voxel(x, y as usize, z, new_voxel);
                     }
                     // Layer 2: Middle shell - calcite
                     else if modified_dist > radius - 1.5 && modified_dist <= radius - 0.5 {
-                        new_voxel.id = 108; // calcite
+                        new_voxel.id = BLOCK_CALCITE;
                         chunk.set_voxel(x, y as usize, z, new_voxel);
                     }
                     // Layer 3: Inner shell - amethyst block
                     else if modified_dist > radius - 2.5 && modified_dist <= radius - 1.5 {
-                        new_voxel.id = 109; // amethyst_block
+                        new_voxel.id = BLOCK_AMETHYST_BLOCK;
                         chunk.set_voxel(x, y as usize, z, new_voxel);
                     }
                     // Layer 4: Innermost - budding amethyst (rare)
                     else if modified_dist > radius - 3.0 && modified_dist <= radius - 2.5 {
-                        new_voxel.id = 110; // budding_amethyst
+                        new_voxel.id = BLOCK_BUDDING_AMETHYST;
                         chunk.set_voxel(x, y as usize, z, new_voxel);
                     }
                     // Center: Air cavity
                     else if modified_dist <= radius - 3.0 {
-                        new_voxel.id = 0; // air
+                        new_voxel.id = BLOCK_AIR;
                         chunk.set_voxel(x, y as usize, z, new_voxel);
                     }
                 }
@@ -142,7 +145,7 @@ impl GeodeGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::ChunkPos;
+    use crate::chunk::{ChunkPos, BLOCK_STONE};
 
     fn create_stone_chunk() -> Chunk {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
@@ -150,7 +153,7 @@ mod tests {
             for y in 1..100 {
                 for z in 0..16 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13; // stone
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -184,11 +187,11 @@ mod tests {
                 for z in 0..16 {
                     let id = chunk.voxel(x, y, z).id;
                     match id {
-                        107 => smooth_basalt_count += 1,
-                        108 => calcite_count += 1,
-                        109 => amethyst_count += 1,
-                        110 => budding_count += 1,
-                        0 => air_count += 1,
+                        BLOCK_SMOOTH_BASALT => smooth_basalt_count += 1,
+                        BLOCK_CALCITE => calcite_count += 1,
+                        BLOCK_AMETHYST_BLOCK => amethyst_count += 1,
+                        BLOCK_BUDDING_AMETHYST => budding_count += 1,
+                        BLOCK_AIR => air_count += 1,
                         _ => {}
                     }
                 }
@@ -223,7 +226,13 @@ mod tests {
             for y in 26..34 {
                 for z in 4..12 {
                     let id = chunk.voxel(x, y, z).id;
-                    if (107..=110).contains(&id) {
+                    if matches!(
+                        id,
+                        BLOCK_SMOOTH_BASALT
+                            | BLOCK_CALCITE
+                            | BLOCK_AMETHYST_BLOCK
+                            | BLOCK_BUDDING_AMETHYST
+                    ) {
                         has_geode_blocks = true;
                         break;
                     }
@@ -248,11 +257,11 @@ mod tests {
             for y in 40..60 {
                 for z in 0..16 {
                     match chunk.voxel(x, y, z).id {
-                        107 => layer_counts[0] += 1,
-                        108 => layer_counts[1] += 1,
-                        109 => layer_counts[2] += 1,
-                        110 => layer_counts[3] += 1,
-                        0 => layer_counts[4] += 1,
+                        BLOCK_SMOOTH_BASALT => layer_counts[0] += 1,
+                        BLOCK_CALCITE => layer_counts[1] += 1,
+                        BLOCK_AMETHYST_BLOCK => layer_counts[2] += 1,
+                        BLOCK_BUDDING_AMETHYST => layer_counts[3] += 1,
+                        BLOCK_AIR => layer_counts[4] += 1,
                         _ => {}
                     }
                 }
@@ -281,7 +290,14 @@ mod tests {
             for y in 44..56 {
                 for z in 0..8 {
                     let id = chunk.voxel(x, y, z).id;
-                    if (107..=110).contains(&id) || id == 0 {
+                    if matches!(
+                        id,
+                        BLOCK_SMOOTH_BASALT
+                            | BLOCK_CALCITE
+                            | BLOCK_AMETHYST_BLOCK
+                            | BLOCK_BUDDING_AMETHYST
+                            | BLOCK_AIR
+                    ) {
                         geode_blocks += 1;
                     }
                 }
@@ -300,7 +316,7 @@ mod tests {
             for y in 48..52 {
                 for z in 6..10 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13; // stone
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -310,7 +326,7 @@ mod tests {
 
         // Air areas outside the stone should remain air (geode skips air)
         let corner_voxel = chunk.voxel(0, 50, 0);
-        assert_eq!(corner_voxel.id, 0, "Far corner should remain air");
+        assert_eq!(corner_voxel.id, BLOCK_AIR, "Far corner should remain air");
     }
 
     #[test]
@@ -323,7 +339,7 @@ mod tests {
             for y in 48..52 {
                 for z in 6..10 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 6; // water
+                    voxel.id = BLOCK_WATER;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -336,7 +352,7 @@ mod tests {
         for x in 6..10 {
             for y in 48..52 {
                 for z in 6..10 {
-                    if chunk.voxel(x, y, z).id == 6 {
+                    if chunk.voxel(x, y, z).id == BLOCK_WATER {
                         water_remaining += 1;
                     }
                 }
@@ -372,7 +388,7 @@ mod tests {
             for y in 1..100 {
                 for z in 0..16 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 0; // air
+                    voxel.id = BLOCK_AIR;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -429,7 +445,7 @@ mod tests {
     #[test]
     fn test_geode_block_ids() {
         // Verify the expected block IDs for geode layers
-        // smooth_basalt = 107, calcite = 108, amethyst_block = 109, budding_amethyst = 110
+        // smooth_basalt, calcite, amethyst_block, budding_amethyst
         let gen = GeodeGenerator::new(55555);
 
         // Search for a chunk that spawns a geode
@@ -443,7 +459,13 @@ mod tests {
                     for y in 1..100 {
                         for z in 0..16 {
                             let id = chunk.voxel(x, y, z).id;
-                            if id == 107 || id == 108 || id == 109 || id == 110 {
+                            if matches!(
+                                id,
+                                BLOCK_SMOOTH_BASALT
+                                    | BLOCK_CALCITE
+                                    | BLOCK_AMETHYST_BLOCK
+                                    | BLOCK_BUDDING_AMETHYST
+                            ) {
                                 found_geode = true;
                                 break;
                             }
@@ -481,7 +503,7 @@ mod tests {
                     for z in 0..16 {
                         for y in 1..100 {
                             let mut voxel = chunk.voxel(x, y, z);
-                            voxel.id = 13; // stone
+                            voxel.id = BLOCK_STONE;
                             chunk.set_voxel(x, y, z, voxel);
                         }
                     }
@@ -495,11 +517,13 @@ mod tests {
                     for z in 0..16 {
                         for y in 1..100 {
                             let block_id = chunk.voxel(x, y, z).id;
-                            if block_id == 107
-                                || block_id == 108
-                                || block_id == 109
-                                || block_id == 110
-                            {
+                            if matches!(
+                                block_id,
+                                BLOCK_SMOOTH_BASALT
+                                    | BLOCK_CALCITE
+                                    | BLOCK_AMETHYST_BLOCK
+                                    | BLOCK_BUDDING_AMETHYST
+                            ) {
                                 has_geode = true;
                                 break;
                             }
@@ -541,7 +565,7 @@ mod tests {
                     for z in 0..16 {
                         for y in 1..100 {
                             let mut voxel = chunk.voxel(x, y, z);
-                            voxel.id = 13;
+                            voxel.id = BLOCK_STONE;
                             chunk.set_voxel(x, y, z, voxel);
                         }
                     }
@@ -559,16 +583,16 @@ mod tests {
                     for z in 0..16 {
                         for y in 1..100 {
                             let block_id = chunk.voxel(x, y, z).id;
-                            if block_id == 107 {
+                            if block_id == BLOCK_SMOOTH_BASALT {
                                 has_basalt = true;
                             }
-                            if block_id == 108 {
+                            if block_id == BLOCK_CALCITE {
                                 has_calcite = true;
                             }
-                            if block_id == 109 {
+                            if block_id == BLOCK_AMETHYST_BLOCK {
                                 has_amethyst = true;
                             }
-                            if block_id == 110 {
+                            if block_id == BLOCK_BUDDING_AMETHYST {
                                 has_budding = true;
                             }
                         }

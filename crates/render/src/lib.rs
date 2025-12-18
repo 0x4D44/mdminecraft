@@ -21,7 +21,7 @@ pub use camera::{Camera, CameraUniform};
 pub use chunk_manager::{ChunkManager, ChunkRenderData, Frustum};
 pub use driver::{ChunkMeshDriver, ChunkMeshStat};
 use mdminecraft_assets::TextureAtlasMetadata;
-pub use mesh::{mesh_chunk, MeshBuffers, MeshHash, MeshVertex};
+pub use mesh::{mesh_chunk, mesh_chunk_with_voxel_at, MeshBuffers, MeshHash, MeshVertex};
 pub use particles::{ParticleEmitter, ParticleSystem, ParticleVertex};
 pub use pipeline::{
     ChunkMeshBuffer, HighlightUniform, ParticlePipeline, RenderContext, SkyboxPipeline,

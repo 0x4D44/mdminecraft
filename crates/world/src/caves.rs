@@ -1,6 +1,13 @@
 //! Cave generation using 3D noise carving with biomes and decorations
 
-use crate::chunk::{BlockId, Chunk, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{
+    BlockId, Chunk, BLOCK_AIR, BLOCK_BEDROCK, BLOCK_CAVE_VINES, BLOCK_DEEPSLATE, BLOCK_GLOW_LICHEN,
+    BLOCK_GRAVEL, BLOCK_HANGING_ROOTS, BLOCK_MOSS_BLOCK, BLOCK_MOSS_CARPET,
+    BLOCK_POINTED_DRIPSTONE, BLOCK_SCULK, BLOCK_SCULK_CATALYST, BLOCK_SCULK_SENSOR,
+    BLOCK_SCULK_SHRIEKER, BLOCK_SCULK_VEIN, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, CHUNK_SIZE_X,
+    CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+};
+use crate::fluid::is_fluid;
 use crate::noise::{NoiseConfig, NoiseGenerator};
 
 /// Cave generation parameters
@@ -95,10 +102,10 @@ impl CaveCarver {
                 for y in self.params.min_y..=self.params.max_y.min(CHUNK_SIZE_Y as i32 - 1) {
                     if self.should_carve(world_x, y, world_z) {
                         let voxel = chunk.voxel(local_x, y as usize, local_z);
-                        // Don't carve bedrock (1) or water (14)
-                        if voxel.id != 0 && voxel.id != 1 && voxel.id != 14 {
+                        if voxel.id != BLOCK_AIR && voxel.id != BLOCK_BEDROCK && !is_fluid(voxel.id)
+                        {
                             let mut new_voxel = voxel;
-                            new_voxel.id = 0; // Air
+                            new_voxel.id = BLOCK_AIR;
                             chunk.set_voxel(local_x, y as usize, local_z, new_voxel);
                         }
                     }
@@ -181,9 +188,10 @@ impl CheeseCaveCarver {
                 for y in self.params.min_y..=self.params.max_y.min(CHUNK_SIZE_Y as i32 - 1) {
                     if self.should_carve(world_x, y, world_z) {
                         let voxel = chunk.voxel(local_x, y as usize, local_z);
-                        if voxel.id != 0 && voxel.id != 1 && voxel.id != 14 {
+                        if voxel.id != BLOCK_AIR && voxel.id != BLOCK_BEDROCK && !is_fluid(voxel.id)
+                        {
                             let mut new_voxel = voxel;
-                            new_voxel.id = 0;
+                            new_voxel.id = BLOCK_AIR;
                             chunk.set_voxel(local_x, y as usize, local_z, new_voxel);
                         }
                     }
@@ -244,9 +252,10 @@ impl SpaghettiCaveCarver {
                 for y in 5..120 {
                     if self.should_carve(world_x, y, world_z) {
                         let voxel = chunk.voxel(local_x, y as usize, local_z);
-                        if voxel.id != 0 && voxel.id != 1 && voxel.id != 14 {
+                        if voxel.id != BLOCK_AIR && voxel.id != BLOCK_BEDROCK && !is_fluid(voxel.id)
+                        {
                             let mut new_voxel = voxel;
-                            new_voxel.id = 0;
+                            new_voxel.id = BLOCK_AIR;
                             chunk.set_voxel(local_x, y as usize, local_z, new_voxel);
                         }
                     }
@@ -300,9 +309,10 @@ impl NoodleCaveCarver {
                 for y in 5..120 {
                     if self.should_carve(world_x, y, world_z) {
                         let voxel = chunk.voxel(local_x, y as usize, local_z);
-                        if voxel.id != 0 && voxel.id != 1 && voxel.id != 14 {
+                        if voxel.id != BLOCK_AIR && voxel.id != BLOCK_BEDROCK && !is_fluid(voxel.id)
+                        {
                             let mut new_voxel = voxel;
-                            new_voxel.id = 0;
+                            new_voxel.id = BLOCK_AIR;
                             chunk.set_voxel(local_x, y as usize, local_z, new_voxel);
                         }
                     }
@@ -397,9 +407,10 @@ impl RavineCarver {
                     let dist_from_path = path_val.abs() * 20.0; // Scale up for width check
                     if dist_from_path < max_width {
                         let voxel = chunk.voxel(local_x, y as usize, local_z);
-                        if voxel.id != 0 {
+                        if voxel.id != BLOCK_AIR && voxel.id != BLOCK_BEDROCK && !is_fluid(voxel.id)
+                        {
                             let mut new_voxel = voxel;
-                            new_voxel.id = 0;
+                            new_voxel.id = BLOCK_AIR;
                             chunk.set_voxel(local_x, y as usize, local_z, new_voxel);
                         }
                     }
@@ -451,20 +462,20 @@ impl CaveBiome {
     /// Get floor block for this biome
     pub fn floor_block(&self) -> BlockId {
         match self {
-            CaveBiome::Stone => 13,     // stone
-            CaveBiome::Lush => 100,     // moss_block
-            CaveBiome::Dripstone => 13, // stone
-            CaveBiome::DeepDark => 101, // deepslate
-            CaveBiome::Flooded => 10,   // gravel
+            CaveBiome::Stone => BLOCK_STONE,
+            CaveBiome::Lush => BLOCK_MOSS_BLOCK,
+            CaveBiome::Dripstone => BLOCK_STONE,
+            CaveBiome::DeepDark => BLOCK_DEEPSLATE,
+            CaveBiome::Flooded => BLOCK_GRAVEL,
         }
     }
 
     /// Get ceiling decoration block
     pub fn ceiling_decoration(&self) -> Option<BlockId> {
         match self {
-            CaveBiome::Lush => Some(102),      // glow_lichen
-            CaveBiome::Dripstone => Some(103), // pointed_dripstone
-            CaveBiome::DeepDark => Some(104),  // sculk
+            CaveBiome::Lush => Some(BLOCK_GLOW_LICHEN),
+            CaveBiome::Dripstone => Some(BLOCK_POINTED_DRIPSTONE),
+            CaveBiome::DeepDark => Some(BLOCK_SCULK),
             _ => None,
         }
     }
@@ -474,7 +485,7 @@ impl CaveBiome {
         // Scan upward from current position
         for scan_y in y..CHUNK_SIZE_Y {
             let voxel = chunk.voxel(x, scan_y, z);
-            if voxel.id != 0 {
+            if voxel.id != BLOCK_AIR {
                 // Hit solid block before reaching top
                 return false;
             }
@@ -488,8 +499,8 @@ impl CaveBiome {
         if is_surface {
             // Different decorations for surface-connected caves
             match self {
-                CaveBiome::Lush => Some(116),      // hanging_roots
-                CaveBiome::Dripstone => Some(103), // pointed_dripstone
+                CaveBiome::Lush => Some(BLOCK_HANGING_ROOTS),
+                CaveBiome::Dripstone => Some(BLOCK_POINTED_DRIPSTONE),
                 _ => None,
             }
         } else {
@@ -542,15 +553,14 @@ impl DripstoneGenerator {
                     }
 
                     let voxel = chunk.voxel(local_x, y, local_z);
-                    if voxel.id != 0 {
+                    if voxel.id != BLOCK_AIR {
                         continue; // Not air
                     }
 
                     // Check for ceiling (stalactite)
                     if y + 1 < CHUNK_SIZE_Y {
                         let above = chunk.voxel(local_x, y + 1, local_z);
-                        if above.id == 13 {
-                            // Stone ceiling
+                        if above.id == BLOCK_STONE {
                             let spawn_chance = self.noise.sample_3d(
                                 world_x as f64 * 0.3,
                                 y as f64 * 0.3,
@@ -558,7 +568,7 @@ impl DripstoneGenerator {
                             );
                             if spawn_chance > 0.7 {
                                 let mut voxel = chunk.voxel(local_x, y, local_z);
-                                voxel.id = 103; // pointed_dripstone
+                                voxel.id = BLOCK_POINTED_DRIPSTONE;
                                 chunk.set_voxel(local_x, y, local_z, voxel);
                             }
                         }
@@ -567,8 +577,7 @@ impl DripstoneGenerator {
                     // Check for floor (stalagmite)
                     if y > 0 {
                         let below = chunk.voxel(local_x, y - 1, local_z);
-                        if below.id == 13 {
-                            // Stone floor
+                        if below.id == BLOCK_STONE {
                             let spawn_chance = self.noise.sample_3d(
                                 world_x as f64 * 0.3 + 100.0,
                                 y as f64 * 0.3,
@@ -576,7 +585,7 @@ impl DripstoneGenerator {
                             );
                             if spawn_chance > 0.75 {
                                 let mut voxel = chunk.voxel(local_x, y, local_z);
-                                voxel.id = 103; // pointed_dripstone
+                                voxel.id = BLOCK_POINTED_DRIPSTONE;
                                 chunk.set_voxel(local_x, y, local_z, voxel);
                             }
                         }
@@ -628,14 +637,14 @@ impl LushCaveDecorator {
                     }
 
                     let voxel = chunk.voxel(local_x, y, local_z);
-                    if voxel.id != 0 {
+                    if voxel.id != BLOCK_AIR {
                         continue;
                     }
 
                     // Ceiling decorations (cave vines, spore blossoms)
                     if y + 1 < CHUNK_SIZE_Y {
                         let above = chunk.voxel(local_x, y + 1, local_z);
-                        if above.id == 100 || above.id == 13 {
+                        if above.id == BLOCK_MOSS_BLOCK || above.id == BLOCK_STONE {
                             // Moss or stone ceiling
                             let decoration_noise = self.noise.sample_3d(
                                 world_x as f64 * 0.2,
@@ -645,11 +654,11 @@ impl LushCaveDecorator {
 
                             if decoration_noise > 0.85 {
                                 let mut new_voxel = voxel;
-                                new_voxel.id = 113; // spore_blossom
+                                new_voxel.id = BLOCK_SPORE_BLOSSOM;
                                 chunk.set_voxel(local_x, y, local_z, new_voxel);
                             } else if decoration_noise > 0.7 {
                                 let mut new_voxel = voxel;
-                                new_voxel.id = 111; // cave_vines
+                                new_voxel.id = BLOCK_CAVE_VINES;
                                 chunk.set_voxel(local_x, y, local_z, new_voxel);
                             }
                         }
@@ -658,7 +667,7 @@ impl LushCaveDecorator {
                     // Floor decorations (moss carpet)
                     if y > 0 {
                         let below = chunk.voxel(local_x, y - 1, local_z);
-                        if below.id == 100 {
+                        if below.id == BLOCK_MOSS_BLOCK {
                             // Moss block floor
                             let carpet_noise = self.noise.sample_3d(
                                 world_x as f64 * 0.3,
@@ -667,7 +676,7 @@ impl LushCaveDecorator {
                             );
                             if carpet_noise > 0.6 {
                                 let mut new_voxel = voxel;
-                                new_voxel.id = 112; // moss_carpet
+                                new_voxel.id = BLOCK_MOSS_CARPET;
                                 chunk.set_voxel(local_x, y, local_z, new_voxel);
                             }
                         }
@@ -719,14 +728,14 @@ impl DeepDarkDecorator {
                     }
 
                     let voxel = chunk.voxel(local_x, y, local_z);
-                    if voxel.id != 0 {
+                    if voxel.id != BLOCK_AIR {
                         continue;
                     }
 
                     // Floor decorations
                     if y > 0 {
                         let below = chunk.voxel(local_x, y - 1, local_z);
-                        if below.id == 101 || below.id == 104 {
+                        if below.id == BLOCK_DEEPSLATE || below.id == BLOCK_SCULK {
                             // Deepslate or sculk floor
                             let decoration_noise = self.noise.sample_3d(
                                 world_x as f64 * 0.15,
@@ -735,13 +744,13 @@ impl DeepDarkDecorator {
                             );
 
                             let block_id = if decoration_noise > 0.9 {
-                                119 // sculk_catalyst (rare)
+                                BLOCK_SCULK_CATALYST
                             } else if decoration_noise > 0.8 {
-                                118 // sculk_shrieker
+                                BLOCK_SCULK_SHRIEKER
                             } else if decoration_noise > 0.7 {
-                                117 // sculk_sensor
+                                BLOCK_SCULK_SENSOR
                             } else if decoration_noise > 0.5 {
-                                120 // sculk_vein
+                                BLOCK_SCULK_VEIN
                             } else {
                                 continue;
                             };
@@ -763,8 +772,7 @@ pub fn flood_low_areas(chunk: &mut Chunk, water_level: i32, water_id: BlockId) {
         for z in 0..CHUNK_SIZE_Z {
             for y in 1..water_level.min(CHUNK_SIZE_Y as i32) as usize {
                 let voxel = chunk.voxel(x, y, z);
-                if voxel.id == 0 {
-                    // Air
+                if voxel.id == BLOCK_AIR {
                     let mut new_voxel = voxel;
                     new_voxel.id = water_id;
                     chunk.set_voxel(x, y, z, new_voxel);
@@ -777,7 +785,7 @@ pub fn flood_low_areas(chunk: &mut Chunk, water_level: i32, water_id: BlockId) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chunk::ChunkPos;
+    use crate::chunk::{ChunkPos, BLOCK_WATER};
 
     fn create_stone_chunk() -> Chunk {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
@@ -785,7 +793,7 @@ mod tests {
             for y in 1..100 {
                 for z in 0..16 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13; // stone
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -803,7 +811,7 @@ mod tests {
             for y in 0..64 {
                 for z in 0..16 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13;
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -816,7 +824,7 @@ mod tests {
         for x in 0..16 {
             for y in 5..56 {
                 for z in 0..16 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         air_count += 1;
                     }
                 }
@@ -865,7 +873,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 for y in 1..10 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         below_min_count += 1;
                     }
                 }
@@ -883,7 +891,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 let mut voxel = chunk.voxel(x, 5, z);
-                voxel.id = 1; // bedrock
+                voxel.id = BLOCK_BEDROCK;
                 chunk.set_voxel(x, 5, z, voxel);
             }
         }
@@ -893,7 +901,11 @@ mod tests {
         // Verify bedrock is preserved
         for x in 0..16 {
             for z in 0..16 {
-                assert_eq!(chunk.voxel(x, 5, z).id, 1, "Bedrock should not be carved");
+                assert_eq!(
+                    chunk.voxel(x, 5, z).id,
+                    BLOCK_BEDROCK,
+                    "Bedrock should not be carved"
+                );
             }
         }
     }
@@ -907,7 +919,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 let mut voxel = chunk.voxel(x, 30, z);
-                voxel.id = 14; // water
+                voxel.id = BLOCK_WATER;
                 chunk.set_voxel(x, 30, z, voxel);
             }
         }
@@ -917,7 +929,11 @@ mod tests {
         // Verify water is preserved
         for x in 0..16 {
             for z in 0..16 {
-                assert_eq!(chunk.voxel(x, 30, z).id, 14, "Water should not be carved");
+                assert_eq!(
+                    chunk.voxel(x, 30, z).id,
+                    BLOCK_WATER,
+                    "Water should not be carved"
+                );
             }
         }
     }
@@ -969,9 +985,9 @@ mod tests {
 
     #[test]
     fn test_floor_block_assignment() {
-        assert_eq!(CaveBiome::Stone.floor_block(), 13);
-        assert_eq!(CaveBiome::Lush.floor_block(), 100);
-        assert_eq!(CaveBiome::DeepDark.floor_block(), 101);
+        assert_eq!(CaveBiome::Stone.floor_block(), BLOCK_STONE);
+        assert_eq!(CaveBiome::Lush.floor_block(), BLOCK_MOSS_BLOCK);
+        assert_eq!(CaveBiome::DeepDark.floor_block(), BLOCK_DEEPSLATE);
     }
 
     #[test]
@@ -984,11 +1000,11 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 let mut voxel = chunk.voxel(x, 30, z);
-                voxel.id = 13; // Stone floor
+                voxel.id = BLOCK_STONE;
                 chunk.set_voxel(x, 30, z, voxel);
 
                 let mut voxel = chunk.voxel(x, 31, z);
-                voxel.id = 0; // Air
+                voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 31, z, voxel);
             }
         }
@@ -1005,7 +1021,7 @@ mod tests {
         let mut dripstone_count = 0;
         for x in 0..16 {
             for z in 0..16 {
-                if chunk.voxel(x, 31, z).id == 103 {
+                if chunk.voxel(x, 31, z).id == BLOCK_POINTED_DRIPSTONE {
                     dripstone_count += 1;
                 }
             }
@@ -1030,7 +1046,7 @@ mod tests {
             for z in 0..16 {
                 for y in 1..100 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13; // stone
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -1046,7 +1062,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 for y in 1..100 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         air_count += 1;
                     }
                 }
@@ -1067,7 +1083,7 @@ mod tests {
             for z in 0..16 {
                 for y in 1..200 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13;
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -1080,7 +1096,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 for y in 1..200 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         carved_y_levels.insert(y);
                     }
                 }
@@ -1106,7 +1122,7 @@ mod tests {
             for z in 0..16 {
                 for y in 1..100 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13;
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -1119,7 +1135,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 for y in 1..100 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         air_count += 1;
                     }
                 }
@@ -1141,7 +1157,7 @@ mod tests {
             for z in 0..16 {
                 for y in 1..100 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13;
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -1154,7 +1170,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 for y in 1..100 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         air_count += 1;
                     }
                 }
@@ -1174,7 +1190,7 @@ mod tests {
             for z in 0..16 {
                 for y in 1..100 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 13;
+                    voxel.id = BLOCK_STONE;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
@@ -1187,7 +1203,7 @@ mod tests {
         for x in 0..16 {
             for z in 0..16 {
                 for y in 1..100 {
-                    if chunk.voxel(x, y, z).id == 0 {
+                    if chunk.voxel(x, y, z).id == BLOCK_AIR {
                         air_count += 1;
                     }
                 }
@@ -1199,19 +1215,25 @@ mod tests {
 
     #[test]
     fn test_cave_biome_floor_block() {
-        assert_eq!(CaveBiome::Stone.floor_block(), 13);
-        assert_eq!(CaveBiome::Lush.floor_block(), 100);
-        assert_eq!(CaveBiome::Dripstone.floor_block(), 13);
-        assert_eq!(CaveBiome::DeepDark.floor_block(), 101);
-        assert_eq!(CaveBiome::Flooded.floor_block(), 10);
+        assert_eq!(CaveBiome::Stone.floor_block(), BLOCK_STONE);
+        assert_eq!(CaveBiome::Lush.floor_block(), BLOCK_MOSS_BLOCK);
+        assert_eq!(CaveBiome::Dripstone.floor_block(), BLOCK_STONE);
+        assert_eq!(CaveBiome::DeepDark.floor_block(), BLOCK_DEEPSLATE);
+        assert_eq!(CaveBiome::Flooded.floor_block(), BLOCK_GRAVEL);
     }
 
     #[test]
     fn test_cave_biome_ceiling_decoration() {
         assert_eq!(CaveBiome::Stone.ceiling_decoration(), None);
-        assert_eq!(CaveBiome::Lush.ceiling_decoration(), Some(102));
-        assert_eq!(CaveBiome::Dripstone.ceiling_decoration(), Some(103));
-        assert_eq!(CaveBiome::DeepDark.ceiling_decoration(), Some(104));
+        assert_eq!(
+            CaveBiome::Lush.ceiling_decoration(),
+            Some(BLOCK_GLOW_LICHEN)
+        );
+        assert_eq!(
+            CaveBiome::Dripstone.ceiling_decoration(),
+            Some(BLOCK_POINTED_DRIPSTONE)
+        );
+        assert_eq!(CaveBiome::DeepDark.ceiling_decoration(), Some(BLOCK_SCULK));
         assert_eq!(CaveBiome::Flooded.ceiling_decoration(), None);
     }
 
@@ -1220,11 +1242,11 @@ mod tests {
         // Surface connected
         assert_eq!(
             CaveBiome::Lush.ceiling_decoration_with_surface(true),
-            Some(116)
-        ); // hanging_roots
+            Some(BLOCK_HANGING_ROOTS)
+        );
         assert_eq!(
             CaveBiome::Dripstone.ceiling_decoration_with_surface(true),
-            Some(103)
+            Some(BLOCK_POINTED_DRIPSTONE)
         );
         assert_eq!(CaveBiome::Stone.ceiling_decoration_with_surface(true), None);
         assert_eq!(
@@ -1235,15 +1257,15 @@ mod tests {
         // Not surface connected (underground)
         assert_eq!(
             CaveBiome::Lush.ceiling_decoration_with_surface(false),
-            Some(102)
+            Some(BLOCK_GLOW_LICHEN)
         );
         assert_eq!(
             CaveBiome::Dripstone.ceiling_decoration_with_surface(false),
-            Some(103)
+            Some(BLOCK_POINTED_DRIPSTONE)
         );
         assert_eq!(
             CaveBiome::DeepDark.ceiling_decoration_with_surface(false),
-            Some(104)
+            Some(BLOCK_SCULK)
         );
     }
 
@@ -1254,7 +1276,7 @@ mod tests {
         // Create a column with air all the way up
         for y in 50..CHUNK_SIZE_Y {
             let mut voxel = chunk.voxel(8, y, 8);
-            voxel.id = 0; // air
+            voxel.id = BLOCK_AIR;
             chunk.set_voxel(8, y, 8, voxel);
         }
 
@@ -1262,7 +1284,7 @@ mod tests {
 
         // Block it with stone
         let mut voxel = chunk.voxel(8, 100, 8);
-        voxel.id = 13; // stone
+        voxel.id = BLOCK_STONE;
         chunk.set_voxel(8, 100, 8, voxel);
 
         assert!(!CaveBiome::is_surface_connected(&chunk, 8, 50, 8));
@@ -1277,13 +1299,13 @@ mod tests {
             for z in 5..10 {
                 for y in 5..12 {
                     let mut voxel = chunk.voxel(x, y, z);
-                    voxel.id = 0; // air
+                    voxel.id = BLOCK_AIR;
                     chunk.set_voxel(x, y, z, voxel);
                 }
             }
         }
 
-        flood_low_areas(&mut chunk, 15, 14); // water_id = 14
+        flood_low_areas(&mut chunk, 15, BLOCK_WATER);
 
         // Verify air below water_level is now water
         for x in 5..10 {
@@ -1291,7 +1313,7 @@ mod tests {
                 for y in 5..12 {
                     assert_eq!(
                         chunk.voxel(x, y, z).id,
-                        14,
+                        BLOCK_WATER,
                         "Air should be flooded with water"
                     );
                 }
@@ -1299,7 +1321,11 @@ mod tests {
         }
 
         // Verify stone is unchanged
-        assert_eq!(chunk.voxel(3, 10, 3).id, 13, "Stone should not be flooded");
+        assert_eq!(
+            chunk.voxel(3, 10, 3).id,
+            BLOCK_STONE,
+            "Stone should not be flooded"
+        );
     }
 
     #[test]
@@ -1312,17 +1338,17 @@ mod tests {
             for z in 5..11 {
                 // Moss ceiling
                 let mut voxel = chunk.voxel(x, 41, z);
-                voxel.id = 100; // moss_block
+                voxel.id = BLOCK_MOSS_BLOCK;
                 chunk.set_voxel(x, 41, z, voxel);
 
                 // Air below
                 let mut voxel = chunk.voxel(x, 40, z);
-                voxel.id = 0; // air
+                voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 40, z, voxel);
 
                 // Moss floor
                 let mut voxel = chunk.voxel(x, 39, z);
-                voxel.id = 100; // moss_block
+                voxel.id = BLOCK_MOSS_BLOCK;
                 chunk.set_voxel(x, 39, z, voxel);
             }
         }
@@ -1341,7 +1367,10 @@ mod tests {
         for x in 5..11 {
             for z in 5..11 {
                 let block_id = chunk.voxel(x, 40, z).id;
-                if block_id == 111 || block_id == 112 || block_id == 113 {
+                if block_id == BLOCK_CAVE_VINES
+                    || block_id == BLOCK_MOSS_CARPET
+                    || block_id == BLOCK_SPORE_BLOSSOM
+                {
                     decoration_count += 1;
                 }
             }
@@ -1362,12 +1391,12 @@ mod tests {
             for z in 5..11 {
                 // Deepslate floor
                 let mut voxel = chunk.voxel(x, 8, z);
-                voxel.id = 101; // deepslate
+                voxel.id = BLOCK_DEEPSLATE;
                 chunk.set_voxel(x, 8, z, voxel);
 
                 // Air above
                 let mut voxel = chunk.voxel(x, 9, z);
-                voxel.id = 0; // air
+                voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 9, z, voxel);
             }
         }
@@ -1386,7 +1415,13 @@ mod tests {
         for x in 5..11 {
             for z in 5..11 {
                 let block_id = chunk.voxel(x, 9, z).id;
-                if (117..=120).contains(&block_id) {
+                if matches!(
+                    block_id,
+                    BLOCK_SCULK_SENSOR
+                        | BLOCK_SCULK_SHRIEKER
+                        | BLOCK_SCULK_CATALYST
+                        | BLOCK_SCULK_VEIN
+                ) {
                     sculk_count += 1;
                 }
             }
@@ -1407,12 +1442,12 @@ mod tests {
             for z in 3..13 {
                 // Stone ceiling at y=50
                 let mut voxel = chunk.voxel(x, 50, z);
-                voxel.id = 13; // stone
+                voxel.id = BLOCK_STONE;
                 chunk.set_voxel(x, 50, z, voxel);
 
                 // Air below
                 let mut voxel = chunk.voxel(x, 49, z);
-                voxel.id = 0; // air
+                voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 49, z, voxel);
             }
         }
@@ -1429,7 +1464,7 @@ mod tests {
         let mut dripstone_count = 0;
         for x in 3..13 {
             for z in 3..13 {
-                if chunk.voxel(x, 49, z).id == 103 {
+                if chunk.voxel(x, 49, z).id == BLOCK_POINTED_DRIPSTONE {
                     dripstone_count += 1;
                 }
             }
@@ -1448,12 +1483,12 @@ mod tests {
             for z in 3..13 {
                 // Stone floor at y=30
                 let mut voxel = chunk.voxel(x, 30, z);
-                voxel.id = 13; // stone
+                voxel.id = BLOCK_STONE;
                 chunk.set_voxel(x, 30, z, voxel);
 
                 // Air above
                 let mut voxel = chunk.voxel(x, 31, z);
-                voxel.id = 0; // air
+                voxel.id = BLOCK_AIR;
                 chunk.set_voxel(x, 31, z, voxel);
             }
         }
@@ -1502,7 +1537,7 @@ mod tests {
         let mut chunk = create_stone_chunk();
         let initial_stone_count: usize = (0..16)
             .flat_map(|x| (0..16).flat_map(move |z| (1..100).map(move |y| (x, y, z))))
-            .filter(|(x, y, z)| chunk.voxel(*x, *y, *z).id == 13)
+            .filter(|(x, y, z)| chunk.voxel(*x, *y, *z).id == BLOCK_STONE)
             .count();
 
         // Apply all carvers
@@ -1512,7 +1547,7 @@ mod tests {
 
         let final_stone_count: usize = (0..16)
             .flat_map(|x| (0..16).flat_map(move |z| (1..100).map(move |y| (x, y, z))))
-            .filter(|(x, y, z)| chunk.voxel(*x, *y, *z).id == 13)
+            .filter(|(x, y, z)| chunk.voxel(*x, *y, *z).id == BLOCK_STONE)
             .count();
 
         // Multiple carvers should carve more than individual ones

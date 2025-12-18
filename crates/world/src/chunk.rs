@@ -21,6 +21,33 @@ pub const BLOCK_AIR: BlockId = 0;
 /// ID for stone block.
 pub const BLOCK_STONE: BlockId = 1;
 
+/// ID for dirt.
+pub const BLOCK_DIRT: BlockId = 2;
+
+/// ID for grass.
+pub const BLOCK_GRASS: BlockId = 3;
+
+/// ID for sand.
+pub const BLOCK_SAND: BlockId = 4;
+
+/// ID for gravel.
+pub const BLOCK_GRAVEL: BlockId = 5;
+
+/// ID for water source block.
+pub const BLOCK_WATER: BlockId = 6;
+
+/// ID for ice.
+pub const BLOCK_ICE: BlockId = 7;
+
+/// ID for snow.
+pub const BLOCK_SNOW: BlockId = 8;
+
+/// ID for clay.
+pub const BLOCK_CLAY: BlockId = 9;
+
+/// ID for bedrock.
+pub const BLOCK_BEDROCK: BlockId = 10;
+
 /// ID for oak log.
 pub const BLOCK_OAK_LOG: BlockId = 11;
 
@@ -32,6 +59,9 @@ pub const BLOCK_CRAFTING_TABLE: BlockId = 13;
 
 /// ID for cobblestone.
 pub const BLOCK_COBBLESTONE: BlockId = 24;
+
+/// ID for glass.
+pub const BLOCK_GLASS: BlockId = 25;
 
 /// ID for coal ore (spawns y: 0-128).
 pub const BLOCK_COAL_ORE: BlockId = 14;
@@ -51,6 +81,9 @@ pub const BLOCK_FURNACE: BlockId = 18;
 /// ID for lit furnace block.
 pub const BLOCK_FURNACE_LIT: BlockId = 19;
 
+/// ID for obsidian.
+pub const BLOCK_OBSIDIAN: BlockId = 23;
+
 /// ID for lapis ore (spawns y: 0-32).
 pub const BLOCK_LAPIS_ORE: BlockId = 98;
 
@@ -65,6 +98,60 @@ pub const BLOCK_NETHER_WART_BLOCK: BlockId = 101;
 
 /// ID for soul sand.
 pub const BLOCK_SOUL_SAND: BlockId = 102;
+
+/// ID for moss block.
+pub const BLOCK_MOSS_BLOCK: BlockId = 75;
+
+/// ID for deepslate.
+pub const BLOCK_DEEPSLATE: BlockId = 76;
+
+/// ID for glow lichen.
+pub const BLOCK_GLOW_LICHEN: BlockId = 77;
+
+/// ID for pointed dripstone.
+pub const BLOCK_POINTED_DRIPSTONE: BlockId = 78;
+
+/// ID for sculk.
+pub const BLOCK_SCULK: BlockId = 79;
+
+/// ID for magma block.
+pub const BLOCK_MAGMA_BLOCK: BlockId = 80;
+
+/// ID for cave vines.
+pub const BLOCK_CAVE_VINES: BlockId = 86;
+
+/// ID for moss carpet.
+pub const BLOCK_MOSS_CARPET: BlockId = 87;
+
+/// ID for spore blossom.
+pub const BLOCK_SPORE_BLOSSOM: BlockId = 88;
+
+/// ID for hanging roots.
+pub const BLOCK_HANGING_ROOTS: BlockId = 91;
+
+/// ID for sculk sensor.
+pub const BLOCK_SCULK_SENSOR: BlockId = 92;
+
+/// ID for sculk shrieker.
+pub const BLOCK_SCULK_SHRIEKER: BlockId = 93;
+
+/// ID for sculk catalyst.
+pub const BLOCK_SCULK_CATALYST: BlockId = 94;
+
+/// ID for sculk vein.
+pub const BLOCK_SCULK_VEIN: BlockId = 95;
+
+/// ID for smooth basalt.
+pub const BLOCK_SMOOTH_BASALT: BlockId = 82;
+
+/// ID for calcite.
+pub const BLOCK_CALCITE: BlockId = 83;
+
+/// ID for amethyst block.
+pub const BLOCK_AMETHYST_BLOCK: BlockId = 84;
+
+/// ID for budding amethyst.
+pub const BLOCK_BUDDING_AMETHYST: BlockId = 85;
 
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
