@@ -131,12 +131,157 @@ pub enum ItemType {
     // Placeable utility blocks (appended to preserve stable IDs)
     CraftingTable,
     Torch,
+
+    // Tools (appended to preserve stable IDs)
+    WoodenPickaxe,
+    StonePickaxe,
+    IronPickaxe,
+    DiamondPickaxe,
+    GoldPickaxe,
+    WoodenAxe,
+    StoneAxe,
+    IronAxe,
+    DiamondAxe,
+    GoldAxe,
+    WoodenShovel,
+    StoneShovel,
+    IronShovel,
+    DiamondShovel,
+    GoldShovel,
+    WoodenSword,
+    StoneSword,
+    IronSword,
+    DiamondSword,
+    GoldSword,
+    WoodenHoe,
+    StoneHoe,
+    IronHoe,
+    DiamondHoe,
+    GoldHoe,
 }
+
+const ALL_ITEM_TYPES: &[ItemType] = &[
+    ItemType::Stone,
+    ItemType::Cobblestone,
+    ItemType::Dirt,
+    ItemType::Grass,
+    ItemType::Sand,
+    ItemType::Gravel,
+    ItemType::Ice,
+    ItemType::Snow,
+    ItemType::Clay,
+    ItemType::Bedrock,
+    ItemType::OakLog,
+    ItemType::OakLeaves,
+    ItemType::BirchLog,
+    ItemType::BirchLeaves,
+    ItemType::PineLog,
+    ItemType::PineLeaves,
+    ItemType::CoalOre,
+    ItemType::IronOre,
+    ItemType::GoldOre,
+    ItemType::DiamondOre,
+    ItemType::LapisOre,
+    ItemType::RawPork,
+    ItemType::RawBeef,
+    ItemType::Leather,
+    ItemType::Wool,
+    ItemType::Feather,
+    ItemType::Egg,
+    ItemType::Bone,
+    ItemType::RottenFlesh,
+    ItemType::String,
+    ItemType::Gunpowder,
+    ItemType::IronIngot,
+    ItemType::GoldIngot,
+    ItemType::CookedPork,
+    ItemType::CookedBeef,
+    ItemType::Coal,
+    ItemType::Stick,
+    ItemType::Planks,
+    ItemType::OakPlanks,
+    ItemType::BirchPlanks,
+    ItemType::PinePlanks,
+    ItemType::Furnace,
+    ItemType::Sapling,
+    ItemType::Apple,
+    ItemType::Flint,
+    ItemType::Arrow,
+    ItemType::Bow,
+    ItemType::LeatherHelmet,
+    ItemType::LeatherChestplate,
+    ItemType::LeatherLeggings,
+    ItemType::LeatherBoots,
+    ItemType::IronHelmet,
+    ItemType::IronChestplate,
+    ItemType::IronLeggings,
+    ItemType::IronBoots,
+    ItemType::GoldHelmet,
+    ItemType::GoldChestplate,
+    ItemType::GoldLeggings,
+    ItemType::GoldBoots,
+    ItemType::DiamondHelmet,
+    ItemType::DiamondChestplate,
+    ItemType::DiamondLeggings,
+    ItemType::DiamondBoots,
+    ItemType::Diamond,
+    ItemType::LapisLazuli,
+    ItemType::GlassBottle,
+    ItemType::WaterBottle,
+    ItemType::NetherWart,
+    ItemType::BlazePowder,
+    ItemType::PotionAwkward,
+    ItemType::PotionNightVision,
+    ItemType::PotionInvisibility,
+    ItemType::PotionLeaping,
+    ItemType::PotionFireResistance,
+    ItemType::PotionSwiftness,
+    ItemType::PotionSlowness,
+    ItemType::PotionWaterBreathing,
+    ItemType::PotionHealing,
+    ItemType::PotionHarming,
+    ItemType::PotionPoison,
+    ItemType::PotionRegeneration,
+    ItemType::PotionStrength,
+    ItemType::PotionWeakness,
+    ItemType::CraftingTable,
+    ItemType::Torch,
+    ItemType::WoodenPickaxe,
+    ItemType::StonePickaxe,
+    ItemType::IronPickaxe,
+    ItemType::DiamondPickaxe,
+    ItemType::GoldPickaxe,
+    ItemType::WoodenAxe,
+    ItemType::StoneAxe,
+    ItemType::IronAxe,
+    ItemType::DiamondAxe,
+    ItemType::GoldAxe,
+    ItemType::WoodenShovel,
+    ItemType::StoneShovel,
+    ItemType::IronShovel,
+    ItemType::DiamondShovel,
+    ItemType::GoldShovel,
+    ItemType::WoodenSword,
+    ItemType::StoneSword,
+    ItemType::IronSword,
+    ItemType::DiamondSword,
+    ItemType::GoldSword,
+    ItemType::WoodenHoe,
+    ItemType::StoneHoe,
+    ItemType::IronHoe,
+    ItemType::DiamondHoe,
+    ItemType::GoldHoe,
+];
 
 impl ItemType {
     /// Get the numeric ID for this item type (used in crafting recipes).
     pub fn id(&self) -> u16 {
         *self as u16
+    }
+
+    /// Convert a numeric item ID back into an [`ItemType`].
+    pub fn from_id(id: u16) -> Option<Self> {
+        ALL_ITEM_TYPES.get(id as usize).copied()
     }
 
     /// Get the maximum stack size for this item type.
@@ -227,7 +372,32 @@ impl ItemType {
             | ItemType::PotionPoison
             | ItemType::PotionRegeneration
             | ItemType::PotionStrength
-            | ItemType::PotionWeakness => 1,
+            | ItemType::PotionWeakness
+            | ItemType::WoodenPickaxe
+            | ItemType::StonePickaxe
+            | ItemType::IronPickaxe
+            | ItemType::DiamondPickaxe
+            | ItemType::GoldPickaxe
+            | ItemType::WoodenAxe
+            | ItemType::StoneAxe
+            | ItemType::IronAxe
+            | ItemType::DiamondAxe
+            | ItemType::GoldAxe
+            | ItemType::WoodenShovel
+            | ItemType::StoneShovel
+            | ItemType::IronShovel
+            | ItemType::DiamondShovel
+            | ItemType::GoldShovel
+            | ItemType::WoodenSword
+            | ItemType::StoneSword
+            | ItemType::IronSword
+            | ItemType::DiamondSword
+            | ItemType::GoldSword
+            | ItemType::WoodenHoe
+            | ItemType::StoneHoe
+            | ItemType::IronHoe
+            | ItemType::DiamondHoe
+            | ItemType::GoldHoe => 1,
 
             // Brewing ingredients stack to 64
             ItemType::GlassBottle
@@ -842,6 +1012,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn item_type_from_id_roundtrips() {
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::GoldHoe as usize + 1);
+
+        for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
+            assert_eq!(item_type.id(), idx as u16);
+            assert_eq!(ItemType::from_id(idx as u16), Some(item_type));
+        }
+
+        assert_eq!(ItemType::from_id(u16::MAX), None);
+    }
+
+    #[test]
     fn test_item_type_max_stack() {
         // Block items stack to 64
         assert_eq!(ItemType::Stone.max_stack_size(), 64);
@@ -852,6 +1034,10 @@ mod tests {
         // Food/resources stack to 16
         assert_eq!(ItemType::RawPork.max_stack_size(), 16);
         assert_eq!(ItemType::Apple.max_stack_size(), 16);
+
+        // Tools don't stack
+        assert_eq!(ItemType::WoodenPickaxe.max_stack_size(), 1);
+        assert_eq!(ItemType::DiamondSword.max_stack_size(), 1);
     }
 
     #[test]
