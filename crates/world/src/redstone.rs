@@ -161,6 +161,8 @@ pub struct RedstoneSimulator {
     current_tick: u64,
     /// Dirty chunks that need mesh rebuilding
     dirty_chunks: std::collections::HashSet<ChunkPos>,
+    /// Dirty chunks that need block-light recomputation
+    dirty_light_chunks: std::collections::HashSet<ChunkPos>,
 }
 
 impl RedstoneSimulator {
@@ -171,6 +173,7 @@ impl RedstoneSimulator {
             button_timers: Vec::new(),
             current_tick: 0,
             dirty_chunks: std::collections::HashSet::new(),
+            dirty_light_chunks: std::collections::HashSet::new(),
         }
     }
 
@@ -498,16 +501,23 @@ impl RedstoneSimulator {
             None => return false,
         };
 
-        // Check power from block below (torch inverts)
-        let below_pos = RedstonePos::new(pos.x, pos.y - 1, pos.z);
-        let powered_from_below = if let Some(below_voxel) = self.get_voxel(below_pos, chunks) {
-            get_power_level(below_voxel.state) > 0
+        // Check power from supporting block (torch inverts).
+        let support_pos = if crate::is_torch_wall(voxel.state) {
+            let facing = crate::torch_facing(voxel.state);
+            let (dx, dz) = facing.offset();
+            RedstonePos::new(pos.x - dx, pos.y, pos.z - dz)
+        } else {
+            RedstonePos::new(pos.x, pos.y - 1, pos.z)
+        };
+        let powered_from_support = if let Some(support_voxel) = self.get_voxel(support_pos, chunks)
+        {
+            get_power_level(support_voxel.state) > 0
         } else {
             false
         };
 
-        // Torch is ON when NOT powered from below (inversion)
-        let should_be_active = !powered_from_below;
+        // Torch is ON when NOT powered from the supporting block (inversion)
+        let should_be_active = !powered_from_support;
         let was_active = is_active(voxel.state);
 
         if should_be_active == was_active {
@@ -587,14 +597,23 @@ impl RedstoneSimulator {
 
         let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
         if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+            let old = chunk.voxel(local_x, local_y, local_z);
             chunk.set_voxel(local_x, local_y, local_z, voxel);
             self.dirty_chunks.insert(chunk_pos);
+            if old.light_block != voxel.light_block {
+                self.dirty_light_chunks.insert(chunk_pos);
+            }
         }
     }
 
     /// Take the set of dirty chunks (clears internal state)
     pub fn take_dirty_chunks(&mut self) -> HashSet<ChunkPos> {
         std::mem::take(&mut self.dirty_chunks)
+    }
+
+    /// Take the set of chunks that need block-light recomputation.
+    pub fn take_dirty_light_chunks(&mut self) -> HashSet<ChunkPos> {
+        std::mem::take(&mut self.dirty_light_chunks)
     }
 
     /// Get pending update count

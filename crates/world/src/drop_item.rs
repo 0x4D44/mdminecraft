@@ -158,6 +158,36 @@ pub enum ItemType {
     IronHoe,
     DiamondHoe,
     GoldHoe,
+
+    // Interactive/redstone blocks (appended to preserve stable IDs)
+    Ladder,
+    Lever,
+    StoneButton,
+    OakButton,
+    StonePressurePlate,
+    OakPressurePlate,
+    RedstoneWire,
+    RedstoneTorch,
+
+    // Additional placeable blocks (appended to preserve stable IDs)
+    Glass,
+    Obsidian,
+    OakFence,
+    OakFenceGate,
+    StoneSlab,
+    OakSlab,
+    StoneStairs,
+    OakStairs,
+    GlassPane,
+    Trapdoor,
+    Chest,
+    OakDoor,
+    IronDoor,
+    RedstoneLamp,
+    EnchantingTable,
+    BrewingStand,
+    NetherWartBlock,
+    SoulSand,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -271,6 +301,32 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::IronHoe,
     ItemType::DiamondHoe,
     ItemType::GoldHoe,
+    ItemType::Ladder,
+    ItemType::Lever,
+    ItemType::StoneButton,
+    ItemType::OakButton,
+    ItemType::StonePressurePlate,
+    ItemType::OakPressurePlate,
+    ItemType::RedstoneWire,
+    ItemType::RedstoneTorch,
+    ItemType::Glass,
+    ItemType::Obsidian,
+    ItemType::OakFence,
+    ItemType::OakFenceGate,
+    ItemType::StoneSlab,
+    ItemType::OakSlab,
+    ItemType::StoneStairs,
+    ItemType::OakStairs,
+    ItemType::GlassPane,
+    ItemType::Trapdoor,
+    ItemType::Chest,
+    ItemType::OakDoor,
+    ItemType::IronDoor,
+    ItemType::RedstoneLamp,
+    ItemType::EnchantingTable,
+    ItemType::BrewingStand,
+    ItemType::NetherWartBlock,
+    ItemType::SoulSand,
 ];
 
 impl ItemType {
@@ -329,7 +385,33 @@ impl ItemType {
             | ItemType::Arrow
             | ItemType::LapisLazuli
             | ItemType::CraftingTable
-            | ItemType::Torch => 64,
+            | ItemType::Torch
+            | ItemType::Ladder
+            | ItemType::Lever
+            | ItemType::StoneButton
+            | ItemType::OakButton
+            | ItemType::StonePressurePlate
+            | ItemType::OakPressurePlate
+            | ItemType::RedstoneWire
+            | ItemType::RedstoneTorch
+            | ItemType::Glass
+            | ItemType::Obsidian
+            | ItemType::OakFence
+            | ItemType::OakFenceGate
+            | ItemType::StoneSlab
+            | ItemType::OakSlab
+            | ItemType::StoneStairs
+            | ItemType::OakStairs
+            | ItemType::GlassPane
+            | ItemType::Trapdoor
+            | ItemType::Chest
+            | ItemType::OakDoor
+            | ItemType::IronDoor
+            | ItemType::RedstoneLamp
+            | ItemType::EnchantingTable
+            | ItemType::BrewingStand
+            | ItemType::NetherWartBlock
+            | ItemType::SoulSand => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -440,12 +522,13 @@ impl ItemType {
             3 => Some((ItemType::Dirt, 1)), // Grass drops dirt (like Minecraft)
             4 => Some((ItemType::Sand, 1)),
             5 => Some((ItemType::Gravel, 1)),
-            7 => Some((ItemType::Ice, 1)),
             8 => Some((ItemType::Snow, 1)),
             9 => Some((ItemType::Clay, 1)),
 
             // Tree blocks
             11 => Some((ItemType::OakLog, 1)),
+            71 => Some((ItemType::BirchLog, 1)),
+            73 => Some((ItemType::PineLog, 1)),
             12 => Some((ItemType::OakPlanks, 1)),
             13 => Some((ItemType::CraftingTable, 1)),
 
@@ -455,9 +538,35 @@ impl ItemType {
             16 => Some((ItemType::GoldOre, 1)),
             17 => Some((ItemType::DiamondOre, 1)),
 
+            // Obsidian
+            23 => Some((ItemType::Obsidian, 1)),
+
+            // Glass and panes (glass requires silk touch; panes drop themselves)
+            37 => Some((ItemType::GlassPane, 1)),
+
+            // Doors (either half drops the door item)
+            26 | 27 => Some((ItemType::OakDoor, 1)),
+            28 | 29 => Some((ItemType::IronDoor, 1)),
+
+            // Building blocks
+            31 => Some((ItemType::OakFence, 1)),
+            32 => Some((ItemType::OakFenceGate, 1)),
+            33 => Some((ItemType::StoneSlab, 1)),
+            34 => Some((ItemType::OakSlab, 1)),
+            35 => Some((ItemType::StoneStairs, 1)),
+            36 => Some((ItemType::OakStairs, 1)),
+            67 => Some((ItemType::Chest, 1)),
+            68 => Some((ItemType::Trapdoor, 1)),
+
             // Furnace
             18 => Some((ItemType::Furnace, 1)),
             19 => Some((ItemType::Furnace, 1)), // Lit furnace also drops furnace
+
+            // Redstone lamp (both lit and unlit)
+            45 | 46 => Some((ItemType::RedstoneLamp, 1)),
+
+            // Farmland drops dirt (like Minecraft)
+            47 | 48 => Some((ItemType::Dirt, 1)),
 
             // Lapis ore (drops 4-9 lapis, using 6 as average for now)
             98 => Some((ItemType::LapisLazuli, 6)),
@@ -465,7 +574,23 @@ impl ItemType {
             // Torch
             69 => Some((ItemType::Torch, 1)),
 
-            // No drops: Air (0), Water (6), Bedrock (10), Enchanting Table (99)
+            // Utility blocks
+            99 => Some((ItemType::EnchantingTable, 1)),
+            100 => Some((ItemType::BrewingStand, 1)),
+            101 => Some((ItemType::NetherWartBlock, 1)),
+            102 => Some((ItemType::SoulSand, 1)),
+
+            // Interactive/redstone components
+            30 => Some((ItemType::Ladder, 1)),
+            38 => Some((ItemType::Lever, 1)),
+            39 => Some((ItemType::StoneButton, 1)),
+            40 => Some((ItemType::OakButton, 1)),
+            41 => Some((ItemType::StonePressurePlate, 1)),
+            42 => Some((ItemType::OakPressurePlate, 1)),
+            43 => Some((ItemType::RedstoneWire, 1)),
+            44 => Some((ItemType::RedstoneTorch, 1)),
+
+            // No drops: Air (0), Water (6), Ice (7; needs Silk Touch), Bedrock (10), Glass (25; needs Silk Touch)
             _ => None,
         }
     }
@@ -523,6 +648,11 @@ impl ItemType {
             14 => Some((ItemType::CoalOre, 1)), // Coal ore drops ore block instead of coal
             98 => Some((ItemType::LapisOre, 1)), // Lapis ore drops ore block instead of lapis
             17 => Some((ItemType::DiamondOre, 1)), // Diamond ore drops ore block
+            7 => Some((ItemType::Ice, 1)),
+            25 => Some((ItemType::Glass, 1)),
+            70 => Some((ItemType::OakLeaves, 1)),
+            72 => Some((ItemType::BirchLeaves, 1)),
+            74 => Some((ItemType::PineLeaves, 1)),
             // Blocks that already drop themselves can use normal drops
             _ => ItemType::from_block(block_id),
         }
@@ -580,6 +710,11 @@ impl ItemType {
             ItemType::Snow => Some(8),
             ItemType::Clay => Some(9),
             ItemType::OakLog => Some(11),
+            ItemType::OakLeaves => Some(70),
+            ItemType::BirchLog => Some(71),
+            ItemType::BirchLeaves => Some(72),
+            ItemType::PineLog => Some(73),
+            ItemType::PineLeaves => Some(74),
             ItemType::OakPlanks => Some(12),
             ItemType::CraftingTable => Some(13),
             ItemType::CoalOre => Some(14),
@@ -589,7 +724,33 @@ impl ItemType {
             ItemType::Furnace => Some(18),
             ItemType::Torch => Some(69),
             ItemType::LapisOre => Some(98),
-            // Non-placeable items (leaves, mob drops, food, crafted items)
+            ItemType::Ladder => Some(30),
+            ItemType::Lever => Some(38),
+            ItemType::StoneButton => Some(39),
+            ItemType::OakButton => Some(40),
+            ItemType::StonePressurePlate => Some(41),
+            ItemType::OakPressurePlate => Some(42),
+            ItemType::RedstoneWire => Some(43),
+            ItemType::RedstoneTorch => Some(44),
+            ItemType::Glass => Some(25),
+            ItemType::Obsidian => Some(23),
+            ItemType::OakFence => Some(31),
+            ItemType::OakFenceGate => Some(32),
+            ItemType::StoneSlab => Some(33),
+            ItemType::OakSlab => Some(34),
+            ItemType::StoneStairs => Some(35),
+            ItemType::OakStairs => Some(36),
+            ItemType::GlassPane => Some(37),
+            ItemType::Trapdoor => Some(68),
+            ItemType::Chest => Some(67),
+            ItemType::OakDoor => Some(26),
+            ItemType::IronDoor => Some(28),
+            ItemType::RedstoneLamp => Some(45),
+            ItemType::EnchantingTable => Some(99),
+            ItemType::BrewingStand => Some(100),
+            ItemType::NetherWartBlock => Some(101),
+            ItemType::SoulSand => Some(102),
+            // Non-placeable items (mob drops, food, crafted items)
             _ => None,
         }
     }
@@ -609,6 +770,11 @@ impl ItemType {
             8 => Some(ItemType::Snow),
             9 => Some(ItemType::Clay),
             11 => Some(ItemType::OakLog),
+            70 => Some(ItemType::OakLeaves),
+            71 => Some(ItemType::BirchLog),
+            72 => Some(ItemType::BirchLeaves),
+            73 => Some(ItemType::PineLog),
+            74 => Some(ItemType::PineLeaves),
             12 => Some(ItemType::OakPlanks),
             13 => Some(ItemType::CraftingTable),
             14 => Some(ItemType::CoalOre),
@@ -618,6 +784,32 @@ impl ItemType {
             18 | 19 => Some(ItemType::Furnace),
             69 => Some(ItemType::Torch),
             98 => Some(ItemType::LapisOre),
+            30 => Some(ItemType::Ladder),
+            38 => Some(ItemType::Lever),
+            39 => Some(ItemType::StoneButton),
+            40 => Some(ItemType::OakButton),
+            41 => Some(ItemType::StonePressurePlate),
+            42 => Some(ItemType::OakPressurePlate),
+            43 => Some(ItemType::RedstoneWire),
+            44 => Some(ItemType::RedstoneTorch),
+            23 => Some(ItemType::Obsidian),
+            25 => Some(ItemType::Glass),
+            31 => Some(ItemType::OakFence),
+            32 => Some(ItemType::OakFenceGate),
+            33 => Some(ItemType::StoneSlab),
+            34 => Some(ItemType::OakSlab),
+            35 => Some(ItemType::StoneStairs),
+            36 => Some(ItemType::OakStairs),
+            37 => Some(ItemType::GlassPane),
+            26 | 27 => Some(ItemType::OakDoor),
+            28 | 29 => Some(ItemType::IronDoor),
+            45 | 46 => Some(ItemType::RedstoneLamp),
+            67 => Some(ItemType::Chest),
+            68 => Some(ItemType::Trapdoor),
+            99 => Some(ItemType::EnchantingTable),
+            100 => Some(ItemType::BrewingStand),
+            101 => Some(ItemType::NetherWartBlock),
+            102 => Some(ItemType::SoulSand),
             _ => None,
         }
     }
@@ -1013,7 +1205,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::GoldHoe as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::SoulSand as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1048,12 +1240,14 @@ mod tests {
         assert_eq!(ItemType::from_block(3), Some((ItemType::Dirt, 1))); // Grass drops dirt
         assert_eq!(ItemType::from_block(4), Some((ItemType::Sand, 1)));
         assert_eq!(ItemType::from_block(5), Some((ItemType::Gravel, 1)));
-        assert_eq!(ItemType::from_block(7), Some((ItemType::Ice, 1)));
+        assert_eq!(ItemType::from_block(7), None); // Ice needs Silk Touch
         assert_eq!(ItemType::from_block(8), Some((ItemType::Snow, 1)));
         assert_eq!(ItemType::from_block(9), Some((ItemType::Clay, 1)));
 
         // Tree/building blocks
         assert_eq!(ItemType::from_block(11), Some((ItemType::OakLog, 1)));
+        assert_eq!(ItemType::from_block(71), Some((ItemType::BirchLog, 1)));
+        assert_eq!(ItemType::from_block(73), Some((ItemType::PineLog, 1)));
         assert_eq!(ItemType::from_block(12), Some((ItemType::OakPlanks, 1)));
 
         // Ore blocks - coal ore drops coal directly (like Minecraft)
@@ -1061,6 +1255,29 @@ mod tests {
         assert_eq!(ItemType::from_block(15), Some((ItemType::IronOre, 1)));
         assert_eq!(ItemType::from_block(16), Some((ItemType::GoldOre, 1)));
         assert_eq!(ItemType::from_block(17), Some((ItemType::DiamondOre, 1)));
+
+        // Obsidian
+        assert_eq!(ItemType::from_block(23), Some((ItemType::Obsidian, 1)));
+
+        // Glass needs Silk Touch (panes drop themselves)
+        assert_eq!(ItemType::from_block(25), None);
+        assert_eq!(ItemType::from_block(37), Some((ItemType::GlassPane, 1)));
+
+        // Doors: either half drops the door item.
+        assert_eq!(ItemType::from_block(26), Some((ItemType::OakDoor, 1)));
+        assert_eq!(ItemType::from_block(27), Some((ItemType::OakDoor, 1)));
+        assert_eq!(ItemType::from_block(28), Some((ItemType::IronDoor, 1)));
+        assert_eq!(ItemType::from_block(29), Some((ItemType::IronDoor, 1)));
+
+        // Basic building blocks
+        assert_eq!(ItemType::from_block(31), Some((ItemType::OakFence, 1)));
+        assert_eq!(ItemType::from_block(32), Some((ItemType::OakFenceGate, 1)));
+        assert_eq!(ItemType::from_block(33), Some((ItemType::StoneSlab, 1)));
+        assert_eq!(ItemType::from_block(34), Some((ItemType::OakSlab, 1)));
+        assert_eq!(ItemType::from_block(35), Some((ItemType::StoneStairs, 1)));
+        assert_eq!(ItemType::from_block(36), Some((ItemType::OakStairs, 1)));
+        assert_eq!(ItemType::from_block(67), Some((ItemType::Chest, 1)));
+        assert_eq!(ItemType::from_block(68), Some((ItemType::Trapdoor, 1)));
 
         // No drops
         assert_eq!(ItemType::from_block(0), None); // Air
@@ -1315,6 +1532,12 @@ mod tests {
         assert_eq!(ItemType::silk_touch_drop(3), Some((ItemType::Grass, 1))); // Grass instead of dirt
         assert_eq!(ItemType::silk_touch_drop(14), Some((ItemType::CoalOre, 1)));
         // Coal ore instead of coal
+        assert_eq!(ItemType::silk_touch_drop(7), Some((ItemType::Ice, 1))); // Ice is Silk Touch-only
+        assert_eq!(ItemType::silk_touch_drop(25), Some((ItemType::Glass, 1))); // Glass is Silk Touch-only
+        assert_eq!(
+            ItemType::silk_touch_drop(70),
+            Some((ItemType::OakLeaves, 1))
+        );
     }
 
     #[test]
@@ -1619,6 +1842,14 @@ mod tests {
         assert!(ItemType::CraftingTable.to_block().is_some());
         assert!(ItemType::Furnace.to_block().is_some());
         assert!(ItemType::Torch.to_block().is_some());
+        assert!(ItemType::Ladder.to_block().is_some());
+        assert!(ItemType::Lever.to_block().is_some());
+        assert!(ItemType::StoneButton.to_block().is_some());
+        assert!(ItemType::OakButton.to_block().is_some());
+        assert!(ItemType::StonePressurePlate.to_block().is_some());
+        assert!(ItemType::OakPressurePlate.to_block().is_some());
+        assert!(ItemType::RedstoneWire.to_block().is_some());
+        assert!(ItemType::RedstoneTorch.to_block().is_some());
     }
 
     #[test]

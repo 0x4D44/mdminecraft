@@ -4,11 +4,8 @@
 //! queues for deterministic propagation. Light updates track changes for cross-
 //! chunk border handling and event logging.
 
-use crate::chunk::{
-    Chunk, ChunkPos, LocalPos, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
-};
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use crate::chunk::{Chunk, ChunkPos, LocalPos, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
 /// Maximum light level (0-15 range).
 pub const MAX_LIGHT_LEVEL: u8 = 15;
@@ -306,9 +303,10 @@ pub fn stitch_light_seams(
             for x in 0..CHUNK_SIZE_X {
                 let north = chunk.voxel(x, y, 0);
                 let south = chunk.voxel(x, y, CHUNK_SIZE_Z - 1);
-                enqueue_seed(&mut queue, chunk_pos, x, y, 0, north, light_type);
+                enqueue_seed(&mut queue, registry, chunk_pos, x, y, 0, north, light_type);
                 enqueue_seed(
                     &mut queue,
+                    registry,
                     chunk_pos,
                     x,
                     y,
@@ -320,9 +318,10 @@ pub fn stitch_light_seams(
             for z in 0..CHUNK_SIZE_Z {
                 let west = chunk.voxel(0, y, z);
                 let east = chunk.voxel(CHUNK_SIZE_X - 1, y, z);
-                enqueue_seed(&mut queue, chunk_pos, 0, y, z, west, light_type);
+                enqueue_seed(&mut queue, registry, chunk_pos, 0, y, z, west, light_type);
                 enqueue_seed(
                     &mut queue,
+                    registry,
                     chunk_pos,
                     CHUNK_SIZE_X - 1,
                     y,
@@ -387,8 +386,10 @@ pub fn stitch_light_seams(
     processed
 }
 
+#[allow(clippy::too_many_arguments)]
 fn enqueue_seed(
     queue: &mut VecDeque<(BlockPos, u8)>,
+    registry: &dyn BlockOpacityProvider,
     chunk: ChunkPos,
     x: usize,
     y: usize,
@@ -396,13 +397,16 @@ fn enqueue_seed(
     voxel: crate::chunk::Voxel,
     light_type: LightType,
 ) {
-    if voxel.id != BLOCK_AIR {
-        return; // don't propagate from opaque seeds
-    }
     let level = LightType::voxel_level(&voxel, light_type);
-    if level > 0 {
-        queue.push_back((BlockPos::new(chunk, LocalPos { x, y, z }), level));
+    if level == 0 {
+        return;
     }
+
+    if light_type == LightType::Skylight && registry.is_opaque(voxel.id) {
+        return;
+    }
+
+    queue.push_back((BlockPos::new(chunk, LocalPos { x, y, z }), level));
 }
 
 fn neighbor_block(pos: BlockPos, dx: i32, dy: i32, dz: i32) -> Option<(ChunkPos, LocalPos)> {
@@ -729,6 +733,80 @@ pub fn remove_block_light(
         light_type: LightType::BlockLight,
         nodes_processed,
     }
+}
+
+/// Recompute block-light for a local area centered on `center`.
+///
+/// This clears block light for chunks within a 3×3 area (including diagonals), re-seeds light
+/// sources inside that area, and then stitches seams with a 5×5 border to import light from
+/// neighboring chunks.
+///
+/// Returns the chunk positions that may have received lighting updates (within the 5×5 border).
+pub fn recompute_block_light_local(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    registry: &dyn BlockOpacityProvider,
+    center: ChunkPos,
+) -> BTreeSet<ChunkPos> {
+    let mut clear_chunks = BTreeSet::new();
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let pos = ChunkPos::new(center.x + dx, center.z + dz);
+            if chunks.contains_key(&pos) {
+                clear_chunks.insert(pos);
+            }
+        }
+    }
+
+    let mut sources: Vec<(ChunkPos, LocalPos, u8)> = Vec::new();
+    for chunk_pos in clear_chunks.iter().copied() {
+        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+            continue;
+        };
+
+        for y in 0..CHUNK_SIZE_Y {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    let mut voxel = chunk.voxel(x, y, z);
+
+                    let emission = crate::block_light_emission(voxel.id, voxel.state);
+                    if emission > 0 {
+                        sources.push((chunk_pos, LocalPos { x, y, z }, emission));
+                    }
+
+                    if voxel.light_block != 0 {
+                        voxel.light_block = 0;
+                        chunk.set_voxel(x, y, z, voxel);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut cross_chunk_updates = Vec::new();
+    for (chunk_pos, local, intensity) in sources {
+        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+            continue;
+        };
+        let (_update, updates) = add_block_light_with_neighbors(chunk, local, intensity, registry);
+        cross_chunk_updates.extend(updates);
+    }
+    let _ = apply_cross_chunk_updates(chunks, registry, cross_chunk_updates);
+
+    let mut seam_chunks = BTreeSet::new();
+    for dz in -2..=2 {
+        for dx in -2..=2 {
+            let pos = ChunkPos::new(center.x + dx, center.z + dz);
+            if chunks.contains_key(&pos) {
+                seam_chunks.insert(pos);
+            }
+        }
+    }
+
+    for pos in seam_chunks.iter().copied() {
+        let _ = stitch_light_seams(chunks, registry, pos, LightType::BlockLight);
+    }
+
+    seam_chunks
 }
 
 #[cfg(test)]

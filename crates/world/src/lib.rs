@@ -3,6 +3,7 @@ mod armor;
 mod biome;
 mod block_properties;
 mod caves;
+mod chest;
 mod chunk;
 mod crafting;
 mod drop_item;
@@ -14,6 +15,7 @@ mod geode;
 mod heightmap;
 mod interaction;
 mod inventory;
+mod light_sources;
 pub mod lighting;
 mod mob;
 mod noise;
@@ -32,6 +34,7 @@ pub use armor::*;
 pub use biome::*;
 pub use block_properties::*;
 pub use caves::*;
+pub use chest::*;
 pub use chunk::{
     BlockId, BlockState, Chunk, ChunkKey, ChunkPos, DirtyFlags, LocalPos, Voxel, BLOCK_AIR,
     BLOCK_AMETHYST_BLOCK, BLOCK_BEDROCK, BLOCK_BREWING_STAND, BLOCK_BUDDING_AMETHYST,
@@ -55,6 +58,7 @@ pub use geode::*;
 pub use heightmap::*;
 pub use interaction::*;
 pub use inventory::*;
+pub use light_sources::*;
 pub use lighting::*;
 pub use mob::*;
 pub use noise::*;
