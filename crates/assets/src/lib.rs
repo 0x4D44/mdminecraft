@@ -11,6 +11,7 @@ pub use loader::{
     recipe_registry_from_file, recipe_registry_from_str, registry_from_file, registry_from_str,
 };
 pub use recipe_registry::RecipeRegistry;
+pub use recipe_registry::{parse_item_type, parse_item_type_with_blocks};
 pub use registry::{BlockDescriptor, BlockFace, BlockRegistry, HarvestLevel};
 
 use serde::Deserialize;

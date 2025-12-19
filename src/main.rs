@@ -2,6 +2,7 @@
 //!
 //! Main executable with graphical menu system
 
+mod commands;
 mod config;
 mod game;
 mod input;

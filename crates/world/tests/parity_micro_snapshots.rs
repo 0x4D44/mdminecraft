@@ -1,13 +1,19 @@
-use mdminecraft_core::{item::item_ids, ToolMaterial, ToolType};
+use mdminecraft_core::{
+    item::item_ids, DimensionId, ItemStack as CoreItemStack, ItemType as CoreItemType,
+    ToolMaterial, ToolType,
+};
 use mdminecraft_testkit::{run_micro_worldtest, MicroWorldtestConfig};
 use mdminecraft_world::{
-    get_power_level, is_active,
+    comparator_output_power, get_power_level, is_active, is_door_open,
     lighting::{stitch_light_seams, BlockOpacityProvider, LightType},
-    redstone_blocks, BlockProperties, BrewingStandState, Chunk, ChunkPos, FurnaceState, ItemType,
-    PotionType, RedstonePos, RedstoneSimulator, Voxel,
+    mechanical_blocks, redstone_blocks, set_comparator_facing, set_comparator_output_power,
+    set_comparator_subtract_mode, set_hopper_facing, set_hopper_outputs_down, set_observer_facing,
+    tick_hoppers, update_container_signal, BlockEntityKey, BlockProperties, BrewingStandState,
+    ChestState, Chunk, ChunkPos, DispenserState, Facing, FurnaceState, HopperState, ItemManager,
+    ItemType, PotionType, RedstonePos, RedstoneSimulator, Voxel,
 };
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 fn snapshot_path(name: &str) -> PathBuf {
@@ -107,6 +113,413 @@ fn micro_redstone_wire_propagation_snapshot() {
                 wire1_power: get_power_level(wire1.state),
                 wire2_power: get_power_level(wire2.state),
                 lamp_lit: lamp.id == redstone_blocks::REDSTONE_LAMP_LIT,
+            }
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_redstone_observer_lamp_clock_snapshot() {
+    #[derive(Default)]
+    struct State {
+        chunks: HashMap<ChunkPos, Chunk>,
+        sim: RedstoneSimulator,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        lamp_lit: bool,
+        observer_active: bool,
+        output_wire_power: u8,
+    }
+
+    let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+    chunk.set_voxel(
+        6,
+        64,
+        5,
+        Voxel {
+            id: redstone_blocks::REDSTONE_LAMP_LIT,
+            ..Default::default()
+        },
+    );
+
+    let mut observer_state = 0;
+    observer_state = set_observer_facing(observer_state, Facing::West);
+    chunk.set_voxel(
+        5,
+        64,
+        5,
+        Voxel {
+            id: redstone_blocks::REDSTONE_OBSERVER,
+            state: observer_state,
+            ..Default::default()
+        },
+    );
+
+    for (x, z) in [(4, 5), (4, 6), (5, 6), (6, 6)] {
+        chunk.set_voxel(
+            x,
+            64,
+            z,
+            Voxel {
+                id: redstone_blocks::REDSTONE_WIRE,
+                ..Default::default()
+            },
+        );
+    }
+
+    let mut state = State::default();
+    state.chunks.insert(ChunkPos::new(0, 0), chunk);
+
+    let observer_pos = RedstonePos::new(5, 64, 5);
+    let lamp_pos = RedstonePos::new(6, 64, 5);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_redstone_observer_lamp_clock".to_string(),
+            ticks: 12,
+            snapshot_path: snapshot_path("micro_redstone_observer_lamp_clock.json"),
+        },
+        state,
+        |tick, state| {
+            // First initialize the observer fingerprint while the lamp is lit, then schedule the
+            // lamp update to turn it off and start the feedback loop.
+            if tick.0 == 0 {
+                state.sim.schedule_update(observer_pos);
+            }
+            if tick.0 == 1 {
+                state.sim.schedule_update(lamp_pos);
+            }
+            state.sim.tick(&mut state.chunks);
+        },
+        |_tick, state| {
+            let chunk = state
+                .chunks
+                .get(&ChunkPos::new(0, 0))
+                .expect("chunk exists");
+            let lamp = chunk.voxel(6, 64, 5);
+            let observer = chunk.voxel(5, 64, 5);
+            let output_wire = chunk.voxel(4, 64, 5);
+
+            Snap {
+                lamp_lit: lamp.id == redstone_blocks::REDSTONE_LAMP_LIT,
+                observer_active: is_active(observer.state),
+                output_wire_power: get_power_level(output_wire.state),
+            }
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_redstone_two_lever_door_snapshot() {
+    #[derive(Default)]
+    struct State {
+        chunks: HashMap<ChunkPos, Chunk>,
+        sim: RedstoneSimulator,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        left_on: bool,
+        right_on: bool,
+        door_open: bool,
+    }
+
+    let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+    chunk.set_voxel(
+        8,
+        64,
+        5,
+        Voxel {
+            id: mdminecraft_world::interactive_blocks::IRON_DOOR_LOWER,
+            ..Default::default()
+        },
+    );
+    chunk.set_voxel(
+        8,
+        65,
+        5,
+        Voxel {
+            id: mdminecraft_world::interactive_blocks::IRON_DOOR_UPPER,
+            ..Default::default()
+        },
+    );
+
+    chunk.set_voxel(
+        7,
+        64,
+        5,
+        Voxel {
+            id: redstone_blocks::LEVER,
+            ..Default::default()
+        },
+    );
+    chunk.set_voxel(
+        9,
+        64,
+        5,
+        Voxel {
+            id: redstone_blocks::LEVER,
+            ..Default::default()
+        },
+    );
+
+    let mut state = State::default();
+    state.chunks.insert(ChunkPos::new(0, 0), chunk);
+
+    let left_pos = RedstonePos::new(7, 64, 5);
+    let right_pos = RedstonePos::new(9, 64, 5);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_redstone_two_lever_door".to_string(),
+            ticks: 5,
+            snapshot_path: snapshot_path("micro_redstone_two_lever_door.json"),
+        },
+        state,
+        |tick, state| {
+            match tick.0 {
+                0 => state.sim.toggle_lever(left_pos, &mut state.chunks),
+                1 => state.sim.toggle_lever(right_pos, &mut state.chunks),
+                2 => state.sim.toggle_lever(left_pos, &mut state.chunks),
+                3 => state.sim.toggle_lever(right_pos, &mut state.chunks),
+                _ => {}
+            }
+            state.sim.tick(&mut state.chunks);
+        },
+        |_tick, state| {
+            let chunk = state
+                .chunks
+                .get(&ChunkPos::new(0, 0))
+                .expect("chunk exists");
+            let left = chunk.voxel(7, 64, 5);
+            let right = chunk.voxel(9, 64, 5);
+            let door = chunk.voxel(8, 64, 5);
+
+            Snap {
+                left_on: is_active(left.state),
+                right_on: is_active(right.state),
+                door_open: is_door_open(door.state),
+            }
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_item_sorter_lite_snapshot() {
+    struct State {
+        chunks: HashMap<ChunkPos, Chunk>,
+        redstone: RedstoneSimulator,
+        chests: BTreeMap<BlockEntityKey, ChestState>,
+        hoppers: BTreeMap<BlockEntityKey, HopperState>,
+        dispensers: BTreeMap<BlockEntityKey, DispenserState>,
+        droppers: BTreeMap<BlockEntityKey, DispenserState>,
+        dropped_items: ItemManager,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        control_signal: u8,
+        comparator_output: u8,
+        hopper_locked: bool,
+        hopper_items: u32,
+        output_chest_items: u32,
+    }
+
+    fn count_core_slots(slots: &[Option<CoreItemStack>]) -> u32 {
+        slots
+            .iter()
+            .filter_map(|slot| slot.as_ref().map(|s| s.count))
+            .sum()
+    }
+
+    let control_pos = RedstonePos::new(8, 64, 5);
+    let comparator_pos = RedstonePos::new(9, 64, 5);
+    let hopper_pos = RedstonePos::new(10, 64, 5);
+    let output_chest_pos = RedstonePos::new(10, 64, 6);
+
+    let control_key = BlockEntityKey {
+        dimension: DimensionId::Overworld,
+        x: control_pos.x,
+        y: control_pos.y,
+        z: control_pos.z,
+    };
+    let hopper_key = BlockEntityKey {
+        dimension: DimensionId::Overworld,
+        x: hopper_pos.x,
+        y: hopper_pos.y,
+        z: hopper_pos.z,
+    };
+    let output_chest_key = BlockEntityKey {
+        dimension: DimensionId::Overworld,
+        x: output_chest_pos.x,
+        y: output_chest_pos.y,
+        z: output_chest_pos.z,
+    };
+
+    let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+    chunk.set_voxel(
+        control_pos.x as usize,
+        control_pos.y as usize,
+        control_pos.z as usize,
+        Voxel {
+            id: mdminecraft_world::interactive_blocks::CHEST,
+            ..Default::default()
+        },
+    );
+
+    let mut comparator_state = 0;
+    comparator_state = set_comparator_facing(comparator_state, Facing::East);
+    comparator_state = set_comparator_subtract_mode(comparator_state, false);
+    comparator_state = set_comparator_output_power(comparator_state, 1);
+    chunk.set_voxel(
+        comparator_pos.x as usize,
+        comparator_pos.y as usize,
+        comparator_pos.z as usize,
+        Voxel {
+            id: redstone_blocks::REDSTONE_COMPARATOR,
+            state: comparator_state,
+            ..Default::default()
+        },
+    );
+
+    let mut hopper_state = 0;
+    hopper_state = set_hopper_facing(hopper_state, Facing::South);
+    hopper_state = set_hopper_outputs_down(hopper_state, false);
+    chunk.set_voxel(
+        hopper_pos.x as usize,
+        hopper_pos.y as usize,
+        hopper_pos.z as usize,
+        Voxel {
+            id: mechanical_blocks::HOPPER,
+            state: hopper_state,
+            ..Default::default()
+        },
+    );
+
+    chunk.set_voxel(
+        output_chest_pos.x as usize,
+        output_chest_pos.y as usize,
+        output_chest_pos.z as usize,
+        Voxel {
+            id: mdminecraft_world::interactive_blocks::CHEST,
+            ..Default::default()
+        },
+    );
+
+    let mut chests = BTreeMap::new();
+    let mut control_chest = ChestState::default();
+    control_chest.slots[0] = Some(CoreItemStack::new(
+        CoreItemType::Block(mdminecraft_world::BLOCK_COBBLESTONE),
+        1,
+    ));
+    chests.insert(control_key, control_chest);
+    chests.insert(output_chest_key, ChestState::default());
+
+    let mut hoppers = BTreeMap::new();
+    let mut hopper = HopperState::default();
+    hopper.slots[0] = Some(CoreItemStack::new(
+        CoreItemType::Block(mdminecraft_world::BLOCK_COBBLESTONE),
+        1,
+    ));
+    hoppers.insert(hopper_key, hopper);
+
+    let mut state = State {
+        chunks: HashMap::new(),
+        redstone: RedstoneSimulator::new(),
+        chests,
+        hoppers,
+        dispensers: BTreeMap::new(),
+        droppers: BTreeMap::new(),
+        dropped_items: ItemManager::new(),
+    };
+    state.chunks.insert(ChunkPos::new(0, 0), chunk);
+
+    {
+        let slots = &state
+            .chests
+            .get(&control_key)
+            .expect("control chest exists")
+            .slots;
+        update_container_signal(&mut state.chunks, &mut state.redstone, control_pos, slots);
+    }
+    state.redstone.schedule_update(hopper_pos);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_item_sorter_lite".to_string(),
+            ticks: 20,
+            snapshot_path: snapshot_path("micro_item_sorter_lite.json"),
+        },
+        state,
+        |tick, state| {
+            if tick.0 == 5 {
+                let chest = state.chests.get_mut(&control_key).expect("control exists");
+                chest.slots = std::array::from_fn(|_| None);
+                update_container_signal(
+                    &mut state.chunks,
+                    &mut state.redstone,
+                    control_pos,
+                    &chest.slots,
+                );
+            }
+
+            state.redstone.tick(&mut state.chunks);
+            tick_hoppers(
+                mdminecraft_world::HopperTickContext {
+                    chunks: &mut state.chunks,
+                    redstone_sim: &mut state.redstone,
+                    item_manager: &mut state.dropped_items,
+                    chests: &mut state.chests,
+                    hoppers: &mut state.hoppers,
+                    dispensers: &mut state.dispensers,
+                    droppers: &mut state.droppers,
+                },
+                |_| None,
+            );
+        },
+        |_tick, state| {
+            let chunk = state
+                .chunks
+                .get(&ChunkPos::new(0, 0))
+                .expect("chunk exists");
+            let control_voxel = chunk.voxel(
+                control_pos.x as usize,
+                control_pos.y as usize,
+                control_pos.z as usize,
+            );
+            let comparator_voxel = chunk.voxel(
+                comparator_pos.x as usize,
+                comparator_pos.y as usize,
+                comparator_pos.z as usize,
+            );
+            let hopper_voxel = chunk.voxel(
+                hopper_pos.x as usize,
+                hopper_pos.y as usize,
+                hopper_pos.z as usize,
+            );
+
+            let hopper_items = state
+                .hoppers
+                .get(&hopper_key)
+                .map(|hopper| count_core_slots(&hopper.slots))
+                .unwrap_or(0);
+            let output_chest_items = state
+                .chests
+                .get(&output_chest_key)
+                .map(|chest| count_core_slots(&chest.slots))
+                .unwrap_or(0);
+
+            Snap {
+                control_signal: get_power_level(control_voxel.state),
+                comparator_output: comparator_output_power(comparator_voxel.state),
+                hopper_locked: is_active(hopper_voxel.state),
+                hopper_items,
+                output_chest_items,
             }
         },
     )

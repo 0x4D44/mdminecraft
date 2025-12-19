@@ -1,0 +1,215 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 1,
+        "hopper_items": 1,
+        "hopper_locked": false,
+        "output_chest_items": 0
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 1,
+        "hopper_items": 1,
+        "hopper_locked": true,
+        "output_chest_items": 0
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 1,
+        "hopper_items": 1,
+        "hopper_locked": true,
+        "output_chest_items": 0
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 1,
+        "hopper_items": 1,
+        "hopper_locked": true,
+        "output_chest_items": 0
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 1,
+        "hopper_items": 1,
+        "hopper_locked": true,
+        "output_chest_items": 0
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 1,
+        "hopper_items": 1,
+        "hopper_locked": true,
+        "output_chest_items": 0
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "comparator_output": 1,
+        "control_signal": 0,
+        "hopper_items": 1,
+        "hopper_locked": true,
+        "output_chest_items": 0
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "comparator_output": 0,
+        "control_signal": 0,
+        "hopper_items": 0,
+        "hopper_locked": false,
+        "output_chest_items": 1
+      },
+      "tick": 20
+    }
+  ],
+  "name": "micro_item_sorter_lite"
+}
