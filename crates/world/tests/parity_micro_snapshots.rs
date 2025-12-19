@@ -408,6 +408,54 @@ fn micro_brewing_swiftness_fermented_spider_eye_to_slowness_snapshot() {
 }
 
 #[test]
+fn micro_brewing_awkward_magma_cream_to_fire_resistance_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::MAGMA_CREAM, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_magma_cream_to_fire_resistance".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path(
+                "micro_brewing_awkward_magma_cream_to_fire_resistance.json",
+            ),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
 fn micro_mining_stone_drops_snapshot() {
     #[derive(Debug, Clone)]
     struct State {

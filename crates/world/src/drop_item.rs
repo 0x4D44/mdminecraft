@@ -1342,10 +1342,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(
-            ALL_ITEM_TYPES.len(),
-            ItemType::MagmaCream as usize + 1
-        );
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::MagmaCream as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);

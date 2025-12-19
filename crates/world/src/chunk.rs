@@ -111,6 +111,9 @@ pub const BLOCK_BROWN_MUSHROOM: BlockId = 105;
 /// ID for magma cream ore (Overworld proxy block).
 pub const BLOCK_MAGMA_CREAM_ORE: BlockId = 106;
 
+/// ID for ghast tear ore (Overworld proxy block).
+pub const BLOCK_GHAST_TEAR_ORE: BlockId = 107;
+
 /// ID for moss block.
 pub const BLOCK_MOSS_BLOCK: BlockId = 75;
 
