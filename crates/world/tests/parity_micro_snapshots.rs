@@ -456,6 +456,292 @@ fn micro_brewing_awkward_magma_cream_to_fire_resistance_snapshot() {
 }
 
 #[test]
+fn micro_brewing_awkward_ghast_tear_to_regeneration_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::GHAST_TEAR, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_ghast_tear_to_regeneration".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_awkward_ghast_tear_to_regeneration.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_awkward_glistering_melon_to_healing_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::GLISTERING_MELON, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_glistering_melon_to_healing".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_awkward_glistering_melon_to_healing.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_awkward_rabbit_foot_to_leaping_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::RABBIT_FOOT, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_rabbit_foot_to_leaping".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_awkward_rabbit_foot_to_leaping.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_awkward_phantom_membrane_to_slow_falling_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::PHANTOM_MEMBRANE, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_phantom_membrane_to_slow_falling".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path(
+                "micro_brewing_awkward_phantom_membrane_to_slow_falling.json",
+            ),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_swiftness_redstone_to_long_swiftness_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        bottle_is_extended: [bool; 3],
+        bottle_amplifier: [u8; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Swiftness));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::REDSTONE_DUST, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_swiftness_redstone_to_long_swiftness".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_swiftness_redstone_to_long_swiftness.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            bottle_is_extended: state.stand.bottle_is_extended,
+            bottle_amplifier: state.stand.bottle_amplifier,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_healing_glowstone_to_strong_healing_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        bottle_is_extended: [bool; 3],
+        bottle_amplifier: [u8; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Healing));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::GLOWSTONE_DUST, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_healing_glowstone_to_strong_healing".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_healing_glowstone_to_strong_healing.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            bottle_is_extended: state.stand.bottle_is_extended,
+            bottle_amplifier: state.stand.bottle_amplifier,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
 fn micro_mining_stone_drops_snapshot() {
     #[derive(Debug, Clone)]
     struct State {

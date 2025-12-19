@@ -1,0 +1,1465 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 1,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": false
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 25,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 50,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 75,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 100,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 125,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 150,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 175,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 200,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 225,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 250,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 275,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 300,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 325,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 350,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 375,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 400,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 425,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 450,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 475,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 20
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 500,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 21
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 525,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 22
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 550,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 23
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 575,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 24
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 600,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 25
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 625,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 26
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 650,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 27
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 675,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 28
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 700,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 29
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 725,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 30
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 750,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 31
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 775,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 32
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 800,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 33
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 825,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 34
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 850,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 35
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 875,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 36
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 900,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 37
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 925,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 38
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 950,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 39
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 975,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 40
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          0,
+          0,
+          0
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 1000,
+        "fuel": 0,
+        "ingredient": [
+          115,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 41
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          1,
+          1,
+          1
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 42
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          1,
+          1,
+          1
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 43
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          1,
+          1,
+          1
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 44
+    },
+    {
+      "snapshot": {
+        "bottle_amplifier": [
+          1,
+          1,
+          1
+        ],
+        "bottle_is_extended": [
+          false,
+          false,
+          false
+        ],
+        "bottle_is_splash": [
+          false,
+          false,
+          false
+        ],
+        "bottles": [
+          "Healing",
+          "Healing",
+          "Healing"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 45
+    }
+  ],
+  "name": "micro_brewing_healing_glowstone_to_strong_healing"
+}

@@ -40,6 +40,13 @@ pub mod blocks {
     pub const NETHER_WART_BLOCK: BlockId = 101;
     pub const SOUL_SAND: BlockId = 102;
     pub const MAGMA_CREAM_ORE: BlockId = 106;
+    pub const GHAST_TEAR_ORE: BlockId = 107;
+    pub const GLISTERING_MELON_ORE: BlockId = 108;
+    pub const RABBIT_FOOT_ORE: BlockId = 109;
+    pub const PHANTOM_MEMBRANE_ORE: BlockId = 110;
+    pub const REDSTONE_DUST_ORE: BlockId = 111;
+    pub const GLOWSTONE_DUST_ORE: BlockId = 112;
+    pub const PUFFERFISH_ORE: BlockId = 113;
 
     // Plants
     pub const SUGAR_CANE: BlockId = 104;
@@ -603,6 +610,76 @@ impl TerrainGenerator {
                                 ..Default::default()
                             },
                         );
+                    } else if roll < 0.00175 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::GHAST_TEAR_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00225 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::GLISTERING_MELON_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00275 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::RABBIT_FOOT_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00325 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::PHANTOM_MEMBRANE_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00375 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::REDSTONE_DUST_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00425 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::GLOWSTONE_DUST_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00475 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::PUFFERFISH_ORE,
+                                ..Default::default()
+                            },
+                        );
                     }
                 }
             }
@@ -744,6 +821,13 @@ mod tests {
         let mut found_wart_block = false;
         let mut found_soul_sand = false;
         let mut found_magma_cream_ore = false;
+        let mut found_ghast_tear_ore = false;
+        let mut found_glistering_melon_ore = false;
+        let mut found_rabbit_foot_ore = false;
+        let mut found_phantom_membrane_ore = false;
+        let mut found_redstone_dust_ore = false;
+        let mut found_glowstone_dust_ore = false;
+        let mut found_pufferfish_ore = false;
 
         for chunk_x in 0..2 {
             for chunk_z in 0..2 {
@@ -779,6 +863,13 @@ mod tests {
                                 blocks::NETHER_WART_BLOCK => found_wart_block = true,
                                 blocks::SOUL_SAND => found_soul_sand = true,
                                 blocks::MAGMA_CREAM_ORE => found_magma_cream_ore = true,
+                                blocks::GHAST_TEAR_ORE => found_ghast_tear_ore = true,
+                                blocks::GLISTERING_MELON_ORE => found_glistering_melon_ore = true,
+                                blocks::RABBIT_FOOT_ORE => found_rabbit_foot_ore = true,
+                                blocks::PHANTOM_MEMBRANE_ORE => found_phantom_membrane_ore = true,
+                                blocks::REDSTONE_DUST_ORE => found_redstone_dust_ore = true,
+                                blocks::GLOWSTONE_DUST_ORE => found_glowstone_dust_ore = true,
+                                blocks::PUFFERFISH_ORE => found_pufferfish_ore = true,
                                 _ => {}
                             }
                         }
@@ -793,6 +884,34 @@ mod tests {
         assert!(
             found_magma_cream_ore,
             "Expected at least one magma cream ore block"
+        );
+        assert!(
+            found_ghast_tear_ore,
+            "Expected at least one ghast tear ore block"
+        );
+        assert!(
+            found_glistering_melon_ore,
+            "Expected at least one glistering melon ore block"
+        );
+        assert!(
+            found_rabbit_foot_ore,
+            "Expected at least one rabbit foot ore block"
+        );
+        assert!(
+            found_phantom_membrane_ore,
+            "Expected at least one phantom membrane ore block"
+        );
+        assert!(
+            found_redstone_dust_ore,
+            "Expected at least one redstone dust ore block"
+        );
+        assert!(
+            found_glowstone_dust_ore,
+            "Expected at least one glowstone dust ore block"
+        );
+        assert!(
+            found_pufferfish_ore,
+            "Expected at least one pufferfish ore block"
         );
     }
 

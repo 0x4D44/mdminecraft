@@ -37,6 +37,28 @@ pub mod potion_ids {
     pub const REGENERATION: u16 = 11;
     pub const STRENGTH: u16 = 12;
     pub const WEAKNESS: u16 = 13;
+    pub const SLOW_FALLING: u16 = 14;
+
+    // Long/strong variants (appended to preserve stable IDs)
+    pub const NIGHT_VISION_LONG: u16 = 15;
+    pub const INVISIBILITY_LONG: u16 = 16;
+    pub const LEAPING_LONG: u16 = 17;
+    pub const LEAPING_STRONG: u16 = 18;
+    pub const FIRE_RESISTANCE_LONG: u16 = 19;
+    pub const SWIFTNESS_LONG: u16 = 20;
+    pub const SWIFTNESS_STRONG: u16 = 21;
+    pub const SLOWNESS_LONG: u16 = 22;
+    pub const WATER_BREATHING_LONG: u16 = 23;
+    pub const HEALING_STRONG: u16 = 24;
+    pub const HARMING_STRONG: u16 = 25;
+    pub const POISON_LONG: u16 = 26;
+    pub const POISON_STRONG: u16 = 27;
+    pub const REGENERATION_LONG: u16 = 28;
+    pub const REGENERATION_STRONG: u16 = 29;
+    pub const STRENGTH_LONG: u16 = 30;
+    pub const STRENGTH_STRONG: u16 = 31;
+    pub const WEAKNESS_LONG: u16 = 32;
+    pub const SLOW_FALLING_LONG: u16 = 33;
 }
 
 /// Tool types
