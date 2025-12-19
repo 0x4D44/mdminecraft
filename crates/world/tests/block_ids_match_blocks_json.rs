@@ -185,6 +185,10 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::BLOCK_MAGMA_CREAM_ORE,
         id_of(&map, "magma_cream_ore")
     );
+    assert_eq!(
+        mdminecraft_world::BLOCK_GHAST_TEAR_ORE,
+        id_of(&map, "ghast_tear_ore")
+    );
 
     let wheat = [
         mdminecraft_world::farming_blocks::WHEAT_0,

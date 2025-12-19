@@ -129,5 +129,6 @@
   { "name": "bookshelf", "opaque": true, "texture": "blocks/planks" },
   { "name": "sugar_cane", "opaque": false, "texture": "blocks/grass_top" },
   { "name": "brown_mushroom", "opaque": false, "texture": "blocks/grass_top" },
-  { "name": "magma_cream_ore", "opaque": true, "texture": "blocks/magma_block", "emissive": true, "harvest_level": "stone" }
+  { "name": "magma_cream_ore", "opaque": true, "texture": "blocks/magma_block", "emissive": true, "harvest_level": "stone" },
+  { "name": "ghast_tear_ore", "opaque": true, "texture": "blocks/amethyst_block", "emissive": true, "harvest_level": "stone" }
 ]
