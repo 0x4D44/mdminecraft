@@ -497,10 +497,11 @@ fn main() -> Result<()> {
                                 resources.queue,
                                 &time_of_day,
                                 0.0,
+                                0.0,
                             );
                             resources
                                 .pipeline
-                                .update_time(resources.queue, &time_of_day, 0.0);
+                                .update_time(resources.queue, &time_of_day, 0.0, 0.0);
 
                             let mut encoder = resources.device.create_command_encoder(
                                 &wgpu::CommandEncoderDescriptor {

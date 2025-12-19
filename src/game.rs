@@ -10,7 +10,7 @@ use glam::IVec3;
 use mdminecraft_assets::BlockRegistry;
 use mdminecraft_audio::{AudioManager, AudioSettings, SoundId};
 use mdminecraft_core::{
-    item::{item_ids, potion_ids},
+    item::{client_item_ids, item_ids, potion_ids},
     DimensionId, Enchantment, EnchantmentType, ItemStack, ItemType, SimTick, ToolMaterial,
     ToolType,
 };
@@ -77,6 +77,9 @@ const CORE_ITEM_PHANTOM_MEMBRANE: u16 = 2016;
 const CORE_ITEM_REDSTONE_DUST: u16 = 2017;
 const CORE_ITEM_GLOWSTONE_DUST: u16 = 2018;
 const CORE_ITEM_PUFFERFISH: u16 = 2019;
+const CORE_ITEM_BUCKET: u16 = client_item_ids::BUCKET;
+const CORE_ITEM_WATER_BUCKET: u16 = client_item_ids::WATER_BUCKET;
+const CORE_ITEM_LAVA_BUCKET: u16 = client_item_ids::LAVA_BUCKET;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -197,6 +200,10 @@ impl Hotbar {
         if let Some(item) = self.selected_item() {
             match item.item_type {
                 ItemType::Block(block_id) => Some(block_id),
+                // Vanilla-ish: redstone dust places redstone wire.
+                ItemType::Item(CORE_ITEM_REDSTONE_DUST) => {
+                    Some(mdminecraft_world::redstone_blocks::REDSTONE_WIRE)
+                }
                 _ => None,
             }
         } else {
@@ -233,6 +240,24 @@ impl Hotbar {
         if let Some(item) = self.selected_item() {
             match item.item_type {
                 ItemType::SplashPotion(potion_id) => Some(potion_id),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn selected_bucket(&self) -> Option<u16> {
+        if let Some(item) = self.selected_item() {
+            match item.item_type {
+                ItemType::Item(id)
+                    if matches!(
+                        id,
+                        CORE_ITEM_BUCKET | CORE_ITEM_WATER_BUCKET | CORE_ITEM_LAVA_BUCKET
+                    ) =>
+                {
+                    Some(id)
+                }
                 _ => None,
             }
         } else {
@@ -406,6 +431,9 @@ impl Hotbar {
                     CORE_ITEM_REDSTONE_DUST => "Redstone Dust".to_string(),
                     CORE_ITEM_GLOWSTONE_DUST => "Glowstone Dust".to_string(),
                     CORE_ITEM_PUFFERFISH => "Pufferfish".to_string(),
+                    CORE_ITEM_BUCKET => "Bucket".to_string(),
+                    CORE_ITEM_WATER_BUCKET => "Water Bucket".to_string(),
+                    CORE_ITEM_LAVA_BUCKET => "Lava Bucket".to_string(),
                     CORE_ITEM_SUGAR => "Sugar".to_string(),
                     CORE_ITEM_PAPER => "Paper".to_string(),
                     CORE_ITEM_BOOK => "Book".to_string(),
@@ -2355,15 +2383,19 @@ impl GameWorld {
                 AabbSet::single(AABB { min, max })
             }
             mdminecraft_world::CollisionType::Full => {
-                if voxel.id == mdminecraft_world::interactive_blocks::GLASS_PANE {
+                if voxel.id == mdminecraft_world::interactive_blocks::GLASS_PANE
+                    || voxel.id == mdminecraft_world::interactive_blocks::IRON_BARS
+                {
                     // Glass pane collision: a thin post, optionally with connecting arms.
                     let thickness = 2.0 / 16.0;
                     let half = thickness * 0.5;
 
                     let connects_to = |neighbor: Voxel| -> bool {
-                        neighbor.id == mdminecraft_world::interactive_blocks::GLASS_PANE
-                            || neighbor.id == mdminecraft_world::interactive_blocks::GLASS
-                            || block_properties.get(neighbor.id).is_solid
+                        matches!(
+                            neighbor.id,
+                            mdminecraft_world::interactive_blocks::GLASS_PANE
+                                | mdminecraft_world::interactive_blocks::IRON_BARS
+                        ) || mdminecraft_world::is_full_cube_block(neighbor.id)
                     };
 
                     let connect_west =
@@ -2447,6 +2479,11 @@ impl GameWorld {
                 if mdminecraft_world::is_stairs(voxel.id) {
                     let facing = mdminecraft_world::Facing::from_state(voxel.state);
                     let top = (voxel.state & 0x04) != 0;
+                    let shape = mdminecraft_world::stairs_shape_at(
+                        block_x, block_y, block_z, *voxel, &voxel_at,
+                    );
+                    let (footprints, footprint_count) =
+                        mdminecraft_world::stairs_step_footprints(facing, shape);
 
                     let mut set = AabbSet::empty();
                     if top {
@@ -2463,41 +2500,20 @@ impl GameWorld {
 
                         let lower_min_y = block_y as f32 + min_y;
                         let lower_max_y = block_y as f32 + max_y;
-                        let (min, max) = match facing {
-                            mdminecraft_world::Facing::North => (
-                                glam::Vec3::new(block_x as f32, lower_min_y, block_z as f32),
-                                glam::Vec3::new(
-                                    block_x as f32 + 1.0,
-                                    lower_max_y,
-                                    block_z as f32 + 0.5,
+                        for footprint in footprints.iter().take(footprint_count) {
+                            set.push(AABB {
+                                min: glam::Vec3::new(
+                                    block_x as f32 + footprint.min_x,
+                                    lower_min_y,
+                                    block_z as f32 + footprint.min_z,
                                 ),
-                            ),
-                            mdminecraft_world::Facing::South => (
-                                glam::Vec3::new(block_x as f32, lower_min_y, block_z as f32 + 0.5),
-                                glam::Vec3::new(
-                                    block_x as f32 + 1.0,
+                                max: glam::Vec3::new(
+                                    block_x as f32 + footprint.max_x,
                                     lower_max_y,
-                                    block_z as f32 + 1.0,
+                                    block_z as f32 + footprint.max_z,
                                 ),
-                            ),
-                            mdminecraft_world::Facing::East => (
-                                glam::Vec3::new(block_x as f32 + 0.5, lower_min_y, block_z as f32),
-                                glam::Vec3::new(
-                                    block_x as f32 + 1.0,
-                                    lower_max_y,
-                                    block_z as f32 + 1.0,
-                                ),
-                            ),
-                            mdminecraft_world::Facing::West => (
-                                glam::Vec3::new(block_x as f32, lower_min_y, block_z as f32),
-                                glam::Vec3::new(
-                                    block_x as f32 + 0.5,
-                                    lower_max_y,
-                                    block_z as f32 + 1.0,
-                                ),
-                            ),
-                        };
-                        set.push(AABB { min, max });
+                            });
+                        }
                     } else {
                         // Normal stairs: full bottom half + an upper half-footprint step.
                         set.push(AABB {
@@ -2514,41 +2530,20 @@ impl GameWorld {
                         });
 
                         let upper_min_y = block_y as f32 + max_y;
-                        let (min, max) = match facing {
-                            mdminecraft_world::Facing::North => (
-                                glam::Vec3::new(block_x as f32, upper_min_y, block_z as f32),
-                                glam::Vec3::new(
-                                    block_x as f32 + 1.0,
-                                    block_y as f32 + 1.0,
-                                    block_z as f32 + 0.5,
+                        for footprint in footprints.iter().take(footprint_count) {
+                            set.push(AABB {
+                                min: glam::Vec3::new(
+                                    block_x as f32 + footprint.min_x,
+                                    upper_min_y,
+                                    block_z as f32 + footprint.min_z,
                                 ),
-                            ),
-                            mdminecraft_world::Facing::South => (
-                                glam::Vec3::new(block_x as f32, upper_min_y, block_z as f32 + 0.5),
-                                glam::Vec3::new(
-                                    block_x as f32 + 1.0,
+                                max: glam::Vec3::new(
+                                    block_x as f32 + footprint.max_x,
                                     block_y as f32 + 1.0,
-                                    block_z as f32 + 1.0,
+                                    block_z as f32 + footprint.max_z,
                                 ),
-                            ),
-                            mdminecraft_world::Facing::East => (
-                                glam::Vec3::new(block_x as f32 + 0.5, upper_min_y, block_z as f32),
-                                glam::Vec3::new(
-                                    block_x as f32 + 1.0,
-                                    block_y as f32 + 1.0,
-                                    block_z as f32 + 1.0,
-                                ),
-                            ),
-                            mdminecraft_world::Facing::West => (
-                                glam::Vec3::new(block_x as f32, upper_min_y, block_z as f32),
-                                glam::Vec3::new(
-                                    block_x as f32 + 0.5,
-                                    block_y as f32 + 1.0,
-                                    block_z as f32 + 1.0,
-                                ),
-                            ),
-                        };
-                        set.push(AABB { min, max });
+                            });
+                        }
                     }
                     return set;
                 }
@@ -2598,10 +2593,25 @@ impl GameWorld {
                     return AabbSet::single(AABB { min, max });
                 }
 
+                let is_wall = matches!(
+                    voxel.id,
+                    mdminecraft_world::interactive_blocks::COBBLESTONE_WALL
+                        | mdminecraft_world::interactive_blocks::STONE_BRICK_WALL
+                );
+
                 let connects_to = |neighbor: Voxel| -> bool {
-                    mdminecraft_world::is_fence(neighbor.id)
-                        || mdminecraft_world::is_fence_gate(neighbor.id)
-                        || block_properties.get(neighbor.id).is_solid
+                    if is_wall {
+                        matches!(
+                            neighbor.id,
+                            mdminecraft_world::interactive_blocks::COBBLESTONE_WALL
+                                | mdminecraft_world::interactive_blocks::STONE_BRICK_WALL
+                        ) || mdminecraft_world::is_fence_gate(neighbor.id)
+                            || mdminecraft_world::is_full_cube_block(neighbor.id)
+                    } else {
+                        mdminecraft_world::is_fence(neighbor.id)
+                            || mdminecraft_world::is_fence_gate(neighbor.id)
+                            || mdminecraft_world::is_full_cube_block(neighbor.id)
+                    }
                 };
 
                 let connect_west = voxel_at(block_x - 1, block_y, block_z).is_some_and(connects_to);
@@ -2613,12 +2623,30 @@ impl GameWorld {
 
                 // Fence collision: center post + optional connecting arms (multi-AABB), avoiding
                 // over-colliding corners when connected in multiple directions.
-                let post_min_x = block_x as f32 + 0.375;
-                let post_max_x = block_x as f32 + 0.625;
-                let post_min_z = block_z as f32 + 0.375;
-                let post_max_z = block_z as f32 + 0.625;
+                let (post_min_x, post_max_x, post_min_z, post_max_z, arm_thickness) = if matches!(
+                    voxel.id,
+                    mdminecraft_world::interactive_blocks::COBBLESTONE_WALL
+                        | mdminecraft_world::interactive_blocks::STONE_BRICK_WALL
+                ) {
+                    let thickness = 6.0 / 16.0;
+                    let half = thickness * 0.5;
+                    (
+                        block_x as f32 + 0.5 - half,
+                        block_x as f32 + 0.5 + half,
+                        block_z as f32 + 0.5 - half,
+                        block_z as f32 + 0.5 + half,
+                        thickness,
+                    )
+                } else {
+                    (
+                        block_x as f32 + 0.375,
+                        block_x as f32 + 0.625,
+                        block_z as f32 + 0.375,
+                        block_z as f32 + 0.625,
+                        2.0 / 16.0,
+                    )
+                };
 
-                let arm_thickness = 2.0 / 16.0;
                 let arm_half = arm_thickness * 0.5;
                 let arm_min_x = block_x as f32 + 0.5 - arm_half;
                 let arm_max_x = block_x as f32 + 0.5 + arm_half;
@@ -4575,6 +4603,8 @@ impl GameWorld {
                     self.throw_splash_potion(potion_id);
                     self.hotbar.consume_selected();
                     // Skip other interactions when throwing
+                } else if self.try_use_bucket(hit) {
+                    // Skip other interactions when using buckets
                 } else {
                     self.handle_block_placement(hit);
                 }
@@ -4583,6 +4613,65 @@ impl GameWorld {
             // No block selected, reset mining progress
             self.mining_progress = None;
         }
+    }
+
+    fn try_use_bucket(&mut self, hit: RaycastHit) -> bool {
+        let Some(bucket_id) = self.hotbar.selected_bucket() else {
+            return false;
+        };
+
+        let Some((new_bucket_id, changed_positions)) =
+            try_bucket_interaction(bucket_id, hit, &mut self.chunks, &mut self.fluid_sim)
+        else {
+            return false;
+        };
+
+        // Transform the held bucket.
+        if let Some(selected) = self.hotbar.selected_item_mut() {
+            if selected.count > 1 {
+                selected.count -= 1;
+                self.return_stack_to_storage_or_spill(ItemStack::new(
+                    ItemType::Item(new_bucket_id),
+                    1,
+                ));
+            } else {
+                self.hotbar.slots[self.hotbar.selected] =
+                    Some(ItemStack::new(ItemType::Item(new_bucket_id), 1));
+            }
+        }
+
+        // Refresh lighting/meshes for affected chunks.
+        if !changed_positions.is_empty() {
+            let mut dirty_chunks = std::collections::BTreeSet::new();
+            for pos in changed_positions {
+                dirty_chunks.insert(ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16)));
+            }
+
+            for pos in &dirty_chunks {
+                self.recompute_chunk_lighting(*pos);
+            }
+
+            let mut affected = std::collections::BTreeSet::new();
+            for pos in &dirty_chunks {
+                affected.extend(mdminecraft_world::recompute_block_light_local(
+                    &mut self.chunks,
+                    &self.registry,
+                    *pos,
+                ));
+            }
+
+            let mut mesh_refresh = std::collections::BTreeSet::new();
+            for pos in &dirty_chunks {
+                mesh_refresh.insert(*pos);
+                mesh_refresh.extend(Self::neighbor_chunk_positions(*pos));
+            }
+            mesh_refresh.extend(affected);
+            for pos in mesh_refresh {
+                let _ = self.upload_chunk_mesh(pos);
+            }
+        }
+
+        true
     }
 
     fn try_sleep_in_bed(&mut self, bed_pos: IVec3) {
@@ -5298,20 +5387,53 @@ impl GameWorld {
     fn handle_block_placement(&mut self, hit: RaycastHit) {
         // Only place if we have a block selected
         if let Some(block_id) = self.hotbar.selected_block() {
+            let hit_local_y = (hit.hit_pos.y - hit.block_pos.y as f32).clamp(0.0, 1.0);
             let Some(place_state) = Self::placement_state_for_block(
                 block_id,
                 self.renderer.camera().yaw,
                 hit.face_normal,
-                (hit.hit_pos.y - hit.block_pos.y as f32).clamp(0.0, 1.0),
+                hit_local_y,
             ) else {
                 return;
             };
 
-            let place_pos = IVec3::new(
+            let mut place_block_id = block_id;
+            let mut place_state = place_state;
+            let mut allow_replace_existing_slab = false;
+            let mut place_pos = IVec3::new(
                 hit.block_pos.x + hit.face_normal.x,
                 hit.block_pos.y + hit.face_normal.y,
                 hit.block_pos.z + hit.face_normal.z,
             );
+
+            if mdminecraft_world::is_slab(block_id) {
+                if let Some(double_slab_id) = Self::double_slab_block_id(block_id) {
+                    let support_chunk_pos = ChunkPos::new(
+                        hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                        hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                    );
+                    if let Some(chunk) = self.chunks.get(&support_chunk_pos) {
+                        let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                        let local_y = hit.block_pos.y as usize;
+                        let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                        if local_y < CHUNK_SIZE_Y {
+                            let existing = chunk.voxel(local_x, local_y, local_z);
+                            if existing.id == block_id
+                                && Self::should_merge_slab(
+                                    existing.state,
+                                    hit.face_normal,
+                                    hit_local_y,
+                                )
+                            {
+                                place_pos = hit.block_pos;
+                                place_block_id = double_slab_id;
+                                place_state = 0;
+                                allow_replace_existing_slab = true;
+                            }
+                        }
+                    }
+                }
+            }
 
             if matches!(
                 block_id,
@@ -5432,7 +5554,11 @@ impl GameWorld {
 
                 if local_y < 256 {
                     let current = chunk.voxel(local_x, local_y, local_z);
-                    if current.id == BLOCK_AIR {
+                    if current.id == BLOCK_AIR
+                        || (allow_replace_existing_slab
+                            && current.id == block_id
+                            && place_block_id != block_id)
+                    {
                         if mdminecraft_world::is_door_lower(block_id) {
                             if Self::try_place_door(
                                 chunk,
@@ -5453,7 +5579,7 @@ impl GameWorld {
                             }
                         } else {
                             let new_voxel = Voxel {
-                                id: block_id,
+                                id: place_block_id,
                                 state: place_state,
                                 light_sky: 0,
                                 light_block: 0,
@@ -5709,6 +5835,36 @@ impl GameWorld {
         }
 
         Some(0)
+    }
+
+    fn double_slab_block_id(slab_id: BlockId) -> Option<BlockId> {
+        match slab_id {
+            interactive_blocks::STONE_SLAB => Some(mdminecraft_world::BLOCK_DOUBLE_STONE_SLAB),
+            interactive_blocks::OAK_SLAB => Some(mdminecraft_world::BLOCK_DOUBLE_OAK_SLAB),
+            interactive_blocks::STONE_BRICK_SLAB => {
+                Some(mdminecraft_world::BLOCK_DOUBLE_STONE_BRICK_SLAB)
+            }
+            _ => None,
+        }
+    }
+
+    fn should_merge_slab(existing_state: BlockState, face_normal: IVec3, hit_local_y: f32) -> bool {
+        let existing_is_top = matches!(
+            mdminecraft_world::SlabPosition::from_state(existing_state),
+            mdminecraft_world::SlabPosition::Top
+        );
+
+        if face_normal.y > 0 {
+            // Clicking the top face merges only with a bottom slab.
+            !existing_is_top
+        } else if face_normal.y < 0 {
+            // Clicking the bottom face merges only with a top slab.
+            existing_is_top
+        } else {
+            // Clicking the side merges if we target the missing half.
+            let desired_top = hit_local_y >= 0.5;
+            desired_top != existing_is_top
+        }
     }
 
     fn schedule_redstone_updates_around(&mut self, pos: IVec3) {
@@ -6241,6 +6397,18 @@ impl GameWorld {
 
         if let Some(frame) = self.renderer.begin_frame() {
             let weather_intensity = self.weather_intensity();
+            let night_vision_strength = self
+                .status_effects
+                .get(StatusEffectType::NightVision)
+                .map(|effect| {
+                    // Vanilla fades at the end; keep it simple but avoid a hard cutoff.
+                    if effect.duration_ticks < 200 {
+                        effect.duration_ticks as f32 / 200.0
+                    } else {
+                        1.0
+                    }
+                })
+                .unwrap_or(0.0);
             self.populate_particle_emitter();
             #[cfg(feature = "ui3d_billboards")]
             self.populate_billboards();
@@ -6260,10 +6428,14 @@ impl GameWorld {
                 resources.queue,
                 &self.time_of_day,
                 weather_intensity,
+                night_vision_strength,
             );
-            resources
-                .pipeline
-                .update_time(resources.queue, &self.time_of_day, weather_intensity);
+            resources.pipeline.update_time(
+                resources.queue,
+                &self.time_of_day,
+                weather_intensity,
+                night_vision_strength,
+            );
 
             let mut encoder =
                 resources
@@ -6410,6 +6582,7 @@ impl GameWorld {
                         render_hunger_bar(ctx, &self.player_health);
                         render_armor_bar(ctx, &self.player_armor);
                         render_tool_durability(ctx, &self.hotbar);
+                        render_status_effects_overlay(ctx, &self.status_effects);
 
                         // Show inventory if open
                         if inventory_open {
@@ -8408,6 +8581,9 @@ impl GameWorld {
             DroppedItemType::RedstoneDust => Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
             DroppedItemType::GlowstoneDust => Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
             DroppedItemType::Pufferfish => Some(ItemType::Item(CORE_ITEM_PUFFERFISH)),
+            DroppedItemType::Bucket => Some(ItemType::Item(CORE_ITEM_BUCKET)),
+            DroppedItemType::WaterBucket => Some(ItemType::Item(CORE_ITEM_WATER_BUCKET)),
+            DroppedItemType::LavaBucket => Some(ItemType::Item(CORE_ITEM_LAVA_BUCKET)),
             DroppedItemType::Sugar => Some(ItemType::Item(CORE_ITEM_SUGAR)),
             DroppedItemType::Paper => Some(ItemType::Item(CORE_ITEM_PAPER)),
             DroppedItemType::Book => Some(ItemType::Item(CORE_ITEM_BOOK)),
@@ -8700,6 +8876,9 @@ impl GameWorld {
                 CORE_ITEM_REDSTONE_DUST => Some(DroppedItemType::RedstoneDust),
                 CORE_ITEM_GLOWSTONE_DUST => Some(DroppedItemType::GlowstoneDust),
                 CORE_ITEM_PUFFERFISH => Some(DroppedItemType::Pufferfish),
+                CORE_ITEM_BUCKET => Some(DroppedItemType::Bucket),
+                CORE_ITEM_WATER_BUCKET => Some(DroppedItemType::WaterBucket),
+                CORE_ITEM_LAVA_BUCKET => Some(DroppedItemType::LavaBucket),
                 CORE_ITEM_PAPER => Some(DroppedItemType::Paper),
                 CORE_ITEM_BOOK => Some(DroppedItemType::Book),
                 CORE_ITEM_WHEAT_SEEDS => Some(DroppedItemType::WheatSeeds),
@@ -8818,6 +8997,94 @@ impl GameWorld {
                 _ => None,
             },
         }
+    }
+}
+
+fn try_bucket_interaction(
+    held_bucket_id: u16,
+    hit: RaycastHit,
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    fluid_sim: &mut FluidSimulator,
+) -> Option<(u16, Vec<IVec3>)> {
+    let chunk_and_local = |pos: IVec3| -> Option<(ChunkPos, usize, usize, usize)> {
+        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_y = pos.y as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+        Some((chunk_pos, local_x, local_y, local_z))
+    };
+
+    match held_bucket_id {
+        CORE_ITEM_BUCKET => {
+            let target_pos = hit.block_pos;
+            let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(target_pos)?;
+            let current_id = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z).id;
+
+            let new_bucket_id = if current_id == FluidType::Water.source_block_id() {
+                CORE_ITEM_WATER_BUCKET
+            } else if current_id == FluidType::Lava.source_block_id() {
+                CORE_ITEM_LAVA_BUCKET
+            } else {
+                return None;
+            };
+
+            {
+                let chunk = chunks.get_mut(&chunk_pos)?;
+                chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+            }
+
+            fluid_sim.on_fluid_removed(
+                FluidPos::new(target_pos.x, target_pos.y, target_pos.z),
+                chunks,
+            );
+
+            Some((new_bucket_id, vec![target_pos]))
+        }
+        CORE_ITEM_WATER_BUCKET | CORE_ITEM_LAVA_BUCKET => {
+            let fluid_type = if held_bucket_id == CORE_ITEM_WATER_BUCKET {
+                FluidType::Water
+            } else {
+                FluidType::Lava
+            };
+            let source_id = fluid_type.source_block_id();
+
+            let place_pos = hit.block_pos + hit.face_normal;
+            let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(place_pos)?;
+            let current_id = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z).id;
+            if current_id != BLOCK_AIR && get_fluid_type(current_id).is_none() {
+                return None;
+            }
+
+            {
+                let chunk = chunks.get_mut(&chunk_pos)?;
+                chunk.set_voxel(
+                    local_x,
+                    local_y,
+                    local_z,
+                    Voxel {
+                        id: source_id,
+                        state: 0,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                );
+            }
+
+            fluid_sim.on_fluid_placed(
+                FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
+                fluid_type,
+            );
+
+            Some((CORE_ITEM_BUCKET, vec![place_pos]))
+        }
+        _ => None,
     }
 }
 
@@ -9199,6 +9466,132 @@ fn render_tool_durability(ctx: &egui::Context, hotbar: &Hotbar) {
             }
         }
     }
+}
+
+fn render_status_effects_overlay(ctx: &egui::Context, effects: &StatusEffects) {
+    fn effect_name(effect_type: StatusEffectType) -> &'static str {
+        match effect_type {
+            StatusEffectType::Speed => "Speed",
+            StatusEffectType::Haste => "Haste",
+            StatusEffectType::Strength => "Strength",
+            StatusEffectType::InstantHealth => "Instant Health",
+            StatusEffectType::JumpBoost => "Jump Boost",
+            StatusEffectType::Regeneration => "Regeneration",
+            StatusEffectType::Resistance => "Resistance",
+            StatusEffectType::FireResistance => "Fire Resistance",
+            StatusEffectType::WaterBreathing => "Water Breathing",
+            StatusEffectType::Invisibility => "Invisibility",
+            StatusEffectType::NightVision => "Night Vision",
+            StatusEffectType::Absorption => "Absorption",
+            StatusEffectType::Saturation => "Saturation",
+            StatusEffectType::SlowFalling => "Slow Falling",
+            StatusEffectType::Luck => "Luck",
+            StatusEffectType::Slowness => "Slowness",
+            StatusEffectType::MiningFatigue => "Mining Fatigue",
+            StatusEffectType::InstantDamage => "Instant Damage",
+            StatusEffectType::Nausea => "Nausea",
+            StatusEffectType::Blindness => "Blindness",
+            StatusEffectType::Hunger => "Hunger",
+            StatusEffectType::Weakness => "Weakness",
+            StatusEffectType::Poison => "Poison",
+            StatusEffectType::Wither => "Wither",
+            StatusEffectType::BadLuck => "Bad Luck",
+        }
+    }
+
+    fn roman(level: u8) -> &'static str {
+        match level {
+            1 => "I",
+            2 => "II",
+            3 => "III",
+            4 => "IV",
+            5 => "V",
+            6 => "VI",
+            7 => "VII",
+            8 => "VIII",
+            9 => "IX",
+            10 => "X",
+            _ => "",
+        }
+    }
+
+    fn format_duration_ticks(ticks: u32) -> String {
+        let seconds = ticks / 20;
+        let minutes = seconds / 60;
+        let seconds = seconds % 60;
+        format!("{}:{:02}", minutes, seconds)
+    }
+
+    if effects.is_empty() {
+        return;
+    }
+
+    let mut active: Vec<_> = effects.iter().copied().collect();
+    active.sort_by_key(|effect| {
+        (
+            u8::from(!effect.effect_type.is_positive()),
+            effect_name(effect.effect_type),
+        )
+    });
+
+    egui::Area::new(egui::Id::new("status_effects"))
+        .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
+        .show(ctx, |ui| {
+            let frame = egui::Frame::none()
+                .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 15, 160))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60)))
+                .inner_margin(egui::Margin::same(6.0));
+
+            frame.show(ui, |ui| {
+                ui.set_min_width(185.0);
+                ui.vertical(|ui| {
+                    for effect in active {
+                        let name = effect_name(effect.effect_type);
+                        let is_positive = effect.effect_type.is_positive();
+                        let color = if is_positive {
+                            egui::Color32::from_rgb(120, 220, 120)
+                        } else {
+                            egui::Color32::from_rgb(235, 120, 120)
+                        };
+
+                        let level = effect.level();
+                        let level_suffix = if effect.effect_type.max_amplifier() == 0 {
+                            String::new()
+                        } else {
+                            let roman = roman(level);
+                            if roman.is_empty() {
+                                format!(" {}", level)
+                            } else {
+                                format!(" {}", roman)
+                            }
+                        };
+
+                        let duration = if effect.duration_ticks == 0 {
+                            String::new()
+                        } else {
+                            format_duration_ticks(effect.duration_ticks)
+                        };
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if !duration.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(duration)
+                                        .size(11.0)
+                                        .color(egui::Color32::GRAY),
+                                );
+                                ui.add_space(8.0);
+                            }
+
+                            ui.label(
+                                egui::RichText::new(format!("{}{}", name, level_suffix))
+                                    .size(12.0)
+                                    .color(color),
+                            );
+                        });
+                    }
+                });
+            });
+        });
 }
 
 /// Render the XP bar above the hotbar
@@ -12067,6 +12460,32 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
+        // Iron Bars (vanilla-ish): 6 iron ingots → 16 bars
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(7), 6)], // Item(7) = Iron Ingot
+            output: ItemType::Block(interactive_blocks::IRON_BARS),
+            output_count: 16,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
         // Nether Wart Block: 1 block → 9 nether wart items
         CraftingRecipe {
             inputs: vec![(
@@ -12267,6 +12686,24 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
+        // Bucket (vanilla-ish): 3 iron ingots → 1 bucket
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(7), 3)], // Item(7) = Iron Ingot
+            output: ItemType::Item(CORE_ITEM_BUCKET),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                    [None, Some(ItemType::Item(7)), None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
         // Trapdoor: 6 planks → 2 trapdoors
         CraftingRecipe {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 6)],
@@ -12343,6 +12780,32 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
                         Some(ItemType::Item(3)),
                         Some(ItemType::Block(BLOCK_OAK_PLANKS)),
                         Some(ItemType::Item(3)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Cobblestone Wall (vanilla-ish): 6 cobblestone → 6 walls
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_COBBLESTONE), 6)],
+            output: ItemType::Block(interactive_blocks::COBBLESTONE_WALL),
+            output_count: 6,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
                     ],
                     [None, None, None],
                 ],
@@ -12503,6 +12966,110 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
                 ],
             }),
             allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Bricks (vanilla-ish): 4 stone → 4 stone bricks
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(mdminecraft_world::BLOCK_STONE), 4)],
+            output: ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            output_count: 4,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        None,
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Brick Slab: 3 stone bricks → 6 slabs
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS), 3)],
+            output: ItemType::Block(interactive_blocks::STONE_BRICK_SLAB),
+            output_count: 6,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Brick Stairs: 6 stone bricks → 4 stairs
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS), 6)],
+            output: ItemType::Block(interactive_blocks::STONE_BRICK_STAIRS),
+            output_count: 4,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        None,
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Brick Wall (vanilla-ish): 6 stone bricks → 6 walls
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS), 6)],
+            output: ItemType::Block(interactive_blocks::STONE_BRICK_WALL),
+            output_count: 6,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
@@ -15455,17 +16022,18 @@ mod tests {
         try_shift_move_core_stack_into_enchanting_table, try_shift_move_core_stack_into_furnace,
         ArmorPiece, ArmorSlot, BlockPropertiesRegistry, BrewingStandState, ChestState, Chunk,
         ChunkPos, CraftingGridSize, DroppedItemType, EnchantingTableState, Enchantment,
-        EnchantmentType, FurnaceSlotKind, FurnaceState, GameWorld, Hotbar, ItemStack, ItemType,
-        MainInventory, PlayerHealth, PlayerPhysics, StatusEffectType, StatusEffects, ToolMaterial,
-        ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
-        BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
-        BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE,
-        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_FERMENTED_SPIDER_EYE,
-        CORE_ITEM_GHAST_TEAR, CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
-        CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_MAGMA_CREAM,
-        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH,
-        CORE_ITEM_RABBIT_FOOT, CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR,
-        CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
+        EnchantmentType, FluidSimulator, FluidType, FurnaceSlotKind, FurnaceState, GameWorld,
+        Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth, PlayerPhysics, StatusEffectType,
+        StatusEffects, ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_AIR,
+        BLOCK_BOOKSHELF, BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE,
+        BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG,
+        BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK,
+        CORE_ITEM_BUCKET, CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_GHAST_TEAR,
+        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON, CORE_ITEM_GLOWSTONE_DUST,
+        CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_WART,
+        CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH, CORE_ITEM_RABBIT_FOOT,
+        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
+        CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
     use mdminecraft_world::StatusEffect;
 
@@ -16426,6 +16994,70 @@ mod tests {
     }
 
     #[test]
+    fn cobblestone_wall_collision_post_is_thicker_than_fence() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::COBBLESTONE_WALL,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        // Fence posts start at x=0.375; walls start at x=0.3125 (6/16 thick).
+        let thin_slice_inside_wall_post = AABB {
+            min: glam::Vec3::new(0.33, 64.0, 0.45),
+            max: glam::Vec3::new(0.34, 65.0, 0.55),
+        };
+        assert!(
+            GameWorld::aabb_collides_with_world(
+                &chunks,
+                &block_properties,
+                &thin_slice_inside_wall_post
+            ),
+            "Wall post should collide further out than the fence post thickness"
+        );
+    }
+
+    #[test]
+    fn stone_brick_wall_collision_post_is_thicker_than_fence() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::STONE_BRICK_WALL,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        // Fence posts start at x=0.375; walls start at x=0.3125 (6/16 thick).
+        let thin_slice_inside_wall_post = AABB {
+            min: glam::Vec3::new(0.33, 64.0, 0.45),
+            max: glam::Vec3::new(0.34, 65.0, 0.55),
+        };
+        assert!(
+            GameWorld::aabb_collides_with_world(
+                &chunks,
+                &block_properties,
+                &thin_slice_inside_wall_post
+            ),
+            "Wall post should collide further out than the fence post thickness"
+        );
+    }
+
+    #[test]
     fn fence_collision_does_not_fill_corners_when_connected() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -16596,6 +17228,44 @@ mod tests {
     }
 
     #[test]
+    fn iron_bars_collision_is_thin() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::IRON_BARS,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let corner_inside_block = AABB {
+            min: glam::Vec3::new(0.0, 64.0, 0.0),
+            max: glam::Vec3::new(0.2, 65.0, 0.2),
+        };
+        assert!(!GameWorld::aabb_collides_with_world(
+            &chunks,
+            &block_properties,
+            &corner_inside_block
+        ));
+
+        let center_slice = AABB {
+            min: glam::Vec3::new(0.45, 64.0, 0.45),
+            max: glam::Vec3::new(0.55, 65.0, 0.55),
+        };
+        assert!(GameWorld::aabb_collides_with_world(
+            &chunks,
+            &block_properties,
+            &center_slice
+        ));
+    }
+
+    #[test]
     fn glass_pane_collision_connects_without_filling_corners() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -16661,6 +17331,91 @@ mod tests {
             &chunks,
             &block_properties,
             &far_corner
+        ));
+    }
+
+    #[test]
+    fn glass_pane_collision_connects_to_iron_bars() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::GLASS_PANE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::IRON_BARS,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let east_arm_slice = AABB {
+            min: glam::Vec3::new(0.9, 64.0, 0.45),
+            max: glam::Vec3::new(1.0, 65.0, 0.55),
+        };
+        assert!(GameWorld::aabb_collides_with_world(
+            &chunks,
+            &block_properties,
+            &east_arm_slice
+        ));
+    }
+
+    #[test]
+    fn glass_pane_collision_does_not_connect_to_door() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::GLASS_PANE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
+                state: mdminecraft_world::Facing::North.to_state(),
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            65,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER,
+                state: mdminecraft_world::Facing::North.to_state(),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let east_arm_slice = AABB {
+            min: glam::Vec3::new(0.9, 64.0, 0.45),
+            max: glam::Vec3::new(1.0, 65.0, 0.55),
+        };
+        assert!(!GameWorld::aabb_collides_with_world(
+            &chunks,
+            &block_properties,
+            &east_arm_slice
         ));
     }
 
@@ -16846,6 +17601,118 @@ mod tests {
     }
 
     #[test]
+    fn stairs_inner_corner_adds_quarter_to_step_collision() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        chunk.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
+                state: mdminecraft_world::Facing::South.to_state(),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let extra_quarter_in_northeast = AABB {
+            min: glam::Vec3::new(1.6, 64.6, 1.1),
+            max: glam::Vec3::new(1.9, 64.9, 1.4),
+        };
+        assert!(
+            !GameWorld::aabb_collides_with_world(
+                &chunks,
+                &block_properties,
+                &extra_quarter_in_northeast
+            ),
+            "Straight south-facing stair should not occupy the NE quarter of its upper step"
+        );
+
+        // Back stair facing east creates an inner-left corner on the south-facing stair.
+        chunks
+            .get_mut(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .set_voxel(
+                1,
+                64,
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
+                    state: mdminecraft_world::Facing::East.to_state(),
+                    ..Default::default()
+                },
+            );
+
+        assert!(
+            GameWorld::aabb_collides_with_world(
+                &chunks,
+                &block_properties,
+                &extra_quarter_in_northeast
+            ),
+            "Inner corner stair should add collision for the extra quarter of the upper step"
+        );
+    }
+
+    #[test]
+    fn stairs_outer_corner_removes_quarter_from_step_collision() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        chunk.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
+                state: mdminecraft_world::Facing::South.to_state(),
+                ..Default::default()
+            },
+        );
+
+        // Front stair facing east creates an outer-left corner on the south-facing stair.
+        chunk.set_voxel(
+            1,
+            64,
+            2,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
+                state: mdminecraft_world::Facing::East.to_state(),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let removed_quarter_in_southwest = AABB {
+            min: glam::Vec3::new(1.1, 64.6, 1.6),
+            max: glam::Vec3::new(1.4, 64.9, 1.9),
+        };
+        assert!(
+            !GameWorld::aabb_collides_with_world(
+                &chunks,
+                &block_properties,
+                &removed_quarter_in_southwest
+            ),
+            "Outer corner stair should remove collision from the SW quarter of the upper step"
+        );
+
+        let remaining_quarter_in_southeast = AABB {
+            min: glam::Vec3::new(1.6, 64.6, 1.6),
+            max: glam::Vec3::new(1.9, 64.9, 1.9),
+        };
+        assert!(GameWorld::aabb_collides_with_world(
+            &chunks,
+            &block_properties,
+            &remaining_quarter_in_southeast
+        ));
+    }
+
+    #[test]
     fn ladder_is_detected_without_blocking_movement() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -17004,6 +17871,76 @@ mod tests {
         )
         .expect("slab placement should always produce a state");
         assert_eq!(forced_top, mdminecraft_world::SlabPosition::Top.to_state(0));
+    }
+
+    #[test]
+    fn double_slab_mapping_is_defined_for_supported_slabs() {
+        assert_eq!(
+            GameWorld::double_slab_block_id(mdminecraft_world::interactive_blocks::STONE_SLAB),
+            Some(mdminecraft_world::BLOCK_DOUBLE_STONE_SLAB)
+        );
+        assert_eq!(
+            GameWorld::double_slab_block_id(mdminecraft_world::interactive_blocks::OAK_SLAB),
+            Some(mdminecraft_world::BLOCK_DOUBLE_OAK_SLAB)
+        );
+        assert_eq!(
+            GameWorld::double_slab_block_id(
+                mdminecraft_world::interactive_blocks::STONE_BRICK_SLAB
+            ),
+            Some(mdminecraft_world::BLOCK_DOUBLE_STONE_BRICK_SLAB)
+        );
+    }
+
+    #[test]
+    fn slab_merge_rules_match_vanillaish_expectations() {
+        let bottom = mdminecraft_world::SlabPosition::Bottom.to_state(0);
+        let top = mdminecraft_world::SlabPosition::Top.to_state(0);
+
+        // Clicking the top face merges only with a bottom slab.
+        assert!(GameWorld::should_merge_slab(
+            bottom,
+            glam::IVec3::new(0, 1, 0),
+            0.0
+        ));
+        assert!(!GameWorld::should_merge_slab(
+            top,
+            glam::IVec3::new(0, 1, 0),
+            0.0
+        ));
+
+        // Clicking the bottom face merges only with a top slab.
+        assert!(GameWorld::should_merge_slab(
+            top,
+            glam::IVec3::new(0, -1, 0),
+            0.0
+        ));
+        assert!(!GameWorld::should_merge_slab(
+            bottom,
+            glam::IVec3::new(0, -1, 0),
+            0.0
+        ));
+
+        // Side clicks merge when targeting the missing half.
+        assert!(GameWorld::should_merge_slab(
+            bottom,
+            glam::IVec3::new(1, 0, 0),
+            0.75
+        ));
+        assert!(!GameWorld::should_merge_slab(
+            bottom,
+            glam::IVec3::new(1, 0, 0),
+            0.25
+        ));
+        assert!(GameWorld::should_merge_slab(
+            top,
+            glam::IVec3::new(1, 0, 0),
+            0.25
+        ));
+        assert!(!GameWorld::should_merge_slab(
+            top,
+            glam::IVec3::new(1, 0, 0),
+            0.75
+        ));
     }
 
     #[test]
@@ -17825,6 +18762,90 @@ mod tests {
     }
 
     #[test]
+    fn crafting_bucket_vanillaish_recipe() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(7), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_BUCKET), 1))
+        );
+    }
+
+    #[test]
+    fn bucket_picks_up_water_source_block() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: FluidType::Water.source_block_id(),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut fluid_sim = FluidSimulator::new();
+
+        let hit = super::RaycastHit {
+            block_pos: glam::IVec3::new(1, 64, 1),
+            face_normal: glam::IVec3::ZERO,
+            distance: 0.0,
+            hit_pos: glam::Vec3::ZERO,
+        };
+
+        let result =
+            super::try_bucket_interaction(CORE_ITEM_BUCKET, hit, &mut chunks, &mut fluid_sim);
+        assert_eq!(
+            result,
+            Some((CORE_ITEM_WATER_BUCKET, vec![glam::IVec3::new(1, 64, 1)]))
+        );
+
+        let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(1, 64, 1);
+        assert_eq!(voxel.id, BLOCK_AIR);
+    }
+
+    #[test]
+    fn water_bucket_places_water_source_into_adjacent_air() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut fluid_sim = FluidSimulator::new();
+
+        let hit = super::RaycastHit {
+            block_pos: glam::IVec3::new(1, 64, 1),
+            face_normal: glam::IVec3::new(1, 0, 0),
+            distance: 0.0,
+            hit_pos: glam::Vec3::ZERO,
+        };
+
+        let result =
+            super::try_bucket_interaction(CORE_ITEM_WATER_BUCKET, hit, &mut chunks, &mut fluid_sim);
+        assert_eq!(
+            result,
+            Some((CORE_ITEM_BUCKET, vec![glam::IVec3::new(2, 64, 1)]))
+        );
+
+        let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(2, 64, 1);
+        assert_eq!(voxel.id, FluidType::Water.source_block_id());
+        assert_eq!(fluid_sim.pending_count(), 1);
+    }
+
+    #[test]
     fn crafting_planks_to_trapdoor() {
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
         for row in grid.iter_mut().take(2) {
@@ -17866,6 +18887,106 @@ mod tests {
         assert_eq!(
             check_crafting_recipe(&grid),
             Some((ItemType::Block(interactive_blocks::OAK_FENCE_GATE), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_cobblestone_to_walls() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            for slot in row {
+                *slot = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::COBBLESTONE_WALL), 6))
+        );
+    }
+
+    #[test]
+    fn crafting_stone_to_stone_bricks() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            for slot in row.iter_mut().take(2) {
+                *slot = Some(ItemStack::new(
+                    ItemType::Block(mdminecraft_world::BLOCK_STONE),
+                    1,
+                ));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS), 4))
+        );
+    }
+
+    #[test]
+    fn crafting_stone_bricks_to_stone_brick_slabs() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for slot in &mut grid[0] {
+            *slot = Some(ItemStack::new(
+                ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+                1,
+            ));
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::STONE_BRICK_SLAB), 6))
+        );
+    }
+
+    #[test]
+    fn crafting_stone_bricks_to_stone_brick_stairs() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[1][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[1][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[2][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[2][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[2][2] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::STONE_BRICK_STAIRS), 4))
+        );
+    }
+
+    #[test]
+    fn crafting_stone_bricks_to_stone_brick_walls() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            for slot in row {
+                *slot = Some(ItemStack::new(
+                    ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+                    1,
+                ));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::STONE_BRICK_WALL), 6))
         );
     }
 
@@ -18165,6 +19286,23 @@ mod tests {
         assert_eq!(
             check_crafting_recipe(&grid),
             Some((ItemType::Block(interactive_blocks::GLASS_PANE), 16))
+        );
+    }
+
+    #[test]
+    fn crafting_iron_ingots_to_iron_bars() {
+        let ingot = ItemStack::new(ItemType::Item(7), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            for slot in row {
+                *slot = Some(ingot.clone());
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::IRON_BARS), 16))
         );
     }
 
@@ -18497,6 +19635,19 @@ mod tests {
     }
 
     #[test]
+    fn hotbar_selected_block_maps_redstone_dust_to_redstone_wire() {
+        let mut hotbar = Hotbar::new();
+        hotbar.slots = Default::default();
+        hotbar.selected = 0;
+        hotbar.slots[0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 3));
+
+        assert_eq!(
+            hotbar.selected_block(),
+            Some(mdminecraft_world::redstone_blocks::REDSTONE_WIRE)
+        );
+    }
+
+    #[test]
     fn armor_piece_roundtrips_via_core_stack_preserving_durability_and_enchantments() {
         let mut piece = ArmorPiece::from_item_with_enchantments(
             DroppedItemType::IronHelmet,
@@ -18779,6 +19930,36 @@ mod tests {
                 potion_ids::SLOW_FALLING
             )),
             Some(DroppedItemType::SplashPotionSlowFalling)
+        );
+    }
+
+    #[test]
+    fn buckets_convert_between_dropped_and_core_item_types() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Bucket),
+            Some(ItemType::Item(CORE_ITEM_BUCKET))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_BUCKET)),
+            Some(DroppedItemType::Bucket)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::WaterBucket),
+            Some(ItemType::Item(CORE_ITEM_WATER_BUCKET))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_WATER_BUCKET)),
+            Some(DroppedItemType::WaterBucket)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::LavaBucket),
+            Some(ItemType::Item(CORE_ITEM_LAVA_BUCKET))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_LAVA_BUCKET)),
+            Some(DroppedItemType::LavaBucket)
         );
     }
 

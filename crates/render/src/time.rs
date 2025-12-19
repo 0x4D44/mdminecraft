@@ -123,13 +123,13 @@ pub struct TimeUniform {
     pub sun_dir: [f32; 4],
     /// Fog color for current time
     pub fog_color: [f32; 4],
-    /// Fog parameters (start, end, density, unused)
+    /// Fog parameters (start, end, night_vision, precipitation)
     pub fog_params: [f32; 4],
 }
 
 impl TimeUniform {
     /// Create from TimeOfDay state.
-    pub fn from_time_of_day(time: &TimeOfDay, weather_intensity: f32) -> Self {
+    pub fn from_time_of_day(time: &TimeOfDay, weather_intensity: f32, night_vision: f32) -> Self {
         let dir = time.sun_direction();
         let fog_color = fog_color_for_time(time.time());
         let precipitation_tint = [0.55, 0.58, 0.64];
@@ -140,12 +140,12 @@ impl TimeUniform {
         );
         let fog_start = mix_scalar(48.0, 24.0, weather_intensity);
         let fog_end = mix_scalar(120.0, 70.0, weather_intensity);
-        let fog_density = 0.0;
+        let night_vision = night_vision.clamp(0.0, 1.0);
         Self {
             time: [time.time(), 0.0, 0.0, 0.0],
             sun_dir: [dir[0], dir[1], dir[2], 0.0],
             fog_color: [fog_color[0], fog_color[1], fog_color[2], 1.0],
-            fog_params: [fog_start, fog_end, fog_density, weather_intensity],
+            fog_params: [fog_start, fog_end, night_vision, weather_intensity],
         }
     }
 }

@@ -136,5 +136,14 @@
   { "name": "phantom_membrane_ore", "opaque": true, "texture": "blocks/deepslate", "emissive": true, "harvest_level": "stone" },
   { "name": "redstone_dust_ore", "opaque": true, "texture": "blocks/sculk_sensor", "emissive": true, "harvest_level": "stone" },
   { "name": "glowstone_dust_ore", "opaque": true, "texture": "blocks/glow_lichen", "emissive": true, "harvest_level": "stone" },
-  { "name": "pufferfish_ore", "opaque": true, "texture": "blocks/sand", "emissive": true, "harvest_level": "stone" }
+  { "name": "pufferfish_ore", "opaque": true, "texture": "blocks/sand", "emissive": true, "harvest_level": "stone" },
+  { "name": "cobblestone_wall", "opaque": false, "texture": "blocks/gravel" },
+  { "name": "iron_bars", "opaque": false, "texture": "blocks/stone" },
+  { "name": "stone_bricks", "opaque": true, "texture": "blocks/stone" },
+  { "name": "stone_brick_slab", "opaque": false, "texture": "blocks/stone" },
+  { "name": "stone_brick_stairs", "opaque": false, "texture": "blocks/stone" },
+  { "name": "stone_brick_wall", "opaque": false, "texture": "blocks/stone" },
+  { "name": "double_stone_slab", "opaque": true, "texture": "blocks/stone" },
+  { "name": "double_oak_slab", "opaque": true, "texture": "blocks/planks" },
+  { "name": "double_stone_brick_slab", "opaque": true, "texture": "blocks/stone" }
 ]

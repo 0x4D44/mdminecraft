@@ -32,6 +32,11 @@ pub mod interactive_blocks {
     pub const CHEST: BlockId = 67;
     pub const TRAPDOOR: BlockId = 68;
     pub const TORCH: BlockId = 69;
+    pub const COBBLESTONE_WALL: BlockId = 114;
+    pub const IRON_BARS: BlockId = 115;
+    pub const STONE_BRICK_SLAB: BlockId = 117;
+    pub const STONE_BRICK_STAIRS: BlockId = 118;
+    pub const STONE_BRICK_WALL: BlockId = 119;
 }
 
 /// Facing direction for blocks
@@ -88,6 +93,26 @@ impl Facing {
             Facing::South => Facing::North,
             Facing::East => Facing::West,
             Facing::West => Facing::East,
+        }
+    }
+
+    /// Rotate the facing 90° counterclockwise (turn left).
+    pub fn left(self) -> Self {
+        match self {
+            Facing::North => Facing::West,
+            Facing::South => Facing::East,
+            Facing::East => Facing::North,
+            Facing::West => Facing::South,
+        }
+    }
+
+    /// Rotate the facing 90° clockwise (turn right).
+    pub fn right(self) -> Self {
+        match self {
+            Facing::North => Facing::East,
+            Facing::South => Facing::West,
+            Facing::East => Facing::South,
+            Facing::West => Facing::North,
         }
     }
 
@@ -230,6 +255,86 @@ pub fn set_door_open(state: BlockState, open: bool) -> BlockState {
     }
 }
 
+const REDSTONE_POWERED_BIT: BlockState = 0x10;
+
+/// Check whether a block is powered by redstone.
+pub fn is_redstone_powered(state: BlockState) -> bool {
+    (state & REDSTONE_POWERED_BIT) != 0
+}
+
+/// Set whether a block is powered by redstone.
+pub fn set_redstone_powered(state: BlockState, powered: bool) -> BlockState {
+    if powered {
+        state | REDSTONE_POWERED_BIT
+    } else {
+        state & !REDSTONE_POWERED_BIT
+    }
+}
+
+/// Returns `true` when a block should be treated as a full cube for connectivity checks.
+///
+/// This is intentionally **not** the same as `BlockProperties::is_solid` (collision), because
+/// many non-cube blocks (doors, fences, panes, etc.) have collision but should not be treated as
+/// having a full solid face for neighbor connectivity.
+pub fn is_full_cube_block(block_id: BlockId) -> bool {
+    if block_id == blocks::AIR {
+        return false;
+    }
+
+    if matches!(
+        block_id,
+        blocks::WATER | crate::BLOCK_LAVA | crate::BLOCK_WATER_FLOWING | crate::BLOCK_LAVA_FLOWING
+    ) {
+        return false;
+    }
+
+    if is_door(block_id)
+        || is_trapdoor(block_id)
+        || is_ladder(block_id)
+        || is_slab(block_id)
+        || is_stairs(block_id)
+        || is_fence(block_id)
+        || is_fence_gate(block_id)
+        || is_bed(block_id)
+        || is_chest(block_id)
+        || crate::CropType::is_crop(block_id)
+        || crate::is_farmland(block_id)
+    {
+        return false;
+    }
+
+    if matches!(
+        block_id,
+        interactive_blocks::TORCH
+            | interactive_blocks::GLASS_PANE
+            | interactive_blocks::IRON_BARS
+            | interactive_blocks::COBBLESTONE_WALL
+            | interactive_blocks::STONE_BRICK_WALL
+            | crate::redstone_blocks::LEVER
+            | crate::redstone_blocks::STONE_BUTTON
+            | crate::redstone_blocks::OAK_BUTTON
+            | crate::redstone_blocks::STONE_PRESSURE_PLATE
+            | crate::redstone_blocks::OAK_PRESSURE_PLATE
+            | crate::redstone_blocks::REDSTONE_WIRE
+            | crate::redstone_blocks::REDSTONE_TORCH
+            | BLOCK_ENCHANTING_TABLE
+            | BLOCK_BREWING_STAND
+            | crate::BLOCK_SUGAR_CANE
+            | crate::BLOCK_BROWN_MUSHROOM
+            | crate::BLOCK_GLOW_LICHEN
+            | crate::BLOCK_POINTED_DRIPSTONE
+            | crate::BLOCK_CAVE_VINES
+            | crate::BLOCK_MOSS_CARPET
+            | crate::BLOCK_SPORE_BLOSSOM
+            | crate::BLOCK_HANGING_ROOTS
+            | crate::BLOCK_SCULK_VEIN
+    ) {
+        return false;
+    }
+
+    true
+}
+
 /// Check if a block is a door (upper or lower)
 pub fn is_door(block_id: BlockId) -> bool {
     matches!(
@@ -326,7 +431,9 @@ pub fn is_ladder(block_id: BlockId) -> bool {
 pub fn is_slab(block_id: BlockId) -> bool {
     matches!(
         block_id,
-        interactive_blocks::STONE_SLAB | interactive_blocks::OAK_SLAB
+        interactive_blocks::STONE_SLAB
+            | interactive_blocks::OAK_SLAB
+            | interactive_blocks::STONE_BRICK_SLAB
     )
 }
 
@@ -334,8 +441,187 @@ pub fn is_slab(block_id: BlockId) -> bool {
 pub fn is_stairs(block_id: BlockId) -> bool {
     matches!(
         block_id,
-        interactive_blocks::STONE_STAIRS | interactive_blocks::OAK_STAIRS
+        interactive_blocks::STONE_STAIRS
+            | interactive_blocks::OAK_STAIRS
+            | interactive_blocks::STONE_BRICK_STAIRS
     )
+}
+
+/// Stairs corner shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StairsShape {
+    Straight,
+    InnerLeft,
+    InnerRight,
+    OuterLeft,
+    OuterRight,
+}
+
+/// A (min_x, max_x, min_z, max_z) footprint inside a 1×1 block.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StairsFootprint {
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_z: f32,
+    pub max_z: f32,
+}
+
+const STAIRS_TOP_BIT: BlockState = 0x04;
+
+fn is_stairs_top(state: BlockState) -> bool {
+    (state & STAIRS_TOP_BIT) != 0
+}
+
+fn facing_axis(facing: Facing) -> u8 {
+    match facing {
+        Facing::North | Facing::South => 0,
+        Facing::East | Facing::West => 1,
+    }
+}
+
+fn stairs_half_region(dir: Facing) -> StairsFootprint {
+    match dir {
+        Facing::North => StairsFootprint {
+            min_x: 0.0,
+            max_x: 1.0,
+            min_z: 0.0,
+            max_z: 0.5,
+        },
+        Facing::South => StairsFootprint {
+            min_x: 0.0,
+            max_x: 1.0,
+            min_z: 0.5,
+            max_z: 1.0,
+        },
+        Facing::East => StairsFootprint {
+            min_x: 0.5,
+            max_x: 1.0,
+            min_z: 0.0,
+            max_z: 1.0,
+        },
+        Facing::West => StairsFootprint {
+            min_x: 0.0,
+            max_x: 0.5,
+            min_z: 0.0,
+            max_z: 1.0,
+        },
+    }
+}
+
+fn stairs_intersect(a: StairsFootprint, b: StairsFootprint) -> StairsFootprint {
+    StairsFootprint {
+        min_x: a.min_x.max(b.min_x),
+        max_x: a.max_x.min(b.max_x),
+        min_z: a.min_z.max(b.min_z),
+        max_z: a.max_z.min(b.max_z),
+    }
+}
+
+/// Get the stair step footprint(s) for a given facing + computed shape.
+///
+/// The returned footprints describe the *half-height step* portion of the stair:
+/// - for bottom stairs, the step is in the upper half (y=0.5..1.0)
+/// - for top stairs, the step is in the lower half (y=0.0..0.5)
+///
+/// Returns up to 2 footprints (inner corners are L-shaped and use 2 boxes).
+pub fn stairs_step_footprints(facing: Facing, shape: StairsShape) -> ([StairsFootprint; 2], usize) {
+    let front = stairs_half_region(facing);
+    let back = stairs_half_region(facing.opposite());
+    let left = stairs_half_region(facing.left());
+    let right = stairs_half_region(facing.right());
+
+    let dummy = StairsFootprint {
+        min_x: 0.0,
+        max_x: 0.0,
+        min_z: 0.0,
+        max_z: 0.0,
+    };
+
+    match shape {
+        StairsShape::Straight => ([front, dummy], 1),
+        StairsShape::OuterLeft => ([stairs_intersect(front, left), dummy], 1),
+        StairsShape::OuterRight => ([stairs_intersect(front, right), dummy], 1),
+        StairsShape::InnerLeft => ([front, stairs_intersect(back, left)], 2),
+        StairsShape::InnerRight => ([front, stairs_intersect(back, right)], 2),
+    }
+}
+
+/// Compute the stairs corner shape at the given position.
+///
+/// This matches the vanilla heuristic: check the stair in front for outer corners,
+/// then check the stair behind for inner corners, and fall back to straight.
+pub fn stairs_shape_at<F>(
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    stair: Voxel,
+    voxel_at_world: &F,
+) -> StairsShape
+where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    debug_assert!(is_stairs(stair.id), "stairs_shape_at called on non-stairs");
+
+    let facing = Facing::from_state(stair.state);
+    let top = is_stairs_top(stair.state);
+
+    let neighbor_at = |dir: Facing| {
+        let (dx, dz) = dir.offset();
+        voxel_at_world(block_x + dx, block_y, block_z + dz)
+    };
+
+    let neighbor_stairs_facing = |neighbor: Voxel| -> Option<Facing> {
+        if !is_stairs(neighbor.id) {
+            return None;
+        }
+        if is_stairs_top(neighbor.state) != top {
+            return None;
+        }
+        Some(Facing::from_state(neighbor.state))
+    };
+
+    let is_different_stairs = |dir: Facing| -> bool {
+        let Some(neighbor) = neighbor_at(dir) else {
+            return true;
+        };
+        let Some(neighbor_facing) = neighbor_stairs_facing(neighbor) else {
+            return true;
+        };
+
+        neighbor_facing != facing
+    };
+
+    // Outer corners: look at the stair in front.
+    if let Some(front) = neighbor_at(facing) {
+        if let Some(front_facing) = neighbor_stairs_facing(front) {
+            if facing_axis(front_facing) != facing_axis(facing)
+                && is_different_stairs(front_facing.opposite())
+            {
+                if front_facing == facing.left() {
+                    return StairsShape::OuterLeft;
+                }
+                if front_facing == facing.right() {
+                    return StairsShape::OuterRight;
+                }
+            }
+        }
+    }
+
+    // Inner corners: look at the stair behind.
+    if let Some(back) = neighbor_at(facing.opposite()) {
+        if let Some(back_facing) = neighbor_stairs_facing(back) {
+            if facing_axis(back_facing) != facing_axis(facing) && is_different_stairs(back_facing) {
+                if back_facing == facing.left() {
+                    return StairsShape::InnerLeft;
+                }
+                if back_facing == facing.right() {
+                    return StairsShape::InnerRight;
+                }
+            }
+        }
+    }
+
+    StairsShape::Straight
 }
 
 /// Check if a block is a fence
@@ -399,6 +685,10 @@ pub fn get_collision_type(block_id: BlockId, state: BlockState) -> CollisionType
         },
 
         id if is_ladder(id) => CollisionType::Ladder,
+
+        interactive_blocks::COBBLESTONE_WALL | interactive_blocks::STONE_BRICK_WALL => {
+            CollisionType::Fence
+        }
 
         id if is_fence(id) => CollisionType::Fence,
 
@@ -505,6 +795,10 @@ impl InteractionManager {
             return false;
         }
 
+        if is_redstone_powered(voxel.state) {
+            return false;
+        }
+
         let is_lower = is_door_lower(voxel.id);
         let new_open = !is_door_open(voxel.state);
         let new_state = set_door_open(voxel.state, new_open);
@@ -565,6 +859,10 @@ impl InteractionManager {
             return false;
         }
 
+        if is_redstone_powered(voxel.state) {
+            return false;
+        }
+
         let new_open = !is_fence_gate_open(voxel.state);
         let new_state = set_fence_gate_open(voxel.state, new_open);
 
@@ -601,6 +899,10 @@ impl InteractionManager {
         let voxel = chunk.voxel(x, y, z);
 
         if !is_trapdoor(voxel.id) {
+            return false;
+        }
+
+        if is_redstone_powered(voxel.state) {
             return false;
         }
 
@@ -815,6 +1117,14 @@ mod tests {
             get_collision_type(interactive_blocks::OAK_FENCE, 0),
             CollisionType::Fence
         );
+        assert_eq!(
+            get_collision_type(interactive_blocks::COBBLESTONE_WALL, 0),
+            CollisionType::Fence
+        );
+        assert_eq!(
+            get_collision_type(interactive_blocks::STONE_BRICK_WALL, 0),
+            CollisionType::Fence
+        );
 
         // Slab is partial
         let bottom_slab_collision = get_collision_type(
@@ -951,6 +1261,99 @@ mod tests {
         assert!(is_stairs(interactive_blocks::OAK_STAIRS));
         assert!(!is_stairs(blocks::STONE));
         assert!(!is_stairs(interactive_blocks::STONE_SLAB));
+    }
+
+    #[test]
+    fn stairs_shape_is_straight_by_default() {
+        let stair = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::South.to_state(),
+            ..Default::default()
+        };
+        let empty = |_, _, _| None;
+        assert_eq!(
+            stairs_shape_at(0, 0, 0, stair, &empty),
+            StairsShape::Straight
+        );
+    }
+
+    #[test]
+    fn stairs_shape_outer_left_matches_vanilla_front_neighbor_rule() {
+        // Facing south, front stair facing east => outer_left.
+        let current = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::South.to_state(),
+            ..Default::default()
+        };
+        let front = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::East.to_state(),
+            ..Default::default()
+        };
+
+        let voxel_at = |x: i32, y: i32, z: i32| match (x, y, z) {
+            (0, 0, 1) => Some(front),
+            _ => None,
+        };
+        assert_eq!(
+            stairs_shape_at(0, 0, 0, current, &voxel_at),
+            StairsShape::OuterLeft
+        );
+    }
+
+    #[test]
+    fn stairs_shape_inner_right_matches_vanilla_back_neighbor_rule() {
+        // Facing south, back stair facing west => inner_right.
+        let current = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::South.to_state(),
+            ..Default::default()
+        };
+        let back = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::West.to_state(),
+            ..Default::default()
+        };
+
+        let voxel_at = |x: i32, y: i32, z: i32| match (x, y, z) {
+            (0, 0, -1) => Some(back),
+            _ => None,
+        };
+        assert_eq!(
+            stairs_shape_at(0, 0, 0, current, &voxel_at),
+            StairsShape::InnerRight
+        );
+    }
+
+    #[test]
+    fn stairs_shape_outer_corner_suppressed_by_matching_side_stair() {
+        // Outer corner candidate (front stair facing east), but blocked by a matching stair
+        // at west (front_facing.opposite).
+        let current = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::South.to_state(),
+            ..Default::default()
+        };
+        let front = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::East.to_state(),
+            ..Default::default()
+        };
+        let west_match = Voxel {
+            id: interactive_blocks::OAK_STAIRS,
+            state: Facing::South.to_state(),
+            ..Default::default()
+        };
+
+        let voxel_at = |x: i32, y: i32, z: i32| match (x, y, z) {
+            (0, 0, 1) => Some(front),
+            (-1, 0, 0) => Some(west_match),
+            _ => None,
+        };
+        assert_eq!(
+            stairs_shape_at(0, 0, 0, current, &voxel_at),
+            StairsShape::Straight
+        );
     }
 
     #[test]

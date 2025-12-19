@@ -392,6 +392,16 @@ impl RedstoneSimulator {
         let component = match RedstoneComponent::from_block_id(voxel.id) {
             Some(c) => c,
             None => {
+                if crate::is_door(voxel.id) {
+                    return self.update_door(pos, chunks);
+                }
+                if crate::is_trapdoor(voxel.id) {
+                    return self.update_trapdoor(pos, chunks);
+                }
+                if crate::is_fence_gate(voxel.id) {
+                    return self.update_fence_gate(pos, chunks);
+                }
+
                 // Check if it's a lamp that needs updating
                 if voxel.id == redstone_blocks::REDSTONE_LAMP
                     || voxel.id == redstone_blocks::REDSTONE_LAMP_LIT
@@ -451,6 +461,18 @@ impl RedstoneSimulator {
         true
     }
 
+    fn is_powered_by_neighbors(&self, pos: RedstonePos, chunks: &HashMap<ChunkPos, Chunk>) -> bool {
+        for neighbor in pos.neighbors() {
+            if let Some(neighbor_voxel) = self.get_voxel(neighbor, chunks) {
+                if self.get_emitted_power(neighbor_voxel) > 0 {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Update redstone lamp state
     fn update_lamp(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
         let voxel = match self.get_voxel(pos, chunks) {
@@ -458,16 +480,7 @@ impl RedstoneSimulator {
             None => return false,
         };
 
-        // Check if any neighbor is providing power
-        let mut powered = false;
-        for neighbor in pos.neighbors() {
-            if let Some(neighbor_voxel) = self.get_voxel(neighbor, chunks) {
-                if self.get_emitted_power(neighbor_voxel) > 0 {
-                    powered = true;
-                    break;
-                }
-            }
-        }
+        let powered = self.is_powered_by_neighbors(pos, chunks);
 
         let is_lit = voxel.id == redstone_blocks::REDSTONE_LAMP_LIT;
         if powered == is_lit {
@@ -487,6 +500,135 @@ impl RedstoneSimulator {
                 state: voxel.state,
                 light_sky: voxel.light_sky,
                 light_block: if powered { 15 } else { 0 },
+            },
+            chunks,
+        );
+
+        true
+    }
+
+    fn update_door(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if !crate::is_door(voxel.id) {
+            return false;
+        }
+
+        let lower_pos = if crate::is_door_upper(voxel.id) {
+            RedstonePos::new(pos.x, pos.y - 1, pos.z)
+        } else {
+            pos
+        };
+        let upper_pos = RedstonePos::new(lower_pos.x, lower_pos.y + 1, lower_pos.z);
+
+        let lower_voxel = match self.get_voxel(lower_pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if !crate::is_door(lower_voxel.id) {
+            return false;
+        }
+
+        let powered = self.is_powered_by_neighbors(lower_pos, chunks)
+            || self.is_powered_by_neighbors(upper_pos, chunks);
+        let was_powered = crate::is_redstone_powered(lower_voxel.state);
+        if powered == was_powered {
+            return false;
+        }
+
+        let new_state = crate::set_door_open(
+            crate::set_redstone_powered(lower_voxel.state, powered),
+            powered,
+        );
+
+        self.set_voxel(
+            lower_pos,
+            Voxel {
+                state: new_state,
+                ..lower_voxel
+            },
+            chunks,
+        );
+
+        if let Some(upper_voxel) = self.get_voxel(upper_pos, chunks) {
+            if crate::is_door(upper_voxel.id) {
+                self.set_voxel(
+                    upper_pos,
+                    Voxel {
+                        state: new_state,
+                        ..upper_voxel
+                    },
+                    chunks,
+                );
+            }
+        }
+
+        true
+    }
+
+    fn update_trapdoor(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if !crate::is_trapdoor(voxel.id) {
+            return false;
+        }
+
+        let powered = self.is_powered_by_neighbors(pos, chunks);
+        let was_powered = crate::is_redstone_powered(voxel.state);
+        if powered == was_powered {
+            return false;
+        }
+
+        let new_state =
+            crate::set_trapdoor_open(crate::set_redstone_powered(voxel.state, powered), powered);
+
+        self.set_voxel(
+            pos,
+            Voxel {
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+
+        true
+    }
+
+    fn update_fence_gate(
+        &mut self,
+        pos: RedstonePos,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if !crate::is_fence_gate(voxel.id) {
+            return false;
+        }
+
+        let powered = self.is_powered_by_neighbors(pos, chunks);
+        let was_powered = crate::is_redstone_powered(voxel.state);
+        if powered == was_powered {
+            return false;
+        }
+
+        let new_state =
+            crate::set_fence_gate_open(crate::set_redstone_powered(voxel.state, powered), powered);
+
+        self.set_voxel(
+            pos,
+            Voxel {
+                state: new_state,
+                ..voxel
             },
             chunks,
         );
@@ -1044,6 +1186,183 @@ mod tests {
         // Lamp should be lit
         assert_eq!(lamp.id, redstone_blocks::REDSTONE_LAMP_LIT);
         assert_eq!(lamp.light_block, 15);
+    }
+
+    #[test]
+    fn test_redstone_powers_iron_door() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::IRON_DOOR_LOWER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            65,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::IRON_DOOR_UPPER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let lever_pos = RedstonePos::new(5, 64, 5);
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lower = chunk.voxel(6, 64, 5);
+        let upper = chunk.voxel(6, 65, 5);
+        assert!(crate::is_door_open(lower.state));
+        assert!(crate::is_door_open(upper.state));
+        assert!(crate::is_redstone_powered(lower.state));
+        assert!(crate::is_redstone_powered(upper.state));
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lower = chunk.voxel(6, 64, 5);
+        let upper = chunk.voxel(6, 65, 5);
+        assert!(!crate::is_door_open(lower.state));
+        assert!(!crate::is_door_open(upper.state));
+        assert!(!crate::is_redstone_powered(lower.state));
+        assert!(!crate::is_redstone_powered(upper.state));
+    }
+
+    #[test]
+    fn test_redstone_does_not_override_manual_door_open_when_unpowered() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let open_unpowered = crate::set_door_open(0, true);
+
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::OAK_DOOR_LOWER,
+                state: open_unpowered,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::OAK_DOOR_UPPER,
+                state: open_unpowered,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(RedstonePos::new(5, 64, 5));
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let lower = chunk.voxel(5, 64, 5);
+        let upper = chunk.voxel(5, 65, 5);
+        assert!(crate::is_door_open(lower.state));
+        assert!(crate::is_door_open(upper.state));
+        assert!(!crate::is_redstone_powered(lower.state));
+        assert!(!crate::is_redstone_powered(upper.state));
+    }
+
+    #[test]
+    fn test_redstone_powers_trapdoor_and_fence_gate() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Lever adjacent to both the trapdoor and the gate.
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            64,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::TRAPDOOR,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            64,
+            6,
+            Voxel {
+                id: crate::interactive_blocks::OAK_FENCE_GATE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let lever_pos = RedstonePos::new(5, 64, 5);
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let trapdoor = chunk.voxel(6, 64, 5);
+        let gate = chunk.voxel(5, 64, 6);
+        assert!(crate::is_trapdoor_open(trapdoor.state));
+        assert!(crate::is_fence_gate_open(gate.state));
+        assert!(crate::is_redstone_powered(trapdoor.state));
+        assert!(crate::is_redstone_powered(gate.state));
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let trapdoor = chunk.voxel(6, 64, 5);
+        let gate = chunk.voxel(5, 64, 6);
+        assert!(!crate::is_trapdoor_open(trapdoor.state));
+        assert!(!crate::is_fence_gate_open(gate.state));
+        assert!(!crate::is_redstone_powered(trapdoor.state));
+        assert!(!crate::is_redstone_powered(gate.state));
     }
 
     #[test]
