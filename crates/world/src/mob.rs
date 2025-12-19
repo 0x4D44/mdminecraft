@@ -405,6 +405,25 @@ impl Mob {
         target_y: f64,
         target_z: f64,
     ) -> bool {
+        self.update_with_target_visibility(tick, target_x, target_y, target_z, 1.0)
+    }
+
+    /// Update hostile mob AI with a target position (player) and a visibility multiplier.
+    ///
+    /// `visibility` scales the mob's detection range:
+    /// - `1.0` = normal visibility
+    /// - `0.0` = effectively undetectable unless within attack/fuse range
+    ///
+    /// Returns true if the mob dealt damage this tick.
+    pub fn update_with_target_visibility(
+        &mut self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> bool {
+        let visibility = visibility.max(0.0);
         // Update timers
         if self.attack_cooldown > 0.0 {
             self.attack_cooldown -= 0.05; // Assume ~20 TPS
@@ -420,7 +439,7 @@ impl Mob {
         }
 
         let distance = self.distance_to(target_x, target_y, target_z);
-        let detection_range = self.mob_type.detection_range() as f64;
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
         let attack_range = self.mob_type.size() as f64 + 1.5; // Attack when close
 
         let mut dealt_damage = false;
@@ -1033,6 +1052,22 @@ mod tests {
         // Zombie should start chasing
         assert_eq!(mob.state, MobState::Chasing);
         assert!(mob.vel_x > 0.0); // Moving toward player
+    }
+
+    #[test]
+    fn test_zombie_detection_respects_target_visibility() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        mob.state = MobState::Idle;
+
+        // With visibility reduced to zero, target is out of detection range.
+        let _dealt_damage = mob.update_with_target_visibility(0, 10.0, 64.0, 0.0, 0.0);
+        assert_eq!(mob.state, MobState::Idle);
+
+        // With normal visibility, the same target should be detected.
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Zombie);
+        mob.state = MobState::Idle;
+        let _dealt_damage = mob.update_with_target_visibility(0, 10.0, 64.0, 0.0, 1.0);
+        assert_eq!(mob.state, MobState::Chasing);
     }
 
     #[test]

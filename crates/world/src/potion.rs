@@ -490,6 +490,11 @@ pub const BREW_RECIPES: &[BrewRecipe] = &[
         ingredient: 113, // PHANTOM_MEMBRANE
         result: PotionType::SlowFalling,
     },
+    BrewRecipe {
+        base: PotionType::Awkward,
+        ingredient: item_ids::PUFFERFISH,
+        result: PotionType::WaterBreathing,
+    },
     // Corruption recipes: effect potion + fermented spider eye -> negative version
     BrewRecipe {
         base: PotionType::Swiftness,
@@ -511,7 +516,6 @@ pub const BREW_RECIPES: &[BrewRecipe] = &[
         ingredient: 107, // FERMENTED_SPIDER_EYE
         result: PotionType::Harming,
     },
-    // Water breathing from pufferfish (not in item_ids yet, use placeholder)
     // Weakness from water bottle + fermented spider eye
     BrewRecipe {
         base: PotionType::Water,
