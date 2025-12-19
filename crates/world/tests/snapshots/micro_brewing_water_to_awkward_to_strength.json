@@ -1,0 +1,1531 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 2,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": false
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 25,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 50,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 75,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 100,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 125,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 150,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 175,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 200,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 225,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 250,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 275,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 300,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 325,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 350,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 375,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 400,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 425,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 450,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 475,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 20
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 500,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 21
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 525,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 22
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 550,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 23
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 575,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 24
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 600,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 25
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 625,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 26
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 650,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 27
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 675,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 28
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 700,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 29
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 725,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 30
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 750,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 31
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 775,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 32
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 800,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 33
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 825,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 34
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 850,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 35
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 875,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 36
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 900,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 37
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 925,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 38
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 950,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 39
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 975,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 40
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Water",
+          "Water",
+          "Water"
+        ],
+        "brew_progress_milli": 1000,
+        "fuel": 1,
+        "ingredient": [
+          102,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 41
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 1,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": false
+      },
+      "tick": 42
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 43
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 25,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 44
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 50,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 45
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 75,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 46
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 100,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 47
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 125,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 48
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 150,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 49
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 175,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 50
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 200,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 51
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 225,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 52
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 250,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 53
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 275,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 54
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 300,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 55
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 325,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 56
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 350,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 57
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 375,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 58
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 400,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 59
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 425,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 60
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 450,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 61
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 475,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 62
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 500,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 63
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 525,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 64
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 550,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 65
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 575,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 66
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 600,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 67
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 625,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 68
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 650,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 69
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 675,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 70
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 700,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 71
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 725,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 72
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 750,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 73
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 775,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 74
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 800,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 75
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 825,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 76
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 850,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 77
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 875,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 78
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 900,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 79
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 925,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 80
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 950,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 81
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 975,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 82
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Awkward",
+          "Awkward",
+          "Awkward"
+        ],
+        "brew_progress_milli": 1000,
+        "fuel": 0,
+        "ingredient": [
+          103,
+          1
+        ],
+        "is_brewing": true
+      },
+      "tick": 83
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 84
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 85
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 86
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 87
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 88
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 89
+    },
+    {
+      "snapshot": {
+        "bottles": [
+          "Strength",
+          "Strength",
+          "Strength"
+        ],
+        "brew_progress_milli": 0,
+        "fuel": 0,
+        "ingredient": null,
+        "is_brewing": false
+      },
+      "tick": 90
+    }
+  ],
+  "name": "micro_brewing_water_to_awkward_to_strength"
+}

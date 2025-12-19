@@ -172,6 +172,19 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::farming_blocks::FARMLAND_WET,
         id_of(&map, "farmland_wet")
     );
+    assert_eq!(mdminecraft_world::BLOCK_BOOKSHELF, id_of(&map, "bookshelf"));
+    assert_eq!(
+        mdminecraft_world::BLOCK_SUGAR_CANE,
+        id_of(&map, "sugar_cane")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_BROWN_MUSHROOM,
+        id_of(&map, "brown_mushroom")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_MAGMA_CREAM_ORE,
+        id_of(&map, "magma_cream_ore")
+    );
 
     let wheat = [
         mdminecraft_world::farming_blocks::WHEAT_0,

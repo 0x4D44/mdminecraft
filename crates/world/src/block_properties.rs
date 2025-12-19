@@ -1,13 +1,14 @@
 //! Block properties - hardness, mining requirements, drops
 
 use crate::{
-    farming_blocks, interactive_blocks, redstone_blocks, BLOCK_AIR, BLOCK_BEDROCK,
-    BLOCK_CAVE_VINES, BLOCK_CLAY, BLOCK_COAL_ORE, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
-    BLOCK_DIAMOND_ORE, BLOCK_DIRT, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_GLASS,
-    BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL, BLOCK_HANGING_ROOTS, BLOCK_ICE,
-    BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING, BLOCK_MOSS_CARPET, BLOCK_OAK_LOG,
-    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_POINTED_DRIPSTONE, BLOCK_SAND, BLOCK_SCULK_VEIN,
-    BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_WATER, BLOCK_WATER_FLOWING,
+    farming_blocks, interactive_blocks, redstone_blocks, BLOCK_AIR, BLOCK_BEDROCK, BLOCK_BOOKSHELF,
+    BLOCK_BROWN_MUSHROOM, BLOCK_CAVE_VINES, BLOCK_CLAY, BLOCK_COAL_ORE, BLOCK_COBBLESTONE,
+    BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE, BLOCK_DIRT, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
+    BLOCK_GLASS, BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL, BLOCK_HANGING_ROOTS,
+    BLOCK_ICE, BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING, BLOCK_MAGMA_CREAM_ORE,
+    BLOCK_MOSS_CARPET, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_POINTED_DRIPSTONE,
+    BLOCK_SAND, BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_SUGAR_CANE,
+    BLOCK_WATER, BLOCK_WATER_FLOWING,
 };
 use mdminecraft_core::{ToolMaterial, ToolType};
 
@@ -293,11 +294,13 @@ impl BlockPropertiesRegistry {
         properties[BLOCK_OAK_LOG as usize] = BlockProperties::wood();
         properties[BLOCK_OAK_PLANKS as usize] = BlockProperties::wood();
         properties[BLOCK_CRAFTING_TABLE as usize] = BlockProperties::wood();
+        properties[BLOCK_BOOKSHELF as usize] = BlockProperties::wood();
 
         properties[BLOCK_COAL_ORE as usize] = BlockProperties::coal_ore();
         properties[BLOCK_IRON_ORE as usize] = BlockProperties::iron_ore();
         properties[BLOCK_GOLD_ORE as usize] = BlockProperties::gold_ore();
         properties[BLOCK_DIAMOND_ORE as usize] = BlockProperties::diamond_ore();
+        properties[BLOCK_MAGMA_CREAM_ORE as usize] = BlockProperties::iron_ore();
 
         properties[BLOCK_COBBLESTONE as usize] = BlockProperties::stone();
         properties[BLOCK_FURNACE as usize] = BlockProperties::stone();
@@ -328,6 +331,12 @@ impl BlockPropertiesRegistry {
         for crop_id in farming_blocks::POTATOES_0..=farming_blocks::POTATOES_3 {
             properties[crop_id as usize] = BlockProperties::air();
         }
+
+        // Sugar cane is non-solid and instantly breaks.
+        properties[BLOCK_SUGAR_CANE as usize] = BlockProperties::air();
+
+        // Mushrooms are non-solid and instantly break.
+        properties[BLOCK_BROWN_MUSHROOM as usize] = BlockProperties::air();
 
         // Cave decorations that should not block movement.
         properties[BLOCK_GLOW_LICHEN as usize] = BlockProperties::air();

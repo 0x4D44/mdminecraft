@@ -304,7 +304,7 @@ fn test_item_type_block_mapping() {
     assert_eq!(ItemType::from_block(14), Some((ItemType::Coal, 1)));
     assert_eq!(ItemType::from_block(15), Some((ItemType::IronOre, 1)));
     assert_eq!(ItemType::from_block(16), Some((ItemType::GoldOre, 1)));
-    assert_eq!(ItemType::from_block(17), Some((ItemType::DiamondOre, 1)));
+    assert_eq!(ItemType::from_block(17), Some((ItemType::Diamond, 1)));
     // No drops
     assert_eq!(ItemType::from_block(6), None); // Water
     assert_eq!(ItemType::from_block(10), None); // Bedrock

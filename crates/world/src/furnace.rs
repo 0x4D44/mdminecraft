@@ -42,6 +42,14 @@ pub const SMELT_RECIPES: &[SmeltRecipe] = &[
         input: ItemType::RawBeef,
         output: ItemType::CookedBeef,
     },
+    SmeltRecipe {
+        input: ItemType::Potato,
+        output: ItemType::BakedPotato,
+    },
+    SmeltRecipe {
+        input: ItemType::Sand,
+        output: ItemType::Glass,
+    },
 ];
 
 /// Get the smelting output for an input item.
@@ -339,6 +347,7 @@ mod tests {
             get_smelt_output(ItemType::RawBeef),
             Some(ItemType::CookedBeef)
         );
+        assert_eq!(get_smelt_output(ItemType::Sand), Some(ItemType::Glass));
         assert_eq!(get_smelt_output(ItemType::Stone), None);
     }
 
@@ -644,7 +653,7 @@ mod tests {
     #[test]
     fn test_smelt_recipe_constants() {
         // Verify all recipes in SMELT_RECIPES
-        assert_eq!(SMELT_RECIPES.len(), 6);
+        assert_eq!(SMELT_RECIPES.len(), 8);
 
         for recipe in SMELT_RECIPES {
             // Each recipe should have valid input and output

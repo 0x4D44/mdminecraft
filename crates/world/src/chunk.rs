@@ -99,6 +99,18 @@ pub const BLOCK_NETHER_WART_BLOCK: BlockId = 101;
 /// ID for soul sand.
 pub const BLOCK_SOUL_SAND: BlockId = 102;
 
+/// ID for bookshelf.
+pub const BLOCK_BOOKSHELF: BlockId = 103;
+
+/// ID for sugar cane.
+pub const BLOCK_SUGAR_CANE: BlockId = 104;
+
+/// ID for brown mushroom.
+pub const BLOCK_BROWN_MUSHROOM: BlockId = 105;
+
+/// ID for magma cream ore (Overworld proxy block).
+pub const BLOCK_MAGMA_CREAM_ORE: BlockId = 106;
+
 /// ID for moss block.
 pub const BLOCK_MOSS_BLOCK: BlockId = 75;
 

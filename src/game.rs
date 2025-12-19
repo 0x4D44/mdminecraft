@@ -27,15 +27,16 @@ use mdminecraft_world::{
     get_fluid_type, interactive_blocks,
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockEntitiesState, BlockEntityKey, BlockId, BlockPropertiesRegistry,
-    BlockState, BrewingStandState, ChestState, Chunk, ChunkPos, EnchantingTableState, FluidPos,
-    FluidSimulator, FluidType, FurnaceState, InteractionManager, Inventory, ItemManager,
-    ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PlayerSave,
-    PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos, RedstoneSimulator,
-    RegionStore, SimTime, StatusEffect, StatusEffectType, StatusEffects, TerrainGenerator, Voxel,
-    WeatherState, WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR,
-    BLOCK_BREWING_STAND, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
-    BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, CHUNK_SIZE_X, CHUNK_SIZE_Y,
-    CHUNK_SIZE_Z,
+    BlockState, BrewingStandState, ChestState, Chunk, ChunkPos, CropGrowthSystem, CropPosition,
+    EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState, InteractionManager,
+    Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor,
+    PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos,
+    RedstoneSimulator, RegionStore, SimTime, StatusEffect, StatusEffectType, StatusEffects,
+    SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle,
+    WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF,
+    BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
+    BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
+    BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -52,7 +53,7 @@ const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
 
-// Core `ItemType::Item` IDs used by the client for brewing-related items.
+// Core `ItemType::Item` IDs used by the client for non-legacy items.
 // These are intentionally kept separate from the world brewing ingredient IDs
 // (see `mdminecraft_core::item::item_ids`) to avoid collisions with legacy
 // saves and other in-game item IDs.
@@ -60,6 +61,15 @@ const CORE_ITEM_GLASS_BOTTLE: u16 = 2000;
 const CORE_ITEM_WATER_BOTTLE: u16 = 2001;
 const CORE_ITEM_NETHER_WART: u16 = 2002;
 const CORE_ITEM_BLAZE_POWDER: u16 = 2003;
+const CORE_ITEM_GUNPOWDER: u16 = 2004;
+const CORE_ITEM_WHEAT_SEEDS: u16 = 2005;
+const CORE_ITEM_WHEAT: u16 = 2006;
+const CORE_ITEM_SPIDER_EYE: u16 = 2007;
+const CORE_ITEM_SUGAR: u16 = 2008;
+const CORE_ITEM_PAPER: u16 = 2009;
+const CORE_ITEM_BOOK: u16 = 2010;
+const CORE_ITEM_FERMENTED_SPIDER_EYE: u16 = 2011;
+const CORE_ITEM_MAGMA_CREAM: u16 = 2012;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -376,6 +386,15 @@ impl Hotbar {
                     CORE_ITEM_WATER_BOTTLE => "Water Bottle".to_string(),
                     CORE_ITEM_NETHER_WART => "Nether Wart".to_string(),
                     CORE_ITEM_BLAZE_POWDER => "Blaze Powder".to_string(),
+                    CORE_ITEM_GUNPOWDER => "Gunpowder".to_string(),
+                    CORE_ITEM_WHEAT_SEEDS => "Wheat Seeds".to_string(),
+                    CORE_ITEM_WHEAT => "Wheat".to_string(),
+                    CORE_ITEM_SPIDER_EYE => "Spider Eye".to_string(),
+                    CORE_ITEM_FERMENTED_SPIDER_EYE => "Fermented Spider Eye".to_string(),
+                    CORE_ITEM_MAGMA_CREAM => "Magma Cream".to_string(),
+                    CORE_ITEM_SUGAR => "Sugar".to_string(),
+                    CORE_ITEM_PAPER => "Paper".to_string(),
+                    CORE_ITEM_BOOK => "Book".to_string(),
                     _ => format!("Item({})", id),
                 },
                 ItemType::Potion(id) => potion_name(id),
@@ -838,6 +857,10 @@ fn food_hunger_restore(food_type: mdminecraft_core::item::FoodType) -> f32 {
         FoodType::Bread => 5.0,
         FoodType::RawMeat => 3.0,
         FoodType::CookedMeat => 8.0,
+        FoodType::Carrot => 3.0,
+        FoodType::Potato => 1.0,
+        FoodType::BakedPotato => 5.0,
+        FoodType::GoldenCarrot => 6.0,
     }
 }
 
@@ -887,6 +910,14 @@ fn core_item_type_to_brew_ingredient_id(item_type: ItemType) -> Option<u16> {
     match item_type {
         ItemType::Item(CORE_ITEM_NETHER_WART) => Some(item_ids::NETHER_WART),
         ItemType::Item(CORE_ITEM_BLAZE_POWDER) => Some(item_ids::BLAZE_POWDER),
+        ItemType::Item(CORE_ITEM_GUNPOWDER) => Some(item_ids::GUNPOWDER),
+        ItemType::Item(CORE_ITEM_SPIDER_EYE) => Some(item_ids::SPIDER_EYE),
+        ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE) => Some(item_ids::FERMENTED_SPIDER_EYE),
+        ItemType::Item(CORE_ITEM_SUGAR) => Some(item_ids::SUGAR),
+        ItemType::Item(CORE_ITEM_MAGMA_CREAM) => Some(item_ids::MAGMA_CREAM),
+        ItemType::Food(mdminecraft_core::item::FoodType::GoldenCarrot) => {
+            Some(item_ids::GOLDEN_CARROT)
+        }
         _ => None,
     }
 }
@@ -895,55 +926,90 @@ fn brew_ingredient_id_to_core_item_type(ingredient_id: u16) -> Option<ItemType> 
     match ingredient_id {
         item_ids::NETHER_WART => Some(ItemType::Item(CORE_ITEM_NETHER_WART)),
         item_ids::BLAZE_POWDER => Some(ItemType::Item(CORE_ITEM_BLAZE_POWDER)),
+        item_ids::GUNPOWDER => Some(ItemType::Item(CORE_ITEM_GUNPOWDER)),
+        item_ids::SPIDER_EYE => Some(ItemType::Item(CORE_ITEM_SPIDER_EYE)),
+        item_ids::FERMENTED_SPIDER_EYE => Some(ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE)),
+        item_ids::SUGAR => Some(ItemType::Item(CORE_ITEM_SUGAR)),
+        item_ids::MAGMA_CREAM => Some(ItemType::Item(CORE_ITEM_MAGMA_CREAM)),
+        item_ids::GOLDEN_CARROT => Some(ItemType::Food(
+            mdminecraft_core::item::FoodType::GoldenCarrot,
+        )),
         _ => None,
     }
 }
 
-fn core_item_stack_to_bottle(stack: &ItemStack) -> Option<PotionType> {
+fn core_item_stack_to_bottle(stack: &ItemStack) -> Option<(PotionType, bool)> {
     match stack.item_type {
-        ItemType::Item(CORE_ITEM_WATER_BOTTLE) => Some(PotionType::Water),
-        ItemType::Potion(id) => match id {
-            potion_ids::AWKWARD => Some(PotionType::Awkward),
-            potion_ids::NIGHT_VISION => Some(PotionType::NightVision),
-            potion_ids::INVISIBILITY => Some(PotionType::Invisibility),
-            potion_ids::LEAPING => Some(PotionType::Leaping),
-            potion_ids::FIRE_RESISTANCE => Some(PotionType::FireResistance),
-            potion_ids::SWIFTNESS => Some(PotionType::Swiftness),
-            potion_ids::SLOWNESS => Some(PotionType::Slowness),
-            potion_ids::WATER_BREATHING => Some(PotionType::WaterBreathing),
-            potion_ids::HEALING => Some(PotionType::Healing),
-            potion_ids::HARMING => Some(PotionType::Harming),
-            potion_ids::POISON => Some(PotionType::Poison),
-            potion_ids::REGENERATION => Some(PotionType::Regeneration),
-            potion_ids::STRENGTH => Some(PotionType::Strength),
-            potion_ids::WEAKNESS => Some(PotionType::Weakness),
-            _ => None,
-        },
+        ItemType::Item(CORE_ITEM_WATER_BOTTLE) => Some((PotionType::Water, false)),
+        ItemType::Potion(id) => {
+            let potion = match id {
+                potion_ids::AWKWARD => PotionType::Awkward,
+                potion_ids::NIGHT_VISION => PotionType::NightVision,
+                potion_ids::INVISIBILITY => PotionType::Invisibility,
+                potion_ids::LEAPING => PotionType::Leaping,
+                potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
+                potion_ids::SWIFTNESS => PotionType::Swiftness,
+                potion_ids::SLOWNESS => PotionType::Slowness,
+                potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
+                potion_ids::HEALING => PotionType::Healing,
+                potion_ids::HARMING => PotionType::Harming,
+                potion_ids::POISON => PotionType::Poison,
+                potion_ids::REGENERATION => PotionType::Regeneration,
+                potion_ids::STRENGTH => PotionType::Strength,
+                potion_ids::WEAKNESS => PotionType::Weakness,
+                _ => return None,
+            };
+            Some((potion, false))
+        }
+        ItemType::SplashPotion(id) => {
+            let potion = match id {
+                potion_ids::AWKWARD => PotionType::Awkward,
+                potion_ids::NIGHT_VISION => PotionType::NightVision,
+                potion_ids::INVISIBILITY => PotionType::Invisibility,
+                potion_ids::LEAPING => PotionType::Leaping,
+                potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
+                potion_ids::SWIFTNESS => PotionType::Swiftness,
+                potion_ids::SLOWNESS => PotionType::Slowness,
+                potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
+                potion_ids::HEALING => PotionType::Healing,
+                potion_ids::HARMING => PotionType::Harming,
+                potion_ids::POISON => PotionType::Poison,
+                potion_ids::REGENERATION => PotionType::Regeneration,
+                potion_ids::STRENGTH => PotionType::Strength,
+                potion_ids::WEAKNESS => PotionType::Weakness,
+                _ => return None,
+            };
+            Some((potion, true))
+        }
         _ => None,
     }
 }
 
-fn bottle_to_core_item_stack(potion: PotionType) -> ItemStack {
+fn bottle_to_core_item_stack(potion: PotionType, is_splash: bool) -> ItemStack {
+    let potion_item = |id: u16| {
+        if is_splash {
+            ItemType::SplashPotion(id)
+        } else {
+            ItemType::Potion(id)
+        }
+    };
+
     match potion {
         PotionType::Water => ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1),
-        PotionType::Awkward => ItemStack::new(ItemType::Potion(potion_ids::AWKWARD), 1),
-        PotionType::NightVision => ItemStack::new(ItemType::Potion(potion_ids::NIGHT_VISION), 1),
-        PotionType::Invisibility => ItemStack::new(ItemType::Potion(potion_ids::INVISIBILITY), 1),
-        PotionType::Leaping => ItemStack::new(ItemType::Potion(potion_ids::LEAPING), 1),
-        PotionType::FireResistance => {
-            ItemStack::new(ItemType::Potion(potion_ids::FIRE_RESISTANCE), 1)
-        }
-        PotionType::Swiftness => ItemStack::new(ItemType::Potion(potion_ids::SWIFTNESS), 1),
-        PotionType::Slowness => ItemStack::new(ItemType::Potion(potion_ids::SLOWNESS), 1),
-        PotionType::WaterBreathing => {
-            ItemStack::new(ItemType::Potion(potion_ids::WATER_BREATHING), 1)
-        }
-        PotionType::Healing => ItemStack::new(ItemType::Potion(potion_ids::HEALING), 1),
-        PotionType::Harming => ItemStack::new(ItemType::Potion(potion_ids::HARMING), 1),
-        PotionType::Poison => ItemStack::new(ItemType::Potion(potion_ids::POISON), 1),
-        PotionType::Regeneration => ItemStack::new(ItemType::Potion(potion_ids::REGENERATION), 1),
-        PotionType::Strength => ItemStack::new(ItemType::Potion(potion_ids::STRENGTH), 1),
-        PotionType::Weakness => ItemStack::new(ItemType::Potion(potion_ids::WEAKNESS), 1),
+        PotionType::Awkward => ItemStack::new(potion_item(potion_ids::AWKWARD), 1),
+        PotionType::NightVision => ItemStack::new(potion_item(potion_ids::NIGHT_VISION), 1),
+        PotionType::Invisibility => ItemStack::new(potion_item(potion_ids::INVISIBILITY), 1),
+        PotionType::Leaping => ItemStack::new(potion_item(potion_ids::LEAPING), 1),
+        PotionType::FireResistance => ItemStack::new(potion_item(potion_ids::FIRE_RESISTANCE), 1),
+        PotionType::Swiftness => ItemStack::new(potion_item(potion_ids::SWIFTNESS), 1),
+        PotionType::Slowness => ItemStack::new(potion_item(potion_ids::SLOWNESS), 1),
+        PotionType::WaterBreathing => ItemStack::new(potion_item(potion_ids::WATER_BREATHING), 1),
+        PotionType::Healing => ItemStack::new(potion_item(potion_ids::HEALING), 1),
+        PotionType::Harming => ItemStack::new(potion_item(potion_ids::HARMING), 1),
+        PotionType::Poison => ItemStack::new(potion_item(potion_ids::POISON), 1),
+        PotionType::Regeneration => ItemStack::new(potion_item(potion_ids::REGENERATION), 1),
+        PotionType::Strength => ItemStack::new(potion_item(potion_ids::STRENGTH), 1),
+        PotionType::Weakness => ItemStack::new(potion_item(potion_ids::WEAKNESS), 1),
 
         // Base/unsupported potions don't have a client-side representation yet.
         PotionType::Mundane | PotionType::Thick | PotionType::Luck | PotionType::SlowFalling => {
@@ -1290,6 +1356,10 @@ pub struct GameWorld {
     fluid_sim: FluidSimulator,
     /// Redstone simulation
     redstone_sim: RedstoneSimulator,
+    /// Farming simulation (crop growth + farmland hydration).
+    crop_growth: CropGrowthSystem,
+    /// Sugar cane growth simulation.
+    sugar_cane_growth: SugarCaneGrowthSystem,
     /// Block interaction manager (doors/trapdoors/etc)
     interaction_manager: InteractionManager,
     /// Pressure plate currently pressed by the player (if any)
@@ -1697,6 +1767,8 @@ impl GameWorld {
             mobs,
             fluid_sim: FluidSimulator::new(),
             redstone_sim: RedstoneSimulator::new(),
+            crop_growth: CropGrowthSystem::new(world_seed),
+            sugar_cane_growth: SugarCaneGrowthSystem::new(world_seed),
             interaction_manager: InteractionManager::new(),
             pressed_pressure_plate: None,
             sim_tick,
@@ -3719,11 +3791,31 @@ impl GameWorld {
         // Update mobs
         self.update_mobs(dt);
 
+        let mut mesh_refresh = std::collections::BTreeSet::new();
+
+        // Update farming (crops + farmland hydration).
+        self.crop_growth.tick(self.sim_tick.0, &mut self.chunks);
+        for chunk_pos in self.crop_growth.take_dirty_chunks() {
+            mesh_refresh.insert(chunk_pos);
+            for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
+                mesh_refresh.insert(neighbor);
+            }
+        }
+
+        // Update sugar cane growth.
+        self.sugar_cane_growth
+            .tick(self.sim_tick.0, &mut self.chunks);
+        for chunk_pos in self.sugar_cane_growth.take_dirty_chunks() {
+            mesh_refresh.insert(chunk_pos);
+            for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
+                mesh_refresh.insert(neighbor);
+            }
+        }
+
         // Update fluids
         self.fluid_sim.tick(&mut self.chunks);
         let dirty_fluids = self.fluid_sim.take_dirty_chunks();
         let dirty_fluid_lighting = self.fluid_sim.take_dirty_light_chunks();
-        let mut mesh_refresh = std::collections::BTreeSet::new();
         for chunk_pos in dirty_fluids {
             self.recompute_chunk_lighting(chunk_pos);
             mesh_refresh.insert(chunk_pos);
@@ -3866,6 +3958,8 @@ impl GameWorld {
 
         let mut neighbor_mesh_refresh = std::collections::BTreeSet::new();
         for pos in chunks_to_unload {
+            self.crop_growth.unregister_chunk(pos);
+            self.sugar_cane_growth.unregister_chunk(pos);
             if let Some(chunk) = self.chunks.remove(&pos) {
                 if let Err(e) = self.region_store.save_chunk(&chunk) {
                     tracing::error!("Failed to save chunk {:?}: {}", pos, e);
@@ -3920,7 +4014,47 @@ impl GameWorld {
                 self.terrain_generator.generate_chunk(pos)
             };
 
+            let mut crops_to_register = Vec::new();
+            let mut sugar_cane_bases_to_register = Vec::new();
+            for y in 0..CHUNK_SIZE_Y {
+                for z in 0..CHUNK_SIZE_Z {
+                    for x in 0..CHUNK_SIZE_X {
+                        let voxel = chunk.voxel(x, y, z);
+                        if !mdminecraft_world::CropType::is_crop(voxel.id) {
+                            if voxel.id == mdminecraft_world::BLOCK_SUGAR_CANE {
+                                if y == 0 {
+                                    continue;
+                                }
+                                let below = chunk.voxel(x, y - 1, z);
+                                if below.id != mdminecraft_world::BLOCK_SUGAR_CANE {
+                                    sugar_cane_bases_to_register.push(SugarCanePosition {
+                                        chunk: pos,
+                                        x: x as u8,
+                                        y: y as u8,
+                                        z: z as u8,
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+
+                        crops_to_register.push(CropPosition {
+                            chunk: pos,
+                            x: x as u8,
+                            y: y as u8,
+                            z: z as u8,
+                        });
+                    }
+                }
+            }
+
             self.chunks.insert(pos, chunk);
+            for crop in crops_to_register {
+                self.crop_growth.register_crop(crop);
+            }
+            for base in sugar_cane_bases_to_register {
+                self.sugar_cane_growth.register_base(base);
+            }
             self.recompute_chunk_lighting(pos);
             let affected = mdminecraft_world::recompute_block_light_local(
                 &mut self.chunks,
@@ -4306,6 +4440,150 @@ impl GameWorld {
         );
     }
 
+    fn try_fill_glass_bottle_from_water(&mut self) -> bool {
+        let selected = self.hotbar.selected;
+        let Some(stack) = self.hotbar.slots[selected].as_ref() else {
+            return false;
+        };
+
+        if stack.item_type != ItemType::Item(CORE_ITEM_GLASS_BOTTLE) || stack.count == 0 {
+            return false;
+        }
+
+        // Vanilla-ish behavior: after filling, the player holds the filled bottle and any
+        // remaining empty bottles move to inventory (or spill if full).
+        let remaining_empty = stack.count.saturating_sub(1);
+        self.hotbar.slots[selected] =
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1));
+
+        if remaining_empty > 0 {
+            self.return_stack_to_storage_or_spill(ItemStack::new(
+                ItemType::Item(CORE_ITEM_GLASS_BOTTLE),
+                remaining_empty,
+            ));
+        }
+
+        true
+    }
+
+    fn try_till_farmland(
+        &mut self,
+        block_id: BlockId,
+        chunk_pos: ChunkPos,
+        local_x: usize,
+        local_y: usize,
+        local_z: usize,
+    ) -> bool {
+        let Some((tool, _material)) = self.hotbar.selected_tool() else {
+            return false;
+        };
+        if tool != ToolType::Hoe {
+            return false;
+        }
+
+        if !mdminecraft_world::can_till(block_id) {
+            return false;
+        }
+
+        if local_y + 1 >= CHUNK_SIZE_Y {
+            return false;
+        }
+
+        let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+            return false;
+        };
+
+        if chunk.voxel(local_x, local_y + 1, local_z).id != BLOCK_AIR {
+            return false;
+        }
+
+        let mut voxel = chunk.voxel(local_x, local_y, local_z);
+        voxel.id = mdminecraft_world::farming_blocks::FARMLAND;
+        voxel.state = 0;
+        chunk.set_voxel(local_x, local_y, local_z, voxel);
+
+        // Using a hoe consumes durability.
+        if let Some(item) = self.hotbar.selected_item_mut() {
+            if matches!(item.item_type, ItemType::Tool(ToolType::Hoe, _)) {
+                item.damage_durability(1);
+                if item.is_broken() {
+                    self.hotbar.slots[self.hotbar.selected] = None;
+                }
+            }
+        }
+
+        self.debug_hud.chunk_uploads_last_frame += self.upload_chunk_mesh_and_neighbors(chunk_pos);
+        true
+    }
+
+    fn try_plant_crop(
+        &mut self,
+        block_id: BlockId,
+        chunk_pos: ChunkPos,
+        local_x: usize,
+        local_y: usize,
+        local_z: usize,
+    ) -> bool {
+        let Some(stack) = self.hotbar.selected_item() else {
+            return false;
+        };
+        if stack.count == 0 {
+            return false;
+        }
+
+        let crop_type = match stack.item_type {
+            ItemType::Item(CORE_ITEM_WHEAT_SEEDS) => mdminecraft_world::CropType::Wheat,
+            ItemType::Food(mdminecraft_core::item::FoodType::Carrot) => {
+                mdminecraft_world::CropType::Carrots
+            }
+            ItemType::Food(mdminecraft_core::item::FoodType::Potato) => {
+                mdminecraft_world::CropType::Potatoes
+            }
+            _ => return false,
+        };
+
+        if !mdminecraft_world::is_farmland(block_id) {
+            return false;
+        }
+
+        if local_y + 1 >= CHUNK_SIZE_Y {
+            return true;
+        }
+
+        let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+            return true;
+        };
+
+        let above = chunk.voxel(local_x, local_y + 1, local_z);
+        if above.id != BLOCK_AIR {
+            return true;
+        }
+
+        chunk.set_voxel(
+            local_x,
+            local_y + 1,
+            local_z,
+            Voxel {
+                id: crop_type.base_block_id(),
+                state: 0,
+                light_sky: above.light_sky,
+                light_block: above.light_block,
+            },
+        );
+
+        self.crop_growth.register_crop(CropPosition {
+            chunk: chunk_pos,
+            x: local_x as u8,
+            y: (local_y + 1) as u8,
+            z: local_z as u8,
+        });
+
+        let _ = self.hotbar.consume_selected();
+
+        self.debug_hud.chunk_uploads_last_frame += self.upload_chunk_mesh_and_neighbors(chunk_pos);
+        true
+    }
+
     fn try_interact_with_target_block(&mut self, hit: RaycastHit) -> bool {
         let chunk_x = hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32);
         let chunk_z = hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32);
@@ -4321,6 +4599,15 @@ impl GameWorld {
                 None
             }
         });
+
+        if let Some(id) = block_id {
+            if self.try_till_farmland(id, chunk_pos, local_x, local_y, local_z) {
+                return true;
+            }
+            if self.try_plant_crop(id, chunk_pos, local_x, local_y, local_z) {
+                return true;
+            }
+        }
 
         match block_id {
             Some(BLOCK_CRAFTING_TABLE) => {
@@ -4347,6 +4634,7 @@ impl GameWorld {
                 self.try_sleep_in_bed(hit.block_pos);
                 true
             }
+            Some(mdminecraft_world::BLOCK_WATER) => self.try_fill_glass_bottle_from_water(),
             Some(id)
                 if mdminecraft_world::is_door(id)
                     || mdminecraft_world::is_trapdoor(id)
@@ -4477,6 +4765,7 @@ impl GameWorld {
                 let mut spawn_particles_at: Option<glam::Vec3> = None;
                 let mut mined = false;
                 let mut removed_extra: Option<IVec3> = None;
+                let mut mined_block_state: Option<BlockState> = None;
 
                 if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
@@ -4500,8 +4789,19 @@ impl GameWorld {
                         );
                     }
 
+                    mined_block_state = Some(chunk.voxel(local_x, local_y, local_z).state);
+
                     // Remove the block
                     chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+
+                    if mdminecraft_world::CropType::is_crop(block_id) {
+                        self.crop_growth.unregister_crop(CropPosition {
+                            chunk: chunk_pos,
+                            x: local_x as u8,
+                            y: local_y as u8,
+                            z: local_z as u8,
+                        });
+                    }
 
                     removed_extra = Self::try_remove_other_door_half(
                         chunk, local_x, local_y, local_z, block_id,
@@ -4515,7 +4815,20 @@ impl GameWorld {
                         hit.block_pos.z as f32 + 0.5,
                     ));
                     mined = true;
+                }
 
+                if mined && removed_extra.is_none() && mdminecraft_world::is_bed(block_id) {
+                    if let Some(state) = mined_block_state {
+                        removed_extra = Self::try_remove_other_bed_half(
+                            &mut self.chunks,
+                            hit.block_pos,
+                            block_id,
+                            state,
+                        );
+                    }
+                }
+
+                if mined {
                     // Notify fluid sim to update neighbors.
                     self.fluid_sim.on_fluid_removed(
                         FluidPos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
@@ -4555,6 +4868,23 @@ impl GameWorld {
                         changed_positions,
                     );
 
+                    for (pos, removed_block_id) in &removed_support {
+                        if !mdminecraft_world::CropType::is_crop(*removed_block_id) {
+                            continue;
+                        }
+
+                        let removed_chunk = ChunkPos::new(
+                            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                        );
+                        self.crop_growth.unregister_crop(CropPosition {
+                            chunk: removed_chunk,
+                            x: pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
+                            y: pos.y as u8,
+                            z: pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
+                        });
+                    }
+
                     // Notify redstone sim for any neighbor-dependent updates.
                     self.schedule_redstone_updates_around(hit.block_pos);
                     if let Some(extra) = removed_extra {
@@ -4566,6 +4896,12 @@ impl GameWorld {
 
                     let mut affected_chunks = std::collections::BTreeSet::new();
                     affected_chunks.insert(chunk_pos);
+                    if let Some(extra) = removed_extra {
+                        affected_chunks.insert(ChunkPos::new(
+                            extra.x.div_euclid(CHUNK_SIZE_X as i32),
+                            extra.z.div_euclid(CHUNK_SIZE_Z as i32),
+                        ));
+                    }
                     for (pos, removed_block_id) in &removed_support {
                         self.on_block_entity_removed(*pos, *removed_block_id);
 
@@ -4584,7 +4920,7 @@ impl GameWorld {
                                     && mdminecraft_world::is_door_lower(*other_id)
                             })
                         } else {
-                            true
+                            *removed_block_id != interactive_blocks::BED_HEAD
                         };
 
                         if should_drop {
@@ -4689,6 +5025,59 @@ impl GameWorld {
                                     ""
                                 }
                             );
+
+                            // Vanilla-ish: breaking grass can drop seeds.
+                            if block_id == mdminecraft_world::BLOCK_GRASS && !has_silk_touch {
+                                // Keep a simple 1/8 chance; deterministic via the per-block RNG.
+                                if random < 0.125 {
+                                    self.item_manager.spawn_item(
+                                        drop_x,
+                                        drop_y,
+                                        drop_z,
+                                        DroppedItemType::WheatSeeds,
+                                        1,
+                                    );
+                                }
+                            }
+
+                            // Vanilla-ish: mature wheat drops extra seeds in addition to wheat.
+                            if block_id == mdminecraft_world::farming_blocks::WHEAT_7 {
+                                let extra_seeds = ((random * 3.0).floor() as u32).min(2);
+                                let seeds = 1 + extra_seeds;
+                                self.item_manager.spawn_item(
+                                    drop_x,
+                                    drop_y,
+                                    drop_z,
+                                    DroppedItemType::WheatSeeds,
+                                    seeds,
+                                );
+                            }
+
+                            // Vanilla-ish: mature carrots/potatoes drop extra produce in addition to the base drop.
+                            if block_id == mdminecraft_world::farming_blocks::CARROTS_3 {
+                                let extra = ((random * 4.0).floor() as u32).min(3);
+                                if extra > 0 {
+                                    self.item_manager.spawn_item(
+                                        drop_x,
+                                        drop_y,
+                                        drop_z,
+                                        DroppedItemType::Carrot,
+                                        extra,
+                                    );
+                                }
+                            }
+                            if block_id == mdminecraft_world::farming_blocks::POTATOES_3 {
+                                let extra = ((random * 4.0).floor() as u32).min(3);
+                                if extra > 0 {
+                                    self.item_manager.spawn_item(
+                                        drop_x,
+                                        drop_y,
+                                        drop_z,
+                                        DroppedItemType::Potato,
+                                        extra,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -4755,6 +5144,68 @@ impl GameWorld {
                 }
             }
 
+            if block_id == mdminecraft_world::BLOCK_SUGAR_CANE {
+                // Vanilla-ish: sugar cane must be placed on top of a valid support block.
+                if hit.face_normal != IVec3::new(0, 1, 0) {
+                    return;
+                }
+
+                let support_pos = hit.block_pos;
+                let Some(support_id) = self.get_block_at(support_pos) else {
+                    return;
+                };
+
+                // Sugar cane can always be stacked on sugar cane.
+                if support_id != mdminecraft_world::BLOCK_SUGAR_CANE {
+                    // Otherwise the base must be on dirt/grass/sand and adjacent to water.
+                    if !matches!(
+                        support_id,
+                        mdminecraft_world::BLOCK_DIRT
+                            | mdminecraft_world::BLOCK_GRASS
+                            | mdminecraft_world::BLOCK_SAND
+                    ) {
+                        return;
+                    }
+
+                    let has_adjacent_water = [
+                        IVec3::new(1, 0, 0),
+                        IVec3::new(-1, 0, 0),
+                        IVec3::new(0, 0, 1),
+                        IVec3::new(0, 0, -1),
+                    ]
+                    .into_iter()
+                    .any(|offset| {
+                        matches!(
+                            self.get_block_at(support_pos + offset),
+                            Some(
+                                mdminecraft_world::BLOCK_WATER
+                                    | mdminecraft_world::BLOCK_WATER_FLOWING
+                            )
+                        )
+                    });
+
+                    if !has_adjacent_water {
+                        return;
+                    }
+                }
+            }
+
+            if block_id == mdminecraft_world::BLOCK_BROWN_MUSHROOM {
+                // Vanilla-ish: mushrooms are placed on the top face of a solid block.
+                if hit.face_normal != IVec3::new(0, 1, 0) {
+                    return;
+                }
+
+                let support_pos = hit.block_pos;
+                let Some(support_id) = self.get_block_at(support_pos) else {
+                    return;
+                };
+
+                if !self.block_properties.get(support_id).is_solid {
+                    return;
+                }
+            }
+
             let chunk_x = place_pos.x.div_euclid(16);
             let chunk_z = place_pos.z.div_euclid(16);
             let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
@@ -4762,7 +5213,17 @@ impl GameWorld {
             let mut placed = false;
             let mut placed_extra: Option<IVec3> = None;
 
-            if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+            if block_id == interactive_blocks::BED_FOOT {
+                if let Some(extra) = self.try_place_bed(place_pos, place_state) {
+                    placed_extra = Some(extra);
+                    spawn_particles_at = Some(glam::Vec3::new(
+                        place_pos.x as f32 + 0.5,
+                        place_pos.y as f32 + 0.5,
+                        place_pos.z as f32 + 0.5,
+                    ));
+                    placed = true;
+                }
+            } else if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                 let local_x = place_pos.x.rem_euclid(16) as usize;
                 let local_y = place_pos.y as usize;
                 let local_z = place_pos.z.rem_euclid(16) as usize;
@@ -4802,35 +5263,23 @@ impl GameWorld {
                                 place_pos.z as f32 + 0.5,
                             ));
                             placed = true;
-                        }
 
-                        // Decrease block count
-                        if placed {
-                            // Notify fluid sim (treat as removal to wake neighbors who might be flowing here)
-                            self.fluid_sim.on_fluid_removed(
-                                FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
-                                &self.chunks,
-                            );
-                            if mdminecraft_world::is_door_lower(block_id) {
-                                self.fluid_sim.on_fluid_removed(
-                                    FluidPos::new(place_pos.x, place_pos.y + 1, place_pos.z),
-                                    &self.chunks,
-                                );
-                            }
-
-                            // Notify redstone sim for any neighbor-dependent updates.
-                            self.schedule_redstone_updates_around(place_pos);
-                            if let Some(extra) = placed_extra {
-                                self.schedule_redstone_updates_around(extra);
-                            }
-
-                            if let Some(item) = self.hotbar.selected_item_mut() {
-                                if item.count > 0 {
-                                    item.count -= 1;
-                                    if item.count == 0 {
-                                        self.hotbar.slots[self.hotbar.selected] = None;
-                                    }
+                            if block_id == mdminecraft_world::BLOCK_SUGAR_CANE {
+                                // Register the base of the column so it can grow deterministically.
+                                let mut base_y = local_y;
+                                while base_y > 0
+                                    && chunk.voxel(local_x, base_y - 1, local_z).id
+                                        == mdminecraft_world::BLOCK_SUGAR_CANE
+                                {
+                                    base_y -= 1;
                                 }
+
+                                self.sugar_cane_growth.register_base(SugarCanePosition {
+                                    chunk: chunk_pos,
+                                    x: local_x as u8,
+                                    y: base_y as u8,
+                                    z: local_z as u8,
+                                });
                             }
                         }
                     }
@@ -4838,21 +5287,66 @@ impl GameWorld {
             }
 
             if placed {
-                // Update lighting (skylight + seams)
-                self.recompute_chunk_lighting(chunk_pos);
+                // Notify fluid sim (treat as removal to wake neighbors who might be flowing here).
+                self.fluid_sim.on_fluid_removed(
+                    FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
+                    &self.chunks,
+                );
+                if let Some(extra) = placed_extra {
+                    self.fluid_sim
+                        .on_fluid_removed(FluidPos::new(extra.x, extra.y, extra.z), &self.chunks);
+                }
+
+                // Notify redstone sim for any neighbor-dependent updates.
+                self.schedule_redstone_updates_around(place_pos);
+                if let Some(extra) = placed_extra {
+                    self.schedule_redstone_updates_around(extra);
+                }
+
+                // Decrease block count.
+                if let Some(item) = self.hotbar.selected_item_mut() {
+                    if item.count > 0 {
+                        item.count -= 1;
+                        if item.count == 0 {
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                        }
+                    }
+                }
+            }
+
+            if placed {
+                let mut dirty_chunks = std::collections::BTreeSet::new();
+                dirty_chunks.insert(chunk_pos);
+                if let Some(extra) = placed_extra {
+                    dirty_chunks.insert(ChunkPos::new(
+                        extra.x.div_euclid(16),
+                        extra.z.div_euclid(16),
+                    ));
+                }
+
+                // Update lighting (skylight + seams) for any affected chunks (including
+                // cross-chunk multi-block placements like beds).
+                for pos in &dirty_chunks {
+                    self.recompute_chunk_lighting(*pos);
+                }
 
                 // Update blocklight and refresh affected meshes.
-                let affected = mdminecraft_world::recompute_block_light_local(
-                    &mut self.chunks,
-                    &self.registry,
-                    chunk_pos,
-                );
+                let mut affected = std::collections::BTreeSet::new();
+                for pos in &dirty_chunks {
+                    affected.extend(mdminecraft_world::recompute_block_light_local(
+                        &mut self.chunks,
+                        &self.registry,
+                        *pos,
+                    ));
+                }
 
                 // Refresh the changed chunk + neighbors (geometry/connectivity) and any chunks
                 // touched by lighting updates (includes diagonals).
                 let mut mesh_refresh = std::collections::BTreeSet::new();
-                mesh_refresh.insert(chunk_pos);
-                mesh_refresh.extend(Self::neighbor_chunk_positions(chunk_pos));
+                for pos in &dirty_chunks {
+                    mesh_refresh.insert(*pos);
+                    mesh_refresh.extend(Self::neighbor_chunk_positions(*pos));
+                }
                 mesh_refresh.extend(affected);
                 for pos in mesh_refresh {
                     if self.upload_chunk_mesh(pos) {
@@ -4988,6 +5482,15 @@ impl GameWorld {
             return Some(state);
         }
 
+        if block_id == interactive_blocks::BED_HEAD {
+            // Beds should always be placed via their foot block, which spawns both halves.
+            return None;
+        }
+
+        if block_id == interactive_blocks::BED_FOOT {
+            return Some(mdminecraft_world::Facing::from_yaw(camera_yaw).to_state());
+        }
+
         if mdminecraft_world::is_door(block_id) {
             // Only lower halves are placeable; doors must be placed on a top face.
             if !mdminecraft_world::is_door_lower(block_id) {
@@ -5109,6 +5612,135 @@ impl GameWorld {
         true
     }
 
+    fn bed_other_half_pos(
+        pos: IVec3,
+        bed_id: BlockId,
+        state: BlockState,
+    ) -> Option<(IVec3, BlockId)> {
+        if !mdminecraft_world::is_bed(bed_id) {
+            return None;
+        }
+
+        let facing = mdminecraft_world::Facing::from_state(state);
+        let (dx, dz) = facing.offset();
+
+        match bed_id {
+            interactive_blocks::BED_FOOT => Some((
+                IVec3::new(pos.x + dx, pos.y, pos.z + dz),
+                interactive_blocks::BED_HEAD,
+            )),
+            interactive_blocks::BED_HEAD => Some((
+                IVec3::new(pos.x - dx, pos.y, pos.z - dz),
+                interactive_blocks::BED_FOOT,
+            )),
+            _ => None,
+        }
+    }
+
+    fn try_place_bed(&mut self, foot_pos: IVec3, state: BlockState) -> Option<IVec3> {
+        if foot_pos.y < 0 || foot_pos.y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let (head_pos, _) =
+            Self::bed_other_half_pos(foot_pos, interactive_blocks::BED_FOOT, state)?;
+
+        if head_pos.y < 0 || head_pos.y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        // Require space for both halves.
+        if self.get_block_at(foot_pos) != Some(BLOCK_AIR) {
+            return None;
+        }
+        if self.get_block_at(head_pos) != Some(BLOCK_AIR) {
+            return None;
+        }
+
+        // Require solid support below both halves.
+        for pos in [foot_pos, head_pos] {
+            let support_pos = IVec3::new(pos.x, pos.y - 1, pos.z);
+            let support_id = self.get_block_at(support_pos)?;
+            if !self.block_properties.get(support_id).is_solid {
+                return None;
+            }
+        }
+
+        let foot_chunk_pos = ChunkPos::new(
+            foot_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            foot_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let head_chunk_pos = ChunkPos::new(
+            head_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            head_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+
+        let foot_local_x = foot_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let foot_local_y = foot_pos.y as usize;
+        let foot_local_z = foot_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        let head_local_x = head_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let head_local_y = head_pos.y as usize;
+        let head_local_z = head_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        if foot_chunk_pos == head_chunk_pos {
+            let chunk = self.chunks.get_mut(&foot_chunk_pos)?;
+            chunk.set_voxel(
+                foot_local_x,
+                foot_local_y,
+                foot_local_z,
+                Voxel {
+                    id: interactive_blocks::BED_FOOT,
+                    state,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+            chunk.set_voxel(
+                head_local_x,
+                head_local_y,
+                head_local_z,
+                Voxel {
+                    id: interactive_blocks::BED_HEAD,
+                    state,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+        } else {
+            {
+                let foot_chunk = self.chunks.get_mut(&foot_chunk_pos)?;
+                foot_chunk.set_voxel(
+                    foot_local_x,
+                    foot_local_y,
+                    foot_local_z,
+                    Voxel {
+                        id: interactive_blocks::BED_FOOT,
+                        state,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                );
+            }
+            {
+                let head_chunk = self.chunks.get_mut(&head_chunk_pos)?;
+                head_chunk.set_voxel(
+                    head_local_x,
+                    head_local_y,
+                    head_local_z,
+                    Voxel {
+                        id: interactive_blocks::BED_HEAD,
+                        state,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                );
+            }
+        }
+
+        Some(head_pos)
+    }
+
     fn try_remove_other_door_half(
         chunk: &mut Chunk,
         local_x: usize,
@@ -5136,6 +5768,41 @@ impl GameWorld {
         } else {
             None
         }
+    }
+
+    fn try_remove_other_bed_half(
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+        bed_pos: IVec3,
+        bed_id: BlockId,
+        bed_state: BlockState,
+    ) -> Option<IVec3> {
+        let (other_pos, expected_other_id) = Self::bed_other_half_pos(bed_pos, bed_id, bed_state)?;
+
+        if other_pos.y < 0 || other_pos.y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let other_chunk_pos = ChunkPos::new(
+            other_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            other_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let chunk = chunks.get_mut(&other_chunk_pos)?;
+
+        let local_x = other_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_y = other_pos.y as usize;
+        let local_z = other_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        if local_y >= CHUNK_SIZE_Y {
+            return None;
+        }
+
+        let other_voxel = chunk.voxel(local_x, local_y, local_z);
+        if other_voxel.id != expected_other_id {
+            return None;
+        }
+
+        chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+        Some(other_pos)
     }
 
     fn remove_unsupported_blocks(
@@ -5232,6 +5899,39 @@ impl GameWorld {
                                 None => true,
                             }
                         }
+                    }
+                    id if mdminecraft_world::is_bed(id) => {
+                        let support_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                        if !is_solid_at(chunks, support_pos) {
+                            true
+                        } else {
+                            match Self::bed_other_half_pos(candidate, id, voxel.state) {
+                                Some((other_pos, expected_other_id)) => voxel_at(chunks, other_pos)
+                                    .is_none_or(|other| other.id != expected_other_id),
+                                None => true,
+                            }
+                        }
+                    }
+                    id if mdminecraft_world::CropType::is_crop(id) => {
+                        let below_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                        voxel_at(chunks, below_pos)
+                            .is_none_or(|below| !mdminecraft_world::is_farmland(below.id))
+                    }
+                    id if id == mdminecraft_world::BLOCK_SUGAR_CANE => {
+                        let below_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                        voxel_at(chunks, below_pos).is_none_or(|below| {
+                            below.id != mdminecraft_world::BLOCK_SUGAR_CANE
+                                && !matches!(
+                                    below.id,
+                                    mdminecraft_world::BLOCK_DIRT
+                                        | mdminecraft_world::BLOCK_GRASS
+                                        | mdminecraft_world::BLOCK_SAND
+                                )
+                        })
+                    }
+                    id if id == mdminecraft_world::BLOCK_BROWN_MUSHROOM => {
+                        let below_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                        !is_solid_at(chunks, below_pos)
                     }
                     interactive_blocks::TORCH
                     | mdminecraft_world::redstone_blocks::REDSTONE_TORCH => {
@@ -6005,6 +6705,31 @@ impl GameWorld {
                                 count,
                             ));
                         }
+
+                        // Vanilla-ish: zombies can drop carrots/potatoes (deterministic).
+                        let pos_x = mob.x.floor() as i32;
+                        let pos_z = mob.z.floor() as i32;
+                        let roll = (tick as u32)
+                            .wrapping_add((pos_x as u32).wrapping_mul(31))
+                            .wrapping_add((pos_z as u32).wrapping_mul(131))
+                            % 100;
+                        if roll < 2 {
+                            loot_drops.push((
+                                mob.x,
+                                mob.y + 0.5,
+                                mob.z,
+                                DroppedItemType::Carrot,
+                                1,
+                            ));
+                        } else if roll < 4 {
+                            loot_drops.push((
+                                mob.x,
+                                mob.y + 0.5,
+                                mob.z,
+                                DroppedItemType::Potato,
+                                1,
+                            ));
+                        }
                     }
                     MobType::Skeleton => {
                         // Skeletons drop 0-2 bones
@@ -6066,6 +6791,23 @@ impl GameWorld {
                                 mob.z,
                                 DroppedItemType::String,
                                 count,
+                            ));
+                        }
+
+                        // Vanilla-ish: spiders also drop 0-1 spider eyes (deterministic).
+                        let pos_x = mob.x.floor() as i32;
+                        let pos_z = mob.z.floor() as i32;
+                        let roll = (tick as u32)
+                            .wrapping_add((pos_x as u32).wrapping_mul(37))
+                            .wrapping_add((pos_z as u32).wrapping_mul(101))
+                            % 3;
+                        if roll == 0 {
+                            loot_drops.push((
+                                mob.x,
+                                mob.y + 0.5,
+                                mob.z,
+                                DroppedItemType::SpiderEye,
+                                1,
                             ));
                         }
                     }
@@ -7049,17 +7791,25 @@ impl GameWorld {
                     return;
                 };
 
-                if stand.fuel > 0 {
+                let BrewingStandState {
+                    bottles,
+                    bottle_is_splash,
+                    ingredient,
+                    fuel,
+                    ..
+                } = stand;
+
+                if fuel > 0 {
                     self.item_manager.spawn_item(
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
                         DroppedItemType::BlazePowder,
-                        stand.fuel,
+                        fuel,
                     );
                 }
 
-                if let Some((ingredient_id, count)) = stand.ingredient {
+                if let Some((ingredient_id, count)) = ingredient {
                     if let Some(core_item) = brew_ingredient_id_to_core_item_type(ingredient_id) {
                         if let Some(drop_type) = Self::convert_core_item_type_to_dropped(core_item)
                         {
@@ -7069,8 +7819,11 @@ impl GameWorld {
                     }
                 }
 
-                for bottle in stand.bottles.into_iter().flatten() {
-                    let core_stack = bottle_to_core_item_stack(bottle);
+                for (idx, bottle) in bottles.into_iter().enumerate() {
+                    let Some(bottle) = bottle else {
+                        continue;
+                    };
+                    let core_stack = bottle_to_core_item_stack(bottle, bottle_is_splash[idx]);
                     if let Some(drop_type) =
                         Self::convert_core_item_type_to_dropped(core_stack.item_type)
                     {
@@ -7289,7 +8042,7 @@ impl GameWorld {
     fn count_nearby_bookshelves(&self, table_pos: IVec3) -> u32 {
         // Vanilla: bookshelves must be 2 blocks away, 1 block higher, with air in between
         // Simplified: check 5x5x2 area centered on table, 1 block up
-        let bookshelf_id: BlockId = 47; // Bookshelf block ID from blocks.json
+        let bookshelf_id: BlockId = BLOCK_BOOKSHELF;
 
         let mut count = 0u32;
         for dy in 0..2 {
@@ -7418,6 +8171,7 @@ impl GameWorld {
             DroppedItemType::IronIngot => Some(ItemType::Item(7)),
             DroppedItemType::Coal => Some(ItemType::Item(8)),
             DroppedItemType::GoldIngot => Some(ItemType::Item(9)),
+            DroppedItemType::Diamond => Some(ItemType::Item(14)),
             DroppedItemType::LapisLazuli => Some(ItemType::Item(15)),
             DroppedItemType::Leather => Some(ItemType::Item(102)),
             DroppedItemType::Wool => Some(ItemType::Item(103)),
@@ -7427,6 +8181,22 @@ impl GameWorld {
             DroppedItemType::WaterBottle => Some(ItemType::Item(CORE_ITEM_WATER_BOTTLE)),
             DroppedItemType::NetherWart => Some(ItemType::Item(CORE_ITEM_NETHER_WART)),
             DroppedItemType::BlazePowder => Some(ItemType::Item(CORE_ITEM_BLAZE_POWDER)),
+            DroppedItemType::Gunpowder => Some(ItemType::Item(CORE_ITEM_GUNPOWDER)),
+            DroppedItemType::SpiderEye => Some(ItemType::Item(CORE_ITEM_SPIDER_EYE)),
+            DroppedItemType::FermentedSpiderEye => {
+                Some(ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE))
+            }
+            DroppedItemType::MagmaCream => Some(ItemType::Item(CORE_ITEM_MAGMA_CREAM)),
+            DroppedItemType::Sugar => Some(ItemType::Item(CORE_ITEM_SUGAR)),
+            DroppedItemType::Paper => Some(ItemType::Item(CORE_ITEM_PAPER)),
+            DroppedItemType::Book => Some(ItemType::Item(CORE_ITEM_BOOK)),
+            DroppedItemType::WheatSeeds => Some(ItemType::Item(CORE_ITEM_WHEAT_SEEDS)),
+            DroppedItemType::Wheat => Some(ItemType::Item(CORE_ITEM_WHEAT)),
+            DroppedItemType::Bread => Some(ItemType::Food(FoodType::Bread)),
+            DroppedItemType::Carrot => Some(ItemType::Food(FoodType::Carrot)),
+            DroppedItemType::Potato => Some(ItemType::Food(FoodType::Potato)),
+            DroppedItemType::BakedPotato => Some(ItemType::Food(FoodType::BakedPotato)),
+            DroppedItemType::GoldenCarrot => Some(ItemType::Food(FoodType::GoldenCarrot)),
             DroppedItemType::PotionAwkward => Some(ItemType::Potion(potion_ids::AWKWARD)),
             DroppedItemType::PotionNightVision => Some(ItemType::Potion(potion_ids::NIGHT_VISION)),
             DroppedItemType::PotionInvisibility => Some(ItemType::Potion(potion_ids::INVISIBILITY)),
@@ -7445,6 +8215,46 @@ impl GameWorld {
             DroppedItemType::PotionRegeneration => Some(ItemType::Potion(potion_ids::REGENERATION)),
             DroppedItemType::PotionStrength => Some(ItemType::Potion(potion_ids::STRENGTH)),
             DroppedItemType::PotionWeakness => Some(ItemType::Potion(potion_ids::WEAKNESS)),
+            DroppedItemType::SplashPotionAwkward => {
+                Some(ItemType::SplashPotion(potion_ids::AWKWARD))
+            }
+            DroppedItemType::SplashPotionNightVision => {
+                Some(ItemType::SplashPotion(potion_ids::NIGHT_VISION))
+            }
+            DroppedItemType::SplashPotionInvisibility => {
+                Some(ItemType::SplashPotion(potion_ids::INVISIBILITY))
+            }
+            DroppedItemType::SplashPotionLeaping => {
+                Some(ItemType::SplashPotion(potion_ids::LEAPING))
+            }
+            DroppedItemType::SplashPotionFireResistance => {
+                Some(ItemType::SplashPotion(potion_ids::FIRE_RESISTANCE))
+            }
+            DroppedItemType::SplashPotionSwiftness => {
+                Some(ItemType::SplashPotion(potion_ids::SWIFTNESS))
+            }
+            DroppedItemType::SplashPotionSlowness => {
+                Some(ItemType::SplashPotion(potion_ids::SLOWNESS))
+            }
+            DroppedItemType::SplashPotionWaterBreathing => {
+                Some(ItemType::SplashPotion(potion_ids::WATER_BREATHING))
+            }
+            DroppedItemType::SplashPotionHealing => {
+                Some(ItemType::SplashPotion(potion_ids::HEALING))
+            }
+            DroppedItemType::SplashPotionHarming => {
+                Some(ItemType::SplashPotion(potion_ids::HARMING))
+            }
+            DroppedItemType::SplashPotionPoison => Some(ItemType::SplashPotion(potion_ids::POISON)),
+            DroppedItemType::SplashPotionRegeneration => {
+                Some(ItemType::SplashPotion(potion_ids::REGENERATION))
+            }
+            DroppedItemType::SplashPotionStrength => {
+                Some(ItemType::SplashPotion(potion_ids::STRENGTH))
+            }
+            DroppedItemType::SplashPotionWeakness => {
+                Some(ItemType::SplashPotion(potion_ids::WEAKNESS))
+            }
             DroppedItemType::WoodenPickaxe => {
                 Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood))
             }
@@ -7515,9 +8325,13 @@ impl GameWorld {
             ItemType::Block(block_id) => DroppedItemType::from_placeable_block(block_id),
             ItemType::Food(food) => match food {
                 FoodType::Apple => Some(DroppedItemType::Apple),
-                FoodType::Bread => None,
+                FoodType::Bread => Some(DroppedItemType::Bread),
                 FoodType::RawMeat => Some(DroppedItemType::RawPork),
                 FoodType::CookedMeat => Some(DroppedItemType::CookedPork),
+                FoodType::Carrot => Some(DroppedItemType::Carrot),
+                FoodType::Potato => Some(DroppedItemType::Potato),
+                FoodType::BakedPotato => Some(DroppedItemType::BakedPotato),
+                FoodType::GoldenCarrot => Some(DroppedItemType::GoldenCarrot),
             },
             ItemType::Item(id) => match id {
                 1 => Some(DroppedItemType::Bow),
@@ -7529,6 +8343,7 @@ impl GameWorld {
                 7 => Some(DroppedItemType::IronIngot),
                 8 => Some(DroppedItemType::Coal),
                 9 => Some(DroppedItemType::GoldIngot),
+                14 => Some(DroppedItemType::Diamond),
                 15 => Some(DroppedItemType::LapisLazuli),
                 102 => Some(DroppedItemType::Leather),
                 103 => Some(DroppedItemType::Wool),
@@ -7538,6 +8353,15 @@ impl GameWorld {
                 CORE_ITEM_WATER_BOTTLE => Some(DroppedItemType::WaterBottle),
                 CORE_ITEM_NETHER_WART => Some(DroppedItemType::NetherWart),
                 CORE_ITEM_BLAZE_POWDER => Some(DroppedItemType::BlazePowder),
+                CORE_ITEM_GUNPOWDER => Some(DroppedItemType::Gunpowder),
+                CORE_ITEM_SPIDER_EYE => Some(DroppedItemType::SpiderEye),
+                CORE_ITEM_FERMENTED_SPIDER_EYE => Some(DroppedItemType::FermentedSpiderEye),
+                CORE_ITEM_SUGAR => Some(DroppedItemType::Sugar),
+                CORE_ITEM_MAGMA_CREAM => Some(DroppedItemType::MagmaCream),
+                CORE_ITEM_PAPER => Some(DroppedItemType::Paper),
+                CORE_ITEM_BOOK => Some(DroppedItemType::Book),
+                CORE_ITEM_WHEAT_SEEDS => Some(DroppedItemType::WheatSeeds),
+                CORE_ITEM_WHEAT => Some(DroppedItemType::Wheat),
                 _ => None,
             },
             ItemType::Tool(tool, material) => Some(match (tool, material) {
@@ -7584,7 +8408,23 @@ impl GameWorld {
                 potion_ids::WEAKNESS => Some(DroppedItemType::PotionWeakness),
                 _ => None,
             },
-            ItemType::SplashPotion(_) => None,
+            ItemType::SplashPotion(id) => match id {
+                potion_ids::AWKWARD => Some(DroppedItemType::SplashPotionAwkward),
+                potion_ids::NIGHT_VISION => Some(DroppedItemType::SplashPotionNightVision),
+                potion_ids::INVISIBILITY => Some(DroppedItemType::SplashPotionInvisibility),
+                potion_ids::LEAPING => Some(DroppedItemType::SplashPotionLeaping),
+                potion_ids::FIRE_RESISTANCE => Some(DroppedItemType::SplashPotionFireResistance),
+                potion_ids::SWIFTNESS => Some(DroppedItemType::SplashPotionSwiftness),
+                potion_ids::SLOWNESS => Some(DroppedItemType::SplashPotionSlowness),
+                potion_ids::WATER_BREATHING => Some(DroppedItemType::SplashPotionWaterBreathing),
+                potion_ids::HEALING => Some(DroppedItemType::SplashPotionHealing),
+                potion_ids::HARMING => Some(DroppedItemType::SplashPotionHarming),
+                potion_ids::POISON => Some(DroppedItemType::SplashPotionPoison),
+                potion_ids::REGENERATION => Some(DroppedItemType::SplashPotionRegeneration),
+                potion_ids::STRENGTH => Some(DroppedItemType::SplashPotionStrength),
+                potion_ids::WEAKNESS => Some(DroppedItemType::SplashPotionWeakness),
+                _ => None,
+            },
         }
     }
 }
@@ -8738,8 +9578,10 @@ fn render_inventory(
                                         crafting_max_crafts_2x2(personal_crafting_grid, recipe);
                                     let mut crafted = 0_u32;
                                     for _ in 0..crafts {
-                                        if consume_crafting_inputs_2x2(personal_crafting_grid, recipe)
-                                        {
+                                        if consume_crafting_inputs_2x2(
+                                            personal_crafting_grid,
+                                            recipe,
+                                        ) {
                                             crafted += 1;
                                         } else {
                                             break;
@@ -8749,16 +9591,21 @@ fn render_inventory(
                                     if crafted > 0 {
                                         let total = recipe.output_count.saturating_mul(crafted);
                                         let output_stack = ItemStack::new(recipe.output, total);
-                                        if let Some(remainder) =
-                                            add_stack_to_storage(hotbar, main_inventory, output_stack)
-                                        {
+                                        if let Some(remainder) = add_stack_to_storage(
+                                            hotbar,
+                                            main_inventory,
+                                            output_stack,
+                                        ) {
                                             spill_items.push(remainder);
                                         }
                                     }
                                 } else if cursor_can_accept_full_stack(
                                     ui_cursor_stack,
                                     &result_stack,
-                                ) && consume_crafting_inputs_2x2(personal_crafting_grid, recipe) {
+                                ) && consume_crafting_inputs_2x2(
+                                    personal_crafting_grid,
+                                    recipe,
+                                ) {
                                     cursor_add_full_stack(ui_cursor_stack, result_stack);
                                 }
                             }
@@ -9833,15 +10680,17 @@ fn try_shift_move_core_stack_into_brewing_stand(
         }
     }
 
-    if let Some(potion_type) = core_item_stack_to_bottle(stack) {
+    if let Some((potion_type, is_splash)) = core_item_stack_to_bottle(stack) {
         let mut remaining = stack.count;
         let mut moved_any = false;
-        for slot in &mut stand.bottles {
+        let (bottles, bottle_is_splash) = (&mut stand.bottles, &mut stand.bottle_is_splash);
+        for (idx, slot) in bottles.iter_mut().enumerate() {
             if remaining == 0 {
                 break;
             }
             if slot.is_none() {
                 *slot = Some(potion_type);
+                bottle_is_splash[idx] = is_splash && potion_type != PotionType::Water;
                 remaining = remaining.saturating_sub(1);
                 moved_any = true;
             }
@@ -10482,12 +11331,38 @@ struct CraftingPattern {
     cells: [[Option<ItemType>; 3]; 3],
 }
 
+impl CraftingPattern {
+    fn mirrored_horizontal(&self) -> Self {
+        if self.width == 0 || self.height == 0 {
+            return self.clone();
+        }
+
+        let mut cells: [[Option<ItemType>; 3]; 3] = [[None; 3]; 3];
+        for (r, row) in cells.iter_mut().enumerate().take(self.height) {
+            let source_row = &self.cells[r];
+            for (c, source) in source_row.iter().copied().enumerate().take(self.width) {
+                row[self.width - 1 - c] = source;
+            }
+        }
+
+        Self {
+            width: self.width,
+            height: self.height,
+            cells,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CraftingRecipe {
     inputs: Vec<(ItemType, u32)>,
     output: ItemType,
     output_count: u32,
     pattern: Option<CraftingPattern>,
+    /// If true, shaped recipes also match a horizontally mirrored pattern.
+    ///
+    /// Used for recipes like stairs/bows where vanilla accepts both orientations.
+    allow_horizontal_mirror: bool,
     min_grid_size: CraftingGridSize,
     /// If true, allow extra counts of the required item types (no extra item types).
     ///
@@ -10513,13 +11388,34 @@ impl CraftingGridSize {
 /// Get available crafting recipes as (inputs, output, output_count)
 /// Inputs are a list of (ItemType, count) required
 fn get_crafting_recipes() -> Vec<CraftingRecipe> {
-    vec![
+    let mut recipes = vec![
         // Furnace: 8 cobblestone → furnace
         CraftingRecipe {
             inputs: vec![(ItemType::Block(BLOCK_COBBLESTONE), 8)],
             output: ItemType::Block(BLOCK_FURNACE),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        None,
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
@@ -10528,7 +11424,28 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 8)],
             output: ItemType::Block(interactive_blocks::CHEST),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
@@ -10538,6 +11455,7 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             output: ItemType::Block(BLOCK_OAK_PLANKS),
             output_count: 4,
             pattern: None,
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: true,
         },
@@ -10546,7 +11464,24 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 4)],
             output: ItemType::Block(BLOCK_CRAFTING_TABLE),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         },
@@ -10555,7 +11490,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 2)],
             output: ItemType::Item(3),
             output_count: 4,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Block(BLOCK_OAK_PLANKS)), None, None],
+                    [Some(ItemType::Block(BLOCK_OAK_PLANKS)), None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         }, // Item(3) = Stick
@@ -10564,8 +11508,624 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(8), 1), (ItemType::Item(3), 1)], // Item(8) = Coal
             output: ItemType::Block(interactive_blocks::TORCH),
             output_count: 4,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(8)), None, None],
+                    [Some(ItemType::Item(3)), None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Bread: 3 wheat → bread
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(CORE_ITEM_WHEAT), 3)],
+            output: ItemType::Food(mdminecraft_core::item::FoodType::Bread),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Item(CORE_ITEM_WHEAT)),
+                        Some(ItemType::Item(CORE_ITEM_WHEAT)),
+                        Some(ItemType::Item(CORE_ITEM_WHEAT)),
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Sugar: 1 sugar cane → sugar
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_SUGAR_CANE), 1)],
+            output: ItemType::Item(CORE_ITEM_SUGAR),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: true,
+        },
+        // Paper: 3 sugar cane → 3 paper
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_SUGAR_CANE), 3)],
+            output: ItemType::Item(CORE_ITEM_PAPER),
+            output_count: 3,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_SUGAR_CANE)),
+                        Some(ItemType::Block(BLOCK_SUGAR_CANE)),
+                        Some(ItemType::Block(BLOCK_SUGAR_CANE)),
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Book: 3 paper + 1 leather → 1 book
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(CORE_ITEM_PAPER), 3),
+                (ItemType::Item(102), 1), // Item(102) = Leather
+            ],
+            output: ItemType::Item(CORE_ITEM_BOOK),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: true,
+        },
+        // Fermented Spider Eye (vanilla-ish): 1 brown mushroom + 1 sugar + 1 spider eye → 1 fermented spider eye
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_BROWN_MUSHROOM), 1),
+                (ItemType::Item(CORE_ITEM_SUGAR), 1),
+                (ItemType::Item(CORE_ITEM_SPIDER_EYE), 1),
+            ],
+            output: ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: true,
+        },
+        // Golden Carrot (vanilla-ish): 1 carrot + 1 gold ingot → golden carrot
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Food(mdminecraft_core::item::FoodType::Carrot), 1),
+                (ItemType::Item(9), 1), // Item(9) = Gold ingot
+            ],
+            output: ItemType::Food(mdminecraft_core::item::FoodType::GoldenCarrot),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Glass Bottles: 3 glass → 3 bottles
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(interactive_blocks::GLASS), 3)],
+            output: ItemType::Item(CORE_ITEM_GLASS_BOTTLE),
+            output_count: 3,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                        None,
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                    ],
+                    [None, Some(ItemType::Block(interactive_blocks::GLASS)), None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Glass Panes: 6 glass → 16 glass panes
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(interactive_blocks::GLASS), 6)],
+            output: ItemType::Block(interactive_blocks::GLASS_PANE),
+            output_count: 16,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                    ],
+                    [
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                        Some(ItemType::Block(interactive_blocks::GLASS)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Nether Wart Block: 1 block → 9 nether wart items
+        CraftingRecipe {
+            inputs: vec![(
+                ItemType::Block(mdminecraft_world::BLOCK_NETHER_WART_BLOCK),
+                1,
+            )],
+            output: ItemType::Item(CORE_ITEM_NETHER_WART),
+            output_count: 9,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Bed: 3 wool + 3 planks → 1 bed
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(103), 3),
+                (ItemType::Block(BLOCK_OAK_PLANKS), 3),
+            ], // Item(103) = Wool
+            output: ItemType::Block(interactive_blocks::BED_FOOT),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Item(103)),
+                        Some(ItemType::Item(103)),
+                        Some(ItemType::Item(103)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Brewing Stand: 1 blaze powder + 3 cobblestone → 1 brewing stand
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(CORE_ITEM_BLAZE_POWDER), 1),
+                (ItemType::Block(BLOCK_COBBLESTONE), 3),
+            ],
+            output: ItemType::Block(BLOCK_BREWING_STAND),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [None, Some(ItemType::Item(CORE_ITEM_BLAZE_POWDER)), None],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Enchanting Table (vanilla-ish): 4 obsidian + 2 diamonds + 1 lapis → table
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OBSIDIAN), 4),
+                (ItemType::Item(14), 2), // Item(14) = Diamond
+                (ItemType::Item(15), 1), // Item(15) = Lapis Lazuli
+            ],
+            output: ItemType::Block(BLOCK_ENCHANTING_TABLE),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [None, Some(ItemType::Item(15)), None],
+                    [
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                        Some(ItemType::Item(14)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Bookshelf (vanilla-ish): 6 planks + 3 books → bookshelf
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OAK_PLANKS), 6),
+                (ItemType::Item(CORE_ITEM_BOOK), 3),
+            ],
+            output: ItemType::Block(BLOCK_BOOKSHELF),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [
+                        Some(ItemType::Item(CORE_ITEM_BOOK)),
+                        Some(ItemType::Item(CORE_ITEM_BOOK)),
+                        Some(ItemType::Item(CORE_ITEM_BOOK)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Ladder: 7 sticks → 3 ladders
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(3), 7)],
+            output: ItemType::Block(interactive_blocks::LADDER),
+            output_count: 3,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [Some(ItemType::Item(3)), None, Some(ItemType::Item(3))],
+                    [
+                        Some(ItemType::Item(3)),
+                        Some(ItemType::Item(3)),
+                        Some(ItemType::Item(3)),
+                    ],
+                    [Some(ItemType::Item(3)), None, Some(ItemType::Item(3))],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Door: 6 planks → 3 doors
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 6)],
+            output: ItemType::Block(interactive_blocks::OAK_DOOR_LOWER),
+            output_count: 3,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Iron Door: 6 iron ingots → 3 doors
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(7), 6)], // Item(7) = Iron Ingot
+            output: ItemType::Block(interactive_blocks::IRON_DOOR_LOWER),
+            output_count: 3,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 3,
+                cells: [
+                    [Some(ItemType::Item(7)), Some(ItemType::Item(7)), None],
+                    [Some(ItemType::Item(7)), Some(ItemType::Item(7)), None],
+                    [Some(ItemType::Item(7)), Some(ItemType::Item(7)), None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Trapdoor: 6 planks → 2 trapdoors
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 6)],
+            output: ItemType::Block(interactive_blocks::TRAPDOOR),
+            output_count: 2,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Fence: 4 planks + 2 sticks → 3 fences
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OAK_PLANKS), 4),
+                (ItemType::Item(3), 2),
+            ],
+            output: ItemType::Block(interactive_blocks::OAK_FENCE),
+            output_count: 3,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Item(3)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Item(3)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Fence Gate: 2 planks + 4 sticks → 1 fence gate
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OAK_PLANKS), 2),
+                (ItemType::Item(3), 4),
+            ],
+            output: ItemType::Block(interactive_blocks::OAK_FENCE_GATE),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Item(3)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Item(3)),
+                    ],
+                    [
+                        Some(ItemType::Item(3)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Item(3)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Pressure Plate: 2 planks → 1 plate
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 2)],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Button: 1 plank → 1 button
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 1)],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::OAK_BUTTON),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Button: 1 stone → 1 button
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(mdminecraft_world::BLOCK_STONE), 1)],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::STONE_BUTTON),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Lever: 1 stick + 1 cobblestone → 1 lever
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(3), 1),
+                (ItemType::Block(BLOCK_COBBLESTONE), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::LEVER),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(3)), None, None],
+                    [Some(ItemType::Block(BLOCK_COBBLESTONE)), None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Pressure Plate: 2 stone → 1 plate
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(mdminecraft_world::BLOCK_STONE), 2)],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        None,
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Slab: 3 cobblestone → 6 slabs
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_COBBLESTONE), 3)],
+            output: ItemType::Block(interactive_blocks::STONE_SLAB),
+            output_count: 6,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Slab: 3 planks → 6 slabs
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 3)],
+            output: ItemType::Block(interactive_blocks::OAK_SLAB),
+            output_count: 6,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 1,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [None, None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Stone Stairs: 6 cobblestone → 4 stairs
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_COBBLESTONE), 6)],
+            output: ItemType::Block(interactive_blocks::STONE_STAIRS),
+            output_count: 4,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [Some(ItemType::Block(BLOCK_COBBLESTONE)), None, None],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Oak Stairs: 6 planks → 4 stairs
+        CraftingRecipe {
+            inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS), 6)],
+            output: ItemType::Block(interactive_blocks::OAK_STAIRS),
+            output_count: 4,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [Some(ItemType::Block(BLOCK_OAK_PLANKS)), None, None],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
         // Bow: 3 sticks + 3 string
@@ -10573,7 +12133,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(3), 3), (ItemType::Item(4), 3)],
             output: ItemType::Item(1),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [Some(ItemType::Item(3)), Some(ItemType::Item(4)), None],
+                    [Some(ItemType::Item(3)), None, Some(ItemType::Item(4))],
+                    [Some(ItemType::Item(3)), Some(ItemType::Item(4)), None],
+                ],
+            }),
+            allow_horizontal_mirror: true,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(4) = String
@@ -10586,7 +12155,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             ],
             output: ItemType::Item(2),
             output_count: 4,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 3,
+                cells: [
+                    [Some(ItemType::Item(5)), None, None],
+                    [Some(ItemType::Item(3)), None, None],
+                    [Some(ItemType::Item(6)), None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(5) = Flint, Item(6) = Feather
@@ -10596,7 +12174,20 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 5)],
             output: ItemType::Item(20),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                    ],
+                    [Some(ItemType::Item(102)), None, Some(ItemType::Item(102))],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(20) = LeatherHelmet
@@ -10605,7 +12196,24 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 8)],
             output: ItemType::Item(21),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                    ],
+                    [Some(ItemType::Item(102)), None, Some(ItemType::Item(102))],
+                    [
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(21) = LeatherChestplate
@@ -10614,7 +12222,20 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 7)],
             output: ItemType::Item(22),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                        Some(ItemType::Item(102)),
+                    ],
+                    [Some(ItemType::Item(102)), None, Some(ItemType::Item(102))],
+                    [Some(ItemType::Item(102)), None, Some(ItemType::Item(102))],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(22) = LeatherLeggings
@@ -10623,7 +12244,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(102), 4)],
             output: ItemType::Item(23),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(102)), None, Some(ItemType::Item(102))],
+                    [Some(ItemType::Item(102)), None, Some(ItemType::Item(102))],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(23) = LeatherBoots
@@ -10633,7 +12263,20 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 5)],
             output: ItemType::Item(10),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(10) = IronHelmet
@@ -10642,7 +12285,24 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 8)],
             output: ItemType::Item(11),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(11) = IronChestplate
@@ -10651,7 +12311,20 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 7)],
             output: ItemType::Item(12),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(12) = IronLeggings
@@ -10660,7 +12333,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(7), 4)],
             output: ItemType::Item(13),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                    [Some(ItemType::Item(7)), None, Some(ItemType::Item(7))],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(13) = IronBoots
@@ -10670,7 +12352,20 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 5)],
             output: ItemType::Item(30),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                    ],
+                    [Some(ItemType::Item(14)), None, Some(ItemType::Item(14))],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(30) = DiamondHelmet
@@ -10679,7 +12374,24 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 8)],
             output: ItemType::Item(31),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                    ],
+                    [Some(ItemType::Item(14)), None, Some(ItemType::Item(14))],
+                    [
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(31) = DiamondChestplate
@@ -10688,7 +12400,20 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 7)],
             output: ItemType::Item(32),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                        Some(ItemType::Item(14)),
+                    ],
+                    [Some(ItemType::Item(14)), None, Some(ItemType::Item(14))],
+                    [Some(ItemType::Item(14)), None, Some(ItemType::Item(14))],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(32) = DiamondLeggings
@@ -10697,11 +12422,138 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             inputs: vec![(ItemType::Item(14), 4)],
             output: ItemType::Item(33),
             output_count: 1,
-            pattern: None,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(14)), None, Some(ItemType::Item(14))],
+                    [Some(ItemType::Item(14)), None, Some(ItemType::Item(14))],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         }, // Item(33) = DiamondBoots
-    ]
+    ];
+
+    recipes.extend(get_tool_crafting_recipes());
+    recipes
+}
+
+fn get_tool_crafting_recipes() -> Vec<CraftingRecipe> {
+    let stick = ItemType::Item(3);
+    let tool_materials: [(ToolMaterial, ItemType); 5] = [
+        (ToolMaterial::Wood, ItemType::Block(BLOCK_OAK_PLANKS)),
+        (ToolMaterial::Stone, ItemType::Block(BLOCK_COBBLESTONE)),
+        (ToolMaterial::Iron, ItemType::Item(7)),
+        (ToolMaterial::Diamond, ItemType::Item(14)),
+        (ToolMaterial::Gold, ItemType::Item(9)),
+    ];
+
+    let mut recipes = Vec::new();
+    for (tool_material, material_item) in tool_materials {
+        // Pickaxe: 3 materials + 2 sticks.
+        recipes.push(CraftingRecipe {
+            inputs: vec![(material_item, 3), (stick, 2)],
+            output: ItemType::Tool(ToolType::Pickaxe, tool_material),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(material_item),
+                        Some(material_item),
+                        Some(material_item),
+                    ],
+                    [None, Some(stick), None],
+                    [None, Some(stick), None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        });
+
+        // Axe: 3 materials + 2 sticks (mirrorable).
+        recipes.push(CraftingRecipe {
+            inputs: vec![(material_item, 3), (stick, 2)],
+            output: ItemType::Tool(ToolType::Axe, tool_material),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 3,
+                cells: [
+                    [Some(material_item), Some(material_item), None],
+                    [Some(material_item), Some(stick), None],
+                    [None, Some(stick), None],
+                ],
+            }),
+            allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        });
+
+        // Shovel: 1 material + 2 sticks.
+        recipes.push(CraftingRecipe {
+            inputs: vec![(material_item, 1), (stick, 2)],
+            output: ItemType::Tool(ToolType::Shovel, tool_material),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 3,
+                cells: [
+                    [Some(material_item), None, None],
+                    [Some(stick), None, None],
+                    [Some(stick), None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        });
+
+        // Sword: 2 materials + 1 stick.
+        recipes.push(CraftingRecipe {
+            inputs: vec![(material_item, 2), (stick, 1)],
+            output: ItemType::Tool(ToolType::Sword, tool_material),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 3,
+                cells: [
+                    [Some(material_item), None, None],
+                    [Some(material_item), None, None],
+                    [Some(stick), None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        });
+
+        // Hoe: 2 materials + 2 sticks (mirrorable).
+        recipes.push(CraftingRecipe {
+            inputs: vec![(material_item, 2), (stick, 2)],
+            output: ItemType::Tool(ToolType::Hoe, tool_material),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 2,
+                height: 3,
+                cells: [
+                    [Some(material_item), Some(material_item), None],
+                    [None, Some(stick), None],
+                    [None, Some(stick), None],
+                ],
+            }),
+            allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        });
+    }
+
+    recipes
 }
 
 fn match_crafting_recipe(
@@ -10710,12 +12562,10 @@ fn match_crafting_recipe(
 ) -> Option<CraftingRecipe> {
     let grid_dim = grid_size.dimension();
     // Treat any items outside the active grid size as an automatic mismatch.
-    for r in 0..3 {
-        for c in 0..3 {
-            if r >= grid_dim || c >= grid_dim {
-                if crafting_grid[r][c].is_some() {
-                    return None;
-                }
+    for (r, row) in crafting_grid.iter().enumerate() {
+        for (c, slot) in row.iter().enumerate() {
+            if (r >= grid_dim || c >= grid_dim) && slot.is_some() {
+                return None;
             }
         }
     }
@@ -10728,7 +12578,7 @@ fn match_crafting_recipe(
         }
     }
 
-    let mut pattern_matches = |pattern: &CraftingPattern| -> bool {
+    let pattern_matches = |pattern: &CraftingPattern| -> bool {
         if pattern.width > grid_dim || pattern.height > grid_dim {
             return false;
         }
@@ -10736,8 +12586,8 @@ fn match_crafting_recipe(
         for row_offset in 0..=grid_dim.saturating_sub(pattern.height) {
             for col_offset in 0..=grid_dim.saturating_sub(pattern.width) {
                 let mut ok = true;
-                for r in 0..grid_dim {
-                    for c in 0..grid_dim {
+                for (r, row) in crafting_grid.iter().enumerate().take(grid_dim) {
+                    for (c, slot) in row.iter().enumerate().take(grid_dim) {
                         let expected = if (row_offset..row_offset + pattern.height).contains(&r)
                             && (col_offset..col_offset + pattern.width).contains(&c)
                         {
@@ -10746,7 +12596,7 @@ fn match_crafting_recipe(
                             None
                         };
 
-                        let actual = crafting_grid[r][c].as_ref().map(|stack| stack.item_type);
+                        let actual = slot.as_ref().map(|stack| stack.item_type);
                         if expected != actual {
                             ok = false;
                             break;
@@ -10766,16 +12616,34 @@ fn match_crafting_recipe(
         false
     };
 
-    // Check each recipe
-    for recipe in get_crafting_recipes() {
+    // Prefer shaped recipes when they match the grid exactly (vanilla behavior).
+    let recipes = get_crafting_recipes();
+    for recipe in recipes.iter() {
         if recipe.min_grid_size.dimension() > grid_size.dimension() {
             continue;
         }
 
-        if let Some(pattern) = recipe.pattern.as_ref() {
-            if pattern_matches(pattern) {
-                return Some(recipe);
+        let Some(pattern) = recipe.pattern.as_ref() else {
+            continue;
+        };
+        if pattern_matches(pattern) {
+            return Some(recipe.clone());
+        }
+        if recipe.allow_horizontal_mirror {
+            let mirrored = pattern.mirrored_horizontal();
+            if pattern_matches(&mirrored) {
+                return Some(recipe.clone());
             }
+        }
+    }
+
+    // Check shapeless recipes.
+    for recipe in recipes {
+        if recipe.min_grid_size.dimension() > grid_size.dimension() {
+            continue;
+        }
+
+        if recipe.pattern.is_some() {
             continue;
         }
 
@@ -10816,6 +12684,7 @@ fn match_crafting_recipe(
             return Some(recipe);
         }
     }
+
     None
 }
 
@@ -10949,12 +12818,12 @@ fn try_autofill_crafting_grid<const N: usize>(
             }
         }
 
-        for r in 0..pattern.height {
-            for c in 0..pattern.width {
+        for (r, row) in grid.iter_mut().enumerate().take(pattern.height) {
+            for (c, slot) in row.iter_mut().enumerate().take(pattern.width) {
                 let Some(item_type) = pattern.cells[r][c] else {
                     continue;
                 };
-                grid[r][c] = Some(ItemStack::new(item_type, 1));
+                *slot = Some(ItemStack::new(item_type, 1));
             }
         }
 
@@ -11058,7 +12927,11 @@ fn consume_crafting_inputs_3x3(
             return false;
         }
 
-        let non_empty_cells = crafting_grid.iter().flatten().filter(|slot| slot.is_some()).count();
+        let non_empty_cells = crafting_grid
+            .iter()
+            .flatten()
+            .filter(|slot| slot.is_some())
+            .count();
         if non_empty_cells != required_cells {
             return false;
         }
@@ -11127,7 +13000,11 @@ fn consume_crafting_inputs_2x2(
             return false;
         }
 
-        let non_empty_cells = crafting_grid.iter().flatten().filter(|slot| slot.is_some()).count();
+        let non_empty_cells = crafting_grid
+            .iter()
+            .flatten()
+            .filter(|slot| slot.is_some())
+            .count();
         if non_empty_cells != required_cells {
             return false;
         }
@@ -11242,27 +13119,27 @@ fn crafting_max_crafts_3x3(
             min_count
         }
     } else {
-    let mut crafts = u32::MAX;
-    for (item_type, needed) in recipe.inputs.iter().copied() {
-        if needed == 0 {
-            continue;
+        let mut crafts = u32::MAX;
+        for (item_type, needed) in recipe.inputs.iter().copied() {
+            if needed == 0 {
+                continue;
+            }
+
+            let have: u32 = crafting_grid
+                .iter()
+                .flatten()
+                .flatten()
+                .filter(|stack| stack.item_type == item_type)
+                .map(|stack| stack.count)
+                .sum();
+            crafts = crafts.min(have / needed);
         }
 
-        let have: u32 = crafting_grid
-            .iter()
-            .flatten()
-            .flatten()
-            .filter(|stack| stack.item_type == item_type)
-            .map(|stack| stack.count)
-            .sum();
-        crafts = crafts.min(have / needed);
-    }
-
-    if crafts == u32::MAX {
-        0
-    } else {
-        crafts
-    }
+        if crafts == u32::MAX {
+            0
+        } else {
+            crafts
+        }
     }
 }
 
@@ -11295,27 +13172,27 @@ fn crafting_max_crafts_2x2(
             min_count
         }
     } else {
-    let mut crafts = u32::MAX;
-    for (item_type, needed) in recipe.inputs.iter().copied() {
-        if needed == 0 {
-            continue;
+        let mut crafts = u32::MAX;
+        for (item_type, needed) in recipe.inputs.iter().copied() {
+            if needed == 0 {
+                continue;
+            }
+
+            let have: u32 = crafting_grid
+                .iter()
+                .flatten()
+                .flatten()
+                .filter(|stack| stack.item_type == item_type)
+                .map(|stack| stack.count)
+                .sum();
+            crafts = crafts.min(have / needed);
         }
 
-        let have: u32 = crafting_grid
-            .iter()
-            .flatten()
-            .flatten()
-            .filter(|stack| stack.item_type == item_type)
-            .map(|stack| stack.count)
-            .sum();
-        crafts = crafts.min(have / needed);
-    }
-
-    if crafts == u32::MAX {
-        0
-    } else {
-        crafts
-    }
+        if crafts == u32::MAX {
+            0
+        } else {
+            crafts
+        }
     }
 }
 
@@ -11559,16 +13436,21 @@ fn render_crafting(
                                         if crafted > 0 {
                                             let total = recipe.output_count.saturating_mul(crafted);
                                             let output_stack = ItemStack::new(recipe.output, total);
-                                            if let Some(remainder) =
-                                                add_stack_to_storage(hotbar, main_inventory, output_stack)
-                                            {
+                                            if let Some(remainder) = add_stack_to_storage(
+                                                hotbar,
+                                                main_inventory,
+                                                output_stack,
+                                            ) {
                                                 spill_items.push(remainder);
                                             }
                                         }
                                     } else if cursor_can_accept_full_stack(
                                         ui_cursor_stack,
                                         &result_stack,
-                                    ) && consume_crafting_inputs_3x3(crafting_grid, recipe) {
+                                    ) && consume_crafting_inputs_3x3(
+                                        crafting_grid,
+                                        recipe,
+                                    ) {
                                         cursor_add_full_stack(ui_cursor_stack, result_stack);
                                     }
                                 }
@@ -12870,9 +14752,13 @@ fn render_brewing_stand(
                 ui.vertical(|ui| {
                     ui.label("Bottles");
                     ui.horizontal(|ui| {
-                        for (i, bottle) in stand.bottles.iter_mut().enumerate() {
+                        let (bottles, bottle_is_splash) =
+                            (&mut stand.bottles, &mut stand.bottle_is_splash);
+                        for (i, bottle) in bottles.iter_mut().enumerate() {
                             let before = *bottle;
-                            let mut bottle_stack = (*bottle).map(bottle_to_core_item_stack);
+                            let before_splash = bottle_is_splash[i];
+                            let mut bottle_stack = (*bottle)
+                                .map(|potion| bottle_to_core_item_stack(potion, before_splash));
                             let response = render_core_slot_visual(ui, &bottle_stack, 52.0, false);
                             let click = if response.clicked_by(egui::PointerButton::Primary) {
                                 Some(UiSlotClick::Primary)
@@ -12901,11 +14787,20 @@ fn render_brewing_stand(
                             }
 
                             let mapped = bottle_stack.as_ref().and_then(core_item_stack_to_bottle);
-                            *bottle = if mapped.is_some() || bottle_stack.is_none() {
-                                mapped
-                            } else {
-                                before
-                            };
+                            match mapped {
+                                Some((potion, is_splash)) => {
+                                    *bottle = Some(potion);
+                                    bottle_is_splash[i] = is_splash && potion != PotionType::Water;
+                                }
+                                None if bottle_stack.is_none() => {
+                                    *bottle = None;
+                                    bottle_is_splash[i] = false;
+                                }
+                                _ => {
+                                    *bottle = before;
+                                    bottle_is_splash[i] = before_splash;
+                                }
+                            }
                             if i < 2 {
                                 ui.add_space(4.0);
                             }
@@ -13125,17 +15020,21 @@ mod tests {
         apply_primary_drag_distribution, apply_slot_click, armor_piece_from_core_stack,
         armor_piece_to_core_stack, check_crafting_recipe, consume_crafting_inputs_3x3,
         core_item_to_enchanting_id, crafting_max_crafts_2x2, crafting_max_crafts_3x3,
-        cursor_can_accept_full_stack, frames_to_complete, furnace_try_insert, interactive_blocks,
-        item_ids, match_crafting_recipe, potion_ids, try_add_stack_to_cursor,
+        cursor_can_accept_full_stack, frames_to_complete, furnace_try_insert, get_crafting_recipes,
+        interactive_blocks, item_ids, match_crafting_recipe, potion_ids, try_add_stack_to_cursor,
         try_autofill_crafting_grid, try_shift_move_core_stack_into_brewing_stand,
         try_shift_move_core_stack_into_chest, try_shift_move_core_stack_into_enchanting_table,
         try_shift_move_core_stack_into_furnace, ArmorPiece, ArmorSlot, BlockPropertiesRegistry,
         BrewingStandState, ChestState, Chunk, ChunkPos, CraftingGridSize, DroppedItemType,
         EnchantingTableState, Enchantment, EnchantmentType, FurnaceSlotKind, FurnaceState,
         GameWorld, Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth, PlayerPhysics,
-        ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_COBBLESTONE,
-        BLOCK_CRAFTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
-        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_NETHER_WART, CORE_ITEM_WATER_BOTTLE,
+        ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_BOOKSHELF,
+        BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
+        BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
+        BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_FERMENTED_SPIDER_EYE,
+        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GUNPOWDER, CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER,
+        CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WHEAT,
+        CORE_ITEM_WHEAT_SEEDS,
     };
 
     #[test]
@@ -13523,6 +15422,67 @@ mod tests {
     }
 
     #[test]
+    fn sugar_cane_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_DIRT,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            65,
+            0,
+            Voxel {
+                id: BLOCK_SUGAR_CANE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            66,
+            0,
+            Voxel {
+                id: BLOCK_SUGAR_CANE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, 64, 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+
+        assert!(
+            removed.contains(&(glam::IVec3::new(0, 65, 0), BLOCK_SUGAR_CANE)),
+            "Expected sugar cane base to be removed, got: {:?}",
+            removed
+        );
+        assert!(
+            removed.contains(&(glam::IVec3::new(0, 66, 0), BLOCK_SUGAR_CANE)),
+            "Expected sugar cane above to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(chunk.voxel(0, 65, 0).id, mdminecraft_world::BLOCK_AIR);
+        assert_eq!(chunk.voxel(0, 66, 0).id, mdminecraft_world::BLOCK_AIR);
+    }
+
+    #[test]
     fn door_breaks_when_support_removed() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -13598,6 +15558,184 @@ mod tests {
             mdminecraft_world::BLOCK_AIR,
             "Door upper should be cleared when its support is removed"
         );
+    }
+
+    #[test]
+    fn bed_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            64,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+
+        let bed_state = mdminecraft_world::Facing::East.to_state();
+        chunk.set_voxel(
+            0,
+            65,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::BED_FOOT,
+                state: bed_state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            65,
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::BED_HEAD,
+                state: bed_state,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        // Remove the support under the head.
+        chunks
+            .get_mut(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .set_voxel(1, 64, 0, Voxel::default());
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(1, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::interactive_blocks::BED_FOOT
+            )),
+            "Expected bed foot to be removed, got: {:?}",
+            removed
+        );
+        assert!(
+            removed.contains(&(
+                glam::IVec3::new(1, 65, 0),
+                mdminecraft_world::interactive_blocks::BED_HEAD
+            )),
+            "Expected bed head to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(0, 65, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Bed foot should be cleared when its support is removed"
+        );
+        assert_eq!(
+            chunk.voxel(1, 65, 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Bed head should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn bed_pair_removal_works_across_chunks() {
+        let bed_state = mdminecraft_world::Facing::East.to_state();
+
+        // Case 1: removing from the foot clears the head in the neighboring +X chunk.
+        {
+            let mut left = Chunk::new(ChunkPos::new(0, 0));
+            let mut right = Chunk::new(ChunkPos::new(1, 0));
+
+            left.set_voxel(
+                15,
+                65,
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::BED_FOOT,
+                    state: bed_state,
+                    ..Default::default()
+                },
+            );
+            right.set_voxel(
+                0,
+                65,
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::BED_HEAD,
+                    state: bed_state,
+                    ..Default::default()
+                },
+            );
+
+            let mut chunks = std::collections::HashMap::new();
+            chunks.insert(ChunkPos::new(0, 0), left);
+            chunks.insert(ChunkPos::new(1, 0), right);
+
+            let removed = GameWorld::try_remove_other_bed_half(
+                &mut chunks,
+                glam::IVec3::new(15, 65, 0),
+                mdminecraft_world::interactive_blocks::BED_FOOT,
+                bed_state,
+            );
+            assert_eq!(removed, Some(glam::IVec3::new(16, 65, 0)));
+
+            let right = chunks.get(&ChunkPos::new(1, 0)).unwrap();
+            assert_eq!(right.voxel(0, 65, 0).id, mdminecraft_world::BLOCK_AIR);
+        }
+
+        // Case 2: removing from the head clears the foot in the neighboring -X chunk.
+        {
+            let mut left = Chunk::new(ChunkPos::new(0, 0));
+            let mut right = Chunk::new(ChunkPos::new(1, 0));
+
+            left.set_voxel(
+                15,
+                65,
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::BED_FOOT,
+                    state: bed_state,
+                    ..Default::default()
+                },
+            );
+            right.set_voxel(
+                0,
+                65,
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::BED_HEAD,
+                    state: bed_state,
+                    ..Default::default()
+                },
+            );
+
+            let mut chunks = std::collections::HashMap::new();
+            chunks.insert(ChunkPos::new(0, 0), left);
+            chunks.insert(ChunkPos::new(1, 0), right);
+
+            let removed = GameWorld::try_remove_other_bed_half(
+                &mut chunks,
+                glam::IVec3::new(16, 65, 0),
+                mdminecraft_world::interactive_blocks::BED_HEAD,
+                bed_state,
+            );
+            assert_eq!(removed, Some(glam::IVec3::new(15, 65, 0)));
+
+            let left = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert_eq!(left.voxel(15, 65, 0).id, mdminecraft_world::BLOCK_AIR);
+        }
     }
 
     #[test]
@@ -15144,10 +17282,248 @@ mod tests {
     }
 
     #[test]
+    fn crafting_planks_vertical_makes_sticks_and_horizontal_makes_pressure_plate() {
+        let plank = ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1);
+
+        // Vertical: sticks.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[1][0] = Some(plank.clone());
+        assert_eq!(check_crafting_recipe(&grid), Some((ItemType::Item(3), 4)));
+
+        // Horizontal: pressure plate.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[0][1] = Some(plank);
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE),
+                1
+            ))
+        );
+    }
+
+    #[test]
+    fn crafting_buttons_lever_and_stone_pressure_plate() {
+        // Oak button.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::OAK_BUTTON),
+                1
+            ))
+        );
+
+        // Stone button.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::STONE_BUTTON),
+                1
+            ))
+        );
+
+        // Lever.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(3), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::LEVER),
+                1
+            ))
+        );
+
+        // Stone pressure plate.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        grid[0][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE),
+                1
+            ))
+        );
+    }
+
+    #[test]
+    fn crafting_planks_to_oak_door() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in &mut grid {
+            for slot in row.iter_mut().take(2) {
+                *slot = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::OAK_DOOR_LOWER), 3))
+        );
+    }
+
+    #[test]
+    fn crafting_iron_ingots_to_iron_door() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in &mut grid {
+            for slot in row.iter_mut().take(2) {
+                *slot = Some(ItemStack::new(ItemType::Item(7), 1));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::IRON_DOOR_LOWER), 3))
+        );
+    }
+
+    #[test]
+    fn crafting_planks_to_trapdoor() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            for slot in row {
+                *slot = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+            }
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::TRAPDOOR), 2))
+        );
+    }
+
+    #[test]
+    fn crafting_planks_and_sticks_to_oak_fence_and_gate() {
+        let plank = ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1);
+        let stick = ItemStack::new(ItemType::Item(3), 1);
+
+        // Fence: P S P / P S P
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            row[0] = Some(plank.clone());
+            row[1] = Some(stick.clone());
+            row[2] = Some(plank.clone());
+        }
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::OAK_FENCE), 3))
+        );
+
+        // Gate: S P S / S P S
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for row in grid.iter_mut().take(2) {
+            row[0] = Some(stick.clone());
+            row[1] = Some(plank.clone());
+            row[2] = Some(stick.clone());
+        }
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::OAK_FENCE_GATE), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_cobblestone_and_planks_to_slabs_and_stairs() {
+        // Stone slabs.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for slot in &mut grid[0] {
+            *slot = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        }
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::STONE_SLAB), 6))
+        );
+
+        // Oak slabs.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for slot in &mut grid[0] {
+            *slot = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        }
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::OAK_SLAB), 6))
+        );
+
+        // Stone stairs.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::STONE_STAIRS), 4))
+        );
+
+        // Stone stairs (mirrored).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::STONE_STAIRS), 4))
+        );
+
+        // Oak stairs.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::OAK_STAIRS), 4))
+        );
+
+        // Oak stairs (mirrored).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::OAK_STAIRS), 4))
+        );
+    }
+
+    #[test]
     fn crafting_recipes_respect_grid_size() {
         // Furnace is a 3x3-only recipe (crafting table required).
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
-        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 8));
+        for (r, row) in grid.iter_mut().enumerate() {
+            for (c, slot) in row.iter_mut().enumerate() {
+                if r == 1 && c == 1 {
+                    continue;
+                }
+                *slot = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+            }
+        }
 
         assert!(match_crafting_recipe(&grid, CraftingGridSize::TwoByTwo).is_none());
         let recipe = match_crafting_recipe(&grid, CraftingGridSize::ThreeByThree)
@@ -15177,10 +17553,19 @@ mod tests {
             furnace_recipe
         ));
         assert!(main_inventory.slots[0].is_none());
-        assert_eq!(
-            grid[0][0],
-            Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 8))
-        );
+        for (r, row) in grid.iter().enumerate() {
+            for (c, slot) in row.iter().enumerate() {
+                if r == 1 && c == 1 {
+                    assert!(slot.is_none());
+                    continue;
+                }
+
+                assert_eq!(
+                    *slot,
+                    Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1))
+                );
+            }
+        }
 
         // Not enough items: should be a no-op.
         let mut main_inventory = MainInventory::new();
@@ -15203,11 +17588,315 @@ mod tests {
     fn crafting_coal_and_stick_to_torches() {
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
         grid[0][0] = Some(ItemStack::new(ItemType::Item(8), 1));
-        grid[0][1] = Some(ItemStack::new(ItemType::Item(3), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(3), 1));
 
         assert_eq!(
             check_crafting_recipe(&grid),
             Some((ItemType::Block(interactive_blocks::TORCH), 4))
+        );
+    }
+
+    #[test]
+    fn crafting_wheat_to_bread() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_sugar_cane_to_sugar() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_SUGAR_CANE), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_SUGAR), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_sugar_cane_to_paper() {
+        let cane = ItemStack::new(ItemType::Block(BLOCK_SUGAR_CANE), 1);
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(cane.clone());
+        grid[0][1] = Some(cane.clone());
+        grid[0][2] = Some(cane);
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_PAPER), 3))
+        );
+    }
+
+    #[test]
+    fn crafting_paper_and_leather_to_book() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_PAPER), 3));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(102), 1)); // Item(102) = Leather
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_BOOK), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_mushroom_sugar_spider_eye_to_fermented_spider_eye() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_BROWN_MUSHROOM), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_SUGAR), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_SPIDER_EYE), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_carrot_and_gold_ingot_to_golden_carrot() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(
+            ItemType::Food(mdminecraft_core::item::FoodType::Carrot),
+            1,
+        ));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(9), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Food(mdminecraft_core::item::FoodType::GoldenCarrot),
+                1
+            ))
+        );
+    }
+
+    #[test]
+    fn crafting_planks_and_books_to_bookshelf() {
+        let plank = ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1);
+        let book = ItemStack::new(ItemType::Item(CORE_ITEM_BOOK), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        for slot in &mut grid[0] {
+            *slot = Some(plank.clone());
+        }
+        for slot in &mut grid[1] {
+            *slot = Some(book.clone());
+        }
+        for slot in &mut grid[2] {
+            *slot = Some(plank.clone());
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_BOOKSHELF), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_bed_is_shaped() {
+        let wool = ItemStack::new(ItemType::Item(103), 1);
+        let plank = ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(wool.clone());
+        grid[0][1] = Some(wool.clone());
+        grid[0][2] = Some(wool);
+        grid[1][0] = Some(plank.clone());
+        grid[1][1] = Some(plank.clone());
+        grid[1][2] = Some(plank);
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::BED_FOOT), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_glass_to_glass_panes() {
+        let glass = ItemStack::new(ItemType::Block(interactive_blocks::GLASS), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(glass.clone());
+        grid[0][1] = Some(glass.clone());
+        grid[0][2] = Some(glass.clone());
+        grid[1][0] = Some(glass.clone());
+        grid[1][1] = Some(glass.clone());
+        grid[1][2] = Some(glass);
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(interactive_blocks::GLASS_PANE), 16))
+        );
+    }
+
+    #[test]
+    fn crafting_glass_to_glass_bottles() {
+        let glass = ItemStack::new(ItemType::Block(interactive_blocks::GLASS), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(glass.clone());
+        grid[0][2] = Some(glass.clone());
+        grid[1][1] = Some(glass);
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_GLASS_BOTTLE), 3))
+        );
+    }
+
+    #[test]
+    fn crafting_nether_wart_block_to_nether_wart_items() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_NETHER_WART_BLOCK),
+            1,
+        ));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_NETHER_WART), 9))
+        );
+    }
+
+    #[test]
+    fn crafting_brewing_stand_requires_blaze_powder_and_cobblestone() {
+        let blaze_powder = ItemStack::new(ItemType::Item(CORE_ITEM_BLAZE_POWDER), 1);
+        let cobble = ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][1] = Some(blaze_powder);
+        grid[1][0] = Some(cobble.clone());
+        grid[1][1] = Some(cobble.clone());
+        grid[1][2] = Some(cobble);
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_BREWING_STAND), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_enchanting_table_vanillaish_recipe() {
+        let lapis = ItemStack::new(ItemType::Item(15), 1);
+        let diamond = ItemStack::new(ItemType::Item(14), 1);
+        let obsidian = ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), 1);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][1] = Some(lapis);
+        grid[1][0] = Some(diamond.clone());
+        grid[1][1] = Some(obsidian.clone());
+        grid[1][2] = Some(diamond);
+        grid[2][0] = Some(obsidian.clone());
+        grid[2][1] = Some(obsidian.clone());
+        grid[2][2] = Some(obsidian);
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_ENCHANTING_TABLE), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_bow_and_arrow_are_shaped_and_bow_is_mirrorable() {
+        let stick = ItemStack::new(ItemType::Item(3), 1);
+        let string = ItemStack::new(ItemType::Item(4), 1);
+
+        // Bow (canonical orientation).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(stick.clone());
+        grid[1][0] = Some(stick.clone());
+        grid[2][0] = Some(stick.clone());
+        grid[0][1] = Some(string.clone());
+        grid[2][1] = Some(string.clone());
+        grid[1][2] = Some(string.clone());
+        assert_eq!(check_crafting_recipe(&grid), Some((ItemType::Item(1), 1)));
+
+        // Bow (mirrored).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][2] = Some(stick.clone());
+        grid[1][2] = Some(stick.clone());
+        grid[2][2] = Some(stick);
+        grid[0][1] = Some(string.clone());
+        grid[2][1] = Some(string.clone());
+        grid[1][0] = Some(string);
+        assert_eq!(check_crafting_recipe(&grid), Some((ItemType::Item(1), 1)));
+
+        // Arrow.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(5), 1)); // flint
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(3), 1)); // stick
+        grid[2][0] = Some(ItemStack::new(ItemType::Item(6), 1)); // feather
+        assert_eq!(check_crafting_recipe(&grid), Some((ItemType::Item(2), 4)));
+    }
+
+    #[test]
+    fn crafting_tools_are_shaped_and_axes_and_hoes_mirror() {
+        let plank = ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1);
+        let stick = ItemStack::new(ItemType::Item(3), 1);
+
+        // Wooden pickaxe.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[0][1] = Some(plank.clone());
+        grid[0][2] = Some(plank.clone());
+        grid[1][1] = Some(stick.clone());
+        grid[2][1] = Some(stick.clone());
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood), 1))
+        );
+
+        // Wooden axe (canonical orientation).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[0][1] = Some(plank.clone());
+        grid[1][0] = Some(plank.clone());
+        grid[1][1] = Some(stick.clone());
+        grid[2][1] = Some(stick.clone());
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Tool(ToolType::Axe, ToolMaterial::Wood), 1))
+        );
+
+        // Wooden axe (mirrored).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[0][1] = Some(plank.clone());
+        grid[1][1] = Some(plank.clone());
+        grid[1][0] = Some(stick.clone());
+        grid[2][0] = Some(stick.clone());
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Tool(ToolType::Axe, ToolMaterial::Wood), 1))
+        );
+
+        // Wooden hoe (canonical orientation).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[0][1] = Some(plank.clone());
+        grid[1][1] = Some(stick.clone());
+        grid[2][1] = Some(stick.clone());
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Tool(ToolType::Hoe, ToolMaterial::Wood), 1))
+        );
+
+        // Wooden hoe (mirrored).
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(plank.clone());
+        grid[0][1] = Some(plank.clone());
+        grid[1][0] = Some(stick.clone());
+        grid[2][0] = Some(stick);
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Tool(ToolType::Hoe, ToolMaterial::Wood), 1))
         );
     }
 
@@ -15276,20 +17965,24 @@ mod tests {
 
     #[test]
     fn crafting_max_crafts_computes_min_over_inputs() {
+        let recipes = get_crafting_recipes();
+        let torches_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Block(interactive_blocks::TORCH))
+            .expect("torch recipe exists");
+        let planks_recipe = recipes
+            .iter()
+            .find(|recipe| recipe.output == ItemType::Block(BLOCK_OAK_PLANKS))
+            .expect("planks recipe exists");
+
         let mut grid_2x2: [[Option<ItemStack>; 2]; 2] = Default::default();
         grid_2x2[0][0] = Some(ItemStack::new(ItemType::Item(8), 10)); // coal
-        grid_2x2[0][1] = Some(ItemStack::new(ItemType::Item(3), 3)); // stick
-        assert_eq!(
-            crafting_max_crafts_2x2(&grid_2x2, &[(ItemType::Item(8), 1), (ItemType::Item(3), 1)]),
-            3
-        );
+        grid_2x2[1][0] = Some(ItemStack::new(ItemType::Item(3), 3)); // stick
+        assert_eq!(crafting_max_crafts_2x2(&grid_2x2, torches_recipe), 3);
 
         let mut grid_3x3: [[Option<ItemStack>; 3]; 3] = Default::default();
         grid_3x3[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_LOG), 5));
-        assert_eq!(
-            crafting_max_crafts_3x3(&grid_3x3, &[(ItemType::Block(BLOCK_OAK_LOG), 1)]),
-            5
-        );
+        assert_eq!(crafting_max_crafts_3x3(&grid_3x3, planks_recipe), 5);
     }
 
     #[test]
@@ -15411,6 +18104,18 @@ mod tests {
     }
 
     #[test]
+    fn diamond_converts_between_dropped_and_core_item_ids() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Diamond),
+            Some(ItemType::Item(14))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(14)),
+            Some(DroppedItemType::Diamond)
+        );
+    }
+
+    #[test]
     fn tools_convert_between_dropped_and_core_item_types() {
         let tool = ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron);
         assert_eq!(
@@ -15454,12 +18159,180 @@ mod tests {
         );
 
         assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Gunpowder),
+            Some(ItemType::Item(CORE_ITEM_GUNPOWDER))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_GUNPOWDER)),
+            Some(DroppedItemType::Gunpowder)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::SpiderEye),
+            Some(ItemType::Item(CORE_ITEM_SPIDER_EYE))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_SPIDER_EYE)),
+            Some(DroppedItemType::SpiderEye)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::FermentedSpiderEye),
+            Some(ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(
+                CORE_ITEM_FERMENTED_SPIDER_EYE
+            )),
+            Some(DroppedItemType::FermentedSpiderEye)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::MagmaCream),
+            Some(ItemType::Item(CORE_ITEM_MAGMA_CREAM))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_MAGMA_CREAM)),
+            Some(DroppedItemType::MagmaCream)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Sugar),
+            Some(ItemType::Item(CORE_ITEM_SUGAR))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_SUGAR)),
+            Some(DroppedItemType::Sugar)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::GoldenCarrot),
+            Some(ItemType::Food(
+                mdminecraft_core::item::FoodType::GoldenCarrot
+            ))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Food(
+                mdminecraft_core::item::FoodType::GoldenCarrot
+            )),
+            Some(DroppedItemType::GoldenCarrot)
+        );
+
+        assert_eq!(
             GameWorld::convert_dropped_item_type(DroppedItemType::PotionAwkward),
             Some(ItemType::Potion(potion_ids::AWKWARD))
         );
         assert_eq!(
             GameWorld::convert_core_item_type_to_dropped(ItemType::Potion(potion_ids::AWKWARD)),
             Some(DroppedItemType::PotionAwkward)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::SplashPotionStrength),
+            Some(ItemType::SplashPotion(potion_ids::STRENGTH))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::SplashPotion(
+                potion_ids::STRENGTH
+            )),
+            Some(DroppedItemType::SplashPotionStrength)
+        );
+    }
+
+    #[test]
+    fn books_and_paper_convert_between_dropped_and_core_item_types() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Paper),
+            Some(ItemType::Item(CORE_ITEM_PAPER))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_PAPER)),
+            Some(DroppedItemType::Paper)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Book),
+            Some(ItemType::Item(CORE_ITEM_BOOK))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_BOOK)),
+            Some(DroppedItemType::Book)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::SugarCane),
+            Some(ItemType::Block(BLOCK_SUGAR_CANE))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Block(BLOCK_SUGAR_CANE)),
+            Some(DroppedItemType::SugarCane)
+        );
+    }
+
+    #[test]
+    fn farming_items_convert_between_dropped_and_core_item_types() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::WheatSeeds),
+            Some(ItemType::Item(CORE_ITEM_WHEAT_SEEDS))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_WHEAT_SEEDS)),
+            Some(DroppedItemType::WheatSeeds)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Wheat),
+            Some(ItemType::Item(CORE_ITEM_WHEAT))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_WHEAT)),
+            Some(DroppedItemType::Wheat)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Bread),
+            Some(ItemType::Food(mdminecraft_core::item::FoodType::Bread))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Food(
+                mdminecraft_core::item::FoodType::Bread
+            )),
+            Some(DroppedItemType::Bread)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Carrot),
+            Some(ItemType::Food(mdminecraft_core::item::FoodType::Carrot))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Food(
+                mdminecraft_core::item::FoodType::Carrot
+            )),
+            Some(DroppedItemType::Carrot)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Potato),
+            Some(ItemType::Food(mdminecraft_core::item::FoodType::Potato))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Food(
+                mdminecraft_core::item::FoodType::Potato
+            )),
+            Some(DroppedItemType::Potato)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::BakedPotato),
+            Some(ItemType::Food(
+                mdminecraft_core::item::FoodType::BakedPotato
+            ))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Food(
+                mdminecraft_core::item::FoodType::BakedPotato
+            )),
+            Some(DroppedItemType::BakedPotato)
         );
     }
 
@@ -15557,6 +18430,71 @@ mod tests {
         assert_eq!(stand.fuel, 64);
         assert_eq!(stand.ingredient, Some((item_ids::BLAZE_POWDER, 3)));
         assert_eq!(powder.count, 0);
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_gunpowder_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut gunpowder = ItemStack::new(ItemType::Item(CORE_ITEM_GUNPOWDER), 4);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut gunpowder,
+            &mut stand
+        ));
+        assert_eq!(gunpowder.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::GUNPOWDER, 4)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_sugar_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut sugar = ItemStack::new(ItemType::Item(CORE_ITEM_SUGAR), 7);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut sugar, &mut stand
+        ));
+        assert_eq!(sugar.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::SUGAR, 7)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_fermented_spider_eye_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut eye = ItemStack::new(ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE), 3);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut eye, &mut stand
+        ));
+        assert_eq!(eye.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::FERMENTED_SPIDER_EYE, 3)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_magma_cream_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut cream = ItemStack::new(ItemType::Item(CORE_ITEM_MAGMA_CREAM), 2);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut cream, &mut stand
+        ));
+        assert_eq!(cream.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::MAGMA_CREAM, 2)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_golden_carrots_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut carrots = ItemStack::new(
+            ItemType::Food(mdminecraft_core::item::FoodType::GoldenCarrot),
+            2,
+        );
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut carrots,
+            &mut stand
+        ));
+        assert_eq!(carrots.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::GOLDEN_CARROT, 2)));
     }
 
     #[test]

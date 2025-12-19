@@ -80,6 +80,14 @@ pub enum FoodType {
     RawMeat,
     /// Cooked meat
     CookedMeat,
+    /// Carrot (edible and plantable)
+    Carrot,
+    /// Potato (edible and plantable)
+    Potato,
+    /// Baked potato (smelted potato)
+    BakedPotato,
+    /// Golden carrot
+    GoldenCarrot,
 }
 
 /// Generic item IDs for non-tool, non-block items.

@@ -148,6 +148,28 @@ impl CropGrowthSystem {
         self.crop_positions.remove(&pos);
     }
 
+    /// Unregister all crops in a chunk (e.g. when unloading it).
+    pub fn unregister_chunk(&mut self, chunk: ChunkPos) {
+        let start = CropPosition {
+            chunk,
+            x: 0,
+            y: 0,
+            z: 0,
+        };
+        let end = CropPosition {
+            chunk,
+            x: u8::MAX,
+            y: u8::MAX,
+            z: u8::MAX,
+        };
+
+        let to_remove: Vec<CropPosition> =
+            self.crop_positions.range(start..=end).copied().collect();
+        for pos in to_remove {
+            self.crop_positions.remove(&pos);
+        }
+    }
+
     /// Tick crop growth (called each game tick)
     pub fn tick(&mut self, tick: u64, chunks: &mut HashMap<ChunkPos, Chunk>) {
         // Create a seeded RNG for this tick
@@ -276,11 +298,30 @@ impl CropGrowthSystem {
             return;
         }
 
-        // DETERMINISM FIX: Sort chunk positions to ensure consistent iteration order
-        let mut chunk_positions: Vec<ChunkPos> = chunks.keys().copied().collect();
-        chunk_positions.sort();
+        // Skip work when there are no registered crops.
+        //
+        // This keeps farming "pay for play" and avoids scanning every loaded chunk in worlds
+        // where the player hasn't started farming yet.
+        if self.crop_positions.is_empty() {
+            return;
+        }
 
-        for chunk_pos in chunk_positions {
+        // Only scan chunks that contain crops (farmland hydration matters for crop growth).
+        // `crop_positions` is a `BTreeSet`, so iteration order is deterministic.
+        let crop_chunks: Vec<ChunkPos> = {
+            let mut chunks = Vec::new();
+            let mut last_chunk: Option<ChunkPos> = None;
+            for crop in &self.crop_positions {
+                if Some(crop.chunk) == last_chunk {
+                    continue;
+                }
+                last_chunk = Some(crop.chunk);
+                chunks.push(crop.chunk);
+            }
+            chunks
+        };
+
+        for chunk_pos in crop_chunks {
             self.update_chunk_farmland(chunk_pos, chunks);
         }
     }
@@ -892,6 +933,18 @@ mod tests {
                 light_block: 0,
             },
         );
+        // Place a crop above so the hydration system is exercised.
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunk.set_voxel(
             7,
             64,
@@ -904,6 +957,13 @@ mod tests {
             },
         );
         chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        system.register_crop(CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 65,
+            z: 5,
+        });
 
         // Run hydration update (every 20 ticks)
         for tick in 0..21 {
@@ -935,7 +995,26 @@ mod tests {
                 light_block: 0,
             },
         );
+        // Place a crop above so the hydration system is exercised.
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        system.register_crop(CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 65,
+            z: 5,
+        });
 
         // Run hydration update
         for tick in 0..21 {
@@ -1043,6 +1122,18 @@ mod tests {
                 light_block: 0,
             },
         );
+        // Place a crop above so the hydration system is exercised.
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunk.set_voxel(
             5,
             63,
@@ -1055,6 +1146,13 @@ mod tests {
             },
         );
         chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        system.register_crop(CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 65,
+            z: 5,
+        });
 
         // Run hydration update
         for tick in 0..21 {
@@ -1086,6 +1184,18 @@ mod tests {
                 light_block: 0,
             },
         );
+        // Place a crop above so the hydration system is exercised.
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
         chunk.set_voxel(
             10,
             64,
@@ -1098,6 +1208,13 @@ mod tests {
             },
         );
         chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        system.register_crop(CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 65,
+            z: 5,
+        });
 
         // Run hydration update
         for tick in 0..21 {

@@ -188,6 +188,55 @@ pub enum ItemType {
     BrewingStand,
     NetherWartBlock,
     SoulSand,
+
+    // Beds (appended to preserve stable IDs)
+    Bed,
+
+    // Farming/food items (appended to preserve stable IDs)
+    WheatSeeds,
+    Wheat,
+    Bread,
+    Bookshelf,
+    Carrot,
+    Potato,
+    BakedPotato,
+
+    // Splash potions (appended to preserve stable IDs)
+    SplashPotionAwkward,
+    SplashPotionNightVision,
+    SplashPotionInvisibility,
+    SplashPotionLeaping,
+    SplashPotionFireResistance,
+    SplashPotionSwiftness,
+    SplashPotionSlowness,
+    SplashPotionWaterBreathing,
+    SplashPotionHealing,
+    SplashPotionHarming,
+    SplashPotionPoison,
+    SplashPotionRegeneration,
+    SplashPotionStrength,
+    SplashPotionWeakness,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    SpiderEye,
+    GoldenCarrot,
+
+    // Plants (appended to preserve stable IDs)
+    SugarCane,
+
+    // Materials (appended to preserve stable IDs)
+    Sugar,
+    Paper,
+    Book,
+
+    // Plants (appended to preserve stable IDs)
+    BrownMushroom,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    FermentedSpiderEye,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    MagmaCream,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -327,6 +376,37 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::BrewingStand,
     ItemType::NetherWartBlock,
     ItemType::SoulSand,
+    ItemType::Bed,
+    ItemType::WheatSeeds,
+    ItemType::Wheat,
+    ItemType::Bread,
+    ItemType::Bookshelf,
+    ItemType::Carrot,
+    ItemType::Potato,
+    ItemType::BakedPotato,
+    ItemType::SplashPotionAwkward,
+    ItemType::SplashPotionNightVision,
+    ItemType::SplashPotionInvisibility,
+    ItemType::SplashPotionLeaping,
+    ItemType::SplashPotionFireResistance,
+    ItemType::SplashPotionSwiftness,
+    ItemType::SplashPotionSlowness,
+    ItemType::SplashPotionWaterBreathing,
+    ItemType::SplashPotionHealing,
+    ItemType::SplashPotionHarming,
+    ItemType::SplashPotionPoison,
+    ItemType::SplashPotionRegeneration,
+    ItemType::SplashPotionStrength,
+    ItemType::SplashPotionWeakness,
+    ItemType::SpiderEye,
+    ItemType::GoldenCarrot,
+    ItemType::SugarCane,
+    ItemType::Sugar,
+    ItemType::Paper,
+    ItemType::Book,
+    ItemType::BrownMushroom,
+    ItemType::FermentedSpiderEye,
+    ItemType::MagmaCream,
 ];
 
 impl ItemType {
@@ -366,11 +446,13 @@ impl ItemType {
             | ItemType::DiamondOre
             | ItemType::LapisOre
             | ItemType::Wool
+            | ItemType::Diamond
             | ItemType::Feather
             | ItemType::Bone
             | ItemType::RottenFlesh
             | ItemType::String
             | ItemType::Gunpowder
+            | ItemType::SpiderEye
             | ItemType::IronIngot
             | ItemType::GoldIngot
             | ItemType::Coal
@@ -411,7 +493,23 @@ impl ItemType {
             | ItemType::EnchantingTable
             | ItemType::BrewingStand
             | ItemType::NetherWartBlock
-            | ItemType::SoulSand => 64,
+            | ItemType::SoulSand
+            | ItemType::Bed
+            | ItemType::WheatSeeds
+            | ItemType::Wheat
+            | ItemType::Bread
+            | ItemType::Bookshelf
+            | ItemType::Carrot
+            | ItemType::Potato
+            | ItemType::BakedPotato
+            | ItemType::GoldenCarrot
+            | ItemType::SugarCane
+            | ItemType::Sugar
+            | ItemType::Paper
+            | ItemType::Book
+            | ItemType::BrownMushroom
+            | ItemType::FermentedSpiderEye => 64,
+            ItemType::MagmaCream => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -420,8 +518,7 @@ impl ItemType {
             | ItemType::CookedBeef
             | ItemType::Leather
             | ItemType::Egg
-            | ItemType::Apple
-            | ItemType::Diamond => 16,
+            | ItemType::Apple => 16,
 
             // Non-stackable items (weapons, armor, potions)
             ItemType::Bow
@@ -455,6 +552,20 @@ impl ItemType {
             | ItemType::PotionRegeneration
             | ItemType::PotionStrength
             | ItemType::PotionWeakness
+            | ItemType::SplashPotionAwkward
+            | ItemType::SplashPotionNightVision
+            | ItemType::SplashPotionInvisibility
+            | ItemType::SplashPotionLeaping
+            | ItemType::SplashPotionFireResistance
+            | ItemType::SplashPotionSwiftness
+            | ItemType::SplashPotionSlowness
+            | ItemType::SplashPotionWaterBreathing
+            | ItemType::SplashPotionHealing
+            | ItemType::SplashPotionHarming
+            | ItemType::SplashPotionPoison
+            | ItemType::SplashPotionRegeneration
+            | ItemType::SplashPotionStrength
+            | ItemType::SplashPotionWeakness
             | ItemType::WoodenPickaxe
             | ItemType::StonePickaxe
             | ItemType::IronPickaxe
@@ -532,11 +643,11 @@ impl ItemType {
             12 => Some((ItemType::OakPlanks, 1)),
             13 => Some((ItemType::CraftingTable, 1)),
 
-            // Ore blocks - coal drops coal, others drop ore blocks
+            // Ore blocks - coal and diamond drop resources; others drop ore blocks
             14 => Some((ItemType::Coal, 1)),
             15 => Some((ItemType::IronOre, 1)),
             16 => Some((ItemType::GoldOre, 1)),
-            17 => Some((ItemType::DiamondOre, 1)),
+            17 => Some((ItemType::Diamond, 1)),
 
             // Obsidian
             23 => Some((ItemType::Obsidian, 1)),
@@ -547,6 +658,9 @@ impl ItemType {
             // Doors (either half drops the door item)
             26 | 27 => Some((ItemType::OakDoor, 1)),
             28 | 29 => Some((ItemType::IronDoor, 1)),
+
+            // Beds (either half drops the bed item)
+            65 | 66 => Some((ItemType::Bed, 1)),
 
             // Building blocks
             31 => Some((ItemType::OakFence, 1)),
@@ -568,6 +682,14 @@ impl ItemType {
             // Farmland drops dirt (like Minecraft)
             47 | 48 => Some((ItemType::Dirt, 1)),
 
+            // Wheat crops (stage 7 drops wheat; earlier stages drop seeds).
+            49..=55 => Some((ItemType::WheatSeeds, 1)), // wheat_0..wheat_6
+            56 => Some((ItemType::Wheat, 1)),           // wheat_7
+
+            // Carrot/potato crops: always drop the produce item (used for replanting).
+            57..=60 => Some((ItemType::Carrot, 1)), // carrots_0..carrots_3
+            61..=64 => Some((ItemType::Potato, 1)), // potatoes_0..potatoes_3
+
             // Lapis ore (drops 4-9 lapis, using 6 as average for now)
             98 => Some((ItemType::LapisLazuli, 6)),
 
@@ -579,6 +701,13 @@ impl ItemType {
             100 => Some((ItemType::BrewingStand, 1)),
             101 => Some((ItemType::NetherWartBlock, 1)),
             102 => Some((ItemType::SoulSand, 1)),
+            103 => Some((ItemType::Bookshelf, 1)),
+            104 => Some((ItemType::SugarCane, 1)),
+            105 => Some((ItemType::BrownMushroom, 1)),
+            106 => Some((ItemType::MagmaCream, 1)),
+
+            // Magma block: drops blaze powder (Overworld proxy for brewing fuel).
+            80 => Some((ItemType::BlazePowder, 1)),
 
             // Interactive/redstone components
             30 => Some((ItemType::Ladder, 1)),
@@ -750,6 +879,10 @@ impl ItemType {
             ItemType::BrewingStand => Some(100),
             ItemType::NetherWartBlock => Some(101),
             ItemType::SoulSand => Some(102),
+            ItemType::Bookshelf => Some(103),
+            ItemType::SugarCane => Some(104),
+            ItemType::BrownMushroom => Some(105),
+            ItemType::Bed => Some(66),
             // Non-placeable items (mob drops, food, crafted items)
             _ => None,
         }
@@ -810,6 +943,10 @@ impl ItemType {
             100 => Some(ItemType::BrewingStand),
             101 => Some(ItemType::NetherWartBlock),
             102 => Some(ItemType::SoulSand),
+            103 => Some(ItemType::Bookshelf),
+            104 => Some(ItemType::SugarCane),
+            105 => Some(ItemType::BrownMushroom),
+            65 | 66 => Some(ItemType::Bed),
             _ => None,
         }
     }
@@ -1205,7 +1342,10 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::SoulSand as usize + 1);
+        assert_eq!(
+            ALL_ITEM_TYPES.len(),
+            ItemType::MagmaCream as usize + 1
+        );
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1222,6 +1362,15 @@ mod tests {
         assert_eq!(ItemType::OakLog.max_stack_size(), 64);
         assert_eq!(ItemType::Ice.max_stack_size(), 64);
         assert_eq!(ItemType::Feather.max_stack_size(), 64);
+        assert_eq!(ItemType::Bed.max_stack_size(), 64);
+        assert_eq!(ItemType::Diamond.max_stack_size(), 64);
+        assert_eq!(ItemType::WheatSeeds.max_stack_size(), 64);
+        assert_eq!(ItemType::Wheat.max_stack_size(), 64);
+        assert_eq!(ItemType::Bread.max_stack_size(), 64);
+        assert_eq!(ItemType::Bookshelf.max_stack_size(), 64);
+        assert_eq!(ItemType::Carrot.max_stack_size(), 64);
+        assert_eq!(ItemType::Potato.max_stack_size(), 64);
+        assert_eq!(ItemType::BakedPotato.max_stack_size(), 64);
 
         // Food/resources stack to 16
         assert_eq!(ItemType::RawPork.max_stack_size(), 16);
@@ -1254,10 +1403,13 @@ mod tests {
         assert_eq!(ItemType::from_block(14), Some((ItemType::Coal, 1)));
         assert_eq!(ItemType::from_block(15), Some((ItemType::IronOre, 1)));
         assert_eq!(ItemType::from_block(16), Some((ItemType::GoldOre, 1)));
-        assert_eq!(ItemType::from_block(17), Some((ItemType::DiamondOre, 1)));
+        assert_eq!(ItemType::from_block(17), Some((ItemType::Diamond, 1)));
 
         // Obsidian
         assert_eq!(ItemType::from_block(23), Some((ItemType::Obsidian, 1)));
+
+        // Magma blocks drop blaze powder (Overworld proxy).
+        assert_eq!(ItemType::from_block(80), Some((ItemType::BlazePowder, 1)));
 
         // Glass needs Silk Touch (panes drop themselves)
         assert_eq!(ItemType::from_block(25), None);
@@ -1268,6 +1420,10 @@ mod tests {
         assert_eq!(ItemType::from_block(27), Some((ItemType::OakDoor, 1)));
         assert_eq!(ItemType::from_block(28), Some((ItemType::IronDoor, 1)));
         assert_eq!(ItemType::from_block(29), Some((ItemType::IronDoor, 1)));
+
+        // Beds: either half drops the bed item.
+        assert_eq!(ItemType::from_block(65), Some((ItemType::Bed, 1)));
+        assert_eq!(ItemType::from_block(66), Some((ItemType::Bed, 1)));
 
         // Basic building blocks
         assert_eq!(ItemType::from_block(31), Some((ItemType::OakFence, 1)));
@@ -1285,6 +1441,16 @@ mod tests {
         assert_eq!(ItemType::from_block(10), None); // Bedrock
         assert_eq!(ItemType::from_block(13), Some((ItemType::CraftingTable, 1))); // Crafting table
         assert_eq!(ItemType::from_block(69), Some((ItemType::Torch, 1))); // Torch
+
+        // Wheat crops
+        assert_eq!(ItemType::from_block(49), Some((ItemType::WheatSeeds, 1)));
+        assert_eq!(ItemType::from_block(55), Some((ItemType::WheatSeeds, 1)));
+        assert_eq!(ItemType::from_block(56), Some((ItemType::Wheat, 1)));
+        assert_eq!(ItemType::from_block(57), Some((ItemType::Carrot, 1)));
+        assert_eq!(ItemType::from_block(60), Some((ItemType::Carrot, 1)));
+        assert_eq!(ItemType::from_block(61), Some((ItemType::Potato, 1)));
+        assert_eq!(ItemType::from_block(64), Some((ItemType::Potato, 1)));
+        assert_eq!(ItemType::from_block(103), Some((ItemType::Bookshelf, 1)));
     }
 
     #[test]
@@ -1297,11 +1463,23 @@ mod tests {
         assert_eq!(ItemType::IronOre.to_block(), Some(15));
         assert_eq!(ItemType::GoldOre.to_block(), Some(16));
         assert_eq!(ItemType::DiamondOre.to_block(), Some(17));
+        assert_eq!(ItemType::Bed.to_block(), Some(66));
+        assert_eq!(ItemType::Bookshelf.to_block(), Some(103));
 
         // Non-placeable items
         assert_eq!(ItemType::RawPork.to_block(), None);
         assert_eq!(ItemType::Apple.to_block(), None);
         assert_eq!(ItemType::Stick.to_block(), None);
+    }
+
+    #[test]
+    fn test_item_type_from_placeable_block() {
+        assert_eq!(ItemType::from_placeable_block(66), Some(ItemType::Bed));
+        assert_eq!(ItemType::from_placeable_block(65), Some(ItemType::Bed));
+        assert_eq!(
+            ItemType::from_placeable_block(103),
+            Some(ItemType::Bookshelf)
+        );
     }
 
     #[test]

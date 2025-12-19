@@ -125,5 +125,9 @@
   { "name": "enchanting_table", "opaque": true, "texture": "blocks/stone" },
   { "name": "brewing_stand", "opaque": false, "texture": "blocks/stone" },
   { "name": "nether_wart_block", "opaque": true, "texture": "blocks/stone" },
-  { "name": "soul_sand", "opaque": true, "texture": "blocks/sand" }
+  { "name": "soul_sand", "opaque": true, "texture": "blocks/sand" },
+  { "name": "bookshelf", "opaque": true, "texture": "blocks/planks" },
+  { "name": "sugar_cane", "opaque": false, "texture": "blocks/grass_top" },
+  { "name": "brown_mushroom", "opaque": false, "texture": "blocks/grass_top" },
+  { "name": "magma_cream_ore", "opaque": true, "texture": "blocks/magma_block", "emissive": true, "harvest_level": "stone" }
 ]
