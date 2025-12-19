@@ -198,6 +198,18 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::redstone_blocks::REDSTONE_LAMP_LIT,
         id_of(&map, "redstone_lamp_lit")
     );
+    assert_eq!(
+        mdminecraft_world::redstone_blocks::REDSTONE_REPEATER,
+        id_of(&map, "redstone_repeater")
+    );
+    assert_eq!(
+        mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR,
+        id_of(&map, "redstone_comparator")
+    );
+    assert_eq!(
+        mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER,
+        id_of(&map, "redstone_observer")
+    );
 
     // Farming blocks.
     assert_eq!(
@@ -248,6 +260,10 @@ fn block_ids_match_blocks_json() {
     assert_eq!(
         mdminecraft_world::BLOCK_PUFFERFISH_ORE,
         id_of(&map, "pufferfish_ore")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_NETHER_QUARTZ_ORE,
+        id_of(&map, "nether_quartz_ore")
     );
 
     let wheat = [

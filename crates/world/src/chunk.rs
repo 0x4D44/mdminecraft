@@ -132,6 +132,9 @@ pub const BLOCK_GLOWSTONE_DUST_ORE: BlockId = 112;
 /// ID for pufferfish ore (Overworld proxy block).
 pub const BLOCK_PUFFERFISH_ORE: BlockId = 113;
 
+/// ID for nether quartz ore (Overworld proxy block).
+pub const BLOCK_NETHER_QUARTZ_ORE: BlockId = 125;
+
 /// ID for cobblestone wall.
 pub const BLOCK_COBBLESTONE_WALL: BlockId = 114;
 

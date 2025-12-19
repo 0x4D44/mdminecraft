@@ -28,10 +28,10 @@ use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockEntitiesState, BlockEntityKey, BlockId, BlockPropertiesRegistry,
     BlockState, BrewingStandState, ChestState, Chunk, ChunkPos, CropGrowthSystem, CropPosition,
-    EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState, InteractionManager,
-    Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor,
-    PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos,
-    RedstoneSimulator, RegionStore, SimTime, StatusEffectType, StatusEffects,
+    EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState, HopperState,
+    InteractionManager, Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner,
+    MobType, PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager,
+    RedstonePos, RedstoneSimulator, RegionStore, SimTime, StatusEffectType, StatusEffects,
     SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle,
     WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF,
     BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
@@ -77,6 +77,7 @@ const CORE_ITEM_PHANTOM_MEMBRANE: u16 = 2016;
 const CORE_ITEM_REDSTONE_DUST: u16 = 2017;
 const CORE_ITEM_GLOWSTONE_DUST: u16 = 2018;
 const CORE_ITEM_PUFFERFISH: u16 = 2019;
+const CORE_ITEM_NETHER_QUARTZ: u16 = 2023;
 const CORE_ITEM_BUCKET: u16 = client_item_ids::BUCKET;
 const CORE_ITEM_WATER_BUCKET: u16 = client_item_ids::WATER_BUCKET;
 const CORE_ITEM_LAVA_BUCKET: u16 = client_item_ids::LAVA_BUCKET;
@@ -431,6 +432,7 @@ impl Hotbar {
                     CORE_ITEM_REDSTONE_DUST => "Redstone Dust".to_string(),
                     CORE_ITEM_GLOWSTONE_DUST => "Glowstone Dust".to_string(),
                     CORE_ITEM_PUFFERFISH => "Pufferfish".to_string(),
+                    CORE_ITEM_NETHER_QUARTZ => "Nether Quartz".to_string(),
                     CORE_ITEM_BUCKET => "Bucket".to_string(),
                     CORE_ITEM_WATER_BUCKET => "Water Bucket".to_string(),
                     CORE_ITEM_LAVA_BUCKET => "Lava Bucket".to_string(),
@@ -1621,6 +1623,8 @@ pub struct GameWorld {
     chest_open: bool,
     /// Currently open chest position (if any)
     open_chest_pos: Option<BlockEntityKey>,
+    /// Hopper inventories by position
+    hoppers: BTreeMap<BlockEntityKey, HopperState>,
 
     /// Whether the in-game pause menu is open.
     pause_menu_open: bool,
@@ -1905,6 +1909,7 @@ impl GameWorld {
         let enchanting_tables = loaded_block_entities.enchanting_tables;
         let brewing_stands = loaded_block_entities.brewing_stands;
         let chests = loaded_block_entities.chests;
+        let hoppers = loaded_block_entities.hoppers;
 
         // Setup state
         let debug_hud = DebugHud::new(); // Zeroed by default
@@ -1997,6 +2002,7 @@ impl GameWorld {
             chests,
             chest_open: false,
             open_chest_pos: None,
+            hoppers,
             pause_menu_open: false,
             pause_menu_view: PauseMenuView::Main,
             pause_controls_dirty: false,
@@ -3151,6 +3157,7 @@ impl GameWorld {
             enchanting_tables: self.enchanting_tables.clone(),
             brewing_stands: self.brewing_stands.clone(),
             chests: self.chests.clone(),
+            hoppers: self.hoppers.clone(),
         }
     }
 
@@ -4054,6 +4061,8 @@ impl GameWorld {
         // Update redstone
         self.update_player_pressure_plate();
         self.redstone_sim.tick(&mut self.chunks);
+        let dirty_redstone_geometry_positions = self.redstone_sim.take_dirty_geometry_positions();
+        let dirty_redstone_geometry_chunks = self.redstone_sim.take_dirty_geometry_chunks();
         let dirty_redstone = self.redstone_sim.take_dirty_chunks();
         let dirty_redstone_lighting = self.redstone_sim.take_dirty_light_chunks();
         for chunk_pos in dirty_redstone {
@@ -4062,6 +4071,31 @@ impl GameWorld {
                 mesh_refresh.insert(neighbor);
             }
         }
+
+        // Piston-style block movement (and other geometry changes triggered by redstone) should
+        // wake the fluid sim so water/lava reacts on the next tick.
+        for pos in dirty_redstone_geometry_positions {
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+        }
+
+        // Geometry changes can affect skylight and block-light occlusion; recompute both locally.
+        for chunk_pos in &dirty_redstone_geometry_chunks {
+            self.recompute_chunk_lighting(*chunk_pos);
+            mesh_refresh.insert(*chunk_pos);
+            for neighbor in Self::neighbor_chunk_positions(*chunk_pos) {
+                mesh_refresh.insert(neighbor);
+            }
+        }
+        for chunk_pos in dirty_redstone_geometry_chunks {
+            let affected = mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                chunk_pos,
+            );
+            mesh_refresh.extend(affected);
+        }
+
         for chunk_pos in dirty_redstone_lighting {
             let affected = mdminecraft_world::recompute_block_light_local(
                 &mut self.chunks,
@@ -4073,6 +4107,9 @@ impl GameWorld {
         for chunk_pos in mesh_refresh {
             let _ = self.upload_chunk_mesh(chunk_pos);
         }
+
+        // Update hoppers (item transport). Run after redstone so lock bits are up-to-date.
+        self.update_hoppers();
 
         // Update projectiles (arrows)
         self.update_projectiles();
@@ -4974,6 +5011,62 @@ impl GameWorld {
                     self.upload_chunk_mesh_and_neighbors(chunk_pos);
                 true
             }
+            Some(mdminecraft_world::redstone_blocks::REDSTONE_REPEATER) => {
+                let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                    return false;
+                };
+                if local_y >= CHUNK_SIZE_Y {
+                    return false;
+                }
+
+                let voxel = chunk.voxel(local_x, local_y, local_z);
+                let current = mdminecraft_world::repeater_delay_ticks(voxel.state);
+                let next = if current >= 4 { 1 } else { current + 1 };
+                let new_state = mdminecraft_world::set_repeater_delay_ticks(voxel.state, next);
+
+                chunk.set_voxel(
+                    local_x,
+                    local_y,
+                    local_z,
+                    Voxel {
+                        state: new_state,
+                        ..voxel
+                    },
+                );
+
+                self.schedule_redstone_updates_around(hit.block_pos);
+                self.debug_hud.chunk_uploads_last_frame +=
+                    self.upload_chunk_mesh_and_neighbors(chunk_pos);
+                true
+            }
+            Some(mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR) => {
+                let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                    return false;
+                };
+                if local_y >= CHUNK_SIZE_Y {
+                    return false;
+                }
+
+                let voxel = chunk.voxel(local_x, local_y, local_z);
+                let subtract = mdminecraft_world::is_comparator_subtract_mode(voxel.state);
+                let new_state =
+                    mdminecraft_world::set_comparator_subtract_mode(voxel.state, !subtract);
+
+                chunk.set_voxel(
+                    local_x,
+                    local_y,
+                    local_z,
+                    Voxel {
+                        state: new_state,
+                        ..voxel
+                    },
+                );
+
+                self.schedule_redstone_updates_around(hit.block_pos);
+                self.debug_hud.chunk_uploads_last_frame +=
+                    self.upload_chunk_mesh_and_neighbors(chunk_pos);
+                true
+            }
             _ => false,
         }
     }
@@ -5111,6 +5204,24 @@ impl GameWorld {
                 if mined && removed_extra.is_none() && mdminecraft_world::is_bed(block_id) {
                     if let Some(state) = mined_block_state {
                         removed_extra = Self::try_remove_other_bed_half(
+                            &mut self.chunks,
+                            hit.block_pos,
+                            block_id,
+                            state,
+                        );
+                    }
+                }
+
+                if mined
+                    && removed_extra.is_none()
+                    && matches!(
+                        block_id,
+                        mdminecraft_world::mechanical_blocks::PISTON
+                            | mdminecraft_world::mechanical_blocks::PISTON_HEAD
+                    )
+                {
+                    if let Some(state) = mined_block_state {
+                        removed_extra = Self::try_remove_other_piston_part(
                             &mut self.chunks,
                             hit.block_pos,
                             block_id,
@@ -5446,6 +5557,8 @@ impl GameWorld {
                     | mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
                     | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
                     | mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+                    | mdminecraft_world::redstone_blocks::REDSTONE_REPEATER
+                    | mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR
             ) {
                 let support_chunk_pos = ChunkPos::new(
                     hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -5615,6 +5728,12 @@ impl GameWorld {
             }
 
             if placed {
+                // Initialize block-entity state for blocks that need it even when never opened.
+                if place_block_id == mdminecraft_world::mechanical_blocks::HOPPER {
+                    let key = Self::overworld_block_entity_key(place_pos);
+                    self.hoppers.entry(key).or_default();
+                }
+
                 // Notify fluid sim (treat as removal to wake neighbors who might be flowing here).
                 self.fluid_sim.on_fluid_removed(
                     FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
@@ -5745,9 +5864,75 @@ impl GameWorld {
             mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
                 | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
                 | mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+                | mdminecraft_world::redstone_blocks::REDSTONE_REPEATER
+                | mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR
+                | mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER
+                | mdminecraft_world::mechanical_blocks::PISTON
+                | mdminecraft_world::mechanical_blocks::DISPENSER
+                | mdminecraft_world::mechanical_blocks::DROPPER
+                | mdminecraft_world::mechanical_blocks::HOPPER
         ) {
             if face_normal.y != 1 {
                 return None;
+            }
+            if block_id == mdminecraft_world::redstone_blocks::REDSTONE_REPEATER {
+                let mut state = 0;
+                state = mdminecraft_world::set_repeater_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                state = mdminecraft_world::set_repeater_delay_ticks(state, 1);
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR {
+                let mut state = 0;
+                state = mdminecraft_world::set_comparator_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                state = mdminecraft_world::set_comparator_subtract_mode(state, false);
+                state = mdminecraft_world::set_comparator_output_power(state, 0);
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER {
+                let mut state = 0;
+                state = mdminecraft_world::set_observer_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::mechanical_blocks::PISTON {
+                let mut state = 0;
+                state = mdminecraft_world::set_piston_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::mechanical_blocks::DISPENSER {
+                let mut state = 0;
+                state = mdminecraft_world::set_dispenser_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::mechanical_blocks::DROPPER {
+                let mut state = 0;
+                state = mdminecraft_world::set_dropper_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::mechanical_blocks::HOPPER {
+                let mut state = 0;
+                state = mdminecraft_world::set_hopper_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                return Some(state);
             }
             return Some(0);
         }
@@ -6163,6 +6348,57 @@ impl GameWorld {
         Some(other_pos)
     }
 
+    fn try_remove_other_piston_part(
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+        piston_pos: IVec3,
+        piston_id: BlockId,
+        piston_state: BlockState,
+    ) -> Option<IVec3> {
+        let facing = mdminecraft_world::piston_facing(piston_state);
+        let (dx, dz) = facing.offset();
+
+        let (other_pos, expected_other_id) =
+            if piston_id == mdminecraft_world::mechanical_blocks::PISTON {
+                (
+                    IVec3::new(piston_pos.x + dx, piston_pos.y, piston_pos.z + dz),
+                    mdminecraft_world::mechanical_blocks::PISTON_HEAD,
+                )
+            } else if piston_id == mdminecraft_world::mechanical_blocks::PISTON_HEAD {
+                (
+                    IVec3::new(piston_pos.x - dx, piston_pos.y, piston_pos.z - dz),
+                    mdminecraft_world::mechanical_blocks::PISTON,
+                )
+            } else {
+                return None;
+            };
+
+        if other_pos.y < 0 || other_pos.y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let other_chunk_pos = ChunkPos::new(
+            other_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            other_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let chunk = chunks.get_mut(&other_chunk_pos)?;
+
+        let local_x = other_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_y = other_pos.y as usize;
+        let local_z = other_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        if local_y >= CHUNK_SIZE_Y {
+            return None;
+        }
+
+        let other_voxel = chunk.voxel(local_x, local_y, local_z);
+        if other_voxel.id != expected_other_id {
+            return None;
+        }
+
+        chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+        Some(other_pos)
+    }
+
     fn remove_unsupported_blocks(
         chunks: &mut HashMap<ChunkPos, Chunk>,
         block_properties: &BlockPropertiesRegistry,
@@ -6318,7 +6554,9 @@ impl GameWorld {
                     }
                     mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
                     | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
-                    | mdminecraft_world::redstone_blocks::REDSTONE_WIRE => {
+                    | mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+                    | mdminecraft_world::redstone_blocks::REDSTONE_REPEATER
+                    | mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR => {
                         let support_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
                         !is_solid_at(chunks, support_pos)
                     }
@@ -8149,6 +8387,35 @@ impl GameWorld {
                     );
                 }
             }
+            mdminecraft_world::mechanical_blocks::HOPPER => {
+                let Some(hopper) = self.hoppers.remove(&key) else {
+                    return;
+                };
+
+                for (slot_idx, stack) in hopper.slots.into_iter().enumerate() {
+                    let Some(stack) = stack else {
+                        continue;
+                    };
+
+                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
+                    else {
+                        tracing::warn!(
+                            slot = slot_idx,
+                            item = ?stack.item_type,
+                            "Hopper contained an undroppable item type"
+                        );
+                        continue;
+                    };
+
+                    self.item_manager.spawn_item(
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        drop_type,
+                        stack.count,
+                    );
+                }
+            }
             BLOCK_FURNACE | BLOCK_FURNACE_LIT => {
                 if self.furnace_open && self.open_furnace_pos == Some(key) {
                     self.close_furnace();
@@ -8520,6 +8787,160 @@ impl GameWorld {
         }
     }
 
+    fn update_hoppers(&mut self) {
+        const HOPPER_COOLDOWN_TICKS: u8 = 8;
+        const HOPPER_PICKUP_RADIUS: f64 = 0.65;
+
+        let chunks = &mut self.chunks;
+        let redstone_sim = &mut self.redstone_sim;
+        let item_manager = &mut self.item_manager;
+        let chests = &mut self.chests;
+        let hoppers = &mut self.hoppers;
+
+        let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> Option<Voxel> {
+            if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+
+            let chunk_pos = ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let chunk = chunks.get(&chunk_pos)?;
+            let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            Some(chunk.voxel(local_x, pos.y as usize, local_z))
+        };
+
+        let hopper_keys: Vec<_> = hoppers.keys().copied().collect();
+
+        for key in hopper_keys {
+            let Some(mut hopper) = hoppers.remove(&key) else {
+                continue;
+            };
+
+            if key.dimension != DimensionId::Overworld {
+                hoppers.insert(key, hopper);
+                continue;
+            }
+
+            let pos = IVec3::new(key.x, key.y, key.z);
+            let Some(voxel) = voxel_at(chunks, pos) else {
+                hoppers.insert(key, hopper);
+                continue;
+            };
+
+            if voxel.id != mdminecraft_world::mechanical_blocks::HOPPER {
+                continue;
+            }
+
+            if hopper.cooldown_ticks > 0 {
+                hopper.cooldown_ticks = hopper.cooldown_ticks.saturating_sub(1);
+                hoppers.insert(key, hopper);
+                continue;
+            }
+
+            // Hopper locking: treat the redstone active bit as "powered/disabled".
+            if mdminecraft_world::is_active(voxel.state) {
+                hoppers.insert(key, hopper);
+                continue;
+            }
+
+            let facing = mdminecraft_world::hopper_facing(voxel.state);
+            let (dx, dz) = facing.offset();
+            let output_pos = IVec3::new(pos.x + dx, pos.y, pos.z + dz);
+
+            let mut moved_any = false;
+
+            // Push one item into the container in front (chests and hoppers).
+            if let Some(out_voxel) = voxel_at(chunks, output_pos) {
+                if out_voxel.id == interactive_blocks::CHEST {
+                    let chest_key = Self::overworld_block_entity_key(output_pos);
+                    let chest = chests.entry(chest_key).or_default();
+                    if try_transfer_one_between_core_slots(&mut hopper.slots, &mut chest.slots) {
+                        moved_any = true;
+                        update_container_signal(chunks, redstone_sim, output_pos, &chest.slots);
+                    }
+                } else if out_voxel.id == mdminecraft_world::mechanical_blocks::HOPPER {
+                    let target_key = Self::overworld_block_entity_key(output_pos);
+                    let target = hoppers.entry(target_key).or_default();
+                    if try_transfer_one_between_core_slots(&mut hopper.slots, &mut target.slots) {
+                        moved_any = true;
+                        target.cooldown_ticks =
+                            target.cooldown_ticks.max(HOPPER_COOLDOWN_TICKS);
+                        update_container_signal(chunks, redstone_sim, output_pos, &target.slots);
+                    }
+                }
+            }
+
+            // Pull one item from the container above (chests and hoppers).
+            let above_pos = IVec3::new(pos.x, pos.y + 1, pos.z);
+            if !moved_any {
+                if let Some(above_voxel) = voxel_at(chunks, above_pos) {
+                    if above_voxel.id == interactive_blocks::CHEST {
+                        let chest_key = Self::overworld_block_entity_key(above_pos);
+                        let chest = chests.entry(chest_key).or_default();
+                        if try_transfer_one_between_core_slots(&mut chest.slots, &mut hopper.slots) {
+                            moved_any = true;
+                            update_container_signal(chunks, redstone_sim, above_pos, &chest.slots);
+                        }
+                    } else if above_voxel.id == mdminecraft_world::mechanical_blocks::HOPPER {
+                        let source_key = Self::overworld_block_entity_key(above_pos);
+                        let source = hoppers.entry(source_key).or_default();
+                        if try_transfer_one_between_core_slots(&mut source.slots, &mut hopper.slots) {
+                            moved_any = true;
+                            update_container_signal(chunks, redstone_sim, above_pos, &source.slots);
+                        }
+                    }
+                }
+            }
+
+            // Pull one dropped item from above (vanilla-ish).
+            if !moved_any {
+                let pickup_x = pos.x as f64 + 0.5;
+                let pickup_y = pos.y as f64 + 1.0;
+                let pickup_z = pos.z as f64 + 0.5;
+
+                let taken = item_manager.take_one_near_if(
+                    pickup_x,
+                    pickup_y,
+                    pickup_z,
+                    HOPPER_PICKUP_RADIUS,
+                    |drop_type| {
+                        let Some(core_type) = Self::convert_dropped_item_type(drop_type) else {
+                            return false;
+                        };
+                        let stack = ItemStack::new(core_type, 1);
+                        can_insert_one_into_core_slots(&hopper.slots, &stack)
+                    },
+                );
+
+                if let Some((drop_type, _count)) = taken {
+                    let Some(core_type) = Self::convert_dropped_item_type(drop_type) else {
+                        tracing::warn!(
+                            drop_type = ?drop_type,
+                            "Hopper pulled an unconvertible dropped item type"
+                        );
+                        hoppers.insert(key, hopper);
+                        continue;
+                    };
+
+                    let stack = ItemStack::new(core_type, 1);
+                    if insert_one_into_core_slots(&mut hopper.slots, stack) {
+                        moved_any = true;
+                    }
+                }
+            }
+
+            if moved_any {
+                hopper.cooldown_ticks = HOPPER_COOLDOWN_TICKS;
+                update_container_signal(chunks, redstone_sim, pos, &hopper.slots);
+            }
+
+            hoppers.insert(key, hopper);
+        }
+    }
+
     /// Update player status effects (called every frame)
     fn update_status_effects(&mut self, _dt: f32) {
         // Tick all effects and remove expired ones
@@ -8581,6 +9002,7 @@ impl GameWorld {
             DroppedItemType::RedstoneDust => Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
             DroppedItemType::GlowstoneDust => Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
             DroppedItemType::Pufferfish => Some(ItemType::Item(CORE_ITEM_PUFFERFISH)),
+            DroppedItemType::NetherQuartz => Some(ItemType::Item(CORE_ITEM_NETHER_QUARTZ)),
             DroppedItemType::Bucket => Some(ItemType::Item(CORE_ITEM_BUCKET)),
             DroppedItemType::WaterBucket => Some(ItemType::Item(CORE_ITEM_WATER_BUCKET)),
             DroppedItemType::LavaBucket => Some(ItemType::Item(CORE_ITEM_LAVA_BUCKET)),
@@ -8876,6 +9298,7 @@ impl GameWorld {
                 CORE_ITEM_REDSTONE_DUST => Some(DroppedItemType::RedstoneDust),
                 CORE_ITEM_GLOWSTONE_DUST => Some(DroppedItemType::GlowstoneDust),
                 CORE_ITEM_PUFFERFISH => Some(DroppedItemType::Pufferfish),
+                CORE_ITEM_NETHER_QUARTZ => Some(DroppedItemType::NetherQuartz),
                 CORE_ITEM_BUCKET => Some(DroppedItemType::Bucket),
                 CORE_ITEM_WATER_BUCKET => Some(DroppedItemType::WaterBucket),
                 CORE_ITEM_LAVA_BUCKET => Some(DroppedItemType::LavaBucket),
@@ -10516,6 +10939,165 @@ impl UiDragState {
 
 fn stacks_match_for_merge(a: &ItemStack, b: &ItemStack) -> bool {
     a.item_type == b.item_type && a.durability == b.durability && a.enchantments == b.enchantments
+}
+
+fn comparator_signal_from_core_slots(slots: &[Option<ItemStack>]) -> u8 {
+    if slots.is_empty() {
+        return 0;
+    }
+
+    let mut total_fill_64ths: u64 = 0;
+    let mut has_any = false;
+
+    for stack in slots.iter().flatten() {
+        if stack.count == 0 {
+            continue;
+        }
+        has_any = true;
+        let max = stack.max_stack_size().max(1) as u64;
+        total_fill_64ths = total_fill_64ths.saturating_add((stack.count as u64) * 64 / max);
+    }
+
+    if !has_any {
+        return 0;
+    }
+
+    let denom = (slots.len() as u64) * 64;
+    let base = (total_fill_64ths.saturating_mul(14) / denom) as u8;
+    base.saturating_add(1).min(15)
+}
+
+fn update_container_signal(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    redstone_sim: &mut RedstoneSimulator,
+    pos: IVec3,
+    slots: &[Option<ItemStack>],
+) {
+    if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+        return;
+    }
+
+    let desired = comparator_signal_from_core_slots(slots);
+
+    let chunk_pos = ChunkPos::new(
+        pos.x.div_euclid(CHUNK_SIZE_X as i32),
+        pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+    );
+    let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+        return;
+    };
+
+    let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+    let local_y = pos.y as usize;
+    let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+    if local_y >= CHUNK_SIZE_Y {
+        return;
+    }
+
+    let mut voxel = chunk.voxel(local_x, local_y, local_z);
+    let current = mdminecraft_world::get_power_level(voxel.state);
+    if current == desired {
+        return;
+    }
+
+    voxel.state = mdminecraft_world::set_power_level(voxel.state, desired);
+    chunk.set_voxel(local_x, local_y, local_z, voxel);
+
+    let center = RedstonePos::new(pos.x, pos.y, pos.z);
+    redstone_sim.schedule_update(center);
+    for neighbor in center.neighbors() {
+        redstone_sim.schedule_update(neighbor);
+    }
+}
+
+fn can_insert_one_into_core_slots(slots: &[Option<ItemStack>], stack: &ItemStack) -> bool {
+    debug_assert_eq!(stack.count, 1);
+
+    for existing in slots.iter().flatten() {
+        if stacks_match_for_merge(existing, stack) && existing.count < existing.max_stack_size() {
+            return true;
+        }
+    }
+
+    slots.iter().any(|slot| slot.is_none())
+}
+
+fn insert_one_into_core_slots(slots: &mut [Option<ItemStack>], stack: ItemStack) -> bool {
+    debug_assert_eq!(stack.count, 1);
+
+    for existing in slots.iter_mut().flatten() {
+        if stacks_match_for_merge(existing, &stack) && existing.count < existing.max_stack_size() {
+            existing.count = existing.count.saturating_add(1);
+            return true;
+        }
+    }
+
+    for slot in slots.iter_mut() {
+        if slot.is_none() {
+            *slot = Some(stack);
+            return true;
+        }
+    }
+
+    false
+}
+
+fn take_one_from_core_slots(slots: &mut [Option<ItemStack>]) -> Option<(usize, ItemStack)> {
+    for (idx, slot) in slots.iter_mut().enumerate() {
+        let Some(existing) = slot.as_mut() else {
+            continue;
+        };
+
+        let mut taken = existing.clone();
+        taken.count = 1;
+
+        existing.count = existing.count.saturating_sub(1);
+        if existing.count == 0 {
+            *slot = None;
+        }
+
+        return Some((idx, taken));
+    }
+
+    None
+}
+
+fn restore_one_into_core_slot(slots: &mut [Option<ItemStack>], idx: usize, stack: ItemStack) {
+    debug_assert_eq!(stack.count, 1);
+
+    if idx >= slots.len() {
+        return;
+    }
+
+    match slots[idx].as_mut() {
+        Some(existing) if stacks_match_for_merge(existing, &stack) => {
+            existing.count = existing.count.saturating_add(1);
+        }
+        None => {
+            slots[idx] = Some(stack);
+        }
+        Some(_) => {
+            // Fallback: try to insert anywhere (should be extremely rare for deterministic
+            // hopper transfers).
+            let _ = insert_one_into_core_slots(slots, stack);
+        }
+    }
+}
+
+fn try_transfer_one_between_core_slots(
+    source: &mut [Option<ItemStack>],
+    dest: &mut [Option<ItemStack>],
+) -> bool {
+    let Some((source_idx, one)) = take_one_from_core_slots(source) else {
+        return false;
+    };
+
+    if insert_one_into_core_slots(dest, one.clone()) {
+        true
+    } else {
+        restore_one_into_core_slot(source, source_idx, one);
+        false
+    }
 }
 
 const INVENTORY_STACK_METADATA_VERSION_V1: u8 = 1;
@@ -12854,6 +13436,238 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             pattern: None,
             allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Redstone Torch: 1 redstone dust + 1 stick → 1 redstone torch
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1),
+                (ItemType::Item(3), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 1,
+                height: 2,
+                cells: [
+                    [Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)), None, None],
+                    [Some(ItemType::Item(3)), None, None],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Redstone Lamp (vanilla-inspired): alternating redstone/glowstone dust in a 3x3 grid
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 4),
+                (ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 5),
+            ],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_LAMP),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                    ],
+                    [
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                    ],
+                    [
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Redstone Repeater (vanilla-ish): torches + redstone dust over stone
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(mdminecraft_world::BLOCK_STONE), 3),
+                (
+                    ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+                    2,
+                ),
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_REPEATER),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 2,
+                cells: [
+                    [
+                        Some(ItemType::Block(
+                            mdminecraft_world::redstone_blocks::REDSTONE_TORCH,
+                        )),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Block(
+                            mdminecraft_world::redstone_blocks::REDSTONE_TORCH,
+                        )),
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                    ],
+                    [None, None, None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Redstone Comparator (vanilla): torches around nether quartz over stone
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(mdminecraft_world::BLOCK_STONE), 3),
+                (
+                    ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+                    3,
+                ),
+                (ItemType::Item(CORE_ITEM_NETHER_QUARTZ), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        None,
+                        Some(ItemType::Block(
+                            mdminecraft_world::redstone_blocks::REDSTONE_TORCH,
+                        )),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Block(
+                            mdminecraft_world::redstone_blocks::REDSTONE_TORCH,
+                        )),
+                        Some(ItemType::Item(CORE_ITEM_NETHER_QUARTZ)),
+                        Some(ItemType::Block(
+                            mdminecraft_world::redstone_blocks::REDSTONE_TORCH,
+                        )),
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Observer (vanilla): cobblestone, redstone dust, nether quartz
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_COBBLESTONE), 6),
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 2),
+                (ItemType::Item(CORE_ITEM_NETHER_QUARTZ), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_NETHER_QUARTZ)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Piston (vanilla-ish): planks, cobblestone, iron ingot, redstone dust
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OAK_PLANKS), 3),
+                (ItemType::Block(BLOCK_COBBLESTONE), 4),
+                (ItemType::Item(7), 1), // Item(7) = Iron Ingot
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::mechanical_blocks::PISTON),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                        Some(ItemType::Block(BLOCK_OAK_PLANKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Hopper (vanilla-ish): 5 iron ingots + 1 chest
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(7), 5), // Item(7) = Iron Ingot
+                (ItemType::Block(interactive_blocks::CHEST), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::mechanical_blocks::HOPPER),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [
+                        Some(ItemType::Item(7)),
+                        Some(ItemType::Block(interactive_blocks::CHEST)),
+                        Some(ItemType::Item(7)),
+                    ],
+                    [None, Some(ItemType::Item(7)), None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
             allow_extra_counts_of_required_types: false,
         },
         // Lever: 1 stick + 1 cobblestone → 1 lever
@@ -16030,10 +16844,10 @@ mod tests {
         BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK,
         CORE_ITEM_BUCKET, CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_GHAST_TEAR,
         CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON, CORE_ITEM_GLOWSTONE_DUST,
-        CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_WART,
-        CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH, CORE_ITEM_RABBIT_FOOT,
-        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
-        CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
+        CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ,
+        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH,
+        CORE_ITEM_RABBIT_FOOT, CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR,
+        CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
     use mdminecraft_world::StatusEffect;
 
@@ -18729,6 +19543,158 @@ mod tests {
                 1
             ))
         );
+
+        // Redstone torch.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(3), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+                1
+            ))
+        );
+
+        // Redstone lamp.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_LAMP),
+                1
+            ))
+        );
+
+        // Redstone repeater.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+            1,
+        ));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[0][2] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+            1,
+        ));
+        grid[1][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        grid[1][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        grid[1][2] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_REPEATER),
+                1
+            ))
+        );
+
+        // Redstone comparator.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+            1,
+        ));
+        grid[1][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+            1,
+        ));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_NETHER_QUARTZ), 1));
+        grid[1][2] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_TORCH),
+            1,
+        ));
+        grid[2][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        grid[2][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        grid[2][2] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE),
+            1,
+        ));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR),
+                1
+            ))
+        );
+
+        // Observer.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_NETHER_QUARTZ), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER),
+                1
+            ))
+        );
+
+        // Piston.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::mechanical_blocks::PISTON),
+                1
+            ))
+        );
+
+        // Hopper.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Block(interactive_blocks::CHEST), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Item(7), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Item(7), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::mechanical_blocks::HOPPER),
+                1
+            ))
+        );
     }
 
     #[test]
@@ -19844,6 +20810,15 @@ mod tests {
         assert_eq!(
             GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_PUFFERFISH)),
             Some(DroppedItemType::Pufferfish)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::NetherQuartz),
+            Some(ItemType::Item(CORE_ITEM_NETHER_QUARTZ))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_NETHER_QUARTZ)),
+            Some(DroppedItemType::NetherQuartz)
         );
 
         assert_eq!(

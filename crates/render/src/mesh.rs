@@ -100,6 +100,8 @@ where
     mesh_ladders(chunk, &mut builder);
     mesh_torches(chunk, &mut builder);
     mesh_redstone_wires(chunk, &mut builder, &voxel_at_world);
+    mesh_redstone_repeaters(chunk, &mut builder);
+    mesh_redstone_comparators(chunk, &mut builder);
     mesh_pressure_plates(chunk, &mut builder);
     mesh_buttons(chunk, &mut builder);
     mesh_levers(chunk, &mut builder);
@@ -1275,6 +1277,9 @@ where
                 | mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
                 | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
                 | mdminecraft_world::redstone_blocks::REDSTONE_TORCH
+                | mdminecraft_world::redstone_blocks::REDSTONE_REPEATER
+                | mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR
+                | mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER
                 | mdminecraft_world::redstone_blocks::REDSTONE_LAMP
                 | mdminecraft_world::redstone_blocks::REDSTONE_LAMP_LIT
         )
@@ -1360,6 +1365,260 @@ where
                         voxel.id,
                         [center_min_x, min_y, center_min_z],
                         [center_max_x, max_y, center_max_z],
+                        light,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mesh_redstone_repeaters(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let pad = 1.0 / 16.0;
+    let plate_height = 2.0 / 16.0;
+    let ridge_depth = 4.0 / 16.0;
+    let ridge_height = 2.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_REPEATER {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + pad, base_y, base_z + pad],
+                    [
+                        base_x + 1.0 - pad,
+                        base_y + plate_height,
+                        base_z + 1.0 - pad,
+                    ],
+                    light,
+                );
+
+                let facing = mdminecraft_world::repeater_facing(voxel.state);
+
+                // Minimal direction indicator: a small ridge near the repeater's "front" edge.
+                let ridge_min_y = base_y + plate_height;
+                let ridge_max_y = ridge_min_y + ridge_height;
+
+                let (min, max) = match facing {
+                    mdminecraft_world::Facing::North => (
+                        [base_x + 4.0 / 16.0, ridge_min_y, base_z + pad],
+                        [
+                            base_x + 12.0 / 16.0,
+                            ridge_max_y,
+                            base_z + pad + ridge_depth,
+                        ],
+                    ),
+                    mdminecraft_world::Facing::South => (
+                        [
+                            base_x + 4.0 / 16.0,
+                            ridge_min_y,
+                            base_z + 1.0 - pad - ridge_depth,
+                        ],
+                        [base_x + 12.0 / 16.0, ridge_max_y, base_z + 1.0 - pad],
+                    ),
+                    mdminecraft_world::Facing::East => (
+                        [
+                            base_x + 1.0 - pad - ridge_depth,
+                            ridge_min_y,
+                            base_z + 4.0 / 16.0,
+                        ],
+                        [base_x + 1.0 - pad, ridge_max_y, base_z + 12.0 / 16.0],
+                    ),
+                    mdminecraft_world::Facing::West => (
+                        [base_x + pad, ridge_min_y, base_z + 4.0 / 16.0],
+                        [
+                            base_x + pad + ridge_depth,
+                            ridge_max_y,
+                            base_z + 12.0 / 16.0,
+                        ],
+                    ),
+                };
+
+                emit_box(builder, voxel.id, min, max, light);
+            }
+        }
+    }
+}
+
+fn mesh_redstone_comparators(chunk: &Chunk, builder: &mut MeshBuilder) {
+    let pad = 1.0 / 16.0;
+    let plate_height = 2.0 / 16.0;
+    let post_size = 2.0 / 16.0;
+    let post_height = 4.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + pad, base_y, base_z + pad],
+                    [
+                        base_x + 1.0 - pad,
+                        base_y + plate_height,
+                        base_z + 1.0 - pad,
+                    ],
+                    light,
+                );
+
+                let facing = mdminecraft_world::comparator_facing(voxel.state);
+                let subtract = mdminecraft_world::is_comparator_subtract_mode(voxel.state);
+
+                let post_min_y = base_y + plate_height;
+                let post_max_y = post_min_y + post_height;
+
+                let (rear_a_min, rear_a_max, rear_b_min, rear_b_max, front_min, front_max) =
+                    match facing {
+                        mdminecraft_world::Facing::North => (
+                            // Rear posts near the south edge.
+                            [
+                                base_x + 4.0 / 16.0,
+                                post_min_y,
+                                base_z + 1.0 - pad - 4.0 / 16.0,
+                            ],
+                            [
+                                base_x + 4.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 1.0 - pad - 4.0 / 16.0 + post_size,
+                            ],
+                            [
+                                base_x + 10.0 / 16.0,
+                                post_min_y,
+                                base_z + 1.0 - pad - 4.0 / 16.0,
+                            ],
+                            [
+                                base_x + 10.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 1.0 - pad - 4.0 / 16.0 + post_size,
+                            ],
+                            // Front post near the north edge.
+                            [base_x + 7.0 / 16.0, post_min_y, base_z + pad + 4.0 / 16.0],
+                            [
+                                base_x + 7.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + pad + 4.0 / 16.0 + post_size,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::South => (
+                            // Rear posts near the north edge.
+                            [base_x + 4.0 / 16.0, post_min_y, base_z + pad + 2.0 / 16.0],
+                            [
+                                base_x + 4.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + pad + 2.0 / 16.0 + post_size,
+                            ],
+                            [base_x + 10.0 / 16.0, post_min_y, base_z + pad + 2.0 / 16.0],
+                            [
+                                base_x + 10.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + pad + 2.0 / 16.0 + post_size,
+                            ],
+                            // Front post near the south edge.
+                            [
+                                base_x + 7.0 / 16.0,
+                                post_min_y,
+                                base_z + 1.0 - pad - 6.0 / 16.0,
+                            ],
+                            [
+                                base_x + 7.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 1.0 - pad - 6.0 / 16.0 + post_size,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::East => (
+                            // Rear posts near the west edge.
+                            [base_x + pad + 2.0 / 16.0, post_min_y, base_z + 4.0 / 16.0],
+                            [
+                                base_x + pad + 2.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 4.0 / 16.0 + post_size,
+                            ],
+                            [base_x + pad + 2.0 / 16.0, post_min_y, base_z + 10.0 / 16.0],
+                            [
+                                base_x + pad + 2.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 10.0 / 16.0 + post_size,
+                            ],
+                            // Front post near the east edge.
+                            [
+                                base_x + 1.0 - pad - 6.0 / 16.0,
+                                post_min_y,
+                                base_z + 7.0 / 16.0,
+                            ],
+                            [
+                                base_x + 1.0 - pad - 6.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 7.0 / 16.0 + post_size,
+                            ],
+                        ),
+                        mdminecraft_world::Facing::West => (
+                            // Rear posts near the east edge.
+                            [
+                                base_x + 1.0 - pad - 4.0 / 16.0,
+                                post_min_y,
+                                base_z + 4.0 / 16.0,
+                            ],
+                            [
+                                base_x + 1.0 - pad - 4.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 4.0 / 16.0 + post_size,
+                            ],
+                            [
+                                base_x + 1.0 - pad - 4.0 / 16.0,
+                                post_min_y,
+                                base_z + 10.0 / 16.0,
+                            ],
+                            [
+                                base_x + 1.0 - pad - 4.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 10.0 / 16.0 + post_size,
+                            ],
+                            // Front post near the west edge.
+                            [base_x + pad + 4.0 / 16.0, post_min_y, base_z + 7.0 / 16.0],
+                            [
+                                base_x + pad + 4.0 / 16.0 + post_size,
+                                post_max_y,
+                                base_z + 7.0 / 16.0 + post_size,
+                            ],
+                        ),
+                    };
+
+                emit_box(builder, voxel.id, rear_a_min, rear_a_max, light);
+                emit_box(builder, voxel.id, rear_b_min, rear_b_max, light);
+                emit_box(builder, voxel.id, front_min, front_max, light);
+
+                if subtract {
+                    // Minimal mode indicator: small center nub.
+                    let nub_min_y = base_y + plate_height;
+                    let nub_max_y = nub_min_y + 1.0 / 16.0;
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + 7.0 / 16.0, nub_min_y, base_z + 7.0 / 16.0],
+                        [base_x + 9.0 / 16.0, nub_max_y, base_z + 9.0 / 16.0],
                         light,
                     );
                 }
@@ -2058,6 +2317,8 @@ fn is_solid(voxel: Voxel) -> bool {
         && voxel.id != mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
         && voxel.id != mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
         && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_WIRE
+        && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_REPEATER
+        && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR
         && voxel.id != interactive_blocks::TORCH
         && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_TORCH
         && voxel.id != interactive_blocks::GLASS_PANE

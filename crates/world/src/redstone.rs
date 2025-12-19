@@ -5,6 +5,7 @@
 use crate::chunk::{
     BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
+use crate::Facing;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Block IDs for redstone components
@@ -20,10 +21,27 @@ pub mod redstone_blocks {
     pub const REDSTONE_TORCH: BlockId = 44;
     pub const REDSTONE_LAMP: BlockId = 45;
     pub const REDSTONE_LAMP_LIT: BlockId = 46;
+    // Appended to preserve stable block IDs.
+    pub const REDSTONE_REPEATER: BlockId = 123;
+    pub const REDSTONE_COMPARATOR: BlockId = 124;
+    pub const REDSTONE_OBSERVER: BlockId = 126;
+}
+
+/// Block IDs for piston mechanics (append-only indices in `blocks.json`).
+pub mod mechanical_blocks {
+    use crate::chunk::BlockId;
+
+    pub const PISTON: BlockId = 127;
+    pub const PISTON_HEAD: BlockId = 128;
+    pub const DISPENSER: BlockId = 129;
+    pub const DROPPER: BlockId = 130;
+    pub const HOPPER: BlockId = 131;
 }
 
 /// Maximum redstone power level
 pub const MAX_POWER: u8 = 15;
+
+const PISTON_PUSH_LIMIT: usize = 12;
 
 /// Type of redstone component
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +58,12 @@ pub enum RedstoneComponent {
     Torch,
     /// Redstone lamp - lights up when powered
     Lamp,
+    /// Redstone repeater - directional delay element
+    Repeater,
+    /// Redstone comparator - directional 1-tick delay element with compare/subtract modes
+    Comparator,
+    /// Redstone observer - emits a short pulse when its observed block changes
+    Observer,
 }
 
 impl RedstoneComponent {
@@ -58,6 +82,9 @@ impl RedstoneComponent {
             redstone_blocks::REDSTONE_LAMP | redstone_blocks::REDSTONE_LAMP_LIT => {
                 Some(RedstoneComponent::Lamp)
             }
+            redstone_blocks::REDSTONE_REPEATER => Some(RedstoneComponent::Repeater),
+            redstone_blocks::REDSTONE_COMPARATOR => Some(RedstoneComponent::Comparator),
+            redstone_blocks::REDSTONE_OBSERVER => Some(RedstoneComponent::Observer),
             _ => None,
         }
     }
@@ -75,12 +102,24 @@ impl RedstoneComponent {
 
     /// Check if this component conducts power
     pub fn conducts_power(self) -> bool {
-        matches!(self, RedstoneComponent::Wire)
+        matches!(
+            self,
+            RedstoneComponent::Wire
+                | RedstoneComponent::Repeater
+                | RedstoneComponent::Comparator
+                | RedstoneComponent::Observer
+        )
     }
 
     /// Check if this component can be powered
     pub fn can_be_powered(self) -> bool {
-        matches!(self, RedstoneComponent::Lamp | RedstoneComponent::Wire)
+        matches!(
+            self,
+            RedstoneComponent::Lamp
+                | RedstoneComponent::Wire
+                | RedstoneComponent::Repeater
+                | RedstoneComponent::Comparator
+        )
     }
 }
 
@@ -106,6 +145,141 @@ pub fn set_active(state: BlockState, active: bool) -> BlockState {
     } else {
         state & !0x10
     }
+}
+
+const REPEATER_DELAY_SHIFT: u32 = 2;
+const REPEATER_DELAY_MASK: BlockState = 0x03u16 << REPEATER_DELAY_SHIFT;
+
+/// Get the repeater delay in ticks (1-4) from block state.
+pub fn repeater_delay_ticks(state: BlockState) -> u8 {
+    (((state & REPEATER_DELAY_MASK) >> REPEATER_DELAY_SHIFT) as u8).min(3) + 1
+}
+
+/// Set the repeater delay in ticks (1-4) in block state.
+pub fn set_repeater_delay_ticks(state: BlockState, delay_ticks: u8) -> BlockState {
+    let delay = delay_ticks.clamp(1, 4) - 1;
+    (state & !REPEATER_DELAY_MASK) | ((delay as BlockState) << REPEATER_DELAY_SHIFT)
+}
+
+/// Get the repeater facing from block state.
+pub fn repeater_facing(state: BlockState) -> Facing {
+    Facing::from_state(state)
+}
+
+/// Set the repeater facing in block state.
+pub fn set_repeater_facing(state: BlockState, facing: Facing) -> BlockState {
+    (state & !0x03) | facing.to_state()
+}
+
+const COMPARATOR_MODE_MASK: BlockState = 0x04;
+const COMPARATOR_OUTPUT_SHIFT: u32 = 5;
+const COMPARATOR_OUTPUT_MASK: BlockState = 0x0Fu16 << COMPARATOR_OUTPUT_SHIFT;
+
+/// Check if a comparator is in subtract mode.
+pub fn is_comparator_subtract_mode(state: BlockState) -> bool {
+    (state & COMPARATOR_MODE_MASK) != 0
+}
+
+/// Set whether a comparator is in subtract mode.
+pub fn set_comparator_subtract_mode(state: BlockState, subtract: bool) -> BlockState {
+    if subtract {
+        state | COMPARATOR_MODE_MASK
+    } else {
+        state & !COMPARATOR_MODE_MASK
+    }
+}
+
+/// Get the comparator output power (0-15) from block state.
+pub fn comparator_output_power(state: BlockState) -> u8 {
+    ((state & COMPARATOR_OUTPUT_MASK) >> COMPARATOR_OUTPUT_SHIFT) as u8
+}
+
+/// Set the comparator output power (0-15) in block state.
+pub fn set_comparator_output_power(state: BlockState, power: u8) -> BlockState {
+    let clamped = power.min(MAX_POWER) as BlockState;
+    (state & !COMPARATOR_OUTPUT_MASK) | (clamped << COMPARATOR_OUTPUT_SHIFT)
+}
+
+/// Get the comparator facing from block state.
+pub fn comparator_facing(state: BlockState) -> Facing {
+    Facing::from_state(state)
+}
+
+/// Set the comparator facing in block state.
+pub fn set_comparator_facing(state: BlockState, facing: Facing) -> BlockState {
+    (state & !0x03) | facing.to_state()
+}
+
+const OBSERVER_HASH_SHIFT: u32 = 5;
+const OBSERVER_HASH_MASK: BlockState = 0xFFu16 << OBSERVER_HASH_SHIFT;
+
+/// Get the observer's stored "observed block" hash.
+///
+/// A value of 0 means "uninitialized".
+pub fn observer_observed_hash(state: BlockState) -> u8 {
+    ((state & OBSERVER_HASH_MASK) >> OBSERVER_HASH_SHIFT) as u8
+}
+
+/// Set the observer's stored "observed block" hash.
+pub fn set_observer_observed_hash(state: BlockState, hash: u8) -> BlockState {
+    (state & !OBSERVER_HASH_MASK) | ((hash as BlockState) << OBSERVER_HASH_SHIFT)
+}
+
+/// Get the observer facing from block state (output direction).
+pub fn observer_facing(state: BlockState) -> Facing {
+    Facing::from_state(state)
+}
+
+/// Set the observer facing in block state (output direction).
+pub fn set_observer_facing(state: BlockState, facing: Facing) -> BlockState {
+    (state & !0x03) | facing.to_state()
+}
+
+/// Get piston facing from block state.
+pub fn piston_facing(state: BlockState) -> Facing {
+    Facing::from_state(state)
+}
+
+/// Set piston facing in block state.
+pub fn set_piston_facing(state: BlockState, facing: Facing) -> BlockState {
+    (state & !0x03) | facing.to_state()
+}
+
+const CONTAINER_FACING_SHIFT: u32 = 5;
+const CONTAINER_FACING_MASK: BlockState = 0x03u16 << CONTAINER_FACING_SHIFT;
+
+/// Get the facing for container-style blocks (hoppers, droppers, dispensers).
+pub fn container_facing(state: BlockState) -> Facing {
+    Facing::from_state((state & CONTAINER_FACING_MASK) >> CONTAINER_FACING_SHIFT)
+}
+
+/// Set the facing for container-style blocks (hoppers, droppers, dispensers).
+pub fn set_container_facing(state: BlockState, facing: Facing) -> BlockState {
+    (state & !CONTAINER_FACING_MASK) | (facing.to_state() << CONTAINER_FACING_SHIFT)
+}
+
+pub fn hopper_facing(state: BlockState) -> Facing {
+    container_facing(state)
+}
+
+pub fn set_hopper_facing(state: BlockState, facing: Facing) -> BlockState {
+    set_container_facing(state, facing)
+}
+
+pub fn dispenser_facing(state: BlockState) -> Facing {
+    container_facing(state)
+}
+
+pub fn set_dispenser_facing(state: BlockState, facing: Facing) -> BlockState {
+    set_container_facing(state, facing)
+}
+
+pub fn dropper_facing(state: BlockState) -> Facing {
+    container_facing(state)
+}
+
+pub fn set_dropper_facing(state: BlockState, facing: Facing) -> BlockState {
+    set_container_facing(state, facing)
 }
 
 /// World position for redstone updates
@@ -151,18 +325,54 @@ struct ButtonTimer {
     deactivate_tick: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RepeaterTimer {
+    pos: RedstonePos,
+    apply_tick: u64,
+    desired_active: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ComparatorTimer {
+    pos: RedstonePos,
+    apply_tick: u64,
+    desired_power: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ObserverTimer {
+    pos: RedstonePos,
+    apply_tick: u64,
+    desired_active: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PistonTimer {
+    pos: RedstonePos,
+    apply_tick: u64,
+    desired_extended: bool,
+}
+
 /// Redstone simulator for power propagation
 pub struct RedstoneSimulator {
     /// Pending redstone updates
     pending_updates: BTreeSet<RedstonePos>,
     /// Button timers for momentary switches
     button_timers: Vec<ButtonTimer>,
+    repeater_timers: Vec<RepeaterTimer>,
+    comparator_timers: Vec<ComparatorTimer>,
+    observer_timers: Vec<ObserverTimer>,
+    piston_timers: Vec<PistonTimer>,
     /// Current simulation tick
     current_tick: u64,
     /// Dirty chunks that need mesh rebuilding
     dirty_chunks: std::collections::HashSet<ChunkPos>,
     /// Dirty chunks that need block-light recomputation
     dirty_light_chunks: std::collections::HashSet<ChunkPos>,
+    /// Dirty chunks that need skylight + blocklight recomputation due to block-ID (geometry) changes.
+    dirty_geometry_chunks: std::collections::HashSet<ChunkPos>,
+    /// Positions where block-ID (geometry) changes occurred (used for waking other sims).
+    dirty_geometry_positions: BTreeSet<RedstonePos>,
 }
 
 impl RedstoneSimulator {
@@ -171,9 +381,15 @@ impl RedstoneSimulator {
         Self {
             pending_updates: BTreeSet::new(),
             button_timers: Vec::new(),
+            repeater_timers: Vec::new(),
+            comparator_timers: Vec::new(),
+            observer_timers: Vec::new(),
+            piston_timers: Vec::new(),
             current_tick: 0,
             dirty_chunks: std::collections::HashSet::new(),
             dirty_light_chunks: std::collections::HashSet::new(),
+            dirty_geometry_chunks: std::collections::HashSet::new(),
+            dirty_geometry_positions: BTreeSet::new(),
         }
     }
 
@@ -319,6 +535,66 @@ impl RedstoneSimulator {
             self.deactivate_button(pos, chunks);
         }
 
+        // Process repeater timers.
+        let expired_repeaters: Vec<(RedstonePos, bool)> = self
+            .repeater_timers
+            .iter()
+            .filter(|t| t.apply_tick <= self.current_tick)
+            .map(|t| (t.pos, t.desired_active))
+            .collect();
+
+        self.repeater_timers
+            .retain(|t| t.apply_tick > self.current_tick);
+
+        for (pos, desired_active) in expired_repeaters {
+            self.apply_repeater_output(pos, desired_active, chunks);
+        }
+
+        // Process comparator timers.
+        let expired_comparators: Vec<(RedstonePos, u8)> = self
+            .comparator_timers
+            .iter()
+            .filter(|t| t.apply_tick <= self.current_tick)
+            .map(|t| (t.pos, t.desired_power))
+            .collect();
+
+        self.comparator_timers
+            .retain(|t| t.apply_tick > self.current_tick);
+
+        for (pos, desired_power) in expired_comparators {
+            self.apply_comparator_output(pos, desired_power, chunks);
+        }
+
+        // Process observer timers.
+        let expired_observers: Vec<(RedstonePos, bool)> = self
+            .observer_timers
+            .iter()
+            .filter(|t| t.apply_tick <= self.current_tick)
+            .map(|t| (t.pos, t.desired_active))
+            .collect();
+
+        self.observer_timers
+            .retain(|t| t.apply_tick > self.current_tick);
+
+        for (pos, desired_active) in expired_observers {
+            self.apply_observer_output(pos, desired_active, chunks);
+        }
+
+        // Process piston timers.
+        let expired_pistons: Vec<(RedstonePos, bool)> = self
+            .piston_timers
+            .iter()
+            .filter(|t| t.apply_tick <= self.current_tick)
+            .map(|t| (t.pos, t.desired_extended))
+            .collect();
+
+        self.piston_timers
+            .retain(|t| t.apply_tick > self.current_tick);
+
+        for (pos, desired_extended) in expired_pistons {
+            self.apply_piston_state(pos, desired_extended, chunks);
+        }
+
         // Process pending updates using BFS for deterministic order
         if self.pending_updates.is_empty() {
             return;
@@ -401,6 +677,13 @@ impl RedstoneSimulator {
                 if crate::is_fence_gate(voxel.id) {
                     return self.update_fence_gate(pos, chunks);
                 }
+                if voxel.id == mechanical_blocks::PISTON {
+                    return self.update_piston(pos, chunks);
+                }
+                if voxel.id == mechanical_blocks::HOPPER {
+                    self.update_hopper_powered_state(pos, chunks);
+                    return false;
+                }
 
                 // Check if it's a lamp that needs updating
                 if voxel.id == redstone_blocks::REDSTONE_LAMP
@@ -416,6 +699,9 @@ impl RedstoneSimulator {
             RedstoneComponent::Wire => self.update_wire(pos, chunks),
             RedstoneComponent::Lamp => self.update_lamp(pos, chunks),
             RedstoneComponent::Torch => self.update_torch(pos, chunks),
+            RedstoneComponent::Repeater => self.update_repeater(pos, chunks),
+            RedstoneComponent::Comparator => self.update_comparator(pos, chunks),
+            RedstoneComponent::Observer => self.update_observer(pos, chunks),
             _ => false, // Power sources don't need updating
         }
     }
@@ -434,7 +720,7 @@ impl RedstoneSimulator {
 
         for neighbor in pos.neighbors() {
             if let Some(neighbor_voxel) = self.get_voxel(neighbor, chunks) {
-                let neighbor_power = self.get_emitted_power(neighbor_voxel);
+                let neighbor_power = self.get_emitted_power_towards(neighbor, neighbor_voxel, pos);
                 if neighbor_power > 0 {
                     // Wire loses 1 power per block
                     let received = neighbor_power.saturating_sub(1);
@@ -464,7 +750,7 @@ impl RedstoneSimulator {
     fn is_powered_by_neighbors(&self, pos: RedstonePos, chunks: &HashMap<ChunkPos, Chunk>) -> bool {
         for neighbor in pos.neighbors() {
             if let Some(neighbor_voxel) = self.get_voxel(neighbor, chunks) {
-                if self.get_emitted_power(neighbor_voxel) > 0 {
+                if self.get_emitted_power_towards(neighbor, neighbor_voxel, pos) > 0 {
                     return true;
                 }
             }
@@ -683,8 +969,560 @@ impl RedstoneSimulator {
         true
     }
 
+    fn update_repeater(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if voxel.id != redstone_blocks::REDSTONE_REPEATER {
+            return false;
+        }
+
+        let facing = repeater_facing(voxel.state);
+        let (dx, dz) = facing.offset();
+        let input_pos = RedstonePos::new(pos.x - dx, pos.y, pos.z - dz);
+
+        let input_power = if let Some(input_voxel) = self.get_voxel(input_pos, chunks) {
+            self.get_emitted_power_towards(input_pos, input_voxel, pos)
+        } else {
+            0
+        };
+        let desired_active = input_power > 0;
+        let was_active = is_active(voxel.state);
+
+        if desired_active == was_active {
+            self.repeater_timers.retain(|timer| timer.pos != pos);
+            return false;
+        }
+
+        let delay_ticks = repeater_delay_ticks(voxel.state) as u64;
+        let apply_tick = self.current_tick.saturating_add(delay_ticks.max(1));
+
+        self.repeater_timers.retain(|timer| timer.pos != pos);
+        self.repeater_timers.push(RepeaterTimer {
+            pos,
+            apply_tick,
+            desired_active,
+        });
+
+        false
+    }
+
+    fn update_comparator(
+        &mut self,
+        pos: RedstonePos,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if voxel.id != redstone_blocks::REDSTONE_COMPARATOR {
+            return false;
+        }
+
+        let facing = comparator_facing(voxel.state);
+        let (dx, dz) = facing.offset();
+        let rear_pos = RedstonePos::new(pos.x - dx, pos.y, pos.z - dz);
+
+        let left_pos = RedstonePos::new(pos.x + dz, pos.y, pos.z - dx);
+        let right_pos = RedstonePos::new(pos.x - dz, pos.y, pos.z + dx);
+
+        let rear_power = if let Some(rear_voxel) = self.get_voxel(rear_pos, chunks) {
+            if crate::is_chest(rear_voxel.id)
+                || rear_voxel.id == mechanical_blocks::HOPPER
+                || matches!(
+                    rear_voxel.id,
+                    mechanical_blocks::DISPENSER | mechanical_blocks::DROPPER
+                )
+            {
+                // Vanilla-ish container read: the container's comparator output is cached in the
+                // low 4 bits by the gameplay layer.
+                get_power_level(rear_voxel.state)
+            } else {
+                self.get_emitted_power_towards(rear_pos, rear_voxel, pos)
+            }
+        } else {
+            0
+        };
+
+        let mut side_power_max = 0u8;
+        for side_pos in [left_pos, right_pos] {
+            if let Some(side_voxel) = self.get_voxel(side_pos, chunks) {
+                side_power_max =
+                    side_power_max.max(self.get_emitted_power_towards(side_pos, side_voxel, pos));
+            }
+        }
+
+        let subtract = is_comparator_subtract_mode(voxel.state);
+        let desired_power = if subtract {
+            rear_power.saturating_sub(side_power_max)
+        } else if rear_power >= side_power_max {
+            rear_power
+        } else {
+            0
+        };
+
+        let was_power = comparator_output_power(voxel.state);
+        if desired_power == was_power {
+            self.comparator_timers.retain(|timer| timer.pos != pos);
+            return false;
+        }
+
+        let apply_tick = self.current_tick.saturating_add(1);
+        self.comparator_timers.retain(|timer| timer.pos != pos);
+        self.comparator_timers.push(ComparatorTimer {
+            pos,
+            apply_tick,
+            desired_power,
+        });
+
+        false
+    }
+
+    fn observed_voxel_hash(voxel: Option<Voxel>) -> u8 {
+        let (id, state) = match voxel {
+            Some(v) => (v.id as u32, v.state as u32),
+            None => (0, 0),
+        };
+        let mut h = id.wrapping_mul(31) ^ state.wrapping_mul(131);
+        h ^= h >> 16;
+        (h as u8) | 1
+    }
+
+    fn update_observer(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if voxel.id != redstone_blocks::REDSTONE_OBSERVER {
+            return false;
+        }
+
+        let facing = observer_facing(voxel.state);
+        let (dx, dz) = facing.offset();
+        let observed_pos = RedstonePos::new(pos.x - dx, pos.y, pos.z - dz);
+        let observed_voxel = self.get_voxel(observed_pos, chunks);
+        let new_hash = Self::observed_voxel_hash(observed_voxel);
+
+        let stored_hash = observer_observed_hash(voxel.state);
+        if stored_hash == 0 {
+            let new_state = set_observer_observed_hash(voxel.state, new_hash);
+            self.set_voxel(
+                pos,
+                Voxel {
+                    id: voxel.id,
+                    state: new_state,
+                    ..voxel
+                },
+                chunks,
+            );
+            return false;
+        }
+
+        if stored_hash == new_hash {
+            return false;
+        }
+
+        let new_state = set_observer_observed_hash(voxel.state, new_hash);
+        self.set_voxel(
+            pos,
+            Voxel {
+                id: voxel.id,
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+
+        // Schedule a 2-tick pulse with a 1-tick delay (vanilla-ish).
+        let on_tick = self.current_tick.saturating_add(1);
+        let off_tick = on_tick.saturating_add(2);
+        self.observer_timers.retain(|timer| timer.pos != pos);
+        self.observer_timers.push(ObserverTimer {
+            pos,
+            apply_tick: on_tick,
+            desired_active: true,
+        });
+        self.observer_timers.push(ObserverTimer {
+            pos,
+            apply_tick: off_tick,
+            desired_active: false,
+        });
+
+        false
+    }
+
+    fn is_piston_replaceable(block_id: BlockId) -> bool {
+        block_id == crate::BLOCK_AIR || crate::is_fluid(block_id)
+    }
+
+    fn is_piston_pushable(block_id: BlockId, state: BlockState) -> bool {
+        if Self::is_piston_replaceable(block_id) {
+            return false;
+        }
+
+        if matches!(
+            block_id,
+            crate::BLOCK_BEDROCK | crate::BLOCK_OBSIDIAN | mechanical_blocks::PISTON
+        ) {
+            return false;
+        }
+
+        if block_id == mechanical_blocks::PISTON_HEAD {
+            return false;
+        }
+
+        if matches!(
+            block_id,
+            mechanical_blocks::DISPENSER | mechanical_blocks::DROPPER | mechanical_blocks::HOPPER
+        ) {
+            return false;
+        }
+
+        if matches!(block_id, crate::BLOCK_FURNACE | crate::BLOCK_FURNACE_LIT)
+            || matches!(
+                block_id,
+                crate::BLOCK_BREWING_STAND | crate::BLOCK_ENCHANTING_TABLE
+            )
+            || crate::is_chest(block_id)
+        {
+            return false;
+        }
+
+        if crate::is_door(block_id) || crate::is_bed(block_id) {
+            return false;
+        }
+
+        if crate::CropType::is_crop(block_id) || block_id == crate::BLOCK_SUGAR_CANE {
+            return false;
+        }
+
+        matches!(
+            crate::get_collision_type(block_id, state),
+            crate::CollisionType::Full
+        )
+    }
+
+    fn update_piston(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        if voxel.id != mechanical_blocks::PISTON {
+            return false;
+        }
+
+        let desired_extended = self.is_powered_by_neighbors(pos, chunks);
+        let was_extended = is_active(voxel.state);
+
+        if desired_extended == was_extended {
+            self.piston_timers.retain(|timer| timer.pos != pos);
+            return false;
+        }
+
+        let apply_tick = self.current_tick.saturating_add(1);
+        self.piston_timers.retain(|timer| timer.pos != pos);
+        self.piston_timers.push(PistonTimer {
+            pos,
+            apply_tick,
+            desired_extended,
+        });
+
+        false
+    }
+
+    fn update_hopper_powered_state(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if voxel.id != mechanical_blocks::HOPPER {
+            return;
+        }
+
+        let powered = self.is_powered_by_neighbors(pos, chunks);
+        if is_active(voxel.state) == powered {
+            return;
+        }
+
+        let new_state = set_active(voxel.state, powered);
+        self.set_voxel(
+            pos,
+            Voxel {
+                id: voxel.id,
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+    }
+
+    fn set_voxel_and_mark_geometry(
+        &mut self,
+        pos: RedstonePos,
+        voxel: Voxel,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+            return;
+        }
+
+        let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
+        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+            return;
+        };
+
+        chunk.set_voxel(local_x, local_y, local_z, voxel);
+        self.dirty_chunks.insert(chunk_pos);
+        self.dirty_geometry_chunks.insert(chunk_pos);
+        self.dirty_geometry_positions.insert(pos);
+    }
+
+    fn apply_piston_state(
+        &mut self,
+        pos: RedstonePos,
+        desired_extended: bool,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if voxel.id != mechanical_blocks::PISTON {
+            return;
+        }
+
+        let was_extended = is_active(voxel.state);
+        if was_extended == desired_extended {
+            return;
+        }
+
+        let facing = piston_facing(voxel.state);
+        let (dx, dz) = facing.offset();
+        let head_pos = RedstonePos::new(pos.x + dx, pos.y, pos.z + dz);
+
+        let mut changed_positions: Vec<RedstonePos> = Vec::new();
+        changed_positions.push(pos);
+        changed_positions.push(head_pos);
+
+        if desired_extended {
+            // Scan for a space within push limit.
+            let mut cursor = head_pos;
+            let mut line: Vec<(RedstonePos, Voxel)> = Vec::new();
+
+            loop {
+                let Some(found) = self.get_voxel(cursor, chunks) else {
+                    return;
+                };
+
+                if Self::is_piston_replaceable(found.id) {
+                    break;
+                }
+
+                if line.len() >= PISTON_PUSH_LIMIT {
+                    return;
+                }
+
+                if !Self::is_piston_pushable(found.id, found.state) {
+                    return;
+                }
+
+                line.push((cursor, found));
+                cursor = RedstonePos::new(cursor.x + dx, cursor.y, cursor.z + dz);
+            }
+
+            // Push blocks from farthest to nearest.
+            for (from_pos, from_voxel) in line.iter().rev() {
+                let dest_pos = RedstonePos::new(from_pos.x + dx, from_pos.y, from_pos.z + dz);
+                self.set_voxel_and_mark_geometry(
+                    dest_pos,
+                    Voxel {
+                        id: from_voxel.id,
+                        state: from_voxel.state,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                    chunks,
+                );
+                changed_positions.push(dest_pos);
+            }
+
+            // Place piston head.
+            let mut head_state = 0;
+            head_state = set_piston_facing(head_state, facing);
+            self.set_voxel_and_mark_geometry(
+                head_pos,
+                Voxel {
+                    id: mechanical_blocks::PISTON_HEAD,
+                    state: head_state,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+                chunks,
+            );
+
+            // Mark base as extended.
+            let new_state = set_active(voxel.state, true);
+            self.set_voxel(
+                pos,
+                Voxel {
+                    id: voxel.id,
+                    state: new_state,
+                    ..voxel
+                },
+                chunks,
+            );
+        } else {
+            // Retract: remove head if present.
+            if let Some(head_voxel) = self.get_voxel(head_pos, chunks) {
+                if head_voxel.id == mechanical_blocks::PISTON_HEAD {
+                    self.set_voxel_and_mark_geometry(head_pos, Voxel::default(), chunks);
+                }
+            }
+
+            let new_state = set_active(voxel.state, false);
+            self.set_voxel(
+                pos,
+                Voxel {
+                    id: voxel.id,
+                    state: new_state,
+                    ..voxel
+                },
+                chunks,
+            );
+        }
+
+        // Schedule updates around all changed positions.
+        for changed in changed_positions {
+            self.schedule_update(changed);
+            for neighbor in changed.neighbors() {
+                self.schedule_update(neighbor);
+            }
+        }
+    }
+
+    fn apply_repeater_output(
+        &mut self,
+        pos: RedstonePos,
+        desired_active: bool,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if voxel.id != redstone_blocks::REDSTONE_REPEATER {
+            return;
+        }
+
+        if is_active(voxel.state) == desired_active {
+            return;
+        }
+
+        let new_state = set_active(voxel.state, desired_active);
+        self.set_voxel(
+            pos,
+            Voxel {
+                id: voxel.id,
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+
+        // Schedule neighbor updates when output changes.
+        for neighbor in pos.neighbors() {
+            self.schedule_update(neighbor);
+        }
+    }
+
+    fn apply_comparator_output(
+        &mut self,
+        pos: RedstonePos,
+        desired_power: u8,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if voxel.id != redstone_blocks::REDSTONE_COMPARATOR {
+            return;
+        }
+
+        if comparator_output_power(voxel.state) == desired_power {
+            return;
+        }
+
+        let mut new_state = set_comparator_output_power(voxel.state, desired_power);
+        new_state = set_active(new_state, desired_power > 0);
+        self.set_voxel(
+            pos,
+            Voxel {
+                id: voxel.id,
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+
+        for neighbor in pos.neighbors() {
+            self.schedule_update(neighbor);
+        }
+    }
+
+    fn apply_observer_output(
+        &mut self,
+        pos: RedstonePos,
+        desired_active: bool,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if voxel.id != redstone_blocks::REDSTONE_OBSERVER {
+            return;
+        }
+
+        if is_active(voxel.state) == desired_active {
+            return;
+        }
+
+        let new_state = set_active(voxel.state, desired_active);
+        self.set_voxel(
+            pos,
+            Voxel {
+                id: voxel.id,
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+
+        for neighbor in pos.neighbors() {
+            self.schedule_update(neighbor);
+        }
+    }
+
     /// Get the power emitted by a voxel
-    fn get_emitted_power(&self, voxel: Voxel) -> u8 {
+    fn get_emitted_power_towards(&self, from: RedstonePos, voxel: Voxel, to: RedstonePos) -> u8 {
+        let direction = (
+            (to.x - from.x).clamp(-1, 1),
+            (to.y - from.y).clamp(-1, 1),
+            (to.z - from.z).clamp(-1, 1),
+        );
+
         match RedstoneComponent::from_block_id(voxel.id) {
             Some(RedstoneComponent::Lever) => {
                 if is_active(voxel.state) {
@@ -710,6 +1548,49 @@ impl RedstoneSimulator {
             Some(RedstoneComponent::Wire) => get_power_level(voxel.state),
             Some(RedstoneComponent::Torch) => {
                 if is_active(voxel.state) {
+                    MAX_POWER
+                } else {
+                    0
+                }
+            }
+            Some(RedstoneComponent::Repeater) => {
+                if !is_active(voxel.state) {
+                    return 0;
+                }
+
+                let facing = repeater_facing(voxel.state);
+                let (dx, dz) = facing.offset();
+                let front_dir = (dx, 0, dz);
+                if direction == front_dir {
+                    MAX_POWER
+                } else {
+                    0
+                }
+            }
+            Some(RedstoneComponent::Comparator) => {
+                let output_power = comparator_output_power(voxel.state);
+                if output_power == 0 {
+                    return 0;
+                }
+
+                let facing = comparator_facing(voxel.state);
+                let (dx, dz) = facing.offset();
+                let front_dir = (dx, 0, dz);
+                if direction == front_dir {
+                    output_power
+                } else {
+                    0
+                }
+            }
+            Some(RedstoneComponent::Observer) => {
+                if !is_active(voxel.state) {
+                    return 0;
+                }
+
+                let facing = observer_facing(voxel.state);
+                let (dx, dz) = facing.offset();
+                let front_dir = (dx, 0, dz);
+                if direction == front_dir {
                     MAX_POWER
                 } else {
                     0
@@ -756,6 +1637,16 @@ impl RedstoneSimulator {
     /// Take the set of chunks that need block-light recomputation.
     pub fn take_dirty_light_chunks(&mut self) -> HashSet<ChunkPos> {
         std::mem::take(&mut self.dirty_light_chunks)
+    }
+
+    /// Take the set of chunks that need skylight + blocklight recomputation due to geometry changes.
+    pub fn take_dirty_geometry_chunks(&mut self) -> HashSet<ChunkPos> {
+        std::mem::take(&mut self.dirty_geometry_chunks)
+    }
+
+    /// Take the set of positions where geometry changes occurred.
+    pub fn take_dirty_geometry_positions(&mut self) -> BTreeSet<RedstonePos> {
+        std::mem::take(&mut self.dirty_geometry_positions)
     }
 
     /// Get pending update count
@@ -815,6 +1706,18 @@ mod tests {
             RedstoneComponent::from_block_id(redstone_blocks::REDSTONE_LAMP),
             Some(RedstoneComponent::Lamp)
         );
+        assert_eq!(
+            RedstoneComponent::from_block_id(redstone_blocks::REDSTONE_REPEATER),
+            Some(RedstoneComponent::Repeater)
+        );
+        assert_eq!(
+            RedstoneComponent::from_block_id(redstone_blocks::REDSTONE_COMPARATOR),
+            Some(RedstoneComponent::Comparator)
+        );
+        assert_eq!(
+            RedstoneComponent::from_block_id(redstone_blocks::REDSTONE_OBSERVER),
+            Some(RedstoneComponent::Observer)
+        );
         assert_eq!(RedstoneComponent::from_block_id(0), None); // Air
     }
 
@@ -826,6 +1729,9 @@ mod tests {
         assert!(RedstoneComponent::Torch.is_power_source());
         assert!(!RedstoneComponent::Wire.is_power_source());
         assert!(!RedstoneComponent::Lamp.is_power_source());
+        assert!(!RedstoneComponent::Repeater.is_power_source());
+        assert!(!RedstoneComponent::Comparator.is_power_source());
+        assert!(!RedstoneComponent::Observer.is_power_source());
     }
 
     #[test]
@@ -865,11 +1771,17 @@ mod tests {
     #[test]
     fn test_conducts_and_can_be_powered() {
         assert!(RedstoneComponent::Wire.conducts_power());
+        assert!(RedstoneComponent::Repeater.conducts_power());
+        assert!(RedstoneComponent::Comparator.conducts_power());
+        assert!(RedstoneComponent::Observer.conducts_power());
         assert!(!RedstoneComponent::Lever.conducts_power());
         assert!(!RedstoneComponent::Lamp.conducts_power());
 
         assert!(RedstoneComponent::Lamp.can_be_powered());
         assert!(RedstoneComponent::Wire.can_be_powered());
+        assert!(RedstoneComponent::Repeater.can_be_powered());
+        assert!(RedstoneComponent::Comparator.can_be_powered());
+        assert!(!RedstoneComponent::Observer.can_be_powered());
         assert!(!RedstoneComponent::Lever.can_be_powered());
         assert!(!RedstoneComponent::Button.can_be_powered());
     }
@@ -1510,6 +2422,8 @@ mod tests {
     #[test]
     fn test_get_emitted_power_all_components() {
         let sim = RedstoneSimulator::new();
+        let from = RedstonePos::new(0, 0, 0);
+        let to = RedstonePos::new(1, 0, 0);
 
         // Active lever
         let lever_on = Voxel {
@@ -1518,7 +2432,7 @@ mod tests {
             light_sky: 0,
             light_block: 0,
         };
-        assert_eq!(sim.get_emitted_power(lever_on), MAX_POWER);
+        assert_eq!(sim.get_emitted_power_towards(from, lever_on, to), MAX_POWER);
 
         // Inactive lever
         let lever_off = Voxel {
@@ -1527,7 +2441,7 @@ mod tests {
             light_sky: 0,
             light_block: 0,
         };
-        assert_eq!(sim.get_emitted_power(lever_off), 0);
+        assert_eq!(sim.get_emitted_power_towards(from, lever_off, to), 0);
 
         // Wire with power level 10
         let wire = Voxel {
@@ -1536,7 +2450,7 @@ mod tests {
             light_sky: 0,
             light_block: 0,
         };
-        assert_eq!(sim.get_emitted_power(wire), 10);
+        assert_eq!(sim.get_emitted_power_towards(from, wire, to), 10);
 
         // Non-redstone block
         let stone = Voxel {
@@ -1545,7 +2459,476 @@ mod tests {
             light_sky: 0,
             light_block: 0,
         };
-        assert_eq!(sim.get_emitted_power(stone), 0);
+        assert_eq!(sim.get_emitted_power_towards(from, stone, to), 0);
+
+        // Active repeater emits only out its front.
+        let mut repeater_state = 0;
+        repeater_state = set_repeater_facing(repeater_state, Facing::East);
+        repeater_state = set_repeater_delay_ticks(repeater_state, 1);
+        repeater_state = set_active(repeater_state, true);
+        let repeater = Voxel {
+            id: redstone_blocks::REDSTONE_REPEATER,
+            state: repeater_state,
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(
+            sim.get_emitted_power_towards(
+                RedstonePos::new(0, 0, 0),
+                repeater,
+                RedstonePos::new(1, 0, 0)
+            ),
+            MAX_POWER
+        );
+        assert_eq!(
+            sim.get_emitted_power_towards(
+                RedstonePos::new(0, 0, 0),
+                repeater,
+                RedstonePos::new(-1, 0, 0)
+            ),
+            0
+        );
+
+        // Comparator emits only out its front, at its stored output strength.
+        let mut comparator_state = 0;
+        comparator_state = set_comparator_facing(comparator_state, Facing::East);
+        comparator_state = set_comparator_subtract_mode(comparator_state, false);
+        comparator_state = set_comparator_output_power(comparator_state, 7);
+        let comparator = Voxel {
+            id: redstone_blocks::REDSTONE_COMPARATOR,
+            state: comparator_state,
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(
+            sim.get_emitted_power_towards(
+                RedstonePos::new(0, 0, 0),
+                comparator,
+                RedstonePos::new(1, 0, 0)
+            ),
+            7
+        );
+        assert_eq!(
+            sim.get_emitted_power_towards(
+                RedstonePos::new(0, 0, 0),
+                comparator,
+                RedstonePos::new(0, 0, 1)
+            ),
+            0
+        );
+
+        // Observer emits only out its front while active.
+        let mut observer_state = 0;
+        observer_state = set_observer_facing(observer_state, Facing::East);
+        observer_state = set_active(observer_state, true);
+        let observer = Voxel {
+            id: redstone_blocks::REDSTONE_OBSERVER,
+            state: observer_state,
+            light_sky: 0,
+            light_block: 0,
+        };
+        assert_eq!(
+            sim.get_emitted_power_towards(
+                RedstonePos::new(0, 0, 0),
+                observer,
+                RedstonePos::new(1, 0, 0)
+            ),
+            MAX_POWER
+        );
+        assert_eq!(
+            sim.get_emitted_power_towards(
+                RedstonePos::new(0, 0, 0),
+                observer,
+                RedstonePos::new(0, 0, 1)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn repeater_delay_ticks_roundtrips() {
+        let facing = Facing::North;
+        for delay in 1..=4 {
+            let mut state = 0;
+            state = set_repeater_facing(state, facing);
+            state = set_repeater_delay_ticks(state, delay);
+            assert_eq!(repeater_facing(state), facing);
+            assert_eq!(repeater_delay_ticks(state), delay);
+        }
+    }
+
+    #[test]
+    fn repeater_delays_output_and_is_directional() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let lever_pos = RedstonePos::new(5, 64, 5);
+        let repeater_pos = RedstonePos::new(6, 64, 5);
+        let lamp_front_pos = RedstonePos::new(7, 64, 5);
+        let lamp_side_pos = RedstonePos::new(6, 64, 6);
+
+        chunk.set_voxel(
+            lever_pos.x as usize,
+            lever_pos.y as usize,
+            lever_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mut repeater_state = 0;
+        repeater_state = set_repeater_facing(repeater_state, Facing::East);
+        repeater_state = set_repeater_delay_ticks(repeater_state, 2);
+        chunk.set_voxel(
+            repeater_pos.x as usize,
+            repeater_pos.y as usize,
+            repeater_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_REPEATER,
+                state: repeater_state,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            lamp_front_pos.x as usize,
+            lamp_front_pos.y as usize,
+            lamp_front_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            lamp_side_pos.x as usize,
+            lamp_side_pos.y as usize,
+            lamp_side_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Power the lever; this schedules neighbor updates (including the repeater).
+        sim.toggle_lever(lever_pos, &mut chunks);
+
+        // Tick 1: repeater sees input but output hasn't fired yet.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Tick 2: still waiting.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Tick 3: output applies and powers only the front lamp.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+    }
+
+    #[test]
+    fn comparator_compare_and_subtract_output_is_delayed_and_directional() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let rear_lever_pos = RedstonePos::new(5, 64, 5);
+        let side_lever_pos = RedstonePos::new(6, 64, 3);
+        let side_wire_pos = RedstonePos::new(6, 64, 4);
+        let comparator_pos = RedstonePos::new(6, 64, 5);
+        let front_lamp_pos = RedstonePos::new(7, 64, 5);
+        let side_lamp_pos = RedstonePos::new(6, 64, 6);
+
+        chunk.set_voxel(
+            rear_lever_pos.x as usize,
+            rear_lever_pos.y as usize,
+            rear_lever_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            side_lever_pos.x as usize,
+            side_lever_pos.y as usize,
+            side_lever_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            side_wire_pos.x as usize,
+            side_wire_pos.y as usize,
+            side_wire_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_WIRE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mut comparator_state = 0;
+        comparator_state = set_comparator_facing(comparator_state, Facing::East);
+        comparator_state = set_comparator_subtract_mode(comparator_state, false);
+        comparator_state = set_comparator_output_power(comparator_state, 0);
+        chunk.set_voxel(
+            comparator_pos.x as usize,
+            comparator_pos.y as usize,
+            comparator_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_COMPARATOR,
+                state: comparator_state,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            front_lamp_pos.x as usize,
+            front_lamp_pos.y as usize,
+            front_lamp_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            side_lamp_pos.x as usize,
+            side_lamp_pos.y as usize,
+            side_lamp_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // Power rear + side levers. Side lever powers the side wire at strength 14.
+        sim.toggle_lever(rear_lever_pos, &mut chunks);
+        sim.toggle_lever(side_lever_pos, &mut chunks);
+
+        // Tick 1: comparator computes desired output but hasn't applied yet.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            let comparator = chunk.voxel(6, 64, 5);
+            assert_eq!(comparator_output_power(comparator.state), 0);
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Tick 2: compare-mode output applies (rear 15 >= side 14) => 15, and only powers front.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            let comparator = chunk.voxel(6, 64, 5);
+            assert_eq!(comparator_output_power(comparator.state), MAX_POWER);
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Toggle to subtract mode.
+        {
+            let chunk = chunks.get_mut(&ChunkPos::new(0, 0)).unwrap();
+            let voxel = chunk.voxel(6, 64, 5);
+            let new_state = set_comparator_subtract_mode(voxel.state, true);
+            chunk.set_voxel(
+                6,
+                64,
+                5,
+                Voxel {
+                    state: new_state,
+                    ..voxel
+                },
+            );
+        }
+        sim.schedule_update(comparator_pos);
+
+        // Tick 3: delay tick (output still 15).
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            let comparator = chunk.voxel(6, 64, 5);
+            assert_eq!(comparator_output_power(comparator.state), MAX_POWER);
+        }
+
+        // Tick 4: subtract-mode output applies (15 - 14) => 1.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            let comparator = chunk.voxel(6, 64, 5);
+            assert_eq!(comparator_output_power(comparator.state), 1);
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+    }
+
+    #[test]
+    fn observer_pulses_on_observed_change_with_delay_and_direction() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let observed_pos = RedstonePos::new(5, 64, 5);
+        let observer_pos = RedstonePos::new(6, 64, 5);
+        let front_lamp_pos = RedstonePos::new(7, 64, 5);
+        let side_lamp_pos = RedstonePos::new(6, 64, 6);
+
+        chunk.set_voxel(
+            observed_pos.x as usize,
+            observed_pos.y as usize,
+            observed_pos.z as usize,
+            Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mut observer_state = 0;
+        observer_state = set_observer_facing(observer_state, Facing::East);
+        chunk.set_voxel(
+            observer_pos.x as usize,
+            observer_pos.y as usize,
+            observer_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_OBSERVER,
+                state: observer_state,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            front_lamp_pos.x as usize,
+            front_lamp_pos.y as usize,
+            front_lamp_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunk.set_voxel(
+            side_lamp_pos.x as usize,
+            side_lamp_pos.y as usize,
+            side_lamp_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::REDSTONE_LAMP,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        // First update initializes the stored hash but should not pulse.
+        sim.schedule_update(observer_pos);
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            let observer = chunk.voxel(6, 64, 5);
+            assert_eq!(observer.id, redstone_blocks::REDSTONE_OBSERVER);
+            assert!(!is_active(observer.state));
+            assert_ne!(observer_observed_hash(observer.state), 0);
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Change the observed block behind the observer.
+        {
+            let chunk = chunks.get_mut(&ChunkPos::new(0, 0)).unwrap();
+            chunk.set_voxel(
+                observed_pos.x as usize,
+                observed_pos.y as usize,
+                observed_pos.z as usize,
+                Voxel {
+                    id: 24, // Cobblestone
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+        }
+
+        // Tick 2: observer notices the change and schedules a pulse (no output yet).
+        sim.schedule_update(observer_pos);
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Tick 3: pulse turns on and powers only the front lamp.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
+            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+        }
+
+        // Tick 4: still on (2-tick pulse).
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
+        }
+
+        // Tick 5: pulse turns off.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(chunk.voxel(6, 64, 5).state));
+            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+        }
     }
 
     #[test]
@@ -1596,5 +2979,88 @@ mod tests {
     fn test_default_implementation() {
         let sim = RedstoneSimulator::default();
         assert_eq!(sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn piston_extends_after_one_tick_and_pushes_line() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let lever_pos = RedstonePos::new(4, 64, 5);
+        let piston_pos = RedstonePos::new(5, 64, 5);
+        let pushed_pos = RedstonePos::new(6, 64, 5);
+        let dest_pos = RedstonePos::new(7, 64, 5);
+
+        // Lever powering piston from the rear.
+        chunk.set_voxel(
+            lever_pos.x as usize,
+            lever_pos.y as usize,
+            lever_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mut piston_state = 0;
+        piston_state = set_piston_facing(piston_state, Facing::East);
+        piston_state = set_active(piston_state, false);
+        chunk.set_voxel(
+            piston_pos.x as usize,
+            piston_pos.y as usize,
+            piston_pos.z as usize,
+            Voxel {
+                id: mechanical_blocks::PISTON,
+                state: piston_state,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        // Block to push.
+        chunk.set_voxel(
+            pushed_pos.x as usize,
+            pushed_pos.y as usize,
+            pushed_pos.z as usize,
+            Voxel {
+                id: 1, // Stone
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+
+        // Tick 1: piston schedules extension but has not moved blocks yet.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(chunk.voxel(5, 64, 5).state));
+            assert_eq!(chunk.voxel(6, 64, 5).id, 1);
+            assert_eq!(
+                chunk.voxel(dest_pos.x as usize, dest_pos.y as usize, dest_pos.z as usize)
+                    .id,
+                crate::BLOCK_AIR
+            );
+        }
+
+        // Tick 2: extension applies, head appears, and the block is pushed forward.
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(is_active(chunk.voxel(5, 64, 5).state));
+            assert_eq!(chunk.voxel(6, 64, 5).id, mechanical_blocks::PISTON_HEAD);
+            assert_eq!(
+                chunk.voxel(dest_pos.x as usize, dest_pos.y as usize, dest_pos.z as usize)
+                    .id,
+                1
+            );
+        }
     }
 }

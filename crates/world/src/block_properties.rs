@@ -8,11 +8,11 @@ use crate::{
     BLOCK_FURNACE_LIT, BLOCK_GHAST_TEAR_ORE, BLOCK_GLASS, BLOCK_GLISTERING_MELON_ORE,
     BLOCK_GLOWSTONE_DUST_ORE, BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL,
     BLOCK_HANGING_ROOTS, BLOCK_ICE, BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING,
-    BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
-    BLOCK_PHANTOM_MEMBRANE_ORE, BLOCK_POINTED_DRIPSTONE, BLOCK_PUFFERFISH_ORE,
-    BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE, BLOCK_SAND, BLOCK_SCULK_VEIN, BLOCK_SNOW,
-    BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_STONE_BRICKS, BLOCK_SUGAR_CANE, BLOCK_WATER,
-    BLOCK_WATER_FLOWING,
+    BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET, BLOCK_NETHER_QUARTZ_ORE, BLOCK_OAK_LOG,
+    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_PHANTOM_MEMBRANE_ORE, BLOCK_POINTED_DRIPSTONE,
+    BLOCK_PUFFERFISH_ORE, BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE, BLOCK_SAND,
+    BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_STONE_BRICKS,
+    BLOCK_SUGAR_CANE, BLOCK_WATER, BLOCK_WATER_FLOWING,
 };
 use mdminecraft_core::{ToolMaterial, ToolType};
 
@@ -312,6 +312,7 @@ impl BlockPropertiesRegistry {
         properties[BLOCK_REDSTONE_DUST_ORE as usize] = BlockProperties::iron_ore();
         properties[BLOCK_GLOWSTONE_DUST_ORE as usize] = BlockProperties::iron_ore();
         properties[BLOCK_PUFFERFISH_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_NETHER_QUARTZ_ORE as usize] = BlockProperties::iron_ore();
 
         properties[BLOCK_COBBLESTONE as usize] = BlockProperties::stone();
         properties[BLOCK_COBBLESTONE_WALL as usize] = BlockProperties::stone();
@@ -339,6 +340,8 @@ impl BlockPropertiesRegistry {
         properties[redstone_blocks::OAK_PRESSURE_PLATE as usize] = BlockProperties::air();
         properties[redstone_blocks::REDSTONE_WIRE as usize] = BlockProperties::air();
         properties[redstone_blocks::REDSTONE_TORCH as usize] = BlockProperties::air();
+        properties[redstone_blocks::REDSTONE_REPEATER as usize] = BlockProperties::air();
+        properties[redstone_blocks::REDSTONE_COMPARATOR as usize] = BlockProperties::air();
 
         // Crops are non-solid and instantly break.
         for crop_id in farming_blocks::WHEAT_0..=farming_blocks::WHEAT_7 {

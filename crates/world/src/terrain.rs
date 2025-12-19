@@ -47,6 +47,7 @@ pub mod blocks {
     pub const REDSTONE_DUST_ORE: BlockId = 111;
     pub const GLOWSTONE_DUST_ORE: BlockId = 112;
     pub const PUFFERFISH_ORE: BlockId = 113;
+    pub const NETHER_QUARTZ_ORE: BlockId = 125;
 
     // Plants
     pub const SUGAR_CANE: BlockId = 104;
@@ -680,6 +681,16 @@ impl TerrainGenerator {
                                 ..Default::default()
                             },
                         );
+                    } else if roll < 0.00525 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::NETHER_QUARTZ_ORE,
+                                ..Default::default()
+                            },
+                        );
                     }
                 }
             }
@@ -828,6 +839,7 @@ mod tests {
         let mut found_redstone_dust_ore = false;
         let mut found_glowstone_dust_ore = false;
         let mut found_pufferfish_ore = false;
+        let mut found_nether_quartz_ore = false;
 
         for chunk_x in 0..2 {
             for chunk_z in 0..2 {
@@ -870,6 +882,7 @@ mod tests {
                                 blocks::REDSTONE_DUST_ORE => found_redstone_dust_ore = true,
                                 blocks::GLOWSTONE_DUST_ORE => found_glowstone_dust_ore = true,
                                 blocks::PUFFERFISH_ORE => found_pufferfish_ore = true,
+                                blocks::NETHER_QUARTZ_ORE => found_nether_quartz_ore = true,
                                 _ => {}
                             }
                         }
@@ -912,6 +925,10 @@ mod tests {
         assert!(
             found_pufferfish_ore,
             "Expected at least one pufferfish ore block"
+        );
+        assert!(
+            found_nether_quartz_ore,
+            "Expected at least one nether quartz ore block"
         );
     }
 
