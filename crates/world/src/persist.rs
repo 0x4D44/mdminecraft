@@ -1374,6 +1374,7 @@ mod tests {
             brewing_key,
             BrewingStandState {
                 bottles: [Some(crate::PotionType::Water), None, None],
+                bottle_is_splash: [false; 3],
                 ingredient: Some((102, 1)),
                 fuel: 3,
                 brew_progress: 0.5,

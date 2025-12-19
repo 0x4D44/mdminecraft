@@ -3,6 +3,7 @@
 //! Provides status effects that can be applied to players/mobs,
 //! potion types, and brewing recipes.
 
+use mdminecraft_core::item::item_ids;
 use serde::{Deserialize, Serialize};
 
 /// Status effect types that can be applied to entities.
@@ -533,6 +534,12 @@ pub struct BrewingStandState {
     /// Potion slots (3 bottles). Each slot stores (potion_type, is_extended, amplifier).
     /// None = empty slot, Some = bottle with potion
     pub bottles: [Option<PotionType>; 3],
+    /// Whether each bottle is a splash potion.
+    ///
+    /// Stored separately to keep the data model incremental and avoid large refactors.
+    /// Defaults to `false` for backwards-compatible deserialization.
+    #[serde(default)]
+    pub bottle_is_splash: [bool; 3],
     /// Ingredient slot (item_id, count).
     pub ingredient: Option<(u16, u32)>,
     /// Fuel slot (blaze powder count).
@@ -554,6 +561,7 @@ impl BrewingStandState {
     pub fn new() -> Self {
         Self {
             bottles: [None, None, None],
+            bottle_is_splash: [false; 3],
             ingredient: None,
             fuel: 0,
             brew_progress: 0.0,
@@ -601,6 +609,12 @@ impl BrewingStandState {
     /// Check if the brewing stand can brew (has valid ingredient and at least one bottle).
     fn can_brew(&self) -> bool {
         if let Some((ingredient_id, _)) = &self.ingredient {
+            if *ingredient_id == item_ids::GUNPOWDER {
+                return self.bottles.iter().enumerate().any(|(idx, potion)| {
+                    potion.is_some_and(|p| p != PotionType::Water) && !self.bottle_is_splash[idx]
+                });
+            }
+
             // Check if any bottle can be brewed with this ingredient
             for potion_type in self.bottles.iter().flatten() {
                 if get_brew_result(*potion_type, *ingredient_id).is_some() {
@@ -616,11 +630,19 @@ impl BrewingStandState {
         if let Some((ingredient_id, ingredient_count)) = &mut self.ingredient {
             let ing_id = *ingredient_id;
 
-            // Transform each bottle that has a valid recipe
-            for bottle in &mut self.bottles {
-                if let Some(potion_type) = bottle {
-                    if let Some(result) = get_brew_result(*potion_type, ing_id) {
-                        *bottle = Some(result);
+            if ing_id == item_ids::GUNPOWDER {
+                for (idx, bottle) in self.bottles.iter().enumerate() {
+                    if bottle.is_some_and(|potion| potion != PotionType::Water) {
+                        self.bottle_is_splash[idx] = true;
+                    }
+                }
+            } else {
+                // Transform each bottle that has a valid recipe
+                for bottle in &mut self.bottles {
+                    if let Some(potion_type) = bottle {
+                        if let Some(result) = get_brew_result(*potion_type, ing_id) {
+                            *bottle = Some(result);
+                        }
                     }
                 }
             }
@@ -681,6 +703,7 @@ impl BrewingStandState {
             return false;
         }
         self.bottles[slot] = Some(potion_type);
+        self.bottle_is_splash[slot] = false;
         true
     }
 
@@ -692,7 +715,11 @@ impl BrewingStandState {
         if slot >= 3 {
             return None;
         }
-        self.bottles[slot].take()
+        let bottle = self.bottles[slot].take();
+        if bottle.is_some() {
+            self.bottle_is_splash[slot] = false;
+        }
+        bottle
     }
 
     /// Take the ingredient from the brewing stand.
@@ -928,6 +955,7 @@ mod tests {
     fn test_brewing_stand_new() {
         let stand = BrewingStandState::new();
         assert_eq!(stand.bottles, [None, None, None]);
+        assert_eq!(stand.bottle_is_splash, [false, false, false]);
         assert!(stand.ingredient.is_none());
         assert_eq!(stand.fuel, 0);
         assert_eq!(stand.brew_progress, 0.0);
@@ -1030,6 +1058,32 @@ mod tests {
         stand.update(1.0);
         assert!(!stand.is_brewing);
         assert_eq!(stand.fuel, 1); // Fuel not consumed
+    }
+
+    #[test]
+    fn test_brewing_stand_gunpowder_makes_splash_potions() {
+        let mut stand = BrewingStandState::new();
+        stand.add_bottle(0, PotionType::Swiftness);
+        stand.add_bottle(1, PotionType::Swiftness);
+
+        assert_eq!(stand.add_ingredient(item_ids::GUNPOWDER, 1), 0);
+        stand.add_fuel(1);
+
+        let mut completed = false;
+        for _ in 0..420 {
+            if stand.update(0.05) {
+                completed = true;
+            }
+        }
+
+        assert!(completed);
+        assert_eq!(stand.bottles[0], Some(PotionType::Swiftness));
+        assert_eq!(stand.bottles[1], Some(PotionType::Swiftness));
+        assert!(stand.bottle_is_splash[0]);
+        assert!(stand.bottle_is_splash[1]);
+        assert!(!stand.bottle_is_splash[2]);
+        assert!(stand.ingredient.is_none());
+        assert_eq!(stand.fuel, 0);
     }
 
     #[test]

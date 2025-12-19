@@ -1,10 +1,10 @@
-use mdminecraft_core::{ToolMaterial, ToolType};
+use mdminecraft_core::{item::item_ids, ToolMaterial, ToolType};
 use mdminecraft_testkit::{run_micro_worldtest, MicroWorldtestConfig};
 use mdminecraft_world::{
     get_power_level, is_active,
     lighting::{stitch_light_seams, BlockOpacityProvider, LightType},
-    redstone_blocks, BlockProperties, Chunk, ChunkPos, FurnaceState, ItemType, RedstonePos,
-    RedstoneSimulator, Voxel,
+    redstone_blocks, BlockProperties, BrewingStandState, Chunk, ChunkPos, FurnaceState, ItemType,
+    PotionType, RedstonePos, RedstoneSimulator, Voxel,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -155,6 +155,253 @@ fn micro_furnace_single_smelt_snapshot() {
                 smelt_progress_milli,
                 fuel_remaining_milli,
             }
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_water_to_awkward_to_strength_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+        staged_strength: bool,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Water));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::NETHER_WART, 1), 0);
+    assert_eq!(stand.add_fuel(2), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_water_to_awkward_to_strength".to_string(),
+            ticks: 90,
+            snapshot_path: snapshot_path("micro_brewing_water_to_awkward_to_strength.json"),
+        },
+        State {
+            stand,
+            staged_strength: false,
+        },
+        |_tick, state| {
+            let completed = state.stand.update(0.5);
+            if completed
+                && !state.staged_strength
+                && state
+                    .stand
+                    .bottles
+                    .iter()
+                    .all(|b| *b == Some(PotionType::Awkward))
+            {
+                // Stage the second brew: Awkward + Blaze Powder -> Strength.
+                let remainder = state.stand.add_ingredient(item_ids::BLAZE_POWDER, 1);
+                assert_eq!(remainder, 0);
+                state.staged_strength = true;
+            }
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_gunpowder_to_splash_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Swiftness));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::GUNPOWDER, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_gunpowder_to_splash".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_gunpowder_to_splash.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_awkward_spider_eye_to_poison_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::SPIDER_EYE, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_spider_eye_to_poison".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_awkward_spider_eye_to_poison.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_awkward_sugar_to_swiftness_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Awkward));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::SUGAR, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_awkward_sugar_to_swiftness".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path("micro_brewing_awkward_sugar_to_swiftness.json"),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
+        },
+    )
+    .expect("snapshot verified");
+}
+
+#[test]
+fn micro_brewing_swiftness_fermented_spider_eye_to_slowness_snapshot() {
+    #[derive(Debug, Clone)]
+    struct State {
+        stand: BrewingStandState,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        bottles: [Option<PotionType>; 3],
+        bottle_is_splash: [bool; 3],
+        ingredient: Option<(u16, u32)>,
+        fuel: u32,
+        is_brewing: bool,
+        brew_progress_milli: i32,
+    }
+
+    let mut stand = BrewingStandState::new();
+    for slot in 0..3 {
+        assert!(stand.add_bottle(slot, PotionType::Swiftness));
+    }
+    assert_eq!(stand.add_ingredient(item_ids::FERMENTED_SPIDER_EYE, 1), 0);
+    assert_eq!(stand.add_fuel(1), 0);
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_brewing_swiftness_fermented_spider_eye_to_slowness".to_string(),
+            ticks: 45,
+            snapshot_path: snapshot_path(
+                "micro_brewing_swiftness_fermented_spider_eye_to_slowness.json",
+            ),
+        },
+        State { stand },
+        |_tick, state| {
+            state.stand.update(0.5);
+        },
+        |_tick, state| Snap {
+            bottles: state.stand.bottles,
+            bottle_is_splash: state.stand.bottle_is_splash,
+            ingredient: state.stand.ingredient,
+            fuel: state.stand.fuel,
+            is_brewing: state.stand.is_brewing,
+            brew_progress_milli: (state.stand.brew_progress * 1000.0).round() as i32,
         },
     )
     .expect("snapshot verified");

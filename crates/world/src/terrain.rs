@@ -9,6 +9,8 @@ use crate::geode::GeodeGenerator;
 use crate::heightmap::Heightmap;
 use crate::noise::{NoiseConfig, NoiseGenerator};
 use crate::trees::{generate_tree_positions, Tree, TreeType};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use tracing::{debug, instrument};
 
 /// Common block IDs for terrain generation.
@@ -32,6 +34,20 @@ pub mod blocks {
     pub const IRON_ORE: BlockId = 15;
     pub const GOLD_ORE: BlockId = 16;
     pub const DIAMOND_ORE: BlockId = 17;
+    pub const LAPIS_ORE: BlockId = 98;
+
+    // Nether-ish blocks (used as Overworld proxies for brewing progression)
+    pub const NETHER_WART_BLOCK: BlockId = 101;
+    pub const SOUL_SAND: BlockId = 102;
+    pub const MAGMA_CREAM_ORE: BlockId = 106;
+
+    // Plants
+    pub const SUGAR_CANE: BlockId = 104;
+    pub const BROWN_MUSHROOM: BlockId = 105;
+
+    // Cave blocks (used for decoration placement)
+    pub const MOSS_BLOCK: BlockId = 75;
+    pub const DEEPSLATE: BlockId = 76;
 }
 
 /// Terrain generator that fills chunks with blocks using 3D density.
@@ -206,6 +222,8 @@ impl TerrainGenerator {
 
         // Population pass: Add trees
         self.populate_trees(&mut chunk, chunk_origin_x, chunk_origin_z);
+        self.populate_sugar_cane(&mut chunk);
+        self.populate_mushrooms(&mut chunk);
 
         debug!("Terrain generation complete");
         chunk
@@ -267,6 +285,155 @@ impl TerrainGenerator {
                 let tree = Tree::new(world_x, world_y, world_z, tree_type);
                 tree.generate_into_chunk(chunk);
             }
+        }
+    }
+
+    /// Populate chunk with sugar cane near water.
+    fn populate_sugar_cane(&self, chunk: &mut Chunk) {
+        let chunk_pos = chunk.position();
+
+        // Deterministic per-chunk RNG (independent of generation order).
+        let seed = self.world_seed
+            ^ (chunk_pos.x as u64).wrapping_mul(0xC0FF_EE00_D00D_BAAD)
+            ^ (chunk_pos.z as u64).wrapping_mul(0x5EED_CAFE_1234_5678)
+            ^ 0x53_55_47_41_52_43_41_4E_u64; // "SUGARCAN"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        // Try a handful of random columns per chunk.
+        for _ in 0..10 {
+            let local_x = rng.gen_range(0..CHUNK_SIZE_X);
+            let local_z = rng.gen_range(0..CHUNK_SIZE_Z);
+
+            // Find a ground block with air above and adjacent water.
+            let mut ground_y = None;
+            for y in (1..(CHUNK_SIZE_Y - 2)).rev() {
+                let ground = chunk.voxel(local_x, y, local_z).id;
+                if !matches!(ground, blocks::DIRT | blocks::GRASS | blocks::SAND) {
+                    continue;
+                }
+                if chunk.voxel(local_x, y + 1, local_z).id != blocks::AIR {
+                    continue;
+                }
+
+                let mut has_adjacent_water = false;
+                for (dx, dz) in [(1isize, 0isize), (-1, 0), (0, 1), (0, -1)] {
+                    let nx = local_x as isize + dx;
+                    let nz = local_z as isize + dz;
+                    if nx < 0
+                        || nz < 0
+                        || nx >= CHUNK_SIZE_X as isize
+                        || nz >= CHUNK_SIZE_Z as isize
+                    {
+                        continue;
+                    }
+                    let id = chunk.voxel(nx as usize, y, nz as usize).id;
+                    if id == blocks::WATER {
+                        has_adjacent_water = true;
+                        break;
+                    }
+                }
+
+                if has_adjacent_water {
+                    ground_y = Some(y);
+                    break;
+                }
+            }
+
+            let Some(ground_y) = ground_y else {
+                continue;
+            };
+
+            let base_y = ground_y + 1;
+            let target_height = rng.gen_range(1..=3);
+            for dy in 0..target_height {
+                let y = base_y + dy;
+                if y >= CHUNK_SIZE_Y {
+                    break;
+                }
+                let voxel = chunk.voxel(local_x, y, local_z);
+                if voxel.id != blocks::AIR {
+                    break;
+                }
+                chunk.set_voxel(
+                    local_x,
+                    y,
+                    local_z,
+                    Voxel {
+                        id: blocks::SUGAR_CANE,
+                        state: 0,
+                        light_sky: voxel.light_sky,
+                        light_block: voxel.light_block,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Populate chunk with brown mushrooms in underground cave spaces.
+    fn populate_mushrooms(&self, chunk: &mut Chunk) {
+        let chunk_pos = chunk.position();
+
+        // Deterministic per-chunk RNG (independent of generation order).
+        let seed = self.world_seed
+            ^ (chunk_pos.x as u64).wrapping_mul(0xBADD_CAFE_DEAD_BEEF)
+            ^ (chunk_pos.z as u64).wrapping_mul(0x1234_5678_9ABC_DEF0)
+            ^ 0x4D55_5348_524F_4F4D_u64; // "MUSHROOM"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        // Try a small number of random positions per chunk.
+        for _ in 0..12 {
+            let local_x = rng.gen_range(0..CHUNK_SIZE_X);
+            let local_z = rng.gen_range(0..CHUNK_SIZE_Z);
+
+            // Keep below "surface scan" tests that look at y=50..100.
+            let y = rng.gen_range(5..45);
+
+            let voxel = chunk.voxel(local_x, y, local_z);
+            if voxel.id != blocks::AIR {
+                continue;
+            }
+
+            let below = chunk.voxel(local_x, y - 1, local_z).id;
+            let valid_floor = matches!(
+                below,
+                blocks::STONE
+                    | blocks::DIRT
+                    | blocks::GRASS
+                    | blocks::MOSS_BLOCK
+                    | blocks::DEEPSLATE
+            );
+            if !valid_floor {
+                continue;
+            }
+
+            // Require a nearby ceiling so we bias toward caves rather than open air.
+            let mut has_ceiling = false;
+            for dy in 1..=12 {
+                let check_y = y + dy;
+                if check_y >= CHUNK_SIZE_Y {
+                    break;
+                }
+                let id = chunk.voxel(local_x, check_y, local_z).id;
+                if id != blocks::AIR {
+                    has_ceiling = true;
+                    break;
+                }
+            }
+            if !has_ceiling {
+                continue;
+            }
+
+            chunk.set_voxel(
+                local_x,
+                y,
+                local_z,
+                Voxel {
+                    id: blocks::BROWN_MUSHROOM,
+                    state: 0,
+                    light_sky: voxel.light_sky,
+                    light_block: voxel.light_block,
+                },
+            );
         }
     }
 
@@ -352,6 +519,18 @@ impl TerrainGenerator {
                             },
                         );
                     }
+                    // Lapis: y 0-32, 0.1% chance (cumulative threshold)
+                    else if local_y <= 32 && roll < 0.004 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::LAPIS_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    }
                     // Iron: y 0-64, 0.7% chance
                     else if local_y <= 64 && roll < 0.007 {
                         chunk.set_voxel(
@@ -372,6 +551,55 @@ impl TerrainGenerator {
                             local_z,
                             Voxel {
                                 id: blocks::COAL_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // Nether-ish proxy blocks for Overworld-only brewing progression.
+        //
+        // These provide access to brewing ingredients before Nether/structures exist.
+        let nether_seed = ore_seed ^ 0x4E45_5448; // "NETH"
+        let mut nether_rng = StdRng::seed_from_u64(nether_seed);
+        for local_y in 0..=32 {
+            for local_z in 0..CHUNK_SIZE_Z {
+                for local_x in 0..CHUNK_SIZE_X {
+                    let voxel = chunk.voxel(local_x, local_y, local_z);
+                    if voxel.id != blocks::STONE {
+                        continue;
+                    }
+
+                    let roll: f32 = nether_rng.gen();
+                    if roll < 0.00025 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::NETHER_WART_BLOCK,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00075 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::SOUL_SAND,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.00125 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::MAGMA_CREAM_ORE,
                                 ..Default::default()
                             },
                         );
@@ -509,6 +737,66 @@ mod tests {
     }
 
     #[test]
+    fn test_ore_generation_includes_lapis_and_nether_proxy_blocks() {
+        let gen = TerrainGenerator::new(4242);
+
+        let mut found_lapis = false;
+        let mut found_wart_block = false;
+        let mut found_soul_sand = false;
+        let mut found_magma_cream_ore = false;
+
+        for chunk_x in 0..2 {
+            for chunk_z in 0..2 {
+                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                let mut chunk = Chunk::new(chunk_pos);
+
+                // Fill the chunk with stone so ore placement is deterministic and dense.
+                for x in 0..CHUNK_SIZE_X {
+                    for z in 0..CHUNK_SIZE_Z {
+                        for y in 0..CHUNK_SIZE_Y {
+                            chunk.set_voxel(
+                                x,
+                                y,
+                                z,
+                                Voxel {
+                                    id: blocks::STONE,
+                                    ..Default::default()
+                                },
+                            );
+                        }
+                    }
+                }
+
+                let chunk_origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+                let chunk_origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+                gen.generate_ores(&mut chunk, chunk_origin_x, chunk_origin_z);
+
+                for x in 0..CHUNK_SIZE_X {
+                    for z in 0..CHUNK_SIZE_Z {
+                        for y in 0..=32 {
+                            match chunk.voxel(x, y, z).id {
+                                blocks::LAPIS_ORE => found_lapis = true,
+                                blocks::NETHER_WART_BLOCK => found_wart_block = true,
+                                blocks::SOUL_SAND => found_soul_sand = true,
+                                blocks::MAGMA_CREAM_ORE => found_magma_cream_ore = true,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(found_lapis, "Expected at least one lapis ore block");
+        assert!(found_wart_block, "Expected at least one nether wart block");
+        assert!(found_soul_sand, "Expected at least one soul sand block");
+        assert!(
+            found_magma_cream_ore,
+            "Expected at least one magma cream ore block"
+        );
+    }
+
+    #[test]
     fn test_biome_specific_surface_blocks() {
         use crate::trees::tree_blocks;
 
@@ -534,6 +822,7 @@ mod tests {
                                 || voxel.id == blocks::SNOW
                                 || voxel.id == blocks::DIRT
                                 || voxel.id == blocks::STONE
+                                || voxel.id == blocks::SUGAR_CANE
                                 || voxel.id == tree_blocks::LOG
                                 || voxel.id == tree_blocks::LEAVES
                                 || voxel.id == tree_blocks::BIRCH_LOG

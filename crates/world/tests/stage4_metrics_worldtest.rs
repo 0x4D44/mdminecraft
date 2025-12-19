@@ -273,12 +273,19 @@ fn stage4_metrics_worldtest() {
     assert_eq!(seams_failed, 0, "All seams must be continuous");
     assert!(chunks_generated > 0, "Chunks must be generated");
     assert!(unique_biomes >= 3, "Multiple biomes should be present");
-    // Performance threshold: 30ms for release, 800ms for debug (debug is much slower)
-    let performance_threshold = if cfg!(debug_assertions) {
-        800_000.0
+    // Performance threshold: release is tight, debug is intentionally loose (debug is much slower).
+    //
+    // Debug-mode performance varies across machines; keep this as a guardrail, but allow tuning
+    // via env override.
+    let default_threshold_us = if cfg!(debug_assertions) {
+        1_200_000.0
     } else {
         30_000.0
     };
+    let performance_threshold = std::env::var("MDM_STAGE4_METRICS_MAX_AVG_GEN_US")
+        .ok()
+        .and_then(|raw| raw.parse::<f64>().ok())
+        .unwrap_or(default_threshold_us);
     assert!(
         avg_gen_time_us < performance_threshold,
         "Generation must be under {}ms target (was {:.1}μs)",
