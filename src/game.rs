@@ -76,6 +76,7 @@ const CORE_ITEM_RABBIT_FOOT: u16 = 2015;
 const CORE_ITEM_PHANTOM_MEMBRANE: u16 = 2016;
 const CORE_ITEM_REDSTONE_DUST: u16 = 2017;
 const CORE_ITEM_GLOWSTONE_DUST: u16 = 2018;
+const CORE_ITEM_PUFFERFISH: u16 = 2019;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -404,6 +405,7 @@ impl Hotbar {
                     CORE_ITEM_PHANTOM_MEMBRANE => "Phantom Membrane".to_string(),
                     CORE_ITEM_REDSTONE_DUST => "Redstone Dust".to_string(),
                     CORE_ITEM_GLOWSTONE_DUST => "Glowstone Dust".to_string(),
+                    CORE_ITEM_PUFFERFISH => "Pufferfish".to_string(),
                     CORE_ITEM_SUGAR => "Sugar".to_string(),
                     CORE_ITEM_PAPER => "Paper".to_string(),
                     CORE_ITEM_BOOK => "Book".to_string(),
@@ -1095,6 +1097,7 @@ fn brew_ingredient_label(ingredient_id: u16) -> &'static str {
         item_ids::GLOWSTONE_DUST => "Glowstone Dust",
         item_ids::GUNPOWDER => "Gunpowder",
         item_ids::DRAGON_BREATH => "Dragon Breath",
+        item_ids::PUFFERFISH => "Pufferfish",
         item_ids::SUGAR => "Sugar",
         _ => "Unknown",
     }
@@ -1115,6 +1118,7 @@ fn core_item_type_to_brew_ingredient_id(item_type: ItemType) -> Option<u16> {
         ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE) => Some(item_ids::PHANTOM_MEMBRANE),
         ItemType::Item(CORE_ITEM_REDSTONE_DUST) => Some(item_ids::REDSTONE_DUST),
         ItemType::Item(CORE_ITEM_GLOWSTONE_DUST) => Some(item_ids::GLOWSTONE_DUST),
+        ItemType::Item(CORE_ITEM_PUFFERFISH) => Some(item_ids::PUFFERFISH),
         ItemType::Food(mdminecraft_core::item::FoodType::GoldenCarrot) => {
             Some(item_ids::GOLDEN_CARROT)
         }
@@ -1137,6 +1141,7 @@ fn brew_ingredient_id_to_core_item_type(ingredient_id: u16) -> Option<ItemType> 
         item_ids::PHANTOM_MEMBRANE => Some(ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE)),
         item_ids::REDSTONE_DUST => Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
         item_ids::GLOWSTONE_DUST => Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+        item_ids::PUFFERFISH => Some(ItemType::Item(CORE_ITEM_PUFFERFISH)),
         item_ids::GOLDEN_CARROT => Some(ItemType::Food(
             mdminecraft_core::item::FoodType::GoldenCarrot,
         )),
@@ -6791,6 +6796,11 @@ impl GameWorld {
         let player_x = player_pos.x as f64;
         let player_y = player_pos.y as f64;
         let player_z = player_pos.z as f64;
+        let visibility = if self.status_effects.has(StatusEffectType::Invisibility) {
+            0.25
+        } else {
+            1.0
+        };
 
         // Check if it's night time (hostile mobs spawn at night)
         // Time: 0.0-0.25 Night→Dawn, 0.75-1.0 Dusk→Night
@@ -6808,7 +6818,8 @@ impl GameWorld {
             // Spiders are only hostile at night, other hostile mobs always attack
             if mob.mob_type.is_hostile_at_time(is_night) {
                 // Update hostile mob with player targeting
-                let dealt_damage = mob.update_with_target(tick, player_x, player_y, player_z);
+                let dealt_damage = mob
+                    .update_with_target_visibility(tick, player_x, player_y, player_z, visibility);
                 if dealt_damage {
                     // Check if this was a creeper explosion
                     if mob.mob_type.explodes() && mob.dead {
@@ -8396,6 +8407,7 @@ impl GameWorld {
             DroppedItemType::PhantomMembrane => Some(ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE)),
             DroppedItemType::RedstoneDust => Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
             DroppedItemType::GlowstoneDust => Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+            DroppedItemType::Pufferfish => Some(ItemType::Item(CORE_ITEM_PUFFERFISH)),
             DroppedItemType::Sugar => Some(ItemType::Item(CORE_ITEM_SUGAR)),
             DroppedItemType::Paper => Some(ItemType::Item(CORE_ITEM_PAPER)),
             DroppedItemType::Book => Some(ItemType::Item(CORE_ITEM_BOOK)),
@@ -8687,6 +8699,7 @@ impl GameWorld {
                 CORE_ITEM_PHANTOM_MEMBRANE => Some(DroppedItemType::PhantomMembrane),
                 CORE_ITEM_REDSTONE_DUST => Some(DroppedItemType::RedstoneDust),
                 CORE_ITEM_GLOWSTONE_DUST => Some(DroppedItemType::GlowstoneDust),
+                CORE_ITEM_PUFFERFISH => Some(DroppedItemType::Pufferfish),
                 CORE_ITEM_PAPER => Some(DroppedItemType::Paper),
                 CORE_ITEM_BOOK => Some(DroppedItemType::Book),
                 CORE_ITEM_WHEAT_SEEDS => Some(DroppedItemType::WheatSeeds),
@@ -15450,9 +15463,9 @@ mod tests {
         CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_FERMENTED_SPIDER_EYE,
         CORE_ITEM_GHAST_TEAR, CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
         CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_MAGMA_CREAM,
-        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_RABBIT_FOOT,
-        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
-        CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
+        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH,
+        CORE_ITEM_RABBIT_FOOT, CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR,
+        CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
     use mdminecraft_world::StatusEffect;
 
@@ -18674,6 +18687,15 @@ mod tests {
         );
 
         assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Pufferfish),
+            Some(ItemType::Item(CORE_ITEM_PUFFERFISH))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_PUFFERFISH)),
+            Some(DroppedItemType::Pufferfish)
+        );
+
+        assert_eq!(
             GameWorld::convert_dropped_item_type(DroppedItemType::Sugar),
             Some(ItemType::Item(CORE_ITEM_SUGAR))
         );
@@ -19171,6 +19193,18 @@ mod tests {
         ));
         assert_eq!(dust.count, 0);
         assert_eq!(stand.ingredient, Some((item_ids::GLOWSTONE_DUST, 2)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_pufferfish_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut fish = ItemStack::new(ItemType::Item(CORE_ITEM_PUFFERFISH), 3);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut fish, &mut stand
+        ));
+        assert_eq!(fish.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::PUFFERFISH, 3)));
     }
 
     #[test]

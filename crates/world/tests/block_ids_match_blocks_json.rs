@@ -209,6 +209,10 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::BLOCK_GLOWSTONE_DUST_ORE,
         id_of(&map, "glowstone_dust_ore")
     );
+    assert_eq!(
+        mdminecraft_world::BLOCK_PUFFERFISH_ORE,
+        id_of(&map, "pufferfish_ore")
+    );
 
     let wheat = [
         mdminecraft_world::farming_blocks::WHEAT_0,

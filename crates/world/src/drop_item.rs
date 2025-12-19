@@ -295,6 +295,9 @@ pub enum ItemType {
     SplashPotionStrengthStrong,
     SplashPotionWeaknessLong,
     SplashPotionSlowFallingLong,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    Pufferfish,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -511,6 +514,7 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::SplashPotionStrengthStrong,
     ItemType::SplashPotionWeaknessLong,
     ItemType::SplashPotionSlowFallingLong,
+    ItemType::Pufferfish,
 ];
 
 impl ItemType {
@@ -619,7 +623,8 @@ impl ItemType {
             | ItemType::RabbitFoot
             | ItemType::PhantomMembrane
             | ItemType::RedstoneDust
-            | ItemType::GlowstoneDust => 64,
+            | ItemType::GlowstoneDust
+            | ItemType::Pufferfish => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -861,6 +866,7 @@ impl ItemType {
             110 => Some((ItemType::PhantomMembrane, 1)),
             111 => Some((ItemType::RedstoneDust, 1)),
             112 => Some((ItemType::GlowstoneDust, 1)),
+            113 => Some((ItemType::Pufferfish, 1)),
 
             // Magma block: drops blaze powder (Overworld proxy for brewing fuel).
             80 => Some((ItemType::BlazePowder, 1)),
@@ -1544,10 +1550,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(
-            ALL_ITEM_TYPES.len(),
-            ItemType::SplashPotionSlowFallingLong as usize + 1
-        );
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::Pufferfish as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);

@@ -135,6 +135,7 @@ pub mod item_ids {
     pub const GLOWSTONE_DUST: u16 = 115;
     pub const GUNPOWDER: u16 = 116;
     pub const DRAGON_BREATH: u16 = 117;
+    pub const PUFFERFISH: u16 = 118;
 
     // Potions (200-299) - stored as base potion ID, extended/splash/lingering determined by variant
     pub const POTION_WATER: u16 = 200;
