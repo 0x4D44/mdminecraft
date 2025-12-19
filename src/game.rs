@@ -31,7 +31,7 @@ use mdminecraft_world::{
     EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState, InteractionManager,
     Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor,
     PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos,
-    RedstoneSimulator, RegionStore, SimTime, StatusEffect, StatusEffectType, StatusEffects,
+    RedstoneSimulator, RegionStore, SimTime, StatusEffectType, StatusEffects,
     SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle,
     WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF,
     BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
@@ -70,6 +70,12 @@ const CORE_ITEM_PAPER: u16 = 2009;
 const CORE_ITEM_BOOK: u16 = 2010;
 const CORE_ITEM_FERMENTED_SPIDER_EYE: u16 = 2011;
 const CORE_ITEM_MAGMA_CREAM: u16 = 2012;
+const CORE_ITEM_GHAST_TEAR: u16 = 2013;
+const CORE_ITEM_GLISTERING_MELON: u16 = 2014;
+const CORE_ITEM_RABBIT_FOOT: u16 = 2015;
+const CORE_ITEM_PHANTOM_MEMBRANE: u16 = 2016;
+const CORE_ITEM_REDSTONE_DUST: u16 = 2017;
+const CORE_ITEM_GLOWSTONE_DUST: u16 = 2018;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -392,6 +398,12 @@ impl Hotbar {
                     CORE_ITEM_SPIDER_EYE => "Spider Eye".to_string(),
                     CORE_ITEM_FERMENTED_SPIDER_EYE => "Fermented Spider Eye".to_string(),
                     CORE_ITEM_MAGMA_CREAM => "Magma Cream".to_string(),
+                    CORE_ITEM_GHAST_TEAR => "Ghast Tear".to_string(),
+                    CORE_ITEM_GLISTERING_MELON => "Glistering Melon".to_string(),
+                    CORE_ITEM_RABBIT_FOOT => "Rabbit Foot".to_string(),
+                    CORE_ITEM_PHANTOM_MEMBRANE => "Phantom Membrane".to_string(),
+                    CORE_ITEM_REDSTONE_DUST => "Redstone Dust".to_string(),
+                    CORE_ITEM_GLOWSTONE_DUST => "Glowstone Dust".to_string(),
                     CORE_ITEM_SUGAR => "Sugar".to_string(),
                     CORE_ITEM_PAPER => "Paper".to_string(),
                     CORE_ITEM_BOOK => "Book".to_string(),
@@ -849,6 +861,55 @@ impl PlayerHealth {
     }
 }
 
+fn apply_instant_status_effect_to_player_health(
+    health: &mut PlayerHealth,
+    effect_type: StatusEffectType,
+    amplifier: u8,
+) {
+    match effect_type {
+        StatusEffectType::InstantHealth => {
+            let amount = if amplifier > 0 { 8.0 } else { 4.0 };
+            health.heal(amount);
+        }
+        StatusEffectType::InstantDamage => {
+            let amount = if amplifier > 0 { 12.0 } else { 6.0 };
+            health.damage(amount);
+        }
+        _ => {}
+    }
+}
+
+fn tick_health_over_time_status_effects(
+    health: &mut PlayerHealth,
+    effects: &StatusEffects,
+    regeneration_timer_ticks: &mut u8,
+    poison_timer_ticks: &mut u8,
+) {
+    if let Some(amp) = effects.amplifier(StatusEffectType::Regeneration) {
+        let interval = (50u8).saturating_div(amp.saturating_add(1)).max(1);
+        *regeneration_timer_ticks = regeneration_timer_ticks.saturating_add(1);
+        if *regeneration_timer_ticks >= interval {
+            *regeneration_timer_ticks = 0;
+            health.heal(1.0);
+        }
+    } else {
+        *regeneration_timer_ticks = 0;
+    }
+
+    if let Some(amp) = effects.amplifier(StatusEffectType::Poison) {
+        let interval = (25u8).saturating_div(amp.saturating_add(1)).max(1);
+        *poison_timer_ticks = poison_timer_ticks.saturating_add(1);
+        if *poison_timer_ticks >= interval {
+            *poison_timer_ticks = 0;
+            if health.current > 1.0 {
+                health.damage(1.0);
+            }
+        }
+    } else {
+        *poison_timer_ticks = 0;
+    }
+}
+
 /// Get hunger restoration amount for a food type
 fn food_hunger_restore(food_type: mdminecraft_core::item::FoodType) -> f32 {
     use mdminecraft_core::item::FoodType;
@@ -881,7 +942,140 @@ fn potion_name(potion_id: u16) -> String {
         potion_ids::REGENERATION => "Potion of Regeneration".to_string(),
         potion_ids::STRENGTH => "Potion of Strength".to_string(),
         potion_ids::WEAKNESS => "Potion of Weakness".to_string(),
+        potion_ids::SLOW_FALLING => "Potion of Slow Falling".to_string(),
+        potion_ids::NIGHT_VISION_LONG => "Potion of Night Vision (Long)".to_string(),
+        potion_ids::INVISIBILITY_LONG => "Potion of Invisibility (Long)".to_string(),
+        potion_ids::LEAPING_LONG => "Potion of Leaping (Long)".to_string(),
+        potion_ids::LEAPING_STRONG => "Potion of Leaping II".to_string(),
+        potion_ids::FIRE_RESISTANCE_LONG => "Potion of Fire Resistance (Long)".to_string(),
+        potion_ids::SWIFTNESS_LONG => "Potion of Swiftness (Long)".to_string(),
+        potion_ids::SWIFTNESS_STRONG => "Potion of Swiftness II".to_string(),
+        potion_ids::SLOWNESS_LONG => "Potion of Slowness (Long)".to_string(),
+        potion_ids::WATER_BREATHING_LONG => "Potion of Water Breathing (Long)".to_string(),
+        potion_ids::HEALING_STRONG => "Potion of Healing II".to_string(),
+        potion_ids::HARMING_STRONG => "Potion of Harming II".to_string(),
+        potion_ids::POISON_LONG => "Potion of Poison (Long)".to_string(),
+        potion_ids::POISON_STRONG => "Potion of Poison II".to_string(),
+        potion_ids::REGENERATION_LONG => "Potion of Regeneration (Long)".to_string(),
+        potion_ids::REGENERATION_STRONG => "Potion of Regeneration II".to_string(),
+        potion_ids::STRENGTH_LONG => "Potion of Strength (Long)".to_string(),
+        potion_ids::STRENGTH_STRONG => "Potion of Strength II".to_string(),
+        potion_ids::WEAKNESS_LONG => "Potion of Weakness (Long)".to_string(),
+        potion_ids::SLOW_FALLING_LONG => "Potion of Slow Falling (Long)".to_string(),
         _ => format!("Potion({})", potion_id),
+    }
+}
+
+fn potion_supports_strong_variant(potion: PotionType) -> bool {
+    matches!(
+        potion,
+        PotionType::Swiftness
+            | PotionType::Leaping
+            | PotionType::Healing
+            | PotionType::Harming
+            | PotionType::Poison
+            | PotionType::Regeneration
+            | PotionType::Strength
+    )
+}
+
+fn potion_id_to_potion_state(potion_id: u16) -> Option<(PotionType, bool, u8)> {
+    let (potion_type, extended, amplifier) = match potion_id {
+        potion_ids::AWKWARD => (PotionType::Awkward, false, 0),
+        potion_ids::NIGHT_VISION => (PotionType::NightVision, false, 0),
+        potion_ids::INVISIBILITY => (PotionType::Invisibility, false, 0),
+        potion_ids::LEAPING => (PotionType::Leaping, false, 0),
+        potion_ids::FIRE_RESISTANCE => (PotionType::FireResistance, false, 0),
+        potion_ids::SWIFTNESS => (PotionType::Swiftness, false, 0),
+        potion_ids::SLOWNESS => (PotionType::Slowness, false, 0),
+        potion_ids::WATER_BREATHING => (PotionType::WaterBreathing, false, 0),
+        potion_ids::HEALING => (PotionType::Healing, false, 0),
+        potion_ids::HARMING => (PotionType::Harming, false, 0),
+        potion_ids::POISON => (PotionType::Poison, false, 0),
+        potion_ids::REGENERATION => (PotionType::Regeneration, false, 0),
+        potion_ids::STRENGTH => (PotionType::Strength, false, 0),
+        potion_ids::WEAKNESS => (PotionType::Weakness, false, 0),
+        potion_ids::SLOW_FALLING => (PotionType::SlowFalling, false, 0),
+
+        potion_ids::NIGHT_VISION_LONG => (PotionType::NightVision, true, 0),
+        potion_ids::INVISIBILITY_LONG => (PotionType::Invisibility, true, 0),
+        potion_ids::LEAPING_LONG => (PotionType::Leaping, true, 0),
+        potion_ids::LEAPING_STRONG => (PotionType::Leaping, false, 1),
+        potion_ids::FIRE_RESISTANCE_LONG => (PotionType::FireResistance, true, 0),
+        potion_ids::SWIFTNESS_LONG => (PotionType::Swiftness, true, 0),
+        potion_ids::SWIFTNESS_STRONG => (PotionType::Swiftness, false, 1),
+        potion_ids::SLOWNESS_LONG => (PotionType::Slowness, true, 0),
+        potion_ids::WATER_BREATHING_LONG => (PotionType::WaterBreathing, true, 0),
+        potion_ids::HEALING_STRONG => (PotionType::Healing, false, 1),
+        potion_ids::HARMING_STRONG => (PotionType::Harming, false, 1),
+        potion_ids::POISON_LONG => (PotionType::Poison, true, 0),
+        potion_ids::POISON_STRONG => (PotionType::Poison, false, 1),
+        potion_ids::REGENERATION_LONG => (PotionType::Regeneration, true, 0),
+        potion_ids::REGENERATION_STRONG => (PotionType::Regeneration, false, 1),
+        potion_ids::STRENGTH_LONG => (PotionType::Strength, true, 0),
+        potion_ids::STRENGTH_STRONG => (PotionType::Strength, false, 1),
+        potion_ids::WEAKNESS_LONG => (PotionType::Weakness, true, 0),
+        potion_ids::SLOW_FALLING_LONG => (PotionType::SlowFalling, true, 0),
+
+        _ => return None,
+    };
+
+    let extended = extended && potion_type.base_duration_ticks() > 0;
+    let amplifier = if potion_supports_strong_variant(potion_type) {
+        amplifier.min(1)
+    } else {
+        0
+    };
+
+    Some((potion_type, extended, amplifier))
+}
+
+fn potion_state_to_potion_id(potion_type: PotionType, extended: bool, amplifier: u8) -> u16 {
+    let extended = extended && potion_type.base_duration_ticks() > 0;
+    let amplifier = if potion_supports_strong_variant(potion_type) {
+        amplifier.min(1)
+    } else {
+        0
+    };
+    let amplifier = if extended { 0 } else { amplifier };
+
+    match (potion_type, extended, amplifier) {
+        (PotionType::Awkward, false, 0) => potion_ids::AWKWARD,
+        (PotionType::NightVision, false, 0) => potion_ids::NIGHT_VISION,
+        (PotionType::NightVision, true, 0) => potion_ids::NIGHT_VISION_LONG,
+        (PotionType::Invisibility, false, 0) => potion_ids::INVISIBILITY,
+        (PotionType::Invisibility, true, 0) => potion_ids::INVISIBILITY_LONG,
+        (PotionType::Leaping, false, 0) => potion_ids::LEAPING,
+        (PotionType::Leaping, true, 0) => potion_ids::LEAPING_LONG,
+        (PotionType::Leaping, false, 1) => potion_ids::LEAPING_STRONG,
+        (PotionType::FireResistance, false, 0) => potion_ids::FIRE_RESISTANCE,
+        (PotionType::FireResistance, true, 0) => potion_ids::FIRE_RESISTANCE_LONG,
+        (PotionType::Swiftness, false, 0) => potion_ids::SWIFTNESS,
+        (PotionType::Swiftness, true, 0) => potion_ids::SWIFTNESS_LONG,
+        (PotionType::Swiftness, false, 1) => potion_ids::SWIFTNESS_STRONG,
+        (PotionType::Slowness, false, 0) => potion_ids::SLOWNESS,
+        (PotionType::Slowness, true, 0) => potion_ids::SLOWNESS_LONG,
+        (PotionType::WaterBreathing, false, 0) => potion_ids::WATER_BREATHING,
+        (PotionType::WaterBreathing, true, 0) => potion_ids::WATER_BREATHING_LONG,
+        (PotionType::Healing, false, 0) => potion_ids::HEALING,
+        (PotionType::Healing, false, 1) => potion_ids::HEALING_STRONG,
+        (PotionType::Harming, false, 0) => potion_ids::HARMING,
+        (PotionType::Harming, false, 1) => potion_ids::HARMING_STRONG,
+        (PotionType::Poison, false, 0) => potion_ids::POISON,
+        (PotionType::Poison, true, 0) => potion_ids::POISON_LONG,
+        (PotionType::Poison, false, 1) => potion_ids::POISON_STRONG,
+        (PotionType::Regeneration, false, 0) => potion_ids::REGENERATION,
+        (PotionType::Regeneration, true, 0) => potion_ids::REGENERATION_LONG,
+        (PotionType::Regeneration, false, 1) => potion_ids::REGENERATION_STRONG,
+        (PotionType::Strength, false, 0) => potion_ids::STRENGTH,
+        (PotionType::Strength, true, 0) => potion_ids::STRENGTH_LONG,
+        (PotionType::Strength, false, 1) => potion_ids::STRENGTH_STRONG,
+        (PotionType::Weakness, false, 0) => potion_ids::WEAKNESS,
+        (PotionType::Weakness, true, 0) => potion_ids::WEAKNESS_LONG,
+        (PotionType::SlowFalling, false, 0) => potion_ids::SLOW_FALLING,
+        (PotionType::SlowFalling, true, 0) => potion_ids::SLOW_FALLING_LONG,
+
+        _ => potion_ids::AWKWARD,
     }
 }
 
@@ -915,6 +1109,12 @@ fn core_item_type_to_brew_ingredient_id(item_type: ItemType) -> Option<u16> {
         ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE) => Some(item_ids::FERMENTED_SPIDER_EYE),
         ItemType::Item(CORE_ITEM_SUGAR) => Some(item_ids::SUGAR),
         ItemType::Item(CORE_ITEM_MAGMA_CREAM) => Some(item_ids::MAGMA_CREAM),
+        ItemType::Item(CORE_ITEM_GHAST_TEAR) => Some(item_ids::GHAST_TEAR),
+        ItemType::Item(CORE_ITEM_GLISTERING_MELON) => Some(item_ids::GLISTERING_MELON),
+        ItemType::Item(CORE_ITEM_RABBIT_FOOT) => Some(item_ids::RABBIT_FOOT),
+        ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE) => Some(item_ids::PHANTOM_MEMBRANE),
+        ItemType::Item(CORE_ITEM_REDSTONE_DUST) => Some(item_ids::REDSTONE_DUST),
+        ItemType::Item(CORE_ITEM_GLOWSTONE_DUST) => Some(item_ids::GLOWSTONE_DUST),
         ItemType::Food(mdminecraft_core::item::FoodType::GoldenCarrot) => {
             Some(item_ids::GOLDEN_CARROT)
         }
@@ -931,6 +1131,12 @@ fn brew_ingredient_id_to_core_item_type(ingredient_id: u16) -> Option<ItemType> 
         item_ids::FERMENTED_SPIDER_EYE => Some(ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE)),
         item_ids::SUGAR => Some(ItemType::Item(CORE_ITEM_SUGAR)),
         item_ids::MAGMA_CREAM => Some(ItemType::Item(CORE_ITEM_MAGMA_CREAM)),
+        item_ids::GHAST_TEAR => Some(ItemType::Item(CORE_ITEM_GHAST_TEAR)),
+        item_ids::GLISTERING_MELON => Some(ItemType::Item(CORE_ITEM_GLISTERING_MELON)),
+        item_ids::RABBIT_FOOT => Some(ItemType::Item(CORE_ITEM_RABBIT_FOOT)),
+        item_ids::PHANTOM_MEMBRANE => Some(ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE)),
+        item_ids::REDSTONE_DUST => Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+        item_ids::GLOWSTONE_DUST => Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
         item_ids::GOLDEN_CARROT => Some(ItemType::Food(
             mdminecraft_core::item::FoodType::GoldenCarrot,
         )),
@@ -938,54 +1144,27 @@ fn brew_ingredient_id_to_core_item_type(ingredient_id: u16) -> Option<ItemType> 
     }
 }
 
-fn core_item_stack_to_bottle(stack: &ItemStack) -> Option<(PotionType, bool)> {
+fn core_item_stack_to_bottle(stack: &ItemStack) -> Option<(PotionType, bool, bool, u8)> {
     match stack.item_type {
-        ItemType::Item(CORE_ITEM_WATER_BOTTLE) => Some((PotionType::Water, false)),
+        ItemType::Item(CORE_ITEM_WATER_BOTTLE) => Some((PotionType::Water, false, false, 0)),
         ItemType::Potion(id) => {
-            let potion = match id {
-                potion_ids::AWKWARD => PotionType::Awkward,
-                potion_ids::NIGHT_VISION => PotionType::NightVision,
-                potion_ids::INVISIBILITY => PotionType::Invisibility,
-                potion_ids::LEAPING => PotionType::Leaping,
-                potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
-                potion_ids::SWIFTNESS => PotionType::Swiftness,
-                potion_ids::SLOWNESS => PotionType::Slowness,
-                potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
-                potion_ids::HEALING => PotionType::Healing,
-                potion_ids::HARMING => PotionType::Harming,
-                potion_ids::POISON => PotionType::Poison,
-                potion_ids::REGENERATION => PotionType::Regeneration,
-                potion_ids::STRENGTH => PotionType::Strength,
-                potion_ids::WEAKNESS => PotionType::Weakness,
-                _ => return None,
-            };
-            Some((potion, false))
+            let (potion_type, extended, amplifier) = potion_id_to_potion_state(id)?;
+            Some((potion_type, false, extended, amplifier))
         }
         ItemType::SplashPotion(id) => {
-            let potion = match id {
-                potion_ids::AWKWARD => PotionType::Awkward,
-                potion_ids::NIGHT_VISION => PotionType::NightVision,
-                potion_ids::INVISIBILITY => PotionType::Invisibility,
-                potion_ids::LEAPING => PotionType::Leaping,
-                potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
-                potion_ids::SWIFTNESS => PotionType::Swiftness,
-                potion_ids::SLOWNESS => PotionType::Slowness,
-                potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
-                potion_ids::HEALING => PotionType::Healing,
-                potion_ids::HARMING => PotionType::Harming,
-                potion_ids::POISON => PotionType::Poison,
-                potion_ids::REGENERATION => PotionType::Regeneration,
-                potion_ids::STRENGTH => PotionType::Strength,
-                potion_ids::WEAKNESS => PotionType::Weakness,
-                _ => return None,
-            };
-            Some((potion, true))
+            let (potion_type, extended, amplifier) = potion_id_to_potion_state(id)?;
+            Some((potion_type, true, extended, amplifier))
         }
         _ => None,
     }
 }
 
-fn bottle_to_core_item_stack(potion: PotionType, is_splash: bool) -> ItemStack {
+fn bottle_to_core_item_stack(
+    potion: PotionType,
+    is_splash: bool,
+    is_extended: bool,
+    amplifier: u8,
+) -> ItemStack {
     let potion_item = |id: u16| {
         if is_splash {
             ItemType::SplashPotion(id)
@@ -996,24 +1175,9 @@ fn bottle_to_core_item_stack(potion: PotionType, is_splash: bool) -> ItemStack {
 
     match potion {
         PotionType::Water => ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1),
-        PotionType::Awkward => ItemStack::new(potion_item(potion_ids::AWKWARD), 1),
-        PotionType::NightVision => ItemStack::new(potion_item(potion_ids::NIGHT_VISION), 1),
-        PotionType::Invisibility => ItemStack::new(potion_item(potion_ids::INVISIBILITY), 1),
-        PotionType::Leaping => ItemStack::new(potion_item(potion_ids::LEAPING), 1),
-        PotionType::FireResistance => ItemStack::new(potion_item(potion_ids::FIRE_RESISTANCE), 1),
-        PotionType::Swiftness => ItemStack::new(potion_item(potion_ids::SWIFTNESS), 1),
-        PotionType::Slowness => ItemStack::new(potion_item(potion_ids::SLOWNESS), 1),
-        PotionType::WaterBreathing => ItemStack::new(potion_item(potion_ids::WATER_BREATHING), 1),
-        PotionType::Healing => ItemStack::new(potion_item(potion_ids::HEALING), 1),
-        PotionType::Harming => ItemStack::new(potion_item(potion_ids::HARMING), 1),
-        PotionType::Poison => ItemStack::new(potion_item(potion_ids::POISON), 1),
-        PotionType::Regeneration => ItemStack::new(potion_item(potion_ids::REGENERATION), 1),
-        PotionType::Strength => ItemStack::new(potion_item(potion_ids::STRENGTH), 1),
-        PotionType::Weakness => ItemStack::new(potion_item(potion_ids::WEAKNESS), 1),
-
-        // Base/unsupported potions don't have a client-side representation yet.
-        PotionType::Mundane | PotionType::Thick | PotionType::Luck | PotionType::SlowFalling => {
-            ItemStack::new(ItemType::Item(9999), 1)
+        _ => {
+            let potion_id = potion_state_to_potion_id(potion, is_extended, amplifier);
+            ItemStack::new(potion_item(potion_id), 1)
         }
     }
 }
@@ -1410,6 +1574,8 @@ pub struct GameWorld {
     xp_orbs: Vec<XPOrb>,
     /// Player status effects (potions, etc.)
     status_effects: StatusEffects,
+    regeneration_timer_ticks: u8,
+    poison_timer_ticks: u8,
     /// Brewing stand states by position
     brewing_stands: BTreeMap<BlockEntityKey, BrewingStandState>,
     /// Whether brewing stand UI is open
@@ -1790,6 +1956,8 @@ impl GameWorld {
             player_xp: PlayerXP::new(),
             xp_orbs: Vec::new(),
             status_effects: StatusEffects::new(),
+            regeneration_timer_ticks: 0,
+            poison_timer_ticks: 0,
             brewing_stands,
             brewing_open: false,
             open_brewing_pos: None,
@@ -3630,9 +3798,18 @@ impl GameWorld {
                 }
             } else {
                 // Apply gravity
-                physics.velocity.y += physics.gravity * dt;
-                if physics.velocity.y < physics.terminal_velocity {
-                    physics.velocity.y = physics.terminal_velocity;
+                let mut gravity = physics.gravity;
+                let mut terminal_velocity = physics.terminal_velocity;
+                if self.status_effects.has(StatusEffectType::SlowFalling)
+                    && physics.velocity.y < 0.0
+                {
+                    gravity *= 0.2;
+                    terminal_velocity = -3.0;
+                }
+
+                physics.velocity.y += gravity * dt;
+                if physics.velocity.y < terminal_velocity {
+                    physics.velocity.y = terminal_velocity;
                 }
             }
 
@@ -3646,6 +3823,7 @@ impl GameWorld {
             if actions.crouch {
                 move_speed *= 0.5;
             }
+            move_speed *= self.status_effects.speed_multiplier();
 
             // Build movement velocity vector
             let mut move_velocity = glam::Vec3::ZERO;
@@ -3704,13 +3882,20 @@ impl GameWorld {
             }
 
             if actions.jump && physics.on_ground {
-                physics.velocity.y = physics.jump_strength;
+                let jump_boost = self
+                    .status_effects
+                    .amplifier(StatusEffectType::JumpBoost)
+                    .map(|amp| 1.0 + 0.2 * (amp + 1) as f32)
+                    .unwrap_or(1.0);
+                physics.velocity.y = physics.jump_strength * jump_boost;
                 physics.on_ground = false;
             }
         }
 
         if let Some(dist) = fall_damage {
-            self.calculate_fall_damage(dist);
+            if !self.status_effects.has(StatusEffectType::SlowFalling) {
+                self.calculate_fall_damage(dist);
+            }
         }
 
         self.renderer.camera_mut().position = camera_pos;
@@ -3747,7 +3932,8 @@ impl GameWorld {
         }
 
         if movement.length_squared() > 0.0 {
-            let speed = if actions.sprint { 20.0 } else { 10.0 };
+            let mut speed = if actions.sprint { 20.0 } else { 10.0 };
+            speed *= self.status_effects.speed_multiplier();
             let velocity = movement.normalize() * speed * dt;
 
             // Apply collision detection for fly mode (like original Minecraft)
@@ -3874,6 +4060,13 @@ impl GameWorld {
 
         // Tick status effects in sim-time (20 TPS).
         self.update_status_effects(dt);
+
+        tick_health_over_time_status_effects(
+            &mut self.player_health,
+            &self.status_effects,
+            &mut self.regeneration_timer_ticks,
+            &mut self.poison_timer_ticks,
+        );
 
         let camera_pos = self.renderer.camera().position;
         let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
@@ -4366,6 +4559,10 @@ impl GameWorld {
                     // Check if we're holding a potion and try to drink it
                     if self.drink_potion(potion_id) {
                         self.hotbar.consume_selected();
+                        self.return_stack_to_storage_or_spill(ItemStack::new(
+                            ItemType::Item(CORE_ITEM_GLASS_BOTTLE),
+                            1,
+                        ));
                         // Skip other interactions when drinking
                     }
                 } else if let Some(potion_id) = self.hotbar.selected_splash_potion() {
@@ -7308,6 +7505,9 @@ impl GameWorld {
                 tracing::debug!("Sharpness {} adds {:.1} damage", sharpness_level, bonus);
             }
 
+            damage += self.status_effects.attack_damage_modifier();
+            damage = damage.max(0.0);
+
             // Critical hit detection: 1.5x damage if player is falling
             // Check if player has significant downward velocity
             let is_critical = self.player_physics.velocity.y < -0.1;
@@ -7794,6 +7994,8 @@ impl GameWorld {
                 let BrewingStandState {
                     bottles,
                     bottle_is_splash,
+                    bottle_is_extended,
+                    bottle_amplifier,
                     ingredient,
                     fuel,
                     ..
@@ -7823,7 +8025,12 @@ impl GameWorld {
                     let Some(bottle) = bottle else {
                         continue;
                     };
-                    let core_stack = bottle_to_core_item_stack(bottle, bottle_is_splash[idx]);
+                    let core_stack = bottle_to_core_item_stack(
+                        bottle,
+                        bottle_is_splash[idx],
+                        bottle_is_extended[idx],
+                        bottle_amplifier[idx],
+                    );
                     if let Some(drop_type) =
                         Self::convert_core_item_type_to_dropped(core_stack.item_type)
                     {
@@ -7916,43 +8123,44 @@ impl GameWorld {
     /// Drink a potion and apply its status effect
     /// Returns true if the potion was successfully drunk
     fn drink_potion(&mut self, potion_id: u16) -> bool {
-        // Convert potion ID to PotionType
-        let potion_type = match potion_id {
-            potion_ids::AWKWARD => PotionType::Awkward,
-            potion_ids::NIGHT_VISION => PotionType::NightVision,
-            potion_ids::INVISIBILITY => PotionType::Invisibility,
-            potion_ids::LEAPING => PotionType::Leaping,
-            potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
-            potion_ids::SWIFTNESS => PotionType::Swiftness,
-            potion_ids::SLOWNESS => PotionType::Slowness,
-            potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
-            potion_ids::HEALING => PotionType::Healing,
-            potion_ids::HARMING => PotionType::Harming,
-            potion_ids::POISON => PotionType::Poison,
-            potion_ids::REGENERATION => PotionType::Regeneration,
-            potion_ids::STRENGTH => PotionType::Strength,
-            potion_ids::WEAKNESS => PotionType::Weakness,
-            _ => {
-                tracing::warn!("Unknown potion ID: {}", potion_id);
-                return false;
-            }
+        let Some((potion_type, is_extended, amplifier)) = potion_id_to_potion_state(potion_id)
+        else {
+            tracing::warn!("Unknown potion ID: {}", potion_id);
+            return false;
         };
 
         // Get the status effect from the potion type
         if let Some(effect_type) = potion_type.effect() {
-            let duration = potion_type.base_duration_ticks();
-            let amplifier = 0; // Level I
-
-            // Apply the effect
-            let effect = StatusEffect::new(effect_type, amplifier, duration);
-            self.status_effects.add(effect);
-            tracing::info!(
-                "Drank {:?} potion - applied {:?} for {} ticks",
-                potion_type,
-                effect_type,
-                duration
-            );
-            true
+            if effect_type.is_instant() {
+                apply_instant_status_effect_to_player_health(
+                    &mut self.player_health,
+                    effect_type,
+                    amplifier,
+                );
+                tracing::info!(
+                    "Drank {:?} potion - applied instant {:?} (amp={})",
+                    potion_type,
+                    effect_type,
+                    amplifier
+                );
+                true
+            } else {
+                // Apply the effect
+                if let Some(effect) = potion_type.create_effect(amplifier, is_extended) {
+                    let duration = effect.duration_ticks;
+                    self.status_effects.add(effect);
+                    tracing::info!(
+                        "Drank {:?} potion - applied {:?} for {} ticks (amp={})",
+                        potion_type,
+                        effect_type,
+                        duration,
+                        amplifier
+                    );
+                } else {
+                    tracing::info!("Drank {:?} potion (no effect)", potion_type);
+                }
+                true
+            }
         } else {
             // Awkward, Mundane, Thick potions have no effect
             tracing::info!("Drank {:?} potion (no effect)", potion_type);
@@ -7988,54 +8196,49 @@ impl GameWorld {
 
     /// Apply splash potion effect to the player
     fn apply_splash_potion_to_player(&mut self, potion_id: u16, effectiveness: f64) {
-        // Convert potion ID to PotionType
-        let potion_type = match potion_id {
-            potion_ids::AWKWARD => PotionType::Awkward,
-            potion_ids::NIGHT_VISION => PotionType::NightVision,
-            potion_ids::INVISIBILITY => PotionType::Invisibility,
-            potion_ids::LEAPING => PotionType::Leaping,
-            potion_ids::FIRE_RESISTANCE => PotionType::FireResistance,
-            potion_ids::SWIFTNESS => PotionType::Swiftness,
-            potion_ids::SLOWNESS => PotionType::Slowness,
-            potion_ids::WATER_BREATHING => PotionType::WaterBreathing,
-            potion_ids::HEALING => PotionType::Healing,
-            potion_ids::HARMING => PotionType::Harming,
-            potion_ids::POISON => PotionType::Poison,
-            potion_ids::REGENERATION => PotionType::Regeneration,
-            potion_ids::STRENGTH => PotionType::Strength,
-            potion_ids::WEAKNESS => PotionType::Weakness,
-            _ => return,
+        let Some((potion_type, is_extended, amplifier)) = potion_id_to_potion_state(potion_id)
+        else {
+            return;
         };
 
-        // Instant effects (Healing/Harming) apply immediately
-        match potion_type {
-            PotionType::Healing => {
-                let heal_amount = (4.0 * effectiveness) as f32;
-                self.player_health.heal(heal_amount);
-                tracing::info!("Splash healing: +{:.1} HP", heal_amount);
-            }
-            PotionType::Harming => {
-                let damage = (6.0 * effectiveness) as f32;
-                self.player_health.damage(damage);
-                tracing::info!("Splash harming: -{:.1} HP", damage);
-            }
-            _ => {
-                // Duration effects - apply with reduced duration based on distance
-                if let Some(effect_type) = potion_type.effect() {
-                    let base_duration = potion_type.base_duration_ticks();
-                    let duration = (base_duration as f64 * effectiveness) as u32;
-                    if duration > 0 {
-                        let effect = StatusEffect::new(effect_type, 0, duration);
-                        self.status_effects.add(effect);
-                        tracing::info!(
-                            "Splash {:?} applied to player for {} ticks",
-                            effect_type,
-                            duration
-                        );
-                    }
+        let Some(effect_type) = potion_type.effect() else {
+            return;
+        };
+
+        if effect_type.is_instant() {
+            match effect_type {
+                StatusEffectType::InstantHealth => {
+                    let base_amount = if amplifier > 0 { 8.0 } else { 4.0 };
+                    let heal_amount = (base_amount * effectiveness) as f32;
+                    self.player_health.heal(heal_amount);
+                    tracing::info!("Splash healing: +{:.1} HP (amp={})", heal_amount, amplifier);
                 }
+                StatusEffectType::InstantDamage => {
+                    let base_amount = if amplifier > 0 { 12.0 } else { 6.0 };
+                    let damage = (base_amount * effectiveness) as f32;
+                    self.player_health.damage(damage);
+                    tracing::info!("Splash harming: -{:.1} HP (amp={})", damage, amplifier);
+                }
+                _ => {}
             }
+            return;
         }
+
+        let Some(mut effect) = potion_type.create_effect(amplifier, is_extended) else {
+            return;
+        };
+        let duration = (effect.duration_ticks as f64 * effectiveness) as u32;
+        if duration == 0 {
+            return;
+        }
+        effect.duration_ticks = duration;
+        self.status_effects.add(effect);
+        tracing::info!(
+            "Splash {:?} applied to player for {} ticks (amp={})",
+            effect_type,
+            duration,
+            amplifier
+        );
     }
 
     /// Count bookshelves within 2 blocks of the enchanting table (vanilla mechanics)
@@ -8187,6 +8390,12 @@ impl GameWorld {
                 Some(ItemType::Item(CORE_ITEM_FERMENTED_SPIDER_EYE))
             }
             DroppedItemType::MagmaCream => Some(ItemType::Item(CORE_ITEM_MAGMA_CREAM)),
+            DroppedItemType::GhastTear => Some(ItemType::Item(CORE_ITEM_GHAST_TEAR)),
+            DroppedItemType::GlisteringMelon => Some(ItemType::Item(CORE_ITEM_GLISTERING_MELON)),
+            DroppedItemType::RabbitFoot => Some(ItemType::Item(CORE_ITEM_RABBIT_FOOT)),
+            DroppedItemType::PhantomMembrane => Some(ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE)),
+            DroppedItemType::RedstoneDust => Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+            DroppedItemType::GlowstoneDust => Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
             DroppedItemType::Sugar => Some(ItemType::Item(CORE_ITEM_SUGAR)),
             DroppedItemType::Paper => Some(ItemType::Item(CORE_ITEM_PAPER)),
             DroppedItemType::Book => Some(ItemType::Item(CORE_ITEM_BOOK)),
@@ -8215,6 +8424,60 @@ impl GameWorld {
             DroppedItemType::PotionRegeneration => Some(ItemType::Potion(potion_ids::REGENERATION)),
             DroppedItemType::PotionStrength => Some(ItemType::Potion(potion_ids::STRENGTH)),
             DroppedItemType::PotionWeakness => Some(ItemType::Potion(potion_ids::WEAKNESS)),
+            DroppedItemType::PotionSlowFalling => Some(ItemType::Potion(potion_ids::SLOW_FALLING)),
+            DroppedItemType::PotionNightVisionLong => {
+                Some(ItemType::Potion(potion_ids::NIGHT_VISION_LONG))
+            }
+            DroppedItemType::PotionInvisibilityLong => {
+                Some(ItemType::Potion(potion_ids::INVISIBILITY_LONG))
+            }
+            DroppedItemType::PotionLeapingLong => Some(ItemType::Potion(potion_ids::LEAPING_LONG)),
+            DroppedItemType::PotionLeapingStrong => {
+                Some(ItemType::Potion(potion_ids::LEAPING_STRONG))
+            }
+            DroppedItemType::PotionFireResistanceLong => {
+                Some(ItemType::Potion(potion_ids::FIRE_RESISTANCE_LONG))
+            }
+            DroppedItemType::PotionSwiftnessLong => {
+                Some(ItemType::Potion(potion_ids::SWIFTNESS_LONG))
+            }
+            DroppedItemType::PotionSwiftnessStrong => {
+                Some(ItemType::Potion(potion_ids::SWIFTNESS_STRONG))
+            }
+            DroppedItemType::PotionSlownessLong => {
+                Some(ItemType::Potion(potion_ids::SLOWNESS_LONG))
+            }
+            DroppedItemType::PotionWaterBreathingLong => {
+                Some(ItemType::Potion(potion_ids::WATER_BREATHING_LONG))
+            }
+            DroppedItemType::PotionHealingStrong => {
+                Some(ItemType::Potion(potion_ids::HEALING_STRONG))
+            }
+            DroppedItemType::PotionHarmingStrong => {
+                Some(ItemType::Potion(potion_ids::HARMING_STRONG))
+            }
+            DroppedItemType::PotionPoisonLong => Some(ItemType::Potion(potion_ids::POISON_LONG)),
+            DroppedItemType::PotionPoisonStrong => {
+                Some(ItemType::Potion(potion_ids::POISON_STRONG))
+            }
+            DroppedItemType::PotionRegenerationLong => {
+                Some(ItemType::Potion(potion_ids::REGENERATION_LONG))
+            }
+            DroppedItemType::PotionRegenerationStrong => {
+                Some(ItemType::Potion(potion_ids::REGENERATION_STRONG))
+            }
+            DroppedItemType::PotionStrengthLong => {
+                Some(ItemType::Potion(potion_ids::STRENGTH_LONG))
+            }
+            DroppedItemType::PotionStrengthStrong => {
+                Some(ItemType::Potion(potion_ids::STRENGTH_STRONG))
+            }
+            DroppedItemType::PotionWeaknessLong => {
+                Some(ItemType::Potion(potion_ids::WEAKNESS_LONG))
+            }
+            DroppedItemType::PotionSlowFallingLong => {
+                Some(ItemType::Potion(potion_ids::SLOW_FALLING_LONG))
+            }
             DroppedItemType::SplashPotionAwkward => {
                 Some(ItemType::SplashPotion(potion_ids::AWKWARD))
             }
@@ -8254,6 +8517,66 @@ impl GameWorld {
             }
             DroppedItemType::SplashPotionWeakness => {
                 Some(ItemType::SplashPotion(potion_ids::WEAKNESS))
+            }
+            DroppedItemType::SplashPotionSlowFalling => {
+                Some(ItemType::SplashPotion(potion_ids::SLOW_FALLING))
+            }
+            DroppedItemType::SplashPotionNightVisionLong => {
+                Some(ItemType::SplashPotion(potion_ids::NIGHT_VISION_LONG))
+            }
+            DroppedItemType::SplashPotionInvisibilityLong => {
+                Some(ItemType::SplashPotion(potion_ids::INVISIBILITY_LONG))
+            }
+            DroppedItemType::SplashPotionLeapingLong => {
+                Some(ItemType::SplashPotion(potion_ids::LEAPING_LONG))
+            }
+            DroppedItemType::SplashPotionLeapingStrong => {
+                Some(ItemType::SplashPotion(potion_ids::LEAPING_STRONG))
+            }
+            DroppedItemType::SplashPotionFireResistanceLong => {
+                Some(ItemType::SplashPotion(potion_ids::FIRE_RESISTANCE_LONG))
+            }
+            DroppedItemType::SplashPotionSwiftnessLong => {
+                Some(ItemType::SplashPotion(potion_ids::SWIFTNESS_LONG))
+            }
+            DroppedItemType::SplashPotionSwiftnessStrong => {
+                Some(ItemType::SplashPotion(potion_ids::SWIFTNESS_STRONG))
+            }
+            DroppedItemType::SplashPotionSlownessLong => {
+                Some(ItemType::SplashPotion(potion_ids::SLOWNESS_LONG))
+            }
+            DroppedItemType::SplashPotionWaterBreathingLong => {
+                Some(ItemType::SplashPotion(potion_ids::WATER_BREATHING_LONG))
+            }
+            DroppedItemType::SplashPotionHealingStrong => {
+                Some(ItemType::SplashPotion(potion_ids::HEALING_STRONG))
+            }
+            DroppedItemType::SplashPotionHarmingStrong => {
+                Some(ItemType::SplashPotion(potion_ids::HARMING_STRONG))
+            }
+            DroppedItemType::SplashPotionPoisonLong => {
+                Some(ItemType::SplashPotion(potion_ids::POISON_LONG))
+            }
+            DroppedItemType::SplashPotionPoisonStrong => {
+                Some(ItemType::SplashPotion(potion_ids::POISON_STRONG))
+            }
+            DroppedItemType::SplashPotionRegenerationLong => {
+                Some(ItemType::SplashPotion(potion_ids::REGENERATION_LONG))
+            }
+            DroppedItemType::SplashPotionRegenerationStrong => {
+                Some(ItemType::SplashPotion(potion_ids::REGENERATION_STRONG))
+            }
+            DroppedItemType::SplashPotionStrengthLong => {
+                Some(ItemType::SplashPotion(potion_ids::STRENGTH_LONG))
+            }
+            DroppedItemType::SplashPotionStrengthStrong => {
+                Some(ItemType::SplashPotion(potion_ids::STRENGTH_STRONG))
+            }
+            DroppedItemType::SplashPotionWeaknessLong => {
+                Some(ItemType::SplashPotion(potion_ids::WEAKNESS_LONG))
+            }
+            DroppedItemType::SplashPotionSlowFallingLong => {
+                Some(ItemType::SplashPotion(potion_ids::SLOW_FALLING_LONG))
             }
             DroppedItemType::WoodenPickaxe => {
                 Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood))
@@ -8358,6 +8681,12 @@ impl GameWorld {
                 CORE_ITEM_FERMENTED_SPIDER_EYE => Some(DroppedItemType::FermentedSpiderEye),
                 CORE_ITEM_SUGAR => Some(DroppedItemType::Sugar),
                 CORE_ITEM_MAGMA_CREAM => Some(DroppedItemType::MagmaCream),
+                CORE_ITEM_GHAST_TEAR => Some(DroppedItemType::GhastTear),
+                CORE_ITEM_GLISTERING_MELON => Some(DroppedItemType::GlisteringMelon),
+                CORE_ITEM_RABBIT_FOOT => Some(DroppedItemType::RabbitFoot),
+                CORE_ITEM_PHANTOM_MEMBRANE => Some(DroppedItemType::PhantomMembrane),
+                CORE_ITEM_REDSTONE_DUST => Some(DroppedItemType::RedstoneDust),
+                CORE_ITEM_GLOWSTONE_DUST => Some(DroppedItemType::GlowstoneDust),
                 CORE_ITEM_PAPER => Some(DroppedItemType::Paper),
                 CORE_ITEM_BOOK => Some(DroppedItemType::Book),
                 CORE_ITEM_WHEAT_SEEDS => Some(DroppedItemType::WheatSeeds),
@@ -8406,6 +8735,26 @@ impl GameWorld {
                 potion_ids::REGENERATION => Some(DroppedItemType::PotionRegeneration),
                 potion_ids::STRENGTH => Some(DroppedItemType::PotionStrength),
                 potion_ids::WEAKNESS => Some(DroppedItemType::PotionWeakness),
+                potion_ids::SLOW_FALLING => Some(DroppedItemType::PotionSlowFalling),
+                potion_ids::NIGHT_VISION_LONG => Some(DroppedItemType::PotionNightVisionLong),
+                potion_ids::INVISIBILITY_LONG => Some(DroppedItemType::PotionInvisibilityLong),
+                potion_ids::LEAPING_LONG => Some(DroppedItemType::PotionLeapingLong),
+                potion_ids::LEAPING_STRONG => Some(DroppedItemType::PotionLeapingStrong),
+                potion_ids::FIRE_RESISTANCE_LONG => Some(DroppedItemType::PotionFireResistanceLong),
+                potion_ids::SWIFTNESS_LONG => Some(DroppedItemType::PotionSwiftnessLong),
+                potion_ids::SWIFTNESS_STRONG => Some(DroppedItemType::PotionSwiftnessStrong),
+                potion_ids::SLOWNESS_LONG => Some(DroppedItemType::PotionSlownessLong),
+                potion_ids::WATER_BREATHING_LONG => Some(DroppedItemType::PotionWaterBreathingLong),
+                potion_ids::HEALING_STRONG => Some(DroppedItemType::PotionHealingStrong),
+                potion_ids::HARMING_STRONG => Some(DroppedItemType::PotionHarmingStrong),
+                potion_ids::POISON_LONG => Some(DroppedItemType::PotionPoisonLong),
+                potion_ids::POISON_STRONG => Some(DroppedItemType::PotionPoisonStrong),
+                potion_ids::REGENERATION_LONG => Some(DroppedItemType::PotionRegenerationLong),
+                potion_ids::REGENERATION_STRONG => Some(DroppedItemType::PotionRegenerationStrong),
+                potion_ids::STRENGTH_LONG => Some(DroppedItemType::PotionStrengthLong),
+                potion_ids::STRENGTH_STRONG => Some(DroppedItemType::PotionStrengthStrong),
+                potion_ids::WEAKNESS_LONG => Some(DroppedItemType::PotionWeaknessLong),
+                potion_ids::SLOW_FALLING_LONG => Some(DroppedItemType::PotionSlowFallingLong),
                 _ => None,
             },
             ItemType::SplashPotion(id) => match id {
@@ -8423,6 +8772,36 @@ impl GameWorld {
                 potion_ids::REGENERATION => Some(DroppedItemType::SplashPotionRegeneration),
                 potion_ids::STRENGTH => Some(DroppedItemType::SplashPotionStrength),
                 potion_ids::WEAKNESS => Some(DroppedItemType::SplashPotionWeakness),
+                potion_ids::SLOW_FALLING => Some(DroppedItemType::SplashPotionSlowFalling),
+                potion_ids::NIGHT_VISION_LONG => Some(DroppedItemType::SplashPotionNightVisionLong),
+                potion_ids::INVISIBILITY_LONG => {
+                    Some(DroppedItemType::SplashPotionInvisibilityLong)
+                }
+                potion_ids::LEAPING_LONG => Some(DroppedItemType::SplashPotionLeapingLong),
+                potion_ids::LEAPING_STRONG => Some(DroppedItemType::SplashPotionLeapingStrong),
+                potion_ids::FIRE_RESISTANCE_LONG => {
+                    Some(DroppedItemType::SplashPotionFireResistanceLong)
+                }
+                potion_ids::SWIFTNESS_LONG => Some(DroppedItemType::SplashPotionSwiftnessLong),
+                potion_ids::SWIFTNESS_STRONG => Some(DroppedItemType::SplashPotionSwiftnessStrong),
+                potion_ids::SLOWNESS_LONG => Some(DroppedItemType::SplashPotionSlownessLong),
+                potion_ids::WATER_BREATHING_LONG => {
+                    Some(DroppedItemType::SplashPotionWaterBreathingLong)
+                }
+                potion_ids::HEALING_STRONG => Some(DroppedItemType::SplashPotionHealingStrong),
+                potion_ids::HARMING_STRONG => Some(DroppedItemType::SplashPotionHarmingStrong),
+                potion_ids::POISON_LONG => Some(DroppedItemType::SplashPotionPoisonLong),
+                potion_ids::POISON_STRONG => Some(DroppedItemType::SplashPotionPoisonStrong),
+                potion_ids::REGENERATION_LONG => {
+                    Some(DroppedItemType::SplashPotionRegenerationLong)
+                }
+                potion_ids::REGENERATION_STRONG => {
+                    Some(DroppedItemType::SplashPotionRegenerationStrong)
+                }
+                potion_ids::STRENGTH_LONG => Some(DroppedItemType::SplashPotionStrengthLong),
+                potion_ids::STRENGTH_STRONG => Some(DroppedItemType::SplashPotionStrengthStrong),
+                potion_ids::WEAKNESS_LONG => Some(DroppedItemType::SplashPotionWeaknessLong),
+                potion_ids::SLOW_FALLING_LONG => Some(DroppedItemType::SplashPotionSlowFallingLong),
                 _ => None,
             },
         }
@@ -10680,10 +11059,16 @@ fn try_shift_move_core_stack_into_brewing_stand(
         }
     }
 
-    if let Some((potion_type, is_splash)) = core_item_stack_to_bottle(stack) {
+    if let Some((potion_type, is_splash, is_extended, amplifier)) = core_item_stack_to_bottle(stack)
+    {
         let mut remaining = stack.count;
         let mut moved_any = false;
-        let (bottles, bottle_is_splash) = (&mut stand.bottles, &mut stand.bottle_is_splash);
+        let (bottles, bottle_is_splash, bottle_is_extended, bottle_amplifier) = (
+            &mut stand.bottles,
+            &mut stand.bottle_is_splash,
+            &mut stand.bottle_is_extended,
+            &mut stand.bottle_amplifier,
+        );
         for (idx, slot) in bottles.iter_mut().enumerate() {
             if remaining == 0 {
                 break;
@@ -10691,6 +11076,12 @@ fn try_shift_move_core_stack_into_brewing_stand(
             if slot.is_none() {
                 *slot = Some(potion_type);
                 bottle_is_splash[idx] = is_splash && potion_type != PotionType::Water;
+                bottle_is_extended[idx] = is_extended && potion_type != PotionType::Water;
+                bottle_amplifier[idx] = if potion_type != PotionType::Water {
+                    amplifier
+                } else {
+                    0
+                };
                 remaining = remaining.saturating_sub(1);
                 moved_any = true;
             }
@@ -14752,13 +15143,25 @@ fn render_brewing_stand(
                 ui.vertical(|ui| {
                     ui.label("Bottles");
                     ui.horizontal(|ui| {
-                        let (bottles, bottle_is_splash) =
-                            (&mut stand.bottles, &mut stand.bottle_is_splash);
+                        let (bottles, bottle_is_splash, bottle_is_extended, bottle_amplifier) = (
+                            &mut stand.bottles,
+                            &mut stand.bottle_is_splash,
+                            &mut stand.bottle_is_extended,
+                            &mut stand.bottle_amplifier,
+                        );
                         for (i, bottle) in bottles.iter_mut().enumerate() {
                             let before = *bottle;
                             let before_splash = bottle_is_splash[i];
-                            let mut bottle_stack = (*bottle)
-                                .map(|potion| bottle_to_core_item_stack(potion, before_splash));
+                            let before_extended = bottle_is_extended[i];
+                            let before_amplifier = bottle_amplifier[i];
+                            let mut bottle_stack = (*bottle).map(|potion| {
+                                bottle_to_core_item_stack(
+                                    potion,
+                                    before_splash,
+                                    before_extended,
+                                    before_amplifier,
+                                )
+                            });
                             let response = render_core_slot_visual(ui, &bottle_stack, 52.0, false);
                             let click = if response.clicked_by(egui::PointerButton::Primary) {
                                 Some(UiSlotClick::Primary)
@@ -14788,17 +15191,28 @@ fn render_brewing_stand(
 
                             let mapped = bottle_stack.as_ref().and_then(core_item_stack_to_bottle);
                             match mapped {
-                                Some((potion, is_splash)) => {
+                                Some((potion, is_splash, is_extended, amplifier)) => {
                                     *bottle = Some(potion);
                                     bottle_is_splash[i] = is_splash && potion != PotionType::Water;
+                                    bottle_is_extended[i] =
+                                        is_extended && potion != PotionType::Water;
+                                    bottle_amplifier[i] = if potion != PotionType::Water {
+                                        amplifier
+                                    } else {
+                                        0
+                                    };
                                 }
                                 None if bottle_stack.is_none() => {
                                     *bottle = None;
                                     bottle_is_splash[i] = false;
+                                    bottle_is_extended[i] = false;
+                                    bottle_amplifier[i] = 0;
                                 }
                                 _ => {
                                     *bottle = before;
                                     bottle_is_splash[i] = before_splash;
+                                    bottle_is_extended[i] = before_extended;
+                                    bottle_amplifier[i] = before_amplifier;
                                 }
                             }
                             if i < 2 {
@@ -15017,25 +15431,30 @@ fn item_type_to_armor_dropped(item_type: ItemType) -> Option<DroppedItemType> {
 mod tests {
     use super::{
         add_stack_to_storage, apply_brewing_bottle_slot_click, apply_furnace_slot_click,
-        apply_primary_drag_distribution, apply_slot_click, armor_piece_from_core_stack,
-        armor_piece_to_core_stack, check_crafting_recipe, consume_crafting_inputs_3x3,
-        core_item_to_enchanting_id, crafting_max_crafts_2x2, crafting_max_crafts_3x3,
-        cursor_can_accept_full_stack, frames_to_complete, furnace_try_insert, get_crafting_recipes,
-        interactive_blocks, item_ids, match_crafting_recipe, potion_ids, try_add_stack_to_cursor,
-        try_autofill_crafting_grid, try_shift_move_core_stack_into_brewing_stand,
-        try_shift_move_core_stack_into_chest, try_shift_move_core_stack_into_enchanting_table,
-        try_shift_move_core_stack_into_furnace, ArmorPiece, ArmorSlot, BlockPropertiesRegistry,
-        BrewingStandState, ChestState, Chunk, ChunkPos, CraftingGridSize, DroppedItemType,
-        EnchantingTableState, Enchantment, EnchantmentType, FurnaceSlotKind, FurnaceState,
-        GameWorld, Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth, PlayerPhysics,
-        ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_BOOKSHELF,
-        BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
-        BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
-        BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_FERMENTED_SPIDER_EYE,
-        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GUNPOWDER, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_WART,
-        CORE_ITEM_PAPER, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
+        apply_instant_status_effect_to_player_health, apply_primary_drag_distribution,
+        apply_slot_click, armor_piece_from_core_stack, armor_piece_to_core_stack,
+        check_crafting_recipe, consume_crafting_inputs_3x3, core_item_to_enchanting_id,
+        crafting_max_crafts_2x2, crafting_max_crafts_3x3, cursor_can_accept_full_stack,
+        frames_to_complete, furnace_try_insert, get_crafting_recipes, interactive_blocks, item_ids,
+        match_crafting_recipe, potion_ids, tick_health_over_time_status_effects,
+        try_add_stack_to_cursor, try_autofill_crafting_grid,
+        try_shift_move_core_stack_into_brewing_stand, try_shift_move_core_stack_into_chest,
+        try_shift_move_core_stack_into_enchanting_table, try_shift_move_core_stack_into_furnace,
+        ArmorPiece, ArmorSlot, BlockPropertiesRegistry, BrewingStandState, ChestState, Chunk,
+        ChunkPos, CraftingGridSize, DroppedItemType, EnchantingTableState, Enchantment,
+        EnchantmentType, FurnaceSlotKind, FurnaceState, GameWorld, Hotbar, ItemStack, ItemType,
+        MainInventory, PlayerHealth, PlayerPhysics, StatusEffectType, StatusEffects, ToolMaterial,
+        ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
+        BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
+        BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE,
+        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_FERMENTED_SPIDER_EYE,
+        CORE_ITEM_GHAST_TEAR, CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
+        CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_MAGMA_CREAM,
+        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_RABBIT_FOOT,
+        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
         CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
+    use mdminecraft_world::StatusEffect;
 
     #[test]
     fn collisions_use_block_solidity_not_opacity() {
@@ -18197,6 +18616,64 @@ mod tests {
         );
 
         assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::GhastTear),
+            Some(ItemType::Item(CORE_ITEM_GHAST_TEAR))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_GHAST_TEAR)),
+            Some(DroppedItemType::GhastTear)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::GlisteringMelon),
+            Some(ItemType::Item(CORE_ITEM_GLISTERING_MELON))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(
+                CORE_ITEM_GLISTERING_MELON
+            )),
+            Some(DroppedItemType::GlisteringMelon)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::RabbitFoot),
+            Some(ItemType::Item(CORE_ITEM_RABBIT_FOOT))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_RABBIT_FOOT)),
+            Some(DroppedItemType::RabbitFoot)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::PhantomMembrane),
+            Some(ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(
+                CORE_ITEM_PHANTOM_MEMBRANE
+            )),
+            Some(DroppedItemType::PhantomMembrane)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::RedstoneDust),
+            Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+            Some(DroppedItemType::RedstoneDust)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::GlowstoneDust),
+            Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+            Some(DroppedItemType::GlowstoneDust)
+        );
+
+        assert_eq!(
             GameWorld::convert_dropped_item_type(DroppedItemType::Sugar),
             Some(ItemType::Item(CORE_ITEM_SUGAR))
         );
@@ -18228,6 +18705,28 @@ mod tests {
         );
 
         assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::PotionSlowFalling),
+            Some(ItemType::Potion(potion_ids::SLOW_FALLING))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Potion(
+                potion_ids::SLOW_FALLING
+            )),
+            Some(DroppedItemType::PotionSlowFalling)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::PotionSwiftnessLong),
+            Some(ItemType::Potion(potion_ids::SWIFTNESS_LONG))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Potion(
+                potion_ids::SWIFTNESS_LONG
+            )),
+            Some(DroppedItemType::PotionSwiftnessLong)
+        );
+
+        assert_eq!(
             GameWorld::convert_dropped_item_type(DroppedItemType::SplashPotionStrength),
             Some(ItemType::SplashPotion(potion_ids::STRENGTH))
         );
@@ -18236,6 +18735,28 @@ mod tests {
                 potion_ids::STRENGTH
             )),
             Some(DroppedItemType::SplashPotionStrength)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::SplashPotionHealingStrong),
+            Some(ItemType::SplashPotion(potion_ids::HEALING_STRONG))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::SplashPotion(
+                potion_ids::HEALING_STRONG
+            )),
+            Some(DroppedItemType::SplashPotionHealingStrong)
+        );
+
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::SplashPotionSlowFalling),
+            Some(ItemType::SplashPotion(potion_ids::SLOW_FALLING))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::SplashPotion(
+                potion_ids::SLOW_FALLING
+            )),
+            Some(DroppedItemType::SplashPotionSlowFalling)
         );
     }
 
@@ -18334,6 +18855,103 @@ mod tests {
             )),
             Some(DroppedItemType::BakedPotato)
         );
+    }
+
+    #[test]
+    fn instant_status_effects_apply_to_player_health() {
+        let mut health = PlayerHealth::new();
+        health.damage(10.0);
+        assert_eq!(health.current, 10.0);
+
+        apply_instant_status_effect_to_player_health(
+            &mut health,
+            StatusEffectType::InstantHealth,
+            0,
+        );
+        assert_eq!(health.current, 14.0);
+
+        // Reset invulnerability so damage applies in the unit test.
+        health.invulnerability_time = 0.0;
+        apply_instant_status_effect_to_player_health(
+            &mut health,
+            StatusEffectType::InstantDamage,
+            0,
+        );
+        assert_eq!(health.current, 8.0);
+    }
+
+    #[test]
+    fn regeneration_and_poison_tick_player_health_over_time() {
+        let mut effects = StatusEffects::new();
+
+        let mut regen_timer = 0u8;
+        let mut poison_timer = 0u8;
+
+        // Regeneration heals 1 health every 50 ticks at amplifier 0.
+        let mut health = PlayerHealth::new();
+        health.damage(10.0);
+        assert_eq!(health.current, 10.0);
+
+        effects.add(StatusEffect::new(StatusEffectType::Regeneration, 0, 100));
+        for _ in 0..49 {
+            tick_health_over_time_status_effects(
+                &mut health,
+                &effects,
+                &mut regen_timer,
+                &mut poison_timer,
+            );
+        }
+        assert_eq!(health.current, 10.0);
+
+        tick_health_over_time_status_effects(
+            &mut health,
+            &effects,
+            &mut regen_timer,
+            &mut poison_timer,
+        );
+        assert_eq!(health.current, 11.0);
+
+        // Poison deals 1 damage every 25 ticks at amplifier 0 (and does not kill below 1.0).
+        effects.clear();
+        regen_timer = 0;
+        poison_timer = 0;
+
+        effects.add(StatusEffect::new(StatusEffectType::Poison, 0, 100));
+        health.invulnerability_time = 0.0;
+        health.current = 5.0;
+
+        for _ in 0..24 {
+            tick_health_over_time_status_effects(
+                &mut health,
+                &effects,
+                &mut regen_timer,
+                &mut poison_timer,
+            );
+        }
+        assert_eq!(health.current, 5.0);
+
+        health.invulnerability_time = 0.0;
+        tick_health_over_time_status_effects(
+            &mut health,
+            &effects,
+            &mut regen_timer,
+            &mut poison_timer,
+        );
+        assert_eq!(health.current, 4.0);
+
+        regen_timer = 0;
+        poison_timer = 0;
+        health.invulnerability_time = 0.0;
+        health.current = 1.0;
+        for _ in 0..25 {
+            tick_health_over_time_status_effects(
+                &mut health,
+                &effects,
+                &mut regen_timer,
+                &mut poison_timer,
+            );
+        }
+        assert_eq!(health.current, 1.0);
     }
 
     #[test]
@@ -18479,6 +19097,80 @@ mod tests {
         ));
         assert_eq!(cream.count, 0);
         assert_eq!(stand.ingredient, Some((item_ids::MAGMA_CREAM, 2)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_ghast_tear_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut tears = ItemStack::new(ItemType::Item(CORE_ITEM_GHAST_TEAR), 4);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut tears, &mut stand
+        ));
+        assert_eq!(tears.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::GHAST_TEAR, 4)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_glistering_melon_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut melons = ItemStack::new(ItemType::Item(CORE_ITEM_GLISTERING_MELON), 2);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut melons,
+            &mut stand
+        ));
+        assert_eq!(melons.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::GLISTERING_MELON, 2)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_rabbit_foot_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut feet = ItemStack::new(ItemType::Item(CORE_ITEM_RABBIT_FOOT), 1);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut feet, &mut stand
+        ));
+        assert_eq!(feet.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::RABBIT_FOOT, 1)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_phantom_membrane_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut membranes = ItemStack::new(ItemType::Item(CORE_ITEM_PHANTOM_MEMBRANE), 3);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut membranes,
+            &mut stand
+        ));
+        assert_eq!(membranes.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::PHANTOM_MEMBRANE, 3)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_redstone_dust_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut dust = ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 4);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut dust, &mut stand
+        ));
+        assert_eq!(dust.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::REDSTONE_DUST, 4)));
+    }
+
+    #[test]
+    fn brewing_shift_move_inserts_glowstone_dust_as_ingredient() {
+        let mut stand = BrewingStandState::new();
+
+        let mut dust = ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 2);
+        assert!(try_shift_move_core_stack_into_brewing_stand(
+            &mut dust, &mut stand
+        ));
+        assert_eq!(dust.count, 0);
+        assert_eq!(stand.ingredient, Some((item_ids::GLOWSTONE_DUST, 2)));
     }
 
     #[test]

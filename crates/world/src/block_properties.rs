@@ -4,11 +4,14 @@ use crate::{
     farming_blocks, interactive_blocks, redstone_blocks, BLOCK_AIR, BLOCK_BEDROCK, BLOCK_BOOKSHELF,
     BLOCK_BROWN_MUSHROOM, BLOCK_CAVE_VINES, BLOCK_CLAY, BLOCK_COAL_ORE, BLOCK_COBBLESTONE,
     BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE, BLOCK_DIRT, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
-    BLOCK_GLASS, BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL, BLOCK_HANGING_ROOTS,
-    BLOCK_ICE, BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING, BLOCK_MAGMA_CREAM_ORE,
-    BLOCK_MOSS_CARPET, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_POINTED_DRIPSTONE,
-    BLOCK_SAND, BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_SUGAR_CANE,
-    BLOCK_WATER, BLOCK_WATER_FLOWING,
+    BLOCK_GHAST_TEAR_ORE, BLOCK_GLASS, BLOCK_GLISTERING_MELON_ORE, BLOCK_GLOWSTONE_DUST_ORE,
+    BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL, BLOCK_HANGING_ROOTS, BLOCK_ICE,
+    BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING, BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET,
+    BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_PHANTOM_MEMBRANE_ORE,
+    BLOCK_POINTED_DRIPSTONE, BLOCK_PUFFERFISH_ORE, BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE,
+    BLOCK_SAND,
+    BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_SUGAR_CANE, BLOCK_WATER,
+    BLOCK_WATER_FLOWING,
 };
 use mdminecraft_core::{ToolMaterial, ToolType};
 
@@ -301,6 +304,13 @@ impl BlockPropertiesRegistry {
         properties[BLOCK_GOLD_ORE as usize] = BlockProperties::gold_ore();
         properties[BLOCK_DIAMOND_ORE as usize] = BlockProperties::diamond_ore();
         properties[BLOCK_MAGMA_CREAM_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_GHAST_TEAR_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_GLISTERING_MELON_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_RABBIT_FOOT_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_PHANTOM_MEMBRANE_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_REDSTONE_DUST_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_GLOWSTONE_DUST_ORE as usize] = BlockProperties::iron_ore();
+        properties[BLOCK_PUFFERFISH_ORE as usize] = BlockProperties::iron_ore();
 
         properties[BLOCK_COBBLESTONE as usize] = BlockProperties::stone();
         properties[BLOCK_FURNACE as usize] = BlockProperties::stone();

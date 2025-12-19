@@ -189,6 +189,26 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::BLOCK_GHAST_TEAR_ORE,
         id_of(&map, "ghast_tear_ore")
     );
+    assert_eq!(
+        mdminecraft_world::BLOCK_GLISTERING_MELON_ORE,
+        id_of(&map, "glistering_melon_ore")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_RABBIT_FOOT_ORE,
+        id_of(&map, "rabbit_foot_ore")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_PHANTOM_MEMBRANE_ORE,
+        id_of(&map, "phantom_membrane_ore")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_REDSTONE_DUST_ORE,
+        id_of(&map, "redstone_dust_ore")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_GLOWSTONE_DUST_ORE,
+        id_of(&map, "glowstone_dust_ore")
+    );
 
     let wheat = [
         mdminecraft_world::farming_blocks::WHEAT_0,

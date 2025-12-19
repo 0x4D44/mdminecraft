@@ -114,6 +114,24 @@ pub const BLOCK_MAGMA_CREAM_ORE: BlockId = 106;
 /// ID for ghast tear ore (Overworld proxy block).
 pub const BLOCK_GHAST_TEAR_ORE: BlockId = 107;
 
+/// ID for glistering melon ore (Overworld proxy block).
+pub const BLOCK_GLISTERING_MELON_ORE: BlockId = 108;
+
+/// ID for rabbit foot ore (Overworld proxy block).
+pub const BLOCK_RABBIT_FOOT_ORE: BlockId = 109;
+
+/// ID for phantom membrane ore (Overworld proxy block).
+pub const BLOCK_PHANTOM_MEMBRANE_ORE: BlockId = 110;
+
+/// ID for redstone dust ore (Overworld proxy block).
+pub const BLOCK_REDSTONE_DUST_ORE: BlockId = 111;
+
+/// ID for glowstone dust ore (Overworld proxy block).
+pub const BLOCK_GLOWSTONE_DUST_ORE: BlockId = 112;
+
+/// ID for pufferfish ore (Overworld proxy block).
+pub const BLOCK_PUFFERFISH_ORE: BlockId = 113;
+
 /// ID for moss block.
 pub const BLOCK_MOSS_BLOCK: BlockId = 75;
 

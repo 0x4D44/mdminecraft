@@ -237,6 +237,64 @@ pub enum ItemType {
 
     // Brewing ingredients (appended to preserve stable IDs)
     MagmaCream,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    GhastTear,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    GlisteringMelon,
+    RabbitFoot,
+    PhantomMembrane,
+
+    // Potions (appended to preserve stable IDs)
+    PotionSlowFalling,
+    SplashPotionSlowFalling,
+
+    // Brewing ingredients (appended to preserve stable IDs)
+    RedstoneDust,
+    GlowstoneDust,
+
+    // Potion variants (appended to preserve stable IDs)
+    PotionNightVisionLong,
+    PotionInvisibilityLong,
+    PotionLeapingLong,
+    PotionLeapingStrong,
+    PotionFireResistanceLong,
+    PotionSwiftnessLong,
+    PotionSwiftnessStrong,
+    PotionSlownessLong,
+    PotionWaterBreathingLong,
+    PotionHealingStrong,
+    PotionHarmingStrong,
+    PotionPoisonLong,
+    PotionPoisonStrong,
+    PotionRegenerationLong,
+    PotionRegenerationStrong,
+    PotionStrengthLong,
+    PotionStrengthStrong,
+    PotionWeaknessLong,
+    PotionSlowFallingLong,
+
+    // Splash potion variants (appended to preserve stable IDs)
+    SplashPotionNightVisionLong,
+    SplashPotionInvisibilityLong,
+    SplashPotionLeapingLong,
+    SplashPotionLeapingStrong,
+    SplashPotionFireResistanceLong,
+    SplashPotionSwiftnessLong,
+    SplashPotionSwiftnessStrong,
+    SplashPotionSlownessLong,
+    SplashPotionWaterBreathingLong,
+    SplashPotionHealingStrong,
+    SplashPotionHarmingStrong,
+    SplashPotionPoisonLong,
+    SplashPotionPoisonStrong,
+    SplashPotionRegenerationLong,
+    SplashPotionRegenerationStrong,
+    SplashPotionStrengthLong,
+    SplashPotionStrengthStrong,
+    SplashPotionWeaknessLong,
+    SplashPotionSlowFallingLong,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -407,6 +465,52 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::BrownMushroom,
     ItemType::FermentedSpiderEye,
     ItemType::MagmaCream,
+    ItemType::GhastTear,
+    ItemType::GlisteringMelon,
+    ItemType::RabbitFoot,
+    ItemType::PhantomMembrane,
+    ItemType::PotionSlowFalling,
+    ItemType::SplashPotionSlowFalling,
+    ItemType::RedstoneDust,
+    ItemType::GlowstoneDust,
+    ItemType::PotionNightVisionLong,
+    ItemType::PotionInvisibilityLong,
+    ItemType::PotionLeapingLong,
+    ItemType::PotionLeapingStrong,
+    ItemType::PotionFireResistanceLong,
+    ItemType::PotionSwiftnessLong,
+    ItemType::PotionSwiftnessStrong,
+    ItemType::PotionSlownessLong,
+    ItemType::PotionWaterBreathingLong,
+    ItemType::PotionHealingStrong,
+    ItemType::PotionHarmingStrong,
+    ItemType::PotionPoisonLong,
+    ItemType::PotionPoisonStrong,
+    ItemType::PotionRegenerationLong,
+    ItemType::PotionRegenerationStrong,
+    ItemType::PotionStrengthLong,
+    ItemType::PotionStrengthStrong,
+    ItemType::PotionWeaknessLong,
+    ItemType::PotionSlowFallingLong,
+    ItemType::SplashPotionNightVisionLong,
+    ItemType::SplashPotionInvisibilityLong,
+    ItemType::SplashPotionLeapingLong,
+    ItemType::SplashPotionLeapingStrong,
+    ItemType::SplashPotionFireResistanceLong,
+    ItemType::SplashPotionSwiftnessLong,
+    ItemType::SplashPotionSwiftnessStrong,
+    ItemType::SplashPotionSlownessLong,
+    ItemType::SplashPotionWaterBreathingLong,
+    ItemType::SplashPotionHealingStrong,
+    ItemType::SplashPotionHarmingStrong,
+    ItemType::SplashPotionPoisonLong,
+    ItemType::SplashPotionPoisonStrong,
+    ItemType::SplashPotionRegenerationLong,
+    ItemType::SplashPotionRegenerationStrong,
+    ItemType::SplashPotionStrengthLong,
+    ItemType::SplashPotionStrengthStrong,
+    ItemType::SplashPotionWeaknessLong,
+    ItemType::SplashPotionSlowFallingLong,
 ];
 
 impl ItemType {
@@ -509,7 +613,13 @@ impl ItemType {
             | ItemType::Book
             | ItemType::BrownMushroom
             | ItemType::FermentedSpiderEye => 64,
-            ItemType::MagmaCream => 64,
+            ItemType::MagmaCream
+            | ItemType::GhastTear
+            | ItemType::GlisteringMelon
+            | ItemType::RabbitFoot
+            | ItemType::PhantomMembrane
+            | ItemType::RedstoneDust
+            | ItemType::GlowstoneDust => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -552,6 +662,7 @@ impl ItemType {
             | ItemType::PotionRegeneration
             | ItemType::PotionStrength
             | ItemType::PotionWeakness
+            | ItemType::PotionSlowFalling
             | ItemType::SplashPotionAwkward
             | ItemType::SplashPotionNightVision
             | ItemType::SplashPotionInvisibility
@@ -566,6 +677,45 @@ impl ItemType {
             | ItemType::SplashPotionRegeneration
             | ItemType::SplashPotionStrength
             | ItemType::SplashPotionWeakness
+            | ItemType::SplashPotionSlowFalling
+            | ItemType::PotionNightVisionLong
+            | ItemType::PotionInvisibilityLong
+            | ItemType::PotionLeapingLong
+            | ItemType::PotionLeapingStrong
+            | ItemType::PotionFireResistanceLong
+            | ItemType::PotionSwiftnessLong
+            | ItemType::PotionSwiftnessStrong
+            | ItemType::PotionSlownessLong
+            | ItemType::PotionWaterBreathingLong
+            | ItemType::PotionHealingStrong
+            | ItemType::PotionHarmingStrong
+            | ItemType::PotionPoisonLong
+            | ItemType::PotionPoisonStrong
+            | ItemType::PotionRegenerationLong
+            | ItemType::PotionRegenerationStrong
+            | ItemType::PotionStrengthLong
+            | ItemType::PotionStrengthStrong
+            | ItemType::PotionWeaknessLong
+            | ItemType::PotionSlowFallingLong
+            | ItemType::SplashPotionNightVisionLong
+            | ItemType::SplashPotionInvisibilityLong
+            | ItemType::SplashPotionLeapingLong
+            | ItemType::SplashPotionLeapingStrong
+            | ItemType::SplashPotionFireResistanceLong
+            | ItemType::SplashPotionSwiftnessLong
+            | ItemType::SplashPotionSwiftnessStrong
+            | ItemType::SplashPotionSlownessLong
+            | ItemType::SplashPotionWaterBreathingLong
+            | ItemType::SplashPotionHealingStrong
+            | ItemType::SplashPotionHarmingStrong
+            | ItemType::SplashPotionPoisonLong
+            | ItemType::SplashPotionPoisonStrong
+            | ItemType::SplashPotionRegenerationLong
+            | ItemType::SplashPotionRegenerationStrong
+            | ItemType::SplashPotionStrengthLong
+            | ItemType::SplashPotionStrengthStrong
+            | ItemType::SplashPotionWeaknessLong
+            | ItemType::SplashPotionSlowFallingLong
             | ItemType::WoodenPickaxe
             | ItemType::StonePickaxe
             | ItemType::IronPickaxe
@@ -705,6 +855,12 @@ impl ItemType {
             104 => Some((ItemType::SugarCane, 1)),
             105 => Some((ItemType::BrownMushroom, 1)),
             106 => Some((ItemType::MagmaCream, 1)),
+            107 => Some((ItemType::GhastTear, 1)),
+            108 => Some((ItemType::GlisteringMelon, 1)),
+            109 => Some((ItemType::RabbitFoot, 1)),
+            110 => Some((ItemType::PhantomMembrane, 1)),
+            111 => Some((ItemType::RedstoneDust, 1)),
+            112 => Some((ItemType::GlowstoneDust, 1)),
 
             // Magma block: drops blaze powder (Overworld proxy for brewing fuel).
             80 => Some((ItemType::BlazePowder, 1)),
@@ -969,6 +1125,26 @@ impl ItemType {
                 | ItemType::PotionRegeneration
                 | ItemType::PotionStrength
                 | ItemType::PotionWeakness
+                | ItemType::PotionNightVisionLong
+                | ItemType::PotionInvisibilityLong
+                | ItemType::PotionLeapingLong
+                | ItemType::PotionLeapingStrong
+                | ItemType::PotionFireResistanceLong
+                | ItemType::PotionSwiftnessLong
+                | ItemType::PotionSwiftnessStrong
+                | ItemType::PotionSlownessLong
+                | ItemType::PotionWaterBreathingLong
+                | ItemType::PotionHealingStrong
+                | ItemType::PotionHarmingStrong
+                | ItemType::PotionPoisonLong
+                | ItemType::PotionPoisonStrong
+                | ItemType::PotionRegenerationLong
+                | ItemType::PotionRegenerationStrong
+                | ItemType::PotionStrengthLong
+                | ItemType::PotionStrengthStrong
+                | ItemType::PotionWeaknessLong
+                | ItemType::PotionSlowFalling
+                | ItemType::PotionSlowFallingLong
         )
     }
 
@@ -990,6 +1166,31 @@ impl ItemType {
             ItemType::PotionRegeneration => Some(crate::PotionType::Regeneration),
             ItemType::PotionStrength => Some(crate::PotionType::Strength),
             ItemType::PotionWeakness => Some(crate::PotionType::Weakness),
+            ItemType::PotionSlowFalling => Some(crate::PotionType::SlowFalling),
+            ItemType::PotionNightVisionLong => Some(crate::PotionType::NightVision),
+            ItemType::PotionInvisibilityLong => Some(crate::PotionType::Invisibility),
+            ItemType::PotionLeapingLong | ItemType::PotionLeapingStrong => {
+                Some(crate::PotionType::Leaping)
+            }
+            ItemType::PotionFireResistanceLong => Some(crate::PotionType::FireResistance),
+            ItemType::PotionSwiftnessLong | ItemType::PotionSwiftnessStrong => {
+                Some(crate::PotionType::Swiftness)
+            }
+            ItemType::PotionSlownessLong => Some(crate::PotionType::Slowness),
+            ItemType::PotionWaterBreathingLong => Some(crate::PotionType::WaterBreathing),
+            ItemType::PotionHealingStrong => Some(crate::PotionType::Healing),
+            ItemType::PotionHarmingStrong => Some(crate::PotionType::Harming),
+            ItemType::PotionPoisonLong | ItemType::PotionPoisonStrong => {
+                Some(crate::PotionType::Poison)
+            }
+            ItemType::PotionRegenerationLong | ItemType::PotionRegenerationStrong => {
+                Some(crate::PotionType::Regeneration)
+            }
+            ItemType::PotionStrengthLong | ItemType::PotionStrengthStrong => {
+                Some(crate::PotionType::Strength)
+            }
+            ItemType::PotionWeaknessLong => Some(crate::PotionType::Weakness),
+            ItemType::PotionSlowFallingLong => Some(crate::PotionType::SlowFalling),
             _ => None,
         }
     }
@@ -1011,12 +1212,13 @@ impl ItemType {
             crate::PotionType::Regeneration => Some(ItemType::PotionRegeneration),
             crate::PotionType::Strength => Some(ItemType::PotionStrength),
             crate::PotionType::Weakness => Some(ItemType::PotionWeakness),
+            crate::PotionType::SlowFalling => Some(ItemType::PotionSlowFalling),
             // Base potions without effects - no item representation
             crate::PotionType::Water | crate::PotionType::Mundane | crate::PotionType::Thick => {
                 None
             }
             // Potions not yet implemented as items
-            crate::PotionType::Luck | crate::PotionType::SlowFalling => None,
+            crate::PotionType::Luck => None,
         }
     }
 }
@@ -1342,7 +1544,10 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::MagmaCream as usize + 1);
+        assert_eq!(
+            ALL_ITEM_TYPES.len(),
+            ItemType::SplashPotionSlowFallingLong as usize + 1
+        );
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1734,6 +1939,7 @@ mod tests {
     fn test_potion_item_types() {
         // Test potion-related functions
         assert!(ItemType::PotionHealing.is_potion());
+        assert!(ItemType::PotionHealingStrong.is_potion());
         assert!(ItemType::PotionStrength.is_potion());
         assert!(!ItemType::Apple.is_potion());
         assert!(!ItemType::Stone.is_potion());
@@ -1756,6 +1962,26 @@ mod tests {
         assert!(ItemType::PotionRegeneration.is_potion());
         assert!(ItemType::PotionStrength.is_potion());
         assert!(ItemType::PotionWeakness.is_potion());
+        assert!(ItemType::PotionSlowFalling.is_potion());
+        assert!(ItemType::PotionNightVisionLong.is_potion());
+        assert!(ItemType::PotionInvisibilityLong.is_potion());
+        assert!(ItemType::PotionLeapingLong.is_potion());
+        assert!(ItemType::PotionLeapingStrong.is_potion());
+        assert!(ItemType::PotionFireResistanceLong.is_potion());
+        assert!(ItemType::PotionSwiftnessLong.is_potion());
+        assert!(ItemType::PotionSwiftnessStrong.is_potion());
+        assert!(ItemType::PotionSlownessLong.is_potion());
+        assert!(ItemType::PotionWaterBreathingLong.is_potion());
+        assert!(ItemType::PotionHealingStrong.is_potion());
+        assert!(ItemType::PotionHarmingStrong.is_potion());
+        assert!(ItemType::PotionPoisonLong.is_potion());
+        assert!(ItemType::PotionPoisonStrong.is_potion());
+        assert!(ItemType::PotionRegenerationLong.is_potion());
+        assert!(ItemType::PotionRegenerationStrong.is_potion());
+        assert!(ItemType::PotionStrengthLong.is_potion());
+        assert!(ItemType::PotionStrengthStrong.is_potion());
+        assert!(ItemType::PotionWeaknessLong.is_potion());
+        assert!(ItemType::PotionSlowFallingLong.is_potion());
     }
 
     #[test]
@@ -1817,6 +2043,22 @@ mod tests {
         assert_eq!(
             ItemType::PotionWeakness.to_potion_type(),
             Some(PotionType::Weakness)
+        );
+        assert_eq!(
+            ItemType::PotionSlowFalling.to_potion_type(),
+            Some(PotionType::SlowFalling)
+        );
+        assert_eq!(
+            ItemType::PotionSwiftnessLong.to_potion_type(),
+            Some(PotionType::Swiftness)
+        );
+        assert_eq!(
+            ItemType::PotionHealingStrong.to_potion_type(),
+            Some(PotionType::Healing)
+        );
+        assert_eq!(
+            ItemType::PotionSlowFallingLong.to_potion_type(),
+            Some(PotionType::SlowFalling)
         );
 
         // Non-potion items should return None
@@ -1884,6 +2126,10 @@ mod tests {
             ItemType::from_potion_type(PotionType::Weakness),
             Some(ItemType::PotionWeakness)
         );
+        assert_eq!(
+            ItemType::from_potion_type(PotionType::SlowFalling),
+            Some(ItemType::PotionSlowFalling)
+        );
 
         // Base potions have no item type
         assert_eq!(ItemType::from_potion_type(PotionType::Water), None);
@@ -1892,7 +2138,6 @@ mod tests {
 
         // Unimplemented potions
         assert_eq!(ItemType::from_potion_type(PotionType::Luck), None);
-        assert_eq!(ItemType::from_potion_type(PotionType::SlowFalling), None);
     }
 
     #[test]
@@ -1914,6 +2159,8 @@ mod tests {
         // Potions should stack to 1
         assert_eq!(ItemType::PotionHealing.max_stack_size(), 1);
         assert_eq!(ItemType::PotionStrength.max_stack_size(), 1);
+        assert_eq!(ItemType::PotionSlowFalling.max_stack_size(), 1);
+        assert_eq!(ItemType::SplashPotionSlowFalling.max_stack_size(), 1);
     }
 
     #[test]

@@ -528,6 +528,19 @@ pub fn get_brew_result(base: PotionType, ingredient: u16) -> Option<PotionType> 
         .map(|r| r.result)
 }
 
+fn potion_supports_strong_variant(potion: PotionType) -> bool {
+    matches!(
+        potion,
+        PotionType::Swiftness
+            | PotionType::Leaping
+            | PotionType::Healing
+            | PotionType::Harming
+            | PotionType::Poison
+            | PotionType::Regeneration
+            | PotionType::Strength
+    )
+}
+
 /// State of a brewing stand in the world.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrewingStandState {
@@ -540,6 +553,16 @@ pub struct BrewingStandState {
     /// Defaults to `false` for backwards-compatible deserialization.
     #[serde(default)]
     pub bottle_is_splash: [bool; 3],
+    /// Whether each bottle is extended via redstone (long duration).
+    ///
+    /// Defaults to `false` for backwards-compatible deserialization.
+    #[serde(default)]
+    pub bottle_is_extended: [bool; 3],
+    /// Amplifier for each bottle (e.g., glowstone-strengthened potions).
+    ///
+    /// Defaults to `0` for backwards-compatible deserialization.
+    #[serde(default)]
+    pub bottle_amplifier: [u8; 3],
     /// Ingredient slot (item_id, count).
     pub ingredient: Option<(u16, u32)>,
     /// Fuel slot (blaze powder count).
@@ -562,6 +585,8 @@ impl BrewingStandState {
         Self {
             bottles: [None, None, None],
             bottle_is_splash: [false; 3],
+            bottle_is_extended: [false; 3],
+            bottle_amplifier: [0; 3],
             ingredient: None,
             fuel: 0,
             brew_progress: 0.0,
@@ -615,6 +640,34 @@ impl BrewingStandState {
                 });
             }
 
+            if *ingredient_id == item_ids::REDSTONE_DUST {
+                let can_extend_any = self.bottles.iter().enumerate().any(|(idx, potion)| {
+                    let Some(potion) = potion else {
+                        return false;
+                    };
+                    potion.base_duration_ticks() > 0
+                        && !self.bottle_is_extended[idx]
+                        && self.bottle_amplifier[idx] == 0
+                });
+                if can_extend_any {
+                    return true;
+                }
+            }
+
+            if *ingredient_id == item_ids::GLOWSTONE_DUST {
+                let can_strengthen_any = self.bottles.iter().enumerate().any(|(idx, potion)| {
+                    let Some(potion) = potion else {
+                        return false;
+                    };
+                    potion_supports_strong_variant(*potion)
+                        && !self.bottle_is_extended[idx]
+                        && self.bottle_amplifier[idx] == 0
+                });
+                if can_strengthen_any {
+                    return true;
+                }
+            }
+
             // Check if any bottle can be brewed with this ingredient
             for potion_type in self.bottles.iter().flatten() {
                 if get_brew_result(*potion_type, *ingredient_id).is_some() {
@@ -636,12 +689,50 @@ impl BrewingStandState {
                         self.bottle_is_splash[idx] = true;
                     }
                 }
+            } else if ing_id == item_ids::REDSTONE_DUST {
+                for (idx, bottle) in self.bottles.iter().enumerate() {
+                    let Some(potion) = bottle else {
+                        continue;
+                    };
+                    if potion.base_duration_ticks() == 0 {
+                        continue;
+                    }
+                    if self.bottle_is_extended[idx] || self.bottle_amplifier[idx] != 0 {
+                        continue;
+                    }
+                    self.bottle_is_extended[idx] = true;
+                }
+            } else if ing_id == item_ids::GLOWSTONE_DUST {
+                for (idx, bottle) in self.bottles.iter().enumerate() {
+                    let Some(potion) = bottle else {
+                        continue;
+                    };
+                    if !potion_supports_strong_variant(*potion) {
+                        continue;
+                    }
+                    if self.bottle_is_extended[idx] || self.bottle_amplifier[idx] != 0 {
+                        continue;
+                    }
+                    self.bottle_amplifier[idx] = 1;
+                }
             } else {
                 // Transform each bottle that has a valid recipe
-                for bottle in &mut self.bottles {
+                for (idx, bottle) in self.bottles.iter_mut().enumerate() {
                     if let Some(potion_type) = bottle {
                         if let Some(result) = get_brew_result(*potion_type, ing_id) {
                             *bottle = Some(result);
+                            // Preserve existing modifiers where possible, but clamp to the new potion.
+                            self.bottle_is_extended[idx] &= result.base_duration_ticks() > 0;
+                            if potion_supports_strong_variant(result) {
+                                if let Some(effect_type) = result.effect() {
+                                    self.bottle_amplifier[idx] =
+                                        self.bottle_amplifier[idx].min(effect_type.max_amplifier());
+                                } else {
+                                    self.bottle_amplifier[idx] = 0;
+                                }
+                            } else {
+                                self.bottle_amplifier[idx] = 0;
+                            }
                         }
                     }
                 }
@@ -704,6 +795,8 @@ impl BrewingStandState {
         }
         self.bottles[slot] = Some(potion_type);
         self.bottle_is_splash[slot] = false;
+        self.bottle_is_extended[slot] = false;
+        self.bottle_amplifier[slot] = 0;
         true
     }
 
@@ -718,6 +811,8 @@ impl BrewingStandState {
         let bottle = self.bottles[slot].take();
         if bottle.is_some() {
             self.bottle_is_splash[slot] = false;
+            self.bottle_is_extended[slot] = false;
+            self.bottle_amplifier[slot] = 0;
         }
         bottle
     }

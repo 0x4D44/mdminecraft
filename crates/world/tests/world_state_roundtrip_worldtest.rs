@@ -155,6 +155,8 @@ fn make_initial_state() -> WorldState {
         BrewingStandState {
             bottles: [Some(mdminecraft_world::PotionType::Water), None, None],
             bottle_is_splash: [false; 3],
+            bottle_is_extended: [false; 3],
+            bottle_amplifier: [0; 3],
             ingredient: Some((102, 1)),
             fuel: 3,
             brew_progress: 0.5,
