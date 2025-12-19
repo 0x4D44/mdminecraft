@@ -186,6 +186,10 @@ pub struct BlockEntitiesState {
     pub chests: BTreeMap<BlockEntityKey, crate::ChestState>,
     #[serde(default)]
     pub hoppers: BTreeMap<BlockEntityKey, crate::HopperState>,
+    #[serde(default)]
+    pub dispensers: BTreeMap<BlockEntityKey, crate::DispenserState>,
+    #[serde(default)]
+    pub droppers: BTreeMap<BlockEntityKey, crate::DispenserState>,
 }
 
 /// Global world state that must survive save/load cycles.
@@ -1203,6 +1207,8 @@ mod tests {
         assert!(loaded.block_entities.brewing_stands.is_empty());
         assert!(loaded.block_entities.chests.is_empty());
         assert!(loaded.block_entities.hoppers.is_empty());
+        assert!(loaded.block_entities.dispensers.is_empty());
+        assert!(loaded.block_entities.droppers.is_empty());
 
         fs::remove_dir_all(&temp_dir).ok();
     }

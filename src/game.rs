@@ -1,6 +1,7 @@
 //! Game world state - the actual 3D voxel game
 
 use crate::{
+    commands,
     config::{load_block_registry, ControlsConfig},
     input::{ActionState, InputProcessor},
     scripted_input::ScriptedInputPlayer,
@@ -28,15 +29,15 @@ use mdminecraft_world::{
     lighting::{init_skylight, stitch_light_seams, LightType},
     ArmorPiece, ArmorSlot, BlockEntitiesState, BlockEntityKey, BlockId, BlockPropertiesRegistry,
     BlockState, BrewingStandState, ChestState, Chunk, ChunkPos, CropGrowthSystem, CropPosition,
-    EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState, HopperState,
-    InteractionManager, Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner,
-    MobType, PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager,
-    RedstonePos, RedstoneSimulator, RegionStore, SimTime, StatusEffectType, StatusEffects,
-    SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle,
-    WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF,
-    BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
-    BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
-    BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    DispenserState, EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState,
+    HopperState, InteractionManager, Inventory, ItemManager, ItemType as DroppedItemType, Mob,
+    MobSpawner, MobType, PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile,
+    ProjectileManager, RedstonePos, RedstoneSimulator, RegionStore, SimTime, StatusEffectType,
+    StatusEffects, SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState,
+    WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR,
+    BLOCK_BOOKSHELF, BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE,
+    BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_OAK_LOG,
+    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::time::Instant;
@@ -1625,12 +1626,34 @@ pub struct GameWorld {
     open_chest_pos: Option<BlockEntityKey>,
     /// Hopper inventories by position
     hoppers: BTreeMap<BlockEntityKey, HopperState>,
+    /// Whether hopper UI is open
+    hopper_open: bool,
+    /// Currently open hopper position (if any)
+    open_hopper_pos: Option<BlockEntityKey>,
+    /// Dispenser inventories by position
+    dispensers: BTreeMap<BlockEntityKey, DispenserState>,
+    /// Whether dispenser UI is open
+    dispenser_open: bool,
+    /// Currently open dispenser position (if any)
+    open_dispenser_pos: Option<BlockEntityKey>,
+    /// Dropper inventories by position
+    droppers: BTreeMap<BlockEntityKey, DispenserState>,
+    /// Whether dropper UI is open
+    dropper_open: bool,
+    /// Currently open dropper position (if any)
+    open_dropper_pos: Option<BlockEntityKey>,
 
     /// Whether the in-game pause menu is open.
     pause_menu_open: bool,
     pause_menu_view: PauseMenuView,
     pause_controls_dirty: bool,
     pending_action: Option<GameAction>,
+
+    /// Whether the command prompt is open.
+    command_open: bool,
+    command_focus_next_frame: bool,
+    command_input: String,
+    command_log: std::collections::VecDeque<String>,
 }
 
 impl GameWorld {
@@ -1910,6 +1933,8 @@ impl GameWorld {
         let brewing_stands = loaded_block_entities.brewing_stands;
         let chests = loaded_block_entities.chests;
         let hoppers = loaded_block_entities.hoppers;
+        let dispensers = loaded_block_entities.dispensers;
+        let droppers = loaded_block_entities.droppers;
 
         // Setup state
         let debug_hud = DebugHud::new(); // Zeroed by default
@@ -2003,10 +2028,23 @@ impl GameWorld {
             chest_open: false,
             open_chest_pos: None,
             hoppers,
+            hopper_open: false,
+            open_hopper_pos: None,
+            dispensers,
+            droppers,
+            dispenser_open: false,
+            open_dispenser_pos: None,
+            dropper_open: false,
+            open_dropper_pos: None,
             pause_menu_open: false,
             pause_menu_view: PauseMenuView::Main,
             pause_controls_dirty: false,
             pending_action: None,
+
+            command_open: false,
+            command_focus_next_frame: false,
+            command_input: String::new(),
+            command_log: std::collections::VecDeque::new(),
 
             // New fields
             region_store,
@@ -3158,6 +3196,8 @@ impl GameWorld {
             brewing_stands: self.brewing_stands.clone(),
             chests: self.chests.clone(),
             hoppers: self.hoppers.clone(),
+            dispensers: self.dispensers.clone(),
+            droppers: self.droppers.clone(),
         }
     }
 
@@ -3309,9 +3349,19 @@ impl GameWorld {
             return;
         }
 
+        if self.command_open {
+            return;
+        }
+
         match event.physical_key {
             PhysicalKey::Code(KeyCode::F3) => {
                 self.debug_hud.toggle();
+            }
+            PhysicalKey::Code(KeyCode::Slash) => {
+                self.open_command_prompt("/");
+            }
+            PhysicalKey::Code(KeyCode::KeyT) => {
+                self.open_command_prompt("");
             }
             PhysicalKey::Code(KeyCode::KeyF) => {
                 self.player_physics.toggle_physics();
@@ -4110,6 +4160,7 @@ impl GameWorld {
 
         // Update hoppers (item transport). Run after redstone so lock bits are up-to-date.
         self.update_hoppers();
+        self.update_dispensers_and_droppers();
 
         // Update projectiles (arrows)
         self.update_projectiles();
@@ -4312,6 +4363,7 @@ impl GameWorld {
             }
 
             self.chunks.insert(pos, chunk);
+            self.refresh_container_signals_for_loaded_chunk(pos);
             for crop in crops_to_register {
                 self.crop_growth.register_crop(crop);
             }
@@ -4368,6 +4420,87 @@ impl GameWorld {
                 }
                 self.mobs.append(&mut new_mobs);
             }
+        }
+    }
+
+    fn refresh_container_signals_for_loaded_chunk(&mut self, chunk_pos: ChunkPos) {
+        let chunk_x = chunk_pos.x;
+        let chunk_z = chunk_pos.z;
+
+        for (key, chest) in &self.chests {
+            if key.dimension != DimensionId::Overworld {
+                continue;
+            }
+
+            let key_chunk_x = key.x.div_euclid(CHUNK_SIZE_X as i32);
+            let key_chunk_z = key.z.div_euclid(CHUNK_SIZE_Z as i32);
+            if key_chunk_x != chunk_x || key_chunk_z != chunk_z {
+                continue;
+            }
+
+            mdminecraft_world::update_container_signal(
+                &mut self.chunks,
+                &mut self.redstone_sim,
+                RedstonePos::new(key.x, key.y, key.z),
+                &chest.slots,
+            );
+        }
+
+        for (key, hopper) in &self.hoppers {
+            if key.dimension != DimensionId::Overworld {
+                continue;
+            }
+
+            let key_chunk_x = key.x.div_euclid(CHUNK_SIZE_X as i32);
+            let key_chunk_z = key.z.div_euclid(CHUNK_SIZE_Z as i32);
+            if key_chunk_x != chunk_x || key_chunk_z != chunk_z {
+                continue;
+            }
+
+            mdminecraft_world::update_container_signal(
+                &mut self.chunks,
+                &mut self.redstone_sim,
+                RedstonePos::new(key.x, key.y, key.z),
+                &hopper.slots,
+            );
+        }
+
+        for (key, dispenser) in &self.dispensers {
+            if key.dimension != DimensionId::Overworld {
+                continue;
+            }
+
+            let key_chunk_x = key.x.div_euclid(CHUNK_SIZE_X as i32);
+            let key_chunk_z = key.z.div_euclid(CHUNK_SIZE_Z as i32);
+            if key_chunk_x != chunk_x || key_chunk_z != chunk_z {
+                continue;
+            }
+
+            mdminecraft_world::update_container_signal(
+                &mut self.chunks,
+                &mut self.redstone_sim,
+                RedstonePos::new(key.x, key.y, key.z),
+                &dispenser.slots,
+            );
+        }
+
+        for (key, dropper) in &self.droppers {
+            if key.dimension != DimensionId::Overworld {
+                continue;
+            }
+
+            let key_chunk_x = key.x.div_euclid(CHUNK_SIZE_X as i32);
+            let key_chunk_z = key.z.div_euclid(CHUNK_SIZE_Z as i32);
+            if key_chunk_x != chunk_x || key_chunk_z != chunk_z {
+                continue;
+            }
+
+            mdminecraft_world::update_container_signal(
+                &mut self.chunks,
+                &mut self.redstone_sim,
+                RedstonePos::new(key.x, key.y, key.z),
+                &dropper.slots,
+            );
         }
     }
 
@@ -4677,38 +4810,43 @@ impl GameWorld {
             }
         }
 
-        // Refresh lighting/meshes for affected chunks.
-        if !changed_positions.is_empty() {
-            let mut dirty_chunks = std::collections::BTreeSet::new();
-            for pos in changed_positions {
-                dirty_chunks.insert(ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16)));
-            }
-
-            for pos in &dirty_chunks {
-                self.recompute_chunk_lighting(*pos);
-            }
-
-            let mut affected = std::collections::BTreeSet::new();
-            for pos in &dirty_chunks {
-                affected.extend(mdminecraft_world::recompute_block_light_local(
-                    &mut self.chunks,
-                    &self.registry,
-                    *pos,
-                ));
-            }
-
-            let mut mesh_refresh = std::collections::BTreeSet::new();
-            for pos in &dirty_chunks {
-                mesh_refresh.insert(*pos);
-                mesh_refresh.extend(Self::neighbor_chunk_positions(*pos));
-            }
-            mesh_refresh.extend(affected);
-            for pos in mesh_refresh {
-                let _ = self.upload_chunk_mesh(pos);
-            }
-        }
+        self.refresh_after_voxel_changes(&changed_positions);
 
         true
+    }
+
+    fn refresh_after_voxel_changes(&mut self, changed_positions: &[IVec3]) {
+        if changed_positions.is_empty() {
+            return;
+        }
+
+        let mut dirty_chunks = std::collections::BTreeSet::new();
+        for pos in changed_positions {
+            dirty_chunks.insert(ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16)));
+        }
+
+        for pos in &dirty_chunks {
+            self.recompute_chunk_lighting(*pos);
+        }
+
+        let mut affected = std::collections::BTreeSet::new();
+        for pos in &dirty_chunks {
+            affected.extend(mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                *pos,
+            ));
+        }
+
+        let mut mesh_refresh = std::collections::BTreeSet::new();
+        for pos in &dirty_chunks {
+            mesh_refresh.insert(*pos);
+            mesh_refresh.extend(Self::neighbor_chunk_positions(*pos));
+        }
+        mesh_refresh.extend(affected);
+        for pos in mesh_refresh {
+            let _ = self.upload_chunk_mesh(pos);
+        }
     }
 
     fn try_sleep_in_bed(&mut self, bed_pos: IVec3) {
@@ -4956,6 +5094,18 @@ impl GameWorld {
             }
             Some(interactive_blocks::CHEST) => {
                 self.open_chest(hit.block_pos);
+                true
+            }
+            Some(mdminecraft_world::mechanical_blocks::HOPPER) => {
+                self.open_hopper(hit.block_pos);
+                true
+            }
+            Some(mdminecraft_world::mechanical_blocks::DISPENSER) => {
+                self.open_dispenser(hit.block_pos);
+                true
+            }
+            Some(mdminecraft_world::mechanical_blocks::DROPPER) => {
+                self.open_dropper(hit.block_pos);
                 true
             }
             Some(interactive_blocks::BED_HEAD) | Some(interactive_blocks::BED_FOOT) => {
@@ -5733,6 +5883,14 @@ impl GameWorld {
                     let key = Self::overworld_block_entity_key(place_pos);
                     self.hoppers.entry(key).or_default();
                 }
+                if place_block_id == mdminecraft_world::mechanical_blocks::DISPENSER {
+                    let key = Self::overworld_block_entity_key(place_pos);
+                    self.dispensers.entry(key).or_default();
+                }
+                if place_block_id == mdminecraft_world::mechanical_blocks::DROPPER {
+                    let key = Self::overworld_block_entity_key(place_pos);
+                    self.droppers.entry(key).or_default();
+                }
 
                 // Notify fluid sim (treat as removal to wake neighbors who might be flowing here).
                 self.fluid_sim.on_fluid_removed(
@@ -5861,16 +6019,79 @@ impl GameWorld {
 
         if matches!(
             block_id,
+            mdminecraft_world::mechanical_blocks::PISTON
+                | mdminecraft_world::mechanical_blocks::DISPENSER
+                | mdminecraft_world::mechanical_blocks::DROPPER
+        ) {
+            // Vanilla-ish: these blocks can be placed on top faces or side faces with horizontal
+            // orientation. Ceiling placement is not supported yet.
+            if face_normal.y == -1 {
+                return None;
+            }
+
+            let facing = if face_normal.y == 1 {
+                mdminecraft_world::Facing::from_yaw(camera_yaw)
+            } else {
+                match (face_normal.x, face_normal.z) {
+                    (1, 0) => mdminecraft_world::Facing::West,
+                    (-1, 0) => mdminecraft_world::Facing::East,
+                    (0, 1) => mdminecraft_world::Facing::North,
+                    (0, -1) => mdminecraft_world::Facing::South,
+                    _ => return None,
+                }
+            };
+
+            let mut state = 0;
+            if block_id == mdminecraft_world::mechanical_blocks::PISTON {
+                state = mdminecraft_world::set_piston_facing(state, facing);
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::mechanical_blocks::DISPENSER {
+                state = mdminecraft_world::set_dispenser_facing(state, facing);
+                return Some(state);
+            }
+            if block_id == mdminecraft_world::mechanical_blocks::DROPPER {
+                state = mdminecraft_world::set_dropper_facing(state, facing);
+                return Some(state);
+            }
+        }
+
+        if block_id == mdminecraft_world::mechanical_blocks::HOPPER {
+            // Vanilla-ish: hoppers can be placed on a top face (output down) or a side face
+            // (output into the clicked block). Ceiling placement is also supported (hanging hopper
+            // output is still "down").
+
+            let mut state = 0;
+            if face_normal.y == 1 || face_normal.y == -1 {
+                // Placing on top (or hanging from a ceiling) outputs down into the block below.
+                state = mdminecraft_world::set_hopper_outputs_down(state, true);
+                // Keep a deterministic horizontal facing for visuals/consistency.
+                state = mdminecraft_world::set_hopper_facing(
+                    state,
+                    mdminecraft_world::Facing::from_yaw(camera_yaw),
+                );
+                return Some(state);
+            }
+
+            let facing = match (face_normal.x, face_normal.z) {
+                (1, 0) => mdminecraft_world::Facing::West,
+                (-1, 0) => mdminecraft_world::Facing::East,
+                (0, 1) => mdminecraft_world::Facing::North,
+                (0, -1) => mdminecraft_world::Facing::South,
+                _ => return None,
+            };
+            state = mdminecraft_world::set_hopper_facing(state, facing);
+            return Some(state);
+        }
+
+        if matches!(
+            block_id,
             mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
                 | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
                 | mdminecraft_world::redstone_blocks::REDSTONE_WIRE
                 | mdminecraft_world::redstone_blocks::REDSTONE_REPEATER
                 | mdminecraft_world::redstone_blocks::REDSTONE_COMPARATOR
                 | mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER
-                | mdminecraft_world::mechanical_blocks::PISTON
-                | mdminecraft_world::mechanical_blocks::DISPENSER
-                | mdminecraft_world::mechanical_blocks::DROPPER
-                | mdminecraft_world::mechanical_blocks::HOPPER
         ) {
             if face_normal.y != 1 {
                 return None;
@@ -5897,38 +6118,6 @@ impl GameWorld {
             if block_id == mdminecraft_world::redstone_blocks::REDSTONE_OBSERVER {
                 let mut state = 0;
                 state = mdminecraft_world::set_observer_facing(
-                    state,
-                    mdminecraft_world::Facing::from_yaw(camera_yaw),
-                );
-                return Some(state);
-            }
-            if block_id == mdminecraft_world::mechanical_blocks::PISTON {
-                let mut state = 0;
-                state = mdminecraft_world::set_piston_facing(
-                    state,
-                    mdminecraft_world::Facing::from_yaw(camera_yaw),
-                );
-                return Some(state);
-            }
-            if block_id == mdminecraft_world::mechanical_blocks::DISPENSER {
-                let mut state = 0;
-                state = mdminecraft_world::set_dispenser_facing(
-                    state,
-                    mdminecraft_world::Facing::from_yaw(camera_yaw),
-                );
-                return Some(state);
-            }
-            if block_id == mdminecraft_world::mechanical_blocks::DROPPER {
-                let mut state = 0;
-                state = mdminecraft_world::set_dropper_facing(
-                    state,
-                    mdminecraft_world::Facing::from_yaw(camera_yaw),
-                );
-                return Some(state);
-            }
-            if block_id == mdminecraft_world::mechanical_blocks::HOPPER {
-                let mut state = 0;
-                state = mdminecraft_world::set_hopper_facing(
                     state,
                     mdminecraft_world::Facing::from_yaw(camera_yaw),
                 );
@@ -6623,6 +6812,11 @@ impl GameWorld {
         let mut close_enchanting_requested = false;
         let mut close_brewing_requested = false;
         let mut close_chest_requested = false;
+        let mut close_hopper_requested = false;
+        let mut close_dispenser_requested = false;
+        let mut close_dropper_requested = false;
+        let mut command_close_requested = false;
+        let mut command_submit: Option<String> = None;
         let mut enchanting_result: Option<EnchantingResult> = None;
         let mut spill_items: Vec<ItemStack> = Vec::new();
         let mut pause_action = PauseMenuAction::None;
@@ -6794,6 +6988,10 @@ impl GameWorld {
             let furnace_open = self.furnace_open;
             let enchanting_open = self.enchanting_open;
             let chest_open = self.chest_open;
+            let hopper_open = self.hopper_open;
+            let dispenser_open = self.dispenser_open;
+            let dropper_open = self.dropper_open;
+            let command_open = self.command_open;
             let mut respawn_clicked = false;
             let mut menu_clicked = false;
 
@@ -6916,8 +7114,136 @@ impl GameWorld {
                                         &mut self.ui_cursor_stack,
                                         &mut self.ui_drag_state,
                                     );
+
+                                    mdminecraft_world::update_container_signal(
+                                        &mut self.chunks,
+                                        &mut self.redstone_sim,
+                                        RedstonePos::new(pos.x, pos.y, pos.z),
+                                        &chest.slots,
+                                    );
                                 }
                             }
+                        }
+
+                        // Show hopper if open
+                        if hopper_open {
+                            if let Some(pos) = self.open_hopper_pos {
+                                if let Some(hopper) = self.hoppers.get_mut(&pos) {
+                                    close_hopper_requested = render_hopper(
+                                        ctx,
+                                        hopper,
+                                        &mut self.hotbar,
+                                        &mut self.main_inventory,
+                                        &mut self.ui_cursor_stack,
+                                        &mut self.ui_drag_state,
+                                    );
+
+                                    mdminecraft_world::update_container_signal(
+                                        &mut self.chunks,
+                                        &mut self.redstone_sim,
+                                        RedstonePos::new(pos.x, pos.y, pos.z),
+                                        &hopper.slots,
+                                    );
+                                }
+                            }
+                        }
+
+                        // Show dispenser if open
+                        if dispenser_open {
+                            if let Some(pos) = self.open_dispenser_pos {
+                                if let Some(dispenser) = self.dispensers.get_mut(&pos) {
+                                    close_dispenser_requested = render_dispenser(
+                                        ctx,
+                                        dispenser,
+                                        &mut self.hotbar,
+                                        &mut self.main_inventory,
+                                        &mut self.ui_cursor_stack,
+                                        &mut self.ui_drag_state,
+                                    );
+
+                                    mdminecraft_world::update_container_signal(
+                                        &mut self.chunks,
+                                        &mut self.redstone_sim,
+                                        RedstonePos::new(pos.x, pos.y, pos.z),
+                                        &dispenser.slots,
+                                    );
+                                }
+                            }
+                        }
+
+                        // Show dropper if open
+                        if dropper_open {
+                            if let Some(pos) = self.open_dropper_pos {
+                                if let Some(dropper) = self.droppers.get_mut(&pos) {
+                                    close_dropper_requested = render_dropper(
+                                        ctx,
+                                        dropper,
+                                        &mut self.hotbar,
+                                        &mut self.main_inventory,
+                                        &mut self.ui_cursor_stack,
+                                        &mut self.ui_drag_state,
+                                    );
+
+                                    mdminecraft_world::update_container_signal(
+                                        &mut self.chunks,
+                                        &mut self.redstone_sim,
+                                        RedstonePos::new(pos.x, pos.y, pos.z),
+                                        &dropper.slots,
+                                    );
+                                }
+                            }
+                        }
+
+                        if command_open && !is_dead {
+                            egui::Area::new("command_prompt")
+                                .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(10.0, -10.0))
+                                .order(egui::Order::Foreground)
+                                .show(ctx, |ui| {
+                                    egui::Frame::none()
+                                        .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 210))
+                                        .inner_margin(egui::Margin::same(8.0))
+                                        .rounding(egui::Rounding::same(4.0))
+                                        .show(ui, |ui| {
+                                            let lines: Vec<_> = self
+                                                .command_log
+                                                .iter()
+                                                .rev()
+                                                .take(10)
+                                                .cloned()
+                                                .collect();
+                                            for line in lines.into_iter().rev() {
+                                                ui.label(
+                                                    egui::RichText::new(line)
+                                                        .size(12.0)
+                                                        .color(egui::Color32::LIGHT_GRAY),
+                                                );
+                                            }
+
+                                            ui.add_space(4.0);
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut self.command_input)
+                                                    .desired_width(520.0)
+                                                    .hint_text("Enter command (e.g. /help)"),
+                                            );
+                                            if self.command_focus_next_frame {
+                                                response.request_focus();
+                                                self.command_focus_next_frame = false;
+                                            }
+
+                                            let enter_pressed =
+                                                ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                            let esc_pressed =
+                                                ui.input(|i| i.key_pressed(egui::Key::Escape));
+
+                                            if enter_pressed {
+                                                command_submit = Some(self.command_input.clone());
+                                                self.command_input.clear();
+                                            }
+                                            if esc_pressed {
+                                                command_close_requested = true;
+                                            }
+                                        });
+                                });
                         }
 
                         // Show pause menu if open (singleplayer pause).
@@ -6993,6 +7319,28 @@ impl GameWorld {
         // Handle chest close
         if close_chest_requested {
             self.close_chest();
+        }
+
+        // Handle hopper close
+        if close_hopper_requested {
+            self.close_hopper();
+        }
+
+        // Handle dispenser close
+        if close_dispenser_requested {
+            self.close_dispenser();
+        }
+
+        // Handle dropper close
+        if close_dropper_requested {
+            self.close_dropper();
+        }
+
+        if command_close_requested {
+            self.close_command_prompt();
+        }
+        if let Some(cmdline) = command_submit.take() {
+            self.run_command_line(cmdline);
         }
 
         match pause_action {
@@ -8173,6 +8521,71 @@ impl GameWorld {
         }
     }
 
+    fn open_command_prompt(&mut self, initial_text: &str) {
+        if self.command_open || self.player_state != PlayerState::Alive {
+            return;
+        }
+        if self.inventory_open
+            || self.crafting_open
+            || self.furnace_open
+            || self.enchanting_open
+            || self.brewing_open
+            || self.chest_open
+            || self.hopper_open
+            || self.dispenser_open
+            || self.dropper_open
+            || self.pause_menu_open
+        {
+            return;
+        }
+
+        self.command_open = true;
+        self.command_focus_next_frame = true;
+        self.command_input.clear();
+        self.command_input.push_str(initial_text);
+        let _ = self.input.enter_ui_overlay(&self.window);
+        tracing::info!("Command prompt opened");
+    }
+
+    fn close_command_prompt(&mut self) {
+        if !self.command_open {
+            return;
+        }
+        self.command_open = false;
+        self.command_focus_next_frame = false;
+        self.command_input.clear();
+        let _ = self.input.enter_gameplay(&self.window);
+        tracing::info!("Command prompt closed");
+    }
+
+    fn push_command_log_line(&mut self, line: impl Into<String>) {
+        const MAX_LINES: usize = 64;
+        self.command_log.push_back(line.into());
+        while self.command_log.len() > MAX_LINES {
+            self.command_log.pop_front();
+        }
+    }
+
+    fn run_command_line(&mut self, line: String) {
+        let line = line.trim().to_string();
+        if line.is_empty() {
+            return;
+        }
+
+        self.push_command_log_line(format!("> {line}"));
+        match commands::parse_command(&line, &self.registry) {
+            Ok(cmd) => {
+                let out = commands::execute_command(self, cmd);
+                for line in out.lines {
+                    self.push_command_log_line(line);
+                }
+            }
+            Err(err) => {
+                self.push_command_log_line(format!("Error: {err}"));
+            }
+        }
+    }
+
     /// Open crafting table UI
     fn open_crafting(&mut self) {
         self.crafting_open = true;
@@ -8344,6 +8757,154 @@ impl GameWorld {
         tracing::info!("Chest closed");
     }
 
+    /// Open hopper UI at the given position
+    fn open_hopper(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
+        self.hopper_open = true;
+        self.open_hopper_pos = Some(key);
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        self.enchanting_open = false;
+        self.brewing_open = false;
+        self.chest_open = false;
+        self.dispenser_open = false;
+        self.dropper_open = false;
+        self.ui_drag_state.reset();
+        self.hoppers.entry(key).or_default();
+        let _ = self.input.enter_ui_overlay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryOpen);
+        tracing::info!("Hopper opened at {:?}", block_pos);
+    }
+
+    /// Close hopper UI
+    fn close_hopper(&mut self) {
+        self.hopper_open = false;
+        self.open_hopper_pos = None;
+        self.ui_drag_state.reset();
+        if let Some(stack) = self.ui_cursor_stack.take() {
+            self.return_stack_to_storage_or_spill(stack);
+        }
+        let _ = self.input.enter_gameplay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryClose);
+        tracing::info!("Hopper closed");
+    }
+
+    /// Open dispenser UI at the given position
+    fn open_dispenser(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
+        self.dispenser_open = true;
+        self.open_dispenser_pos = Some(key);
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        self.enchanting_open = false;
+        self.brewing_open = false;
+        self.chest_open = false;
+        self.hopper_open = false;
+        self.dropper_open = false;
+        self.ui_drag_state.reset();
+        self.dispensers.entry(key).or_default();
+        let _ = self.input.enter_ui_overlay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryOpen);
+        tracing::info!("Dispenser opened at {:?}", block_pos);
+    }
+
+    /// Close dispenser UI
+    fn close_dispenser(&mut self) {
+        self.dispenser_open = false;
+        self.open_dispenser_pos = None;
+        self.ui_drag_state.reset();
+        if let Some(stack) = self.ui_cursor_stack.take() {
+            self.return_stack_to_storage_or_spill(stack);
+        }
+        let _ = self.input.enter_gameplay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryClose);
+        tracing::info!("Dispenser closed");
+    }
+
+    /// Open dropper UI at the given position
+    fn open_dropper(&mut self, block_pos: IVec3) {
+        let key = Self::overworld_block_entity_key(block_pos);
+        self.dropper_open = true;
+        self.open_dropper_pos = Some(key);
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        self.enchanting_open = false;
+        self.brewing_open = false;
+        self.chest_open = false;
+        self.hopper_open = false;
+        self.dispenser_open = false;
+        self.ui_drag_state.reset();
+        self.droppers.entry(key).or_default();
+        let _ = self.input.enter_ui_overlay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryOpen);
+        tracing::info!("Dropper opened at {:?}", block_pos);
+    }
+
+    /// Close dropper UI
+    fn close_dropper(&mut self) {
+        self.dropper_open = false;
+        self.open_dropper_pos = None;
+        self.ui_drag_state.reset();
+        if let Some(stack) = self.ui_cursor_stack.take() {
+            self.return_stack_to_storage_or_spill(stack);
+        }
+        let _ = self.input.enter_gameplay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryClose);
+        tracing::info!("Dropper closed");
+    }
+
+    fn purge_block_entity_state(&mut self, block_pos: IVec3, removed_block_id: BlockId) {
+        let key = Self::overworld_block_entity_key(block_pos);
+        match removed_block_id {
+            interactive_blocks::CHEST => {
+                if self.chest_open && self.open_chest_pos == Some(key) {
+                    self.close_chest();
+                }
+                let _ = self.chests.remove(&key);
+            }
+            mdminecraft_world::mechanical_blocks::HOPPER => {
+                if self.hopper_open && self.open_hopper_pos == Some(key) {
+                    self.close_hopper();
+                }
+                let _ = self.hoppers.remove(&key);
+            }
+            mdminecraft_world::mechanical_blocks::DISPENSER => {
+                if self.dispenser_open && self.open_dispenser_pos == Some(key) {
+                    self.close_dispenser();
+                }
+                let _ = self.dispensers.remove(&key);
+            }
+            mdminecraft_world::mechanical_blocks::DROPPER => {
+                if self.dropper_open && self.open_dropper_pos == Some(key) {
+                    self.close_dropper();
+                }
+                let _ = self.droppers.remove(&key);
+            }
+            BLOCK_FURNACE | BLOCK_FURNACE_LIT => {
+                if self.furnace_open && self.open_furnace_pos == Some(key) {
+                    self.close_furnace();
+                }
+                let _ = self.furnaces.remove(&key);
+            }
+            BLOCK_BREWING_STAND => {
+                if self.brewing_open && self.open_brewing_pos == Some(key) {
+                    self.close_brewing_stand();
+                }
+                let _ = self.brewing_stands.remove(&key);
+            }
+            BLOCK_ENCHANTING_TABLE => {
+                if self.enchanting_open && self.open_enchanting_pos == Some(key) {
+                    self.close_enchanting_table();
+                }
+                let _ = self.enchanting_tables.remove(&key);
+            }
+            _ => {}
+        }
+    }
+
     fn on_block_entity_removed(&mut self, block_pos: IVec3, removed_block_id: BlockId) {
         let key = Self::overworld_block_entity_key(block_pos);
 
@@ -8388,6 +8949,10 @@ impl GameWorld {
                 }
             }
             mdminecraft_world::mechanical_blocks::HOPPER => {
+                if self.hopper_open && self.open_hopper_pos == Some(key) {
+                    self.close_hopper();
+                }
+
                 let Some(hopper) = self.hoppers.remove(&key) else {
                     return;
                 };
@@ -8403,6 +8968,72 @@ impl GameWorld {
                             slot = slot_idx,
                             item = ?stack.item_type,
                             "Hopper contained an undroppable item type"
+                        );
+                        continue;
+                    };
+
+                    self.item_manager.spawn_item(
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        drop_type,
+                        stack.count,
+                    );
+                }
+            }
+            mdminecraft_world::mechanical_blocks::DISPENSER => {
+                if self.dispenser_open && self.open_dispenser_pos == Some(key) {
+                    self.close_dispenser();
+                }
+
+                let Some(dispenser) = self.dispensers.remove(&key) else {
+                    return;
+                };
+
+                for (slot_idx, stack) in dispenser.slots.into_iter().enumerate() {
+                    let Some(stack) = stack else {
+                        continue;
+                    };
+
+                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
+                    else {
+                        tracing::warn!(
+                            slot = slot_idx,
+                            item = ?stack.item_type,
+                            "Dispenser contained an undroppable item type"
+                        );
+                        continue;
+                    };
+
+                    self.item_manager.spawn_item(
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        drop_type,
+                        stack.count,
+                    );
+                }
+            }
+            mdminecraft_world::mechanical_blocks::DROPPER => {
+                if self.dropper_open && self.open_dropper_pos == Some(key) {
+                    self.close_dropper();
+                }
+
+                let Some(dropper) = self.droppers.remove(&key) else {
+                    return;
+                };
+
+                for (slot_idx, stack) in dropper.slots.into_iter().enumerate() {
+                    let Some(stack) = stack else {
+                        continue;
+                    };
+
+                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
+                    else {
+                        tracing::warn!(
+                            slot = slot_idx,
+                            item = ?stack.item_type,
+                            "Dropper contained an undroppable item type"
                         );
                         continue;
                     };
@@ -8534,6 +9165,23 @@ impl GameWorld {
             return;
         }
 
+        if self.command_open {
+            self.close_command_prompt();
+            return;
+        }
+
+        if self.hopper_open {
+            self.close_hopper();
+            return;
+        }
+        if self.dispenser_open {
+            self.close_dispenser();
+            return;
+        }
+        if self.dropper_open {
+            self.close_dropper();
+            return;
+        }
         if self.chest_open {
             self.close_chest();
             return;
@@ -8788,14 +9436,25 @@ impl GameWorld {
     }
 
     fn update_hoppers(&mut self) {
-        const HOPPER_COOLDOWN_TICKS: u8 = 8;
-        const HOPPER_PICKUP_RADIUS: f64 = 0.65;
+        mdminecraft_world::tick_hoppers(
+            mdminecraft_world::HopperTickContext {
+                chunks: &mut self.chunks,
+                redstone_sim: &mut self.redstone_sim,
+                item_manager: &mut self.item_manager,
+                chests: &mut self.chests,
+                hoppers: &mut self.hoppers,
+                dispensers: &mut self.dispensers,
+                droppers: &mut self.droppers,
+            },
+            |drop_type| {
+                Self::convert_dropped_item_type(drop_type)
+                    .map(|core_type| ItemStack::new(core_type, 1))
+            },
+        );
+    }
 
-        let chunks = &mut self.chunks;
-        let redstone_sim = &mut self.redstone_sim;
-        let item_manager = &mut self.item_manager;
-        let chests = &mut self.chests;
-        let hoppers = &mut self.hoppers;
+    fn update_dispensers_and_droppers(&mut self) {
+        const DISPENSER_COOLDOWN_TICKS: u8 = 4;
 
         let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> Option<Voxel> {
             if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
@@ -8812,133 +9471,199 @@ impl GameWorld {
             Some(chunk.voxel(local_x, pos.y as usize, local_z))
         };
 
-        let hopper_keys: Vec<_> = hoppers.keys().copied().collect();
+        let mut changed_positions: Vec<IVec3> = Vec::new();
 
-        for key in hopper_keys {
-            let Some(mut hopper) = hoppers.remove(&key) else {
-                continue;
-            };
+        {
+            let chunks = &mut self.chunks;
+            let redstone_sim = &mut self.redstone_sim;
+            let item_manager = &mut self.item_manager;
+            let fluid_sim = &mut self.fluid_sim;
+            let mut dispensers = std::mem::take(&mut self.dispensers);
+            let mut droppers = std::mem::take(&mut self.droppers);
 
-            if key.dimension != DimensionId::Overworld {
-                hoppers.insert(key, hopper);
-                continue;
-            }
+            let dispenser_keys: Vec<_> = dispensers.keys().copied().collect();
+            for key in dispenser_keys {
+                let Some(mut dispenser) = dispensers.remove(&key) else {
+                    continue;
+                };
 
-            let pos = IVec3::new(key.x, key.y, key.z);
-            let Some(voxel) = voxel_at(chunks, pos) else {
-                hoppers.insert(key, hopper);
-                continue;
-            };
-
-            if voxel.id != mdminecraft_world::mechanical_blocks::HOPPER {
-                continue;
-            }
-
-            if hopper.cooldown_ticks > 0 {
-                hopper.cooldown_ticks = hopper.cooldown_ticks.saturating_sub(1);
-                hoppers.insert(key, hopper);
-                continue;
-            }
-
-            // Hopper locking: treat the redstone active bit as "powered/disabled".
-            if mdminecraft_world::is_active(voxel.state) {
-                hoppers.insert(key, hopper);
-                continue;
-            }
-
-            let facing = mdminecraft_world::hopper_facing(voxel.state);
-            let (dx, dz) = facing.offset();
-            let output_pos = IVec3::new(pos.x + dx, pos.y, pos.z + dz);
-
-            let mut moved_any = false;
-
-            // Push one item into the container in front (chests and hoppers).
-            if let Some(out_voxel) = voxel_at(chunks, output_pos) {
-                if out_voxel.id == interactive_blocks::CHEST {
-                    let chest_key = Self::overworld_block_entity_key(output_pos);
-                    let chest = chests.entry(chest_key).or_default();
-                    if try_transfer_one_between_core_slots(&mut hopper.slots, &mut chest.slots) {
-                        moved_any = true;
-                        update_container_signal(chunks, redstone_sim, output_pos, &chest.slots);
-                    }
-                } else if out_voxel.id == mdminecraft_world::mechanical_blocks::HOPPER {
-                    let target_key = Self::overworld_block_entity_key(output_pos);
-                    let target = hoppers.entry(target_key).or_default();
-                    if try_transfer_one_between_core_slots(&mut hopper.slots, &mut target.slots) {
-                        moved_any = true;
-                        target.cooldown_ticks =
-                            target.cooldown_ticks.max(HOPPER_COOLDOWN_TICKS);
-                        update_container_signal(chunks, redstone_sim, output_pos, &target.slots);
-                    }
+                if key.dimension != DimensionId::Overworld {
+                    dispensers.insert(key, dispenser);
+                    continue;
                 }
-            }
 
-            // Pull one item from the container above (chests and hoppers).
-            let above_pos = IVec3::new(pos.x, pos.y + 1, pos.z);
-            if !moved_any {
-                if let Some(above_voxel) = voxel_at(chunks, above_pos) {
-                    if above_voxel.id == interactive_blocks::CHEST {
-                        let chest_key = Self::overworld_block_entity_key(above_pos);
-                        let chest = chests.entry(chest_key).or_default();
-                        if try_transfer_one_between_core_slots(&mut chest.slots, &mut hopper.slots) {
-                            moved_any = true;
-                            update_container_signal(chunks, redstone_sim, above_pos, &chest.slots);
-                        }
-                    } else if above_voxel.id == mdminecraft_world::mechanical_blocks::HOPPER {
-                        let source_key = Self::overworld_block_entity_key(above_pos);
-                        let source = hoppers.entry(source_key).or_default();
-                        if try_transfer_one_between_core_slots(&mut source.slots, &mut hopper.slots) {
-                            moved_any = true;
-                            update_container_signal(chunks, redstone_sim, above_pos, &source.slots);
-                        }
-                    }
+                let pos = IVec3::new(key.x, key.y, key.z);
+                let Some(voxel) = voxel_at(chunks, pos) else {
+                    dispensers.insert(key, dispenser);
+                    continue;
+                };
+
+                if voxel.id != mdminecraft_world::mechanical_blocks::DISPENSER {
+                    continue;
                 }
-            }
 
-            // Pull one dropped item from above (vanilla-ish).
-            if !moved_any {
-                let pickup_x = pos.x as f64 + 0.5;
-                let pickup_y = pos.y as f64 + 1.0;
-                let pickup_z = pos.z as f64 + 0.5;
+                if dispenser.cooldown_ticks > 0 {
+                    dispenser.cooldown_ticks = dispenser.cooldown_ticks.saturating_sub(1);
+                }
 
-                let taken = item_manager.take_one_near_if(
-                    pickup_x,
-                    pickup_y,
-                    pickup_z,
-                    HOPPER_PICKUP_RADIUS,
-                    |drop_type| {
-                        let Some(core_type) = Self::convert_dropped_item_type(drop_type) else {
-                            return false;
-                        };
-                        let stack = ItemStack::new(core_type, 1);
-                        can_insert_one_into_core_slots(&hopper.slots, &stack)
-                    },
-                );
+                let powered = mdminecraft_world::is_active(voxel.state);
+                let rising_edge = powered && !dispenser.was_powered;
+                dispenser.was_powered = powered;
 
-                if let Some((drop_type, _count)) = taken {
-                    let Some(core_type) = Self::convert_dropped_item_type(drop_type) else {
-                        tracing::warn!(
-                            drop_type = ?drop_type,
-                            "Hopper pulled an unconvertible dropped item type"
-                        );
-                        hoppers.insert(key, hopper);
+                if rising_edge && dispenser.cooldown_ticks == 0 {
+                    let facing = mdminecraft_world::dispenser_facing(voxel.state);
+                    let (dx, dz) = facing.offset();
+                    let spawn_x = pos.x as f64 + 0.5 + dx as f64 * 0.7;
+                    let spawn_y = pos.y as f64 + 0.5;
+                    let spawn_z = pos.z as f64 + 0.5 + dz as f64 * 0.7;
+
+                    let Some((source_idx, one)) =
+                        mdminecraft_world::take_one_from_core_slots(&mut dispenser.slots)
+                    else {
+                        dispensers.insert(key, dispenser);
                         continue;
                     };
 
-                    let stack = ItemStack::new(core_type, 1);
-                    if insert_one_into_core_slots(&mut hopper.slots, stack) {
-                        moved_any = true;
+                    // Vanilla-ish: dispensers interact with water/lava via buckets instead of dropping them.
+                    if let ItemType::Item(bucket_id) = one.item_type {
+                        if matches!(
+                            bucket_id,
+                            CORE_ITEM_BUCKET | CORE_ITEM_WATER_BUCKET | CORE_ITEM_LAVA_BUCKET
+                        ) {
+                            let face_normal = IVec3::new(dx, 0, dz);
+                            let target_pos = pos + face_normal;
+
+                            let hit = if bucket_id == CORE_ITEM_BUCKET {
+                                RaycastHit {
+                                    block_pos: target_pos,
+                                    face_normal: IVec3::ZERO,
+                                    distance: 0.0,
+                                    hit_pos: glam::Vec3::ZERO,
+                                }
+                            } else {
+                                RaycastHit {
+                                    block_pos: pos,
+                                    face_normal,
+                                    distance: 0.0,
+                                    hit_pos: glam::Vec3::ZERO,
+                                }
+                            };
+
+                            if let Some((new_bucket_id, mut changed)) =
+                                try_bucket_interaction(bucket_id, hit, chunks, fluid_sim)
+                            {
+                                restore_one_into_core_slot(
+                                    &mut dispenser.slots,
+                                    source_idx,
+                                    ItemStack::new(ItemType::Item(new_bucket_id), 1),
+                                );
+                                dispenser.cooldown_ticks = DISPENSER_COOLDOWN_TICKS;
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    RedstonePos::new(pos.x, pos.y, pos.z),
+                                    &dispenser.slots,
+                                );
+                                changed_positions.append(&mut changed);
+                                dispensers.insert(key, dispenser);
+                                continue;
+                            }
+
+                            // Failed bucket interaction: restore item, no dispense.
+                            restore_one_into_core_slot(&mut dispenser.slots, source_idx, one);
+                            dispensers.insert(key, dispenser);
+                            continue;
+                        }
                     }
+
+                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(one.item_type)
+                    else {
+                        restore_one_into_core_slot(&mut dispenser.slots, source_idx, one);
+                        dispensers.insert(key, dispenser);
+                        continue;
+                    };
+
+                    item_manager.spawn_item(spawn_x, spawn_y, spawn_z, drop_type, 1);
+                    dispenser.cooldown_ticks = DISPENSER_COOLDOWN_TICKS;
+                    mdminecraft_world::update_container_signal(
+                        chunks,
+                        redstone_sim,
+                        RedstonePos::new(pos.x, pos.y, pos.z),
+                        &dispenser.slots,
+                    );
                 }
+
+                dispensers.insert(key, dispenser);
             }
 
-            if moved_any {
-                hopper.cooldown_ticks = HOPPER_COOLDOWN_TICKS;
-                update_container_signal(chunks, redstone_sim, pos, &hopper.slots);
+            let dropper_keys: Vec<_> = droppers.keys().copied().collect();
+            for key in dropper_keys {
+                let Some(mut dropper) = droppers.remove(&key) else {
+                    continue;
+                };
+
+                if key.dimension != DimensionId::Overworld {
+                    droppers.insert(key, dropper);
+                    continue;
+                }
+
+                let pos = IVec3::new(key.x, key.y, key.z);
+                let Some(voxel) = voxel_at(chunks, pos) else {
+                    droppers.insert(key, dropper);
+                    continue;
+                };
+
+                if voxel.id != mdminecraft_world::mechanical_blocks::DROPPER {
+                    continue;
+                }
+
+                if dropper.cooldown_ticks > 0 {
+                    dropper.cooldown_ticks = dropper.cooldown_ticks.saturating_sub(1);
+                }
+
+                let powered = mdminecraft_world::is_active(voxel.state);
+                let rising_edge = powered && !dropper.was_powered;
+                dropper.was_powered = powered;
+
+                if rising_edge && dropper.cooldown_ticks == 0 {
+                    let facing = mdminecraft_world::dropper_facing(voxel.state);
+                    let (dx, dz) = facing.offset();
+                    let spawn_x = pos.x as f64 + 0.5 + dx as f64 * 0.7;
+                    let spawn_y = pos.y as f64 + 0.5;
+                    let spawn_z = pos.z as f64 + 0.5 + dz as f64 * 0.7;
+
+                    let Some((source_idx, one)) =
+                        mdminecraft_world::take_one_from_core_slots(&mut dropper.slots)
+                    else {
+                        droppers.insert(key, dropper);
+                        continue;
+                    };
+
+                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(one.item_type)
+                    else {
+                        restore_one_into_core_slot(&mut dropper.slots, source_idx, one);
+                        droppers.insert(key, dropper);
+                        continue;
+                    };
+
+                    item_manager.spawn_item(spawn_x, spawn_y, spawn_z, drop_type, 1);
+                    dropper.cooldown_ticks = DISPENSER_COOLDOWN_TICKS;
+                    mdminecraft_world::update_container_signal(
+                        chunks,
+                        redstone_sim,
+                        RedstonePos::new(pos.x, pos.y, pos.z),
+                        &dropper.slots,
+                    );
+                }
+
+                droppers.insert(key, dropper);
             }
 
-            hoppers.insert(key, hopper);
+            self.dispensers = dispensers;
+            self.droppers = droppers;
         }
+
+        self.refresh_after_voxel_changes(&changed_positions);
     }
 
     /// Update player status effects (called every frame)
@@ -10871,6 +11596,9 @@ enum UiCoreSlotId {
     Hotbar(usize),
     MainInventory(usize),
     Chest(usize),
+    Hopper(usize),
+    Dispenser(usize),
+    Dropper(usize),
     PersonalCrafting(usize),
     CraftingGrid(usize),
 }
@@ -10941,127 +11669,6 @@ fn stacks_match_for_merge(a: &ItemStack, b: &ItemStack) -> bool {
     a.item_type == b.item_type && a.durability == b.durability && a.enchantments == b.enchantments
 }
 
-fn comparator_signal_from_core_slots(slots: &[Option<ItemStack>]) -> u8 {
-    if slots.is_empty() {
-        return 0;
-    }
-
-    let mut total_fill_64ths: u64 = 0;
-    let mut has_any = false;
-
-    for stack in slots.iter().flatten() {
-        if stack.count == 0 {
-            continue;
-        }
-        has_any = true;
-        let max = stack.max_stack_size().max(1) as u64;
-        total_fill_64ths = total_fill_64ths.saturating_add((stack.count as u64) * 64 / max);
-    }
-
-    if !has_any {
-        return 0;
-    }
-
-    let denom = (slots.len() as u64) * 64;
-    let base = (total_fill_64ths.saturating_mul(14) / denom) as u8;
-    base.saturating_add(1).min(15)
-}
-
-fn update_container_signal(
-    chunks: &mut HashMap<ChunkPos, Chunk>,
-    redstone_sim: &mut RedstoneSimulator,
-    pos: IVec3,
-    slots: &[Option<ItemStack>],
-) {
-    if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-        return;
-    }
-
-    let desired = comparator_signal_from_core_slots(slots);
-
-    let chunk_pos = ChunkPos::new(
-        pos.x.div_euclid(CHUNK_SIZE_X as i32),
-        pos.z.div_euclid(CHUNK_SIZE_Z as i32),
-    );
-    let Some(chunk) = chunks.get_mut(&chunk_pos) else {
-        return;
-    };
-
-    let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-    let local_y = pos.y as usize;
-    let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-    if local_y >= CHUNK_SIZE_Y {
-        return;
-    }
-
-    let mut voxel = chunk.voxel(local_x, local_y, local_z);
-    let current = mdminecraft_world::get_power_level(voxel.state);
-    if current == desired {
-        return;
-    }
-
-    voxel.state = mdminecraft_world::set_power_level(voxel.state, desired);
-    chunk.set_voxel(local_x, local_y, local_z, voxel);
-
-    let center = RedstonePos::new(pos.x, pos.y, pos.z);
-    redstone_sim.schedule_update(center);
-    for neighbor in center.neighbors() {
-        redstone_sim.schedule_update(neighbor);
-    }
-}
-
-fn can_insert_one_into_core_slots(slots: &[Option<ItemStack>], stack: &ItemStack) -> bool {
-    debug_assert_eq!(stack.count, 1);
-
-    for existing in slots.iter().flatten() {
-        if stacks_match_for_merge(existing, stack) && existing.count < existing.max_stack_size() {
-            return true;
-        }
-    }
-
-    slots.iter().any(|slot| slot.is_none())
-}
-
-fn insert_one_into_core_slots(slots: &mut [Option<ItemStack>], stack: ItemStack) -> bool {
-    debug_assert_eq!(stack.count, 1);
-
-    for existing in slots.iter_mut().flatten() {
-        if stacks_match_for_merge(existing, &stack) && existing.count < existing.max_stack_size() {
-            existing.count = existing.count.saturating_add(1);
-            return true;
-        }
-    }
-
-    for slot in slots.iter_mut() {
-        if slot.is_none() {
-            *slot = Some(stack);
-            return true;
-        }
-    }
-
-    false
-}
-
-fn take_one_from_core_slots(slots: &mut [Option<ItemStack>]) -> Option<(usize, ItemStack)> {
-    for (idx, slot) in slots.iter_mut().enumerate() {
-        let Some(existing) = slot.as_mut() else {
-            continue;
-        };
-
-        let mut taken = existing.clone();
-        taken.count = 1;
-
-        existing.count = existing.count.saturating_sub(1);
-        if existing.count == 0 {
-            *slot = None;
-        }
-
-        return Some((idx, taken));
-    }
-
-    None
-}
-
 fn restore_one_into_core_slot(slots: &mut [Option<ItemStack>], idx: usize, stack: ItemStack) {
     debug_assert_eq!(stack.count, 1);
 
@@ -11079,24 +11686,8 @@ fn restore_one_into_core_slot(slots: &mut [Option<ItemStack>], idx: usize, stack
         Some(_) => {
             // Fallback: try to insert anywhere (should be extremely rare for deterministic
             // hopper transfers).
-            let _ = insert_one_into_core_slots(slots, stack);
+            let _ = mdminecraft_world::insert_one_into_core_slots(slots, stack);
         }
-    }
-}
-
-fn try_transfer_one_between_core_slots(
-    source: &mut [Option<ItemStack>],
-    dest: &mut [Option<ItemStack>],
-) -> bool {
-    let Some((source_idx, one)) = take_one_from_core_slots(source) else {
-        return false;
-    };
-
-    if insert_one_into_core_slots(dest, one.clone()) {
-        true
-    } else {
-        restore_one_into_core_slot(source, source_idx, one);
-        false
     }
 }
 
@@ -11429,6 +12020,9 @@ fn apply_primary_drag_distribution(
                     }
                 }
                 UiCoreSlotId::Chest(_) => false,
+                UiCoreSlotId::Hopper(_) => false,
+                UiCoreSlotId::Dispenser(_) => false,
+                UiCoreSlotId::Dropper(_) => false,
                 UiCoreSlotId::PersonalCrafting(i) => {
                     let row = i / 2;
                     let col = i % 2;
@@ -11503,7 +12097,184 @@ fn apply_primary_drag_distribution_with_chest(
                         false
                     }
                 }
+                UiCoreSlotId::Hopper(_) | UiCoreSlotId::Dispenser(_) | UiCoreSlotId::Dropper(_) => {
+                    false
+                }
                 UiCoreSlotId::PersonalCrafting(_) | UiCoreSlotId::CraftingGrid(_) => false,
+            };
+
+            if moved {
+                progress = true;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+        }
+
+        if !progress {
+            break;
+        }
+    }
+}
+
+fn apply_primary_drag_distribution_with_hopper(
+    cursor: &mut Option<ItemStack>,
+    visited: &[UiCoreSlotId],
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    hopper: &mut HopperState,
+) {
+    if visited.is_empty() {
+        return;
+    }
+
+    while cursor.as_ref().is_some_and(|stack| stack.count > 0) {
+        let mut progress = false;
+
+        for slot_id in visited {
+            let moved = match *slot_id {
+                UiCoreSlotId::Hotbar(i) => {
+                    if i < hotbar.slots.len() {
+                        try_drag_place_one_from_cursor(&mut hotbar.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::MainInventory(i) => {
+                    if i < main_inventory.slots.len() {
+                        try_drag_place_one_from_cursor(&mut main_inventory.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Hopper(i) => {
+                    if i < hopper.slots.len() {
+                        try_drag_place_one_from_cursor(&mut hopper.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Chest(_)
+                | UiCoreSlotId::Dispenser(_)
+                | UiCoreSlotId::Dropper(_)
+                | UiCoreSlotId::PersonalCrafting(_)
+                | UiCoreSlotId::CraftingGrid(_) => false,
+            };
+
+            if moved {
+                progress = true;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+        }
+
+        if !progress {
+            break;
+        }
+    }
+}
+
+fn apply_primary_drag_distribution_with_dispenser(
+    cursor: &mut Option<ItemStack>,
+    visited: &[UiCoreSlotId],
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    dispenser: &mut DispenserState,
+) {
+    if visited.is_empty() {
+        return;
+    }
+
+    while cursor.as_ref().is_some_and(|stack| stack.count > 0) {
+        let mut progress = false;
+
+        for slot_id in visited {
+            let moved = match *slot_id {
+                UiCoreSlotId::Hotbar(i) => {
+                    if i < hotbar.slots.len() {
+                        try_drag_place_one_from_cursor(&mut hotbar.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::MainInventory(i) => {
+                    if i < main_inventory.slots.len() {
+                        try_drag_place_one_from_cursor(&mut main_inventory.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Dispenser(i) => {
+                    if i < dispenser.slots.len() {
+                        try_drag_place_one_from_cursor(&mut dispenser.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Chest(_)
+                | UiCoreSlotId::Hopper(_)
+                | UiCoreSlotId::Dropper(_)
+                | UiCoreSlotId::PersonalCrafting(_)
+                | UiCoreSlotId::CraftingGrid(_) => false,
+            };
+
+            if moved {
+                progress = true;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+        }
+
+        if !progress {
+            break;
+        }
+    }
+}
+
+fn apply_primary_drag_distribution_with_dropper(
+    cursor: &mut Option<ItemStack>,
+    visited: &[UiCoreSlotId],
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    dropper: &mut DispenserState,
+) {
+    if visited.is_empty() {
+        return;
+    }
+
+    while cursor.as_ref().is_some_and(|stack| stack.count > 0) {
+        let mut progress = false;
+
+        for slot_id in visited {
+            let moved = match *slot_id {
+                UiCoreSlotId::Hotbar(i) => {
+                    if i < hotbar.slots.len() {
+                        try_drag_place_one_from_cursor(&mut hotbar.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::MainInventory(i) => {
+                    if i < main_inventory.slots.len() {
+                        try_drag_place_one_from_cursor(&mut main_inventory.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Dropper(i) => {
+                    if i < dropper.slots.len() {
+                        try_drag_place_one_from_cursor(&mut dropper.slots[i], cursor)
+                    } else {
+                        false
+                    }
+                }
+                UiCoreSlotId::Chest(_)
+                | UiCoreSlotId::Hopper(_)
+                | UiCoreSlotId::Dispenser(_)
+                | UiCoreSlotId::PersonalCrafting(_)
+                | UiCoreSlotId::CraftingGrid(_) => false,
             };
 
             if moved {
@@ -12112,7 +12883,10 @@ fn try_shift_move_core_stack_into_enchanting_table(
     moved > 0
 }
 
-fn try_shift_move_core_stack_into_chest(stack: &mut ItemStack, chest: &mut ChestState) -> bool {
+fn try_shift_move_core_stack_into_slots(
+    stack: &mut ItemStack,
+    slots: &mut [Option<ItemStack>],
+) -> bool {
     if stack.count == 0 {
         return false;
     }
@@ -12120,7 +12894,7 @@ fn try_shift_move_core_stack_into_chest(stack: &mut ItemStack, chest: &mut Chest
     let before = stack.count;
 
     // Merge into existing stacks first.
-    for existing in chest.slots.iter_mut().flatten() {
+    for existing in slots.iter_mut().flatten() {
         if stack.count == 0 {
             break;
         }
@@ -12140,7 +12914,7 @@ fn try_shift_move_core_stack_into_chest(stack: &mut ItemStack, chest: &mut Chest
     }
 
     // Then fill empty slots, splitting if needed.
-    for slot in &mut chest.slots {
+    for slot in slots {
         if stack.count == 0 {
             break;
         }
@@ -12162,6 +12936,28 @@ fn try_shift_move_core_stack_into_chest(stack: &mut ItemStack, chest: &mut Chest
     }
 
     stack.count != before
+}
+
+fn try_shift_move_core_stack_into_chest(stack: &mut ItemStack, chest: &mut ChestState) -> bool {
+    try_shift_move_core_stack_into_slots(stack, &mut chest.slots)
+}
+
+fn try_shift_move_core_stack_into_hopper(stack: &mut ItemStack, hopper: &mut HopperState) -> bool {
+    try_shift_move_core_stack_into_slots(stack, &mut hopper.slots)
+}
+
+fn try_shift_move_core_stack_into_dispenser(
+    stack: &mut ItemStack,
+    dispenser: &mut DispenserState,
+) -> bool {
+    try_shift_move_core_stack_into_slots(stack, &mut dispenser.slots)
+}
+
+fn try_shift_move_core_stack_into_dropper(
+    stack: &mut ItemStack,
+    dropper: &mut DispenserState,
+) -> bool {
+    try_shift_move_core_stack_into_slots(stack, &mut dropper.slots)
 }
 
 fn render_core_slot_interactive_shift_moves_to_furnace_or_hotbar(
@@ -12537,6 +13333,300 @@ fn render_player_storage_for_chest(
                 &mut hotbar.slots[i],
                 cursor,
                 &mut *chest,
+                drag,
+                UiSlotVisual::new(36.0, is_selected),
+            );
+        }
+    });
+}
+
+fn render_core_slot_interactive_shift_moves_to_hopper(
+    ui: &mut egui::Ui,
+    slot_id: UiCoreSlotId,
+    slot: &mut Option<ItemStack>,
+    cursor: &mut Option<ItemStack>,
+    hopper: &mut HopperState,
+    drag: &mut UiDragState,
+    visual: UiSlotVisual,
+) {
+    let response = render_core_slot_visual(ui, slot, visual.size, visual.is_selected);
+    if ui_drag_handle_slot(ui, &response, slot_id, slot, cursor, drag) {
+        return;
+    }
+    if drag.suppress_clicks {
+        return;
+    }
+
+    let click = if response.clicked_by(egui::PointerButton::Primary) {
+        Some(UiSlotClick::Primary)
+    } else if response.clicked_by(egui::PointerButton::Secondary) {
+        Some(UiSlotClick::Secondary)
+    } else {
+        None
+    };
+
+    let Some(click) = click else {
+        return;
+    };
+
+    let shift = ui.input(|i| i.modifiers.shift);
+    if shift {
+        let Some(mut stack) = slot.take() else {
+            return;
+        };
+
+        let moved_any = try_shift_move_core_stack_into_hopper(&mut stack, hopper);
+        if !moved_any || stack.count > 0 {
+            *slot = Some(stack);
+        }
+        return;
+    }
+
+    apply_slot_click(slot, cursor, click);
+}
+
+fn render_player_storage_for_hopper(
+    ui: &mut egui::Ui,
+    hopper: &mut HopperState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    cursor: &mut Option<ItemStack>,
+    drag: &mut UiDragState,
+) {
+    ui.label(
+        egui::RichText::new("Inventory")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    for row in 0..3 {
+        ui.horizontal(|ui| {
+            for col in 0..9 {
+                let slot_idx = row * 9 + col;
+                render_core_slot_interactive_shift_moves_to_hopper(
+                    ui,
+                    UiCoreSlotId::MainInventory(slot_idx),
+                    &mut main_inventory.slots[slot_idx],
+                    cursor,
+                    &mut *hopper,
+                    drag,
+                    UiSlotVisual::new(36.0, false),
+                );
+            }
+        });
+    }
+
+    ui.add_space(6.0);
+
+    ui.label(
+        egui::RichText::new("Hotbar")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    ui.horizontal(|ui| {
+        for i in 0..9 {
+            let is_selected = i == hotbar.selected;
+            render_core_slot_interactive_shift_moves_to_hopper(
+                ui,
+                UiCoreSlotId::Hotbar(i),
+                &mut hotbar.slots[i],
+                cursor,
+                &mut *hopper,
+                drag,
+                UiSlotVisual::new(36.0, is_selected),
+            );
+        }
+    });
+}
+
+fn render_core_slot_interactive_shift_moves_to_dispenser(
+    ui: &mut egui::Ui,
+    slot_id: UiCoreSlotId,
+    slot: &mut Option<ItemStack>,
+    cursor: &mut Option<ItemStack>,
+    dispenser: &mut DispenserState,
+    drag: &mut UiDragState,
+    visual: UiSlotVisual,
+) {
+    let response = render_core_slot_visual(ui, slot, visual.size, visual.is_selected);
+    if ui_drag_handle_slot(ui, &response, slot_id, slot, cursor, drag) {
+        return;
+    }
+    if drag.suppress_clicks {
+        return;
+    }
+
+    let click = if response.clicked_by(egui::PointerButton::Primary) {
+        Some(UiSlotClick::Primary)
+    } else if response.clicked_by(egui::PointerButton::Secondary) {
+        Some(UiSlotClick::Secondary)
+    } else {
+        None
+    };
+
+    let Some(click) = click else {
+        return;
+    };
+
+    let shift = ui.input(|i| i.modifiers.shift);
+    if shift {
+        let Some(mut stack) = slot.take() else {
+            return;
+        };
+
+        let moved_any = try_shift_move_core_stack_into_dispenser(&mut stack, dispenser);
+        if !moved_any || stack.count > 0 {
+            *slot = Some(stack);
+        }
+        return;
+    }
+
+    apply_slot_click(slot, cursor, click);
+}
+
+fn render_player_storage_for_dispenser(
+    ui: &mut egui::Ui,
+    dispenser: &mut DispenserState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    cursor: &mut Option<ItemStack>,
+    drag: &mut UiDragState,
+) {
+    ui.label(
+        egui::RichText::new("Inventory")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    for row in 0..3 {
+        ui.horizontal(|ui| {
+            for col in 0..9 {
+                let slot_idx = row * 9 + col;
+                render_core_slot_interactive_shift_moves_to_dispenser(
+                    ui,
+                    UiCoreSlotId::MainInventory(slot_idx),
+                    &mut main_inventory.slots[slot_idx],
+                    cursor,
+                    &mut *dispenser,
+                    drag,
+                    UiSlotVisual::new(36.0, false),
+                );
+            }
+        });
+    }
+
+    ui.add_space(6.0);
+
+    ui.label(
+        egui::RichText::new("Hotbar")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    ui.horizontal(|ui| {
+        for i in 0..9 {
+            let is_selected = i == hotbar.selected;
+            render_core_slot_interactive_shift_moves_to_dispenser(
+                ui,
+                UiCoreSlotId::Hotbar(i),
+                &mut hotbar.slots[i],
+                cursor,
+                &mut *dispenser,
+                drag,
+                UiSlotVisual::new(36.0, is_selected),
+            );
+        }
+    });
+}
+
+fn render_core_slot_interactive_shift_moves_to_dropper(
+    ui: &mut egui::Ui,
+    slot_id: UiCoreSlotId,
+    slot: &mut Option<ItemStack>,
+    cursor: &mut Option<ItemStack>,
+    dropper: &mut DispenserState,
+    drag: &mut UiDragState,
+    visual: UiSlotVisual,
+) {
+    let response = render_core_slot_visual(ui, slot, visual.size, visual.is_selected);
+    if ui_drag_handle_slot(ui, &response, slot_id, slot, cursor, drag) {
+        return;
+    }
+    if drag.suppress_clicks {
+        return;
+    }
+
+    let click = if response.clicked_by(egui::PointerButton::Primary) {
+        Some(UiSlotClick::Primary)
+    } else if response.clicked_by(egui::PointerButton::Secondary) {
+        Some(UiSlotClick::Secondary)
+    } else {
+        None
+    };
+
+    let Some(click) = click else {
+        return;
+    };
+
+    let shift = ui.input(|i| i.modifiers.shift);
+    if shift {
+        let Some(mut stack) = slot.take() else {
+            return;
+        };
+
+        let moved_any = try_shift_move_core_stack_into_dropper(&mut stack, dropper);
+        if !moved_any || stack.count > 0 {
+            *slot = Some(stack);
+        }
+        return;
+    }
+
+    apply_slot_click(slot, cursor, click);
+}
+
+fn render_player_storage_for_dropper(
+    ui: &mut egui::Ui,
+    dropper: &mut DispenserState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    cursor: &mut Option<ItemStack>,
+    drag: &mut UiDragState,
+) {
+    ui.label(
+        egui::RichText::new("Inventory")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    for row in 0..3 {
+        ui.horizontal(|ui| {
+            for col in 0..9 {
+                let slot_idx = row * 9 + col;
+                render_core_slot_interactive_shift_moves_to_dropper(
+                    ui,
+                    UiCoreSlotId::MainInventory(slot_idx),
+                    &mut main_inventory.slots[slot_idx],
+                    cursor,
+                    &mut *dropper,
+                    drag,
+                    UiSlotVisual::new(36.0, false),
+                );
+            }
+        });
+    }
+
+    ui.add_space(6.0);
+
+    ui.label(
+        egui::RichText::new("Hotbar")
+            .size(12.0)
+            .color(egui::Color32::GRAY),
+    );
+    ui.horizontal(|ui| {
+        for i in 0..9 {
+            let is_selected = i == hotbar.selected;
+            render_core_slot_interactive_shift_moves_to_dropper(
+                ui,
+                UiCoreSlotId::Hotbar(i),
+                &mut hotbar.slots[i],
+                cursor,
+                &mut *dropper,
                 drag,
                 UiSlotVisual::new(36.0, is_selected),
             );
@@ -13664,6 +14754,73 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
                         Some(ItemType::Item(7)),
                     ],
                     [None, Some(ItemType::Item(7)), None],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Dropper (vanilla): cobblestone ring + redstone dust
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_COBBLESTONE), 7),
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::mechanical_blocks::DROPPER),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                ],
+            }),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Dispenser (vanilla): cobblestone ring + bow + redstone dust
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_COBBLESTONE), 7),
+                (ItemType::Item(1), 1), // Item(1) = Bow
+                (ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1),
+            ],
+            output: ItemType::Block(mdminecraft_world::mechanical_blocks::DISPENSER),
+            output_count: 1,
+            pattern: Some(CraftingPattern {
+                width: 3,
+                height: 3,
+                cells: [
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Item(1)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                        Some(ItemType::Item(CORE_ITEM_REDSTONE_DUST)),
+                        Some(ItemType::Block(BLOCK_COBBLESTONE)),
+                    ],
                 ],
             }),
             allow_horizontal_mirror: false,
@@ -15490,6 +16647,366 @@ fn render_chest(
     close_clicked
 }
 
+fn render_hopper(
+    ctx: &egui::Context,
+    hopper: &mut HopperState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    ui_cursor_stack: &mut Option<ItemStack>,
+    ui_drag: &mut UiDragState,
+) -> bool {
+    let mut close_clicked = false;
+    ui_drag.begin_frame();
+
+    if ui_cursor_stack.is_none() {
+        ui_drag.reset();
+    } else if let Some(button) = ui_drag.active_button {
+        let primary_down = ctx.input(|i| i.pointer.primary_down());
+        let secondary_down = ctx.input(|i| i.pointer.secondary_down());
+        match button {
+            UiDragButton::Primary if !primary_down => {
+                let visited = std::mem::take(&mut ui_drag.visited);
+                apply_primary_drag_distribution_with_hopper(
+                    ui_cursor_stack,
+                    &visited,
+                    hotbar,
+                    main_inventory,
+                    hopper,
+                );
+                ui_drag.finish_drag();
+            }
+            UiDragButton::Secondary if !secondary_down => {
+                ui_drag.finish_drag();
+            }
+            _ => {}
+        }
+    }
+
+    egui::Area::new(egui::Id::new("hopper_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    egui::Window::new("Hopper")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(360.0);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Hopper").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Cursor:");
+                render_crafting_slot(ui, ui_cursor_stack.as_ref());
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Shift: quick-move. Drag: distribute.")
+                        .size(11.0)
+                        .color(egui::Color32::GRAY),
+                );
+            });
+
+            ui.add_space(10.0);
+
+            ui.label(
+                egui::RichText::new("Hopper")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+            ui.horizontal(|ui| {
+                for slot_idx in 0..hopper.slots.len() {
+                    render_core_slot_interactive_shift_moves_to_storage(
+                        ui,
+                        UiCoreSlotId::Hopper(slot_idx),
+                        &mut hopper.slots[slot_idx],
+                        ui_cursor_stack,
+                        (hotbar, main_inventory),
+                        ui_drag,
+                        UiSlotVisual::new(36.0, false),
+                    );
+                }
+            });
+
+            ui.add_space(10.0);
+            ui.separator();
+            render_player_storage_for_hopper(
+                ui,
+                hopper,
+                hotbar,
+                main_inventory,
+                ui_cursor_stack,
+                ui_drag,
+            );
+
+            ui.add_space(5.0);
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
+}
+
+fn render_dispenser(
+    ctx: &egui::Context,
+    dispenser: &mut DispenserState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    ui_cursor_stack: &mut Option<ItemStack>,
+    ui_drag: &mut UiDragState,
+) -> bool {
+    let mut close_clicked = false;
+    ui_drag.begin_frame();
+
+    if ui_cursor_stack.is_none() {
+        ui_drag.reset();
+    } else if let Some(button) = ui_drag.active_button {
+        let primary_down = ctx.input(|i| i.pointer.primary_down());
+        let secondary_down = ctx.input(|i| i.pointer.secondary_down());
+        match button {
+            UiDragButton::Primary if !primary_down => {
+                let visited = std::mem::take(&mut ui_drag.visited);
+                apply_primary_drag_distribution_with_dispenser(
+                    ui_cursor_stack,
+                    &visited,
+                    hotbar,
+                    main_inventory,
+                    dispenser,
+                );
+                ui_drag.finish_drag();
+            }
+            UiDragButton::Secondary if !secondary_down => {
+                ui_drag.finish_drag();
+            }
+            _ => {}
+        }
+    }
+
+    egui::Area::new(egui::Id::new("dispenser_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    egui::Window::new("Dispenser")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(420.0);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Dispenser").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Cursor:");
+                render_crafting_slot(ui, ui_cursor_stack.as_ref());
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Shift: quick-move. Drag: distribute.")
+                        .size(11.0)
+                        .color(egui::Color32::GRAY),
+                );
+            });
+
+            ui.add_space(10.0);
+
+            ui.label(
+                egui::RichText::new("Dispenser")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+            for row in 0..3 {
+                ui.horizontal(|ui| {
+                    for col in 0..3 {
+                        let slot_idx = row * 3 + col;
+                        render_core_slot_interactive_shift_moves_to_storage(
+                            ui,
+                            UiCoreSlotId::Dispenser(slot_idx),
+                            &mut dispenser.slots[slot_idx],
+                            ui_cursor_stack,
+                            (hotbar, main_inventory),
+                            ui_drag,
+                            UiSlotVisual::new(36.0, false),
+                        );
+                    }
+                });
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            render_player_storage_for_dispenser(
+                ui,
+                dispenser,
+                hotbar,
+                main_inventory,
+                ui_cursor_stack,
+                ui_drag,
+            );
+
+            ui.add_space(5.0);
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
+}
+
+fn render_dropper(
+    ctx: &egui::Context,
+    dropper: &mut DispenserState,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    ui_cursor_stack: &mut Option<ItemStack>,
+    ui_drag: &mut UiDragState,
+) -> bool {
+    let mut close_clicked = false;
+    ui_drag.begin_frame();
+
+    if ui_cursor_stack.is_none() {
+        ui_drag.reset();
+    } else if let Some(button) = ui_drag.active_button {
+        let primary_down = ctx.input(|i| i.pointer.primary_down());
+        let secondary_down = ctx.input(|i| i.pointer.secondary_down());
+        match button {
+            UiDragButton::Primary if !primary_down => {
+                let visited = std::mem::take(&mut ui_drag.visited);
+                apply_primary_drag_distribution_with_dropper(
+                    ui_cursor_stack,
+                    &visited,
+                    hotbar,
+                    main_inventory,
+                    dropper,
+                );
+                ui_drag.finish_drag();
+            }
+            UiDragButton::Secondary if !secondary_down => {
+                ui_drag.finish_drag();
+            }
+            _ => {}
+        }
+    }
+
+    egui::Area::new(egui::Id::new("dropper_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    egui::Window::new("Dropper")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(420.0);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Dropper").size(18.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Cursor:");
+                render_crafting_slot(ui, ui_cursor_stack.as_ref());
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("Shift: quick-move. Drag: distribute.")
+                        .size(11.0)
+                        .color(egui::Color32::GRAY),
+                );
+            });
+
+            ui.add_space(10.0);
+
+            ui.label(
+                egui::RichText::new("Dropper")
+                    .size(12.0)
+                    .color(egui::Color32::GRAY),
+            );
+            for row in 0..3 {
+                ui.horizontal(|ui| {
+                    for col in 0..3 {
+                        let slot_idx = row * 3 + col;
+                        render_core_slot_interactive_shift_moves_to_storage(
+                            ui,
+                            UiCoreSlotId::Dropper(slot_idx),
+                            &mut dropper.slots[slot_idx],
+                            ui_cursor_stack,
+                            (hotbar, main_inventory),
+                            ui_drag,
+                            UiSlotVisual::new(36.0, false),
+                        );
+                    }
+                });
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            render_player_storage_for_dropper(
+                ui,
+                dropper,
+                hotbar,
+                main_inventory,
+                ui_cursor_stack,
+                ui_drag,
+            );
+
+            ui.add_space(5.0);
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    close_clicked
+}
+
 /// Render the furnace UI
 /// Returns true if the close button was clicked
 fn render_furnace(
@@ -16821,33 +18338,160 @@ fn item_type_to_armor_dropped(item_type: ItemType) -> Option<DroppedItemType> {
     }
 }
 
+impl commands::CommandContext for GameWorld {
+    fn player_position(&self) -> (f64, f64, f64) {
+        let pos = self.renderer.camera().position;
+        (pos.x as f64, pos.y as f64, pos.z as f64)
+    }
+
+    fn teleport_player(&mut self, x: f64, y: f64, z: f64) -> anyhow::Result<()> {
+        let camera = self.renderer.camera_mut();
+        camera.position = glam::Vec3::new(x as f32, y as f32, z as f32);
+        self.player_physics.velocity = glam::Vec3::ZERO;
+        self.player_physics.on_ground = false;
+
+        // Force-load chunks around the new position so teleporting isn't a black screen.
+        self.update_chunks(usize::MAX);
+        Ok(())
+    }
+
+    fn give_item(&mut self, item: ItemType, count: u32) -> u32 {
+        let remainder = add_stack_to_storage(
+            &mut self.hotbar,
+            &mut self.main_inventory,
+            ItemStack::new(item, count),
+        );
+        remainder.map(|stack| stack.count).unwrap_or(0)
+    }
+
+    fn time_tick(&self) -> u64 {
+        self.sim_time.tick.0
+    }
+
+    fn set_time_tick(&mut self, tick: u64) {
+        self.sim_time.tick = SimTick(tick);
+        self.time_of_day
+            .set_time(self.sim_time.time_of_day() as f32);
+    }
+
+    fn set_weather(&mut self, state: WeatherState) {
+        self.weather.set_state(state);
+        // Deterministic reschedule.
+        let delay_ticks = Self::weather_delay_ticks(
+            self.world_seed,
+            self.sim_tick,
+            900..2400, // 45..120 seconds at 20 TPS
+            0x0057_4541_5448_4552_u64,
+        );
+        self.weather_next_change_tick = self.sim_tick.advance(delay_ticks);
+    }
+
+    fn set_gamemode(&mut self, mode: commands::Gamemode) {
+        let wants_physics = matches!(mode, commands::Gamemode::Survival);
+        if self.player_physics.physics_enabled != wants_physics {
+            self.player_physics.toggle_physics();
+        }
+    }
+
+    fn set_block(&mut self, x: i32, y: i32, z: i32, block_id: u16) -> anyhow::Result<()> {
+        if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
+            anyhow::bail!("Y out of bounds: {y}");
+        }
+
+        let chunk_pos = ChunkPos::new(x.div_euclid(16), z.div_euclid(16));
+        let Some(chunk) = self.chunks.get(&chunk_pos) else {
+            anyhow::bail!("Chunk not loaded at {chunk_pos:?}");
+        };
+        let local_x = x.rem_euclid(16) as usize;
+        let local_y = y as usize;
+        let local_z = z.rem_euclid(16) as usize;
+
+        let old_id = chunk.voxel(local_x, local_y, local_z).id;
+        if old_id != block_id {
+            self.purge_block_entity_state(IVec3::new(x, y, z), old_id);
+        }
+
+        let voxel = Voxel {
+            id: block_id,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+        if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+            chunk.set_voxel(local_x, local_y, local_z, voxel);
+        }
+
+        // Initialize block-entity state when needed.
+        let key = Self::overworld_block_entity_key(IVec3::new(x, y, z));
+        match block_id {
+            interactive_blocks::CHEST => {
+                self.chests.entry(key).or_default();
+            }
+            mdminecraft_world::mechanical_blocks::HOPPER => {
+                self.hoppers.entry(key).or_default();
+            }
+            mdminecraft_world::mechanical_blocks::DISPENSER => {
+                self.dispensers.entry(key).or_default();
+            }
+            mdminecraft_world::mechanical_blocks::DROPPER => {
+                self.droppers.entry(key).or_default();
+            }
+            BLOCK_FURNACE | BLOCK_FURNACE_LIT => {
+                self.furnaces.entry(key).or_default();
+            }
+            BLOCK_BREWING_STAND => {
+                self.brewing_stands.entry(key).or_default();
+            }
+            BLOCK_ENCHANTING_TABLE => {
+                self.enchanting_tables.entry(key).or_default();
+            }
+            _ => {}
+        }
+
+        // Wake sims.
+        self.fluid_sim
+            .on_fluid_removed(FluidPos::new(x, y, z), &self.chunks);
+        self.schedule_redstone_updates_around(IVec3::new(x, y, z));
+
+        self.refresh_after_voxel_changes(&[IVec3::new(x, y, z)]);
+        Ok(())
+    }
+
+    fn summon_mob(&mut self, mob: MobType, x: f64, y: f64, z: f64) -> anyhow::Result<()> {
+        self.mobs.push(Mob::new(x, y, z, mob));
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         add_stack_to_storage, apply_brewing_bottle_slot_click, apply_furnace_slot_click,
         apply_instant_status_effect_to_player_health, apply_primary_drag_distribution,
-        apply_slot_click, armor_piece_from_core_stack, armor_piece_to_core_stack,
-        check_crafting_recipe, consume_crafting_inputs_3x3, core_item_to_enchanting_id,
-        crafting_max_crafts_2x2, crafting_max_crafts_3x3, cursor_can_accept_full_stack,
-        frames_to_complete, furnace_try_insert, get_crafting_recipes, interactive_blocks, item_ids,
-        match_crafting_recipe, potion_ids, tick_health_over_time_status_effects,
-        try_add_stack_to_cursor, try_autofill_crafting_grid,
+        apply_primary_drag_distribution_with_dispenser,
+        apply_primary_drag_distribution_with_hopper, apply_slot_click, armor_piece_from_core_stack,
+        armor_piece_to_core_stack, check_crafting_recipe, consume_crafting_inputs_3x3,
+        core_item_to_enchanting_id, crafting_max_crafts_2x2, crafting_max_crafts_3x3,
+        cursor_can_accept_full_stack, frames_to_complete, furnace_try_insert, get_crafting_recipes,
+        interactive_blocks, item_ids, match_crafting_recipe, potion_ids,
+        tick_health_over_time_status_effects, try_add_stack_to_cursor, try_autofill_crafting_grid,
         try_shift_move_core_stack_into_brewing_stand, try_shift_move_core_stack_into_chest,
         try_shift_move_core_stack_into_enchanting_table, try_shift_move_core_stack_into_furnace,
         ArmorPiece, ArmorSlot, BlockPropertiesRegistry, BrewingStandState, ChestState, Chunk,
-        ChunkPos, CraftingGridSize, DroppedItemType, EnchantingTableState, Enchantment,
-        EnchantmentType, FluidSimulator, FluidType, FurnaceSlotKind, FurnaceState, GameWorld,
-        Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth, PlayerPhysics, StatusEffectType,
-        StatusEffects, ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_AIR,
-        BLOCK_BOOKSHELF, BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE,
-        BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_OAK_LOG,
-        BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK,
-        CORE_ITEM_BUCKET, CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_GHAST_TEAR,
-        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON, CORE_ITEM_GLOWSTONE_DUST,
-        CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ,
-        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH,
-        CORE_ITEM_RABBIT_FOOT, CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR,
-        CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
+        ChunkPos, CraftingGridSize, DispenserState, DroppedItemType, EnchantingTableState,
+        Enchantment, EnchantmentType, FluidSimulator, FluidType, FurnaceSlotKind, FurnaceState,
+        GameWorld, HopperState, Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth,
+        PlayerPhysics, StatusEffectType, StatusEffects, ToolMaterial, ToolType, UiCoreSlotId,
+        UiSlotClick, Voxel, AABB, BLOCK_AIR, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
+        BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
+        BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE,
+        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_BUCKET, CORE_ITEM_FERMENTED_SPIDER_EYE,
+        CORE_ITEM_GHAST_TEAR, CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
+        CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET,
+        CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ, CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER,
+        CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH, CORE_ITEM_RABBIT_FOOT,
+        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
+        CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
     use mdminecraft_world::StatusEffect;
 
@@ -18657,6 +20301,122 @@ mod tests {
     }
 
     #[test]
+    fn hopper_placement_state_outputs_down_on_top_bottom_faces_and_opposite_on_side_faces() {
+        let top = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::HOPPER,
+            0.0,
+            glam::IVec3::new(0, 1, 0),
+            0.0,
+        )
+        .expect("hopper placement should produce a state on top faces");
+        assert!(mdminecraft_world::hopper_outputs_down(top));
+
+        let east_side = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::HOPPER,
+            0.0,
+            glam::IVec3::new(1, 0, 0),
+            0.0,
+        )
+        .expect("hopper placement should produce a state on side faces");
+        assert!(!mdminecraft_world::hopper_outputs_down(east_side));
+        assert_eq!(
+            mdminecraft_world::hopper_facing(east_side),
+            mdminecraft_world::Facing::West
+        );
+
+        let bottom = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::HOPPER,
+            0.0,
+            glam::IVec3::new(0, -1, 0),
+            0.0,
+        )
+        .expect("hopper placement should produce a state on bottom faces");
+        assert!(mdminecraft_world::hopper_outputs_down(bottom));
+    }
+
+    #[test]
+    fn piston_placement_state_is_opposite_on_side_faces_and_rejects_bottom() {
+        let top = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::PISTON,
+            0.0,
+            glam::IVec3::new(0, 1, 0),
+            0.0,
+        )
+        .expect("piston placement should produce a state on top faces");
+        assert_eq!(
+            mdminecraft_world::piston_facing(top),
+            mdminecraft_world::Facing::South
+        );
+
+        let east_side = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::PISTON,
+            0.0,
+            glam::IVec3::new(1, 0, 0),
+            0.0,
+        )
+        .expect("piston placement should produce a state on side faces");
+        assert_eq!(
+            mdminecraft_world::piston_facing(east_side),
+            mdminecraft_world::Facing::West
+        );
+
+        assert!(GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::PISTON,
+            0.0,
+            glam::IVec3::new(0, -1, 0),
+            0.0,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn dispenser_and_dropper_placement_state_is_opposite_on_side_faces_and_rejects_bottom() {
+        let top = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::DISPENSER,
+            0.0,
+            glam::IVec3::new(0, 1, 0),
+            0.0,
+        )
+        .expect("dispenser placement should produce a state on top faces");
+        assert_eq!(
+            mdminecraft_world::dispenser_facing(top),
+            mdminecraft_world::Facing::South
+        );
+
+        let north_side = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::DISPENSER,
+            0.0,
+            glam::IVec3::new(0, 0, -1),
+            0.0,
+        )
+        .expect("dispenser placement should produce a state on side faces");
+        assert_eq!(
+            mdminecraft_world::dispenser_facing(north_side),
+            mdminecraft_world::Facing::South
+        );
+
+        assert!(GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::DISPENSER,
+            0.0,
+            glam::IVec3::new(0, -1, 0),
+            0.0,
+        )
+        .is_none());
+
+        let dropper_north_side = GameWorld::placement_state_for_block(
+            mdminecraft_world::mechanical_blocks::DROPPER,
+            0.0,
+            glam::IVec3::new(0, 0, -1),
+            0.0,
+        )
+        .expect("dropper placement should produce a state on side faces");
+        assert_eq!(
+            mdminecraft_world::dropper_facing(dropper_north_side),
+            mdminecraft_world::Facing::South
+        );
+    }
+
+    #[test]
     fn slab_placement_state_uses_hit_height_for_top_bottom() {
         let bottom = GameWorld::placement_state_for_block(
             mdminecraft_world::interactive_blocks::STONE_SLAB,
@@ -19406,6 +21166,48 @@ mod tests {
     }
 
     #[test]
+    fn primary_drag_distribution_places_into_hopper_slots() {
+        let mut hotbar = Hotbar::new();
+        let mut main_inventory = MainInventory::new();
+        let mut hopper = HopperState::default();
+        let mut cursor = Some(ItemStack::new(ItemType::Item(3), 3));
+        let visited = vec![UiCoreSlotId::Hopper(0), UiCoreSlotId::Hopper(1)];
+
+        apply_primary_drag_distribution_with_hopper(
+            &mut cursor,
+            &visited,
+            &mut hotbar,
+            &mut main_inventory,
+            &mut hopper,
+        );
+
+        assert!(cursor.is_none());
+        assert_eq!(hopper.slots[0].as_ref().unwrap().count, 2);
+        assert_eq!(hopper.slots[1].as_ref().unwrap().count, 1);
+    }
+
+    #[test]
+    fn primary_drag_distribution_places_into_dispenser_slots() {
+        let mut hotbar = Hotbar::new();
+        let mut main_inventory = MainInventory::new();
+        let mut dispenser = DispenserState::default();
+        let mut cursor = Some(ItemStack::new(ItemType::Item(3), 3));
+        let visited = vec![UiCoreSlotId::Dispenser(0), UiCoreSlotId::Dispenser(1)];
+
+        apply_primary_drag_distribution_with_dispenser(
+            &mut cursor,
+            &visited,
+            &mut hotbar,
+            &mut main_inventory,
+            &mut dispenser,
+        );
+
+        assert!(cursor.is_none());
+        assert_eq!(dispenser.slots[0].as_ref().unwrap().count, 2);
+        assert_eq!(dispenser.slots[1].as_ref().unwrap().count, 1);
+    }
+
+    #[test]
     fn crafting_planks_to_sticks() {
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
         grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OAK_PLANKS), 1));
@@ -19685,13 +21487,54 @@ mod tests {
         grid[0][1] = Some(ItemStack::new(ItemType::Item(7), 1));
         grid[0][2] = Some(ItemStack::new(ItemType::Item(7), 1));
         grid[1][0] = Some(ItemStack::new(ItemType::Item(7), 1));
-        grid[1][1] = Some(ItemStack::new(ItemType::Block(interactive_blocks::CHEST), 1));
+        grid[1][1] = Some(ItemStack::new(
+            ItemType::Block(interactive_blocks::CHEST),
+            1,
+        ));
         grid[1][2] = Some(ItemStack::new(ItemType::Item(7), 1));
         grid[2][1] = Some(ItemStack::new(ItemType::Item(7), 1));
         assert_eq!(
             check_crafting_recipe(&grid),
             Some((
                 ItemType::Block(mdminecraft_world::mechanical_blocks::HOPPER),
+                1
+            ))
+        );
+
+        // Dropper.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::mechanical_blocks::DROPPER),
+                1
+            ))
+        );
+
+        // Dispenser.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(1), 1));
+        grid[1][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        grid[2][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_REDSTONE_DUST), 1));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((
+                ItemType::Block(mdminecraft_world::mechanical_blocks::DISPENSER),
                 1
             ))
         );
@@ -21435,5 +23278,61 @@ mod tests {
             core_item_to_enchanting_id(&sword),
             Some(mdminecraft_world::TOOL_ID_START + 20 + ToolMaterial::Gold as u16)
         );
+    }
+
+    #[test]
+    fn update_container_signal_only_mutates_container_blocks() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                state: 0x1234,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            2,
+            64,
+            1,
+            Voxel {
+                id: interactive_blocks::CHEST,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+
+        let mut slots: [Option<ItemStack>; 27] = std::array::from_fn(|_| None);
+        slots[0] = Some(ItemStack::new(ItemType::Item(7), 1));
+        let desired = mdminecraft_world::comparator_signal_from_core_slots(&slots);
+        assert!(desired > 0);
+
+        mdminecraft_world::update_container_signal(
+            &mut chunks,
+            &mut redstone_sim,
+            mdminecraft_world::RedstonePos::new(1, 64, 1),
+            &slots,
+        );
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert_eq!(chunk.voxel(1, 64, 1).state, 0x1234);
+        }
+
+        mdminecraft_world::update_container_signal(
+            &mut chunks,
+            &mut redstone_sim,
+            mdminecraft_world::RedstonePos::new(2, 64, 1),
+            &slots,
+        );
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            let chest = chunk.voxel(2, 64, 1);
+            assert_eq!(mdminecraft_world::get_power_level(chest.state), desired);
+        }
     }
 }

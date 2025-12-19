@@ -1980,7 +1980,10 @@ mod tests {
             Some(ItemType::RedstoneObserver)
         );
         assert_eq!(ItemType::from_placeable_block(127), Some(ItemType::Piston));
-        assert_eq!(ItemType::from_placeable_block(129), Some(ItemType::Dispenser));
+        assert_eq!(
+            ItemType::from_placeable_block(129),
+            Some(ItemType::Dispenser)
+        );
         assert_eq!(ItemType::from_placeable_block(130), Some(ItemType::Dropper));
         assert_eq!(ItemType::from_placeable_block(131), Some(ItemType::Hopper));
     }
@@ -2193,9 +2196,15 @@ mod tests {
         manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 1);
         manager.spawn_item(12.0, 64.0, 20.0, ItemType::Dirt, 1);
 
-        assert_eq!(manager.take_one_near(10.0, 64.0, 20.0, 0.5), Some((ItemType::Stone, 1)));
+        assert_eq!(
+            manager.take_one_near(10.0, 64.0, 20.0, 0.5),
+            Some((ItemType::Stone, 1))
+        );
         assert_eq!(manager.take_one_near(10.0, 64.0, 20.0, 0.5), None);
-        assert_eq!(manager.take_one_near(12.0, 64.0, 20.0, 0.5), Some((ItemType::Dirt, 1)));
+        assert_eq!(
+            manager.take_one_near(12.0, 64.0, 20.0, 0.5),
+            Some((ItemType::Dirt, 1))
+        );
     }
 
     #[test]

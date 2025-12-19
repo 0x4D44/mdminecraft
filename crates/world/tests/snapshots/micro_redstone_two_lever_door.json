@@ -1,0 +1,53 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "door_open": false,
+        "left_on": false,
+        "right_on": false
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "door_open": true,
+        "left_on": true,
+        "right_on": false
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "door_open": true,
+        "left_on": true,
+        "right_on": true
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "door_open": true,
+        "left_on": false,
+        "right_on": true
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "door_open": false,
+        "left_on": false,
+        "right_on": false
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "door_open": false,
+        "left_on": false,
+        "right_on": false
+      },
+      "tick": 5
+    }
+  ],
+  "name": "micro_redstone_two_lever_door"
+}

@@ -1,11 +1,13 @@
 mod aquifer;
 mod armor;
+mod automation;
 mod biome;
 mod block_properties;
 mod caves;
 mod chest;
 mod chunk;
 mod crafting;
+mod dispenser;
 mod drop_item;
 mod enchanting;
 mod farming;
@@ -33,6 +35,7 @@ mod weather;
 
 pub use aquifer::*;
 pub use armor::*;
+pub use automation::*;
 pub use biome::*;
 pub use block_properties::*;
 pub use caves::*;
@@ -56,6 +59,7 @@ pub use chunk::{
     BLOCK_WATER, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, CHUNK_VOLUME,
 };
 pub use crafting::*;
+pub use dispenser::*;
 pub use drop_item::*;
 pub use enchanting::*;
 pub use farming::*;

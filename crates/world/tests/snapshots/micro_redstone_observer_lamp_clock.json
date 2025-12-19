@@ -1,0 +1,109 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "lamp_lit": true,
+        "observer_active": false,
+        "output_wire_power": 0
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "lamp_lit": true,
+        "observer_active": false,
+        "output_wire_power": 0
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 0
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": true,
+        "output_wire_power": 14
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": true,
+        "output_wire_power": 14
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "lamp_lit": false,
+        "observer_active": false,
+        "output_wire_power": 12
+      },
+      "tick": 12
+    }
+  ],
+  "name": "micro_redstone_observer_lamp_clock"
+}

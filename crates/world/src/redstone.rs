@@ -266,6 +266,22 @@ pub fn set_hopper_facing(state: BlockState, facing: Facing) -> BlockState {
     set_container_facing(state, facing)
 }
 
+const HOPPER_OUTPUTS_DOWN_BIT: BlockState = 0x80;
+
+/// Returns true if the hopper's output is directed downward.
+pub fn hopper_outputs_down(state: BlockState) -> bool {
+    (state & HOPPER_OUTPUTS_DOWN_BIT) != 0
+}
+
+/// Set whether the hopper's output is directed downward.
+pub fn set_hopper_outputs_down(state: BlockState, outputs_down: bool) -> BlockState {
+    if outputs_down {
+        state | HOPPER_OUTPUTS_DOWN_BIT
+    } else {
+        state & !HOPPER_OUTPUTS_DOWN_BIT
+    }
+}
+
 pub fn dispenser_facing(state: BlockState) -> Facing {
     container_facing(state)
 }
@@ -682,6 +698,13 @@ impl RedstoneSimulator {
                 }
                 if voxel.id == mechanical_blocks::HOPPER {
                     self.update_hopper_powered_state(pos, chunks);
+                    return false;
+                }
+                if matches!(
+                    voxel.id,
+                    mechanical_blocks::DISPENSER | mechanical_blocks::DROPPER
+                ) {
+                    self.update_dispenser_like_powered_state(pos, chunks);
                     return false;
                 }
 
@@ -1236,13 +1259,51 @@ impl RedstoneSimulator {
         false
     }
 
-    fn update_hopper_powered_state(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) {
+    fn update_hopper_powered_state(
+        &mut self,
+        pos: RedstonePos,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
         let voxel = match self.get_voxel(pos, chunks) {
             Some(v) => v,
             None => return,
         };
 
         if voxel.id != mechanical_blocks::HOPPER {
+            return;
+        }
+
+        let powered = self.is_powered_by_neighbors(pos, chunks);
+        if is_active(voxel.state) == powered {
+            return;
+        }
+
+        let new_state = set_active(voxel.state, powered);
+        self.set_voxel(
+            pos,
+            Voxel {
+                id: voxel.id,
+                state: new_state,
+                ..voxel
+            },
+            chunks,
+        );
+    }
+
+    fn update_dispenser_like_powered_state(
+        &mut self,
+        pos: RedstonePos,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        let voxel = match self.get_voxel(pos, chunks) {
+            Some(v) => v,
+            None => return,
+        };
+
+        if !matches!(
+            voxel.id,
+            mechanical_blocks::DISPENSER | mechanical_blocks::DROPPER
+        ) {
             return;
         }
 
@@ -3044,7 +3105,12 @@ mod tests {
             assert!(!is_active(chunk.voxel(5, 64, 5).state));
             assert_eq!(chunk.voxel(6, 64, 5).id, 1);
             assert_eq!(
-                chunk.voxel(dest_pos.x as usize, dest_pos.y as usize, dest_pos.z as usize)
+                chunk
+                    .voxel(
+                        dest_pos.x as usize,
+                        dest_pos.y as usize,
+                        dest_pos.z as usize
+                    )
                     .id,
                 crate::BLOCK_AIR
             );
@@ -3057,10 +3123,175 @@ mod tests {
             assert!(is_active(chunk.voxel(5, 64, 5).state));
             assert_eq!(chunk.voxel(6, 64, 5).id, mechanical_blocks::PISTON_HEAD);
             assert_eq!(
-                chunk.voxel(dest_pos.x as usize, dest_pos.y as usize, dest_pos.z as usize)
+                chunk
+                    .voxel(
+                        dest_pos.x as usize,
+                        dest_pos.y as usize,
+                        dest_pos.z as usize
+                    )
                     .id,
                 1
             );
+        }
+    }
+
+    #[test]
+    fn hopper_lock_bit_tracks_neighbor_power() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let lever_pos = RedstonePos::new(4, 64, 5);
+        let hopper_pos = RedstonePos::new(5, 64, 5);
+
+        chunk.set_voxel(
+            lever_pos.x as usize,
+            lever_pos.y as usize,
+            lever_pos.z as usize,
+            Voxel {
+                id: redstone_blocks::LEVER,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            hopper_pos.x as usize,
+            hopper_pos.y as usize,
+            hopper_pos.z as usize,
+            Voxel {
+                id: mechanical_blocks::HOPPER,
+                state: 0,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(is_active(
+                chunk
+                    .voxel(
+                        hopper_pos.x as usize,
+                        hopper_pos.y as usize,
+                        hopper_pos.z as usize
+                    )
+                    .state
+            ));
+        }
+
+        sim.toggle_lever(lever_pos, &mut chunks);
+        sim.tick(&mut chunks);
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(
+                chunk
+                    .voxel(
+                        hopper_pos.x as usize,
+                        hopper_pos.y as usize,
+                        hopper_pos.z as usize
+                    )
+                    .state
+            ));
+        }
+    }
+
+    #[test]
+    fn dispenser_and_dropper_power_bits_track_neighbor_power() {
+        let mut sim = RedstoneSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        let lever_dropper_pos = RedstonePos::new(4, 64, 7);
+        let dropper_pos = RedstonePos::new(5, 64, 7);
+        let lever_dispenser_pos = RedstonePos::new(4, 64, 9);
+        let dispenser_pos = RedstonePos::new(5, 64, 9);
+
+        for pos in [lever_dropper_pos, lever_dispenser_pos] {
+            chunk.set_voxel(
+                pos.x as usize,
+                pos.y as usize,
+                pos.z as usize,
+                Voxel {
+                    id: redstone_blocks::LEVER,
+                    ..Default::default()
+                },
+            );
+        }
+
+        chunk.set_voxel(
+            dropper_pos.x as usize,
+            dropper_pos.y as usize,
+            dropper_pos.z as usize,
+            Voxel {
+                id: mechanical_blocks::DROPPER,
+                state: 0,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            dispenser_pos.x as usize,
+            dispenser_pos.y as usize,
+            dispenser_pos.z as usize,
+            Voxel {
+                id: mechanical_blocks::DISPENSER,
+                state: 0,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.toggle_lever(lever_dropper_pos, &mut chunks);
+        sim.toggle_lever(lever_dispenser_pos, &mut chunks);
+        sim.tick(&mut chunks);
+
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(is_active(
+                chunk
+                    .voxel(
+                        dropper_pos.x as usize,
+                        dropper_pos.y as usize,
+                        dropper_pos.z as usize
+                    )
+                    .state
+            ));
+            assert!(is_active(
+                chunk
+                    .voxel(
+                        dispenser_pos.x as usize,
+                        dispenser_pos.y as usize,
+                        dispenser_pos.z as usize
+                    )
+                    .state
+            ));
+        }
+
+        sim.toggle_lever(lever_dropper_pos, &mut chunks);
+        sim.toggle_lever(lever_dispenser_pos, &mut chunks);
+        sim.tick(&mut chunks);
+
+        {
+            let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+            assert!(!is_active(
+                chunk
+                    .voxel(
+                        dropper_pos.x as usize,
+                        dropper_pos.y as usize,
+                        dropper_pos.z as usize
+                    )
+                    .state
+            ));
+            assert!(!is_active(
+                chunk
+                    .voxel(
+                        dispenser_pos.x as usize,
+                        dispenser_pos.y as usize,
+                        dispenser_pos.z as usize
+                    )
+                    .state
+            ));
         }
     }
 }
