@@ -315,6 +315,24 @@ pub enum ItemType {
     StoneBrickSlab,
     StoneBrickStairs,
     StoneBrickWall,
+
+    // Redstone components (appended to preserve stable IDs)
+    RedstoneRepeater,
+    RedstoneComparator,
+
+    // Nether-ish items (appended to preserve stable IDs)
+    NetherQuartz,
+
+    // Redstone components (appended to preserve stable IDs)
+    RedstoneObserver,
+
+    // Pistons (appended to preserve stable IDs)
+    Piston,
+
+    // Automation blocks (appended to preserve stable IDs)
+    Dispenser,
+    Dropper,
+    Hopper,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -541,6 +559,14 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::StoneBrickSlab,
     ItemType::StoneBrickStairs,
     ItemType::StoneBrickWall,
+    ItemType::RedstoneRepeater,
+    ItemType::RedstoneComparator,
+    ItemType::NetherQuartz,
+    ItemType::RedstoneObserver,
+    ItemType::Piston,
+    ItemType::Dispenser,
+    ItemType::Dropper,
+    ItemType::Hopper,
 ];
 
 impl ItemType {
@@ -610,6 +636,13 @@ impl ItemType {
             | ItemType::OakPressurePlate
             | ItemType::RedstoneWire
             | ItemType::RedstoneTorch
+            | ItemType::RedstoneRepeater
+            | ItemType::RedstoneComparator
+            | ItemType::RedstoneObserver
+            | ItemType::Piston
+            | ItemType::Dispenser
+            | ItemType::Dropper
+            | ItemType::Hopper
             | ItemType::Glass
             | ItemType::Obsidian
             | ItemType::OakFence
@@ -656,7 +689,8 @@ impl ItemType {
             | ItemType::PhantomMembrane
             | ItemType::RedstoneDust
             | ItemType::GlowstoneDust
-            | ItemType::Pufferfish => 64,
+            | ItemType::Pufferfish
+            | ItemType::NetherQuartz => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -925,6 +959,14 @@ impl ItemType {
             // Vanilla-ish: breaking redstone wire drops redstone dust.
             43 => Some((ItemType::RedstoneDust, 1)),
             44 => Some((ItemType::RedstoneTorch, 1)),
+            123 => Some((ItemType::RedstoneRepeater, 1)),
+            124 => Some((ItemType::RedstoneComparator, 1)),
+            125 => Some((ItemType::NetherQuartz, 1)),
+            126 => Some((ItemType::RedstoneObserver, 1)),
+            127 | 128 => Some((ItemType::Piston, 1)),
+            129 => Some((ItemType::Dispenser, 1)),
+            130 => Some((ItemType::Dropper, 1)),
+            131 => Some((ItemType::Hopper, 1)),
 
             // No drops: Air (0), Water (6), Ice (7; needs Silk Touch), Bedrock (10), Glass (25; needs Silk Touch)
             _ => None,
@@ -1068,6 +1110,13 @@ impl ItemType {
             ItemType::OakPressurePlate => Some(42),
             ItemType::RedstoneWire => Some(43),
             ItemType::RedstoneTorch => Some(44),
+            ItemType::RedstoneRepeater => Some(123),
+            ItemType::RedstoneComparator => Some(124),
+            ItemType::RedstoneObserver => Some(126),
+            ItemType::Piston => Some(127),
+            ItemType::Dispenser => Some(129),
+            ItemType::Dropper => Some(130),
+            ItemType::Hopper => Some(131),
             ItemType::Glass => Some(25),
             ItemType::Obsidian => Some(23),
             ItemType::OakFence => Some(31),
@@ -1138,6 +1187,13 @@ impl ItemType {
             42 => Some(ItemType::OakPressurePlate),
             43 => Some(ItemType::RedstoneWire),
             44 => Some(ItemType::RedstoneTorch),
+            123 => Some(ItemType::RedstoneRepeater),
+            124 => Some(ItemType::RedstoneComparator),
+            126 => Some(ItemType::RedstoneObserver),
+            127 => Some(ItemType::Piston),
+            129 => Some(ItemType::Dispenser),
+            130 => Some(ItemType::Dropper),
+            131 => Some(ItemType::Hopper),
             23 => Some(ItemType::Obsidian),
             25 => Some(ItemType::Glass),
             31 => Some(ItemType::OakFence),
@@ -1516,6 +1572,70 @@ impl ItemManager {
         picked_up
     }
 
+    /// Take (and remove) a single item from the first dropped stack within `radius` of (x, y, z).
+    ///
+    /// This is intended for deterministic systems like hoppers: it always selects the lowest-ID
+    /// dropped item that matches the radius check.
+    pub fn take_one_near(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius: f64,
+    ) -> Option<(ItemType, u32)> {
+        self.take_one_near_if(x, y, z, radius, |_| true)
+    }
+
+    /// Take (and remove) a single item from the first dropped stack within `radius` of (x, y, z)
+    /// that passes the provided predicate.
+    ///
+    /// This is intended for deterministic systems (e.g., hoppers) that must avoid removing items
+    /// they cannot accept: selection is still deterministic (lowest-ID first).
+    pub fn take_one_near_if<F>(
+        &mut self,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius: f64,
+        predicate: F,
+    ) -> Option<(ItemType, u32)>
+    where
+        F: Fn(ItemType) -> bool,
+    {
+        let radius = radius.max(0.0);
+        let radius_sq = radius * radius;
+
+        let mut picked_id: Option<u64> = None;
+        for (id, item) in self.items.iter() {
+            let dx = item.x - x;
+            let dy = item.y - y;
+            let dz = item.z - z;
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+            if dist_sq <= radius_sq && predicate(item.item_type) {
+                picked_id = Some(*id);
+                break;
+            }
+        }
+
+        let id = picked_id?;
+        let mut remove = false;
+        let item_type = {
+            let item = self.items.get_mut(&id)?;
+            if item.count > 1 {
+                item.count -= 1;
+            } else {
+                remove = true;
+            }
+            item.item_type
+        };
+
+        if remove {
+            self.items.remove(&id);
+        }
+
+        Some((item_type, 1))
+    }
+
     /// Get the number of active dropped items.
     pub fn count(&self) -> usize {
         self.items.len()
@@ -1607,7 +1727,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::StoneBrickWall as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::Hopper as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1636,6 +1756,14 @@ mod tests {
         assert_eq!(ItemType::StoneBrickSlab.max_stack_size(), 64);
         assert_eq!(ItemType::StoneBrickStairs.max_stack_size(), 64);
         assert_eq!(ItemType::StoneBrickWall.max_stack_size(), 64);
+        assert_eq!(ItemType::RedstoneRepeater.max_stack_size(), 64);
+        assert_eq!(ItemType::RedstoneComparator.max_stack_size(), 64);
+        assert_eq!(ItemType::NetherQuartz.max_stack_size(), 64);
+        assert_eq!(ItemType::RedstoneObserver.max_stack_size(), 64);
+        assert_eq!(ItemType::Piston.max_stack_size(), 64);
+        assert_eq!(ItemType::Dispenser.max_stack_size(), 64);
+        assert_eq!(ItemType::Dropper.max_stack_size(), 64);
+        assert_eq!(ItemType::Hopper.max_stack_size(), 64);
         assert_eq!(ItemType::Carrot.max_stack_size(), 64);
         assert_eq!(ItemType::Potato.max_stack_size(), 64);
         assert_eq!(ItemType::BakedPotato.max_stack_size(), 64);
@@ -1744,6 +1872,35 @@ mod tests {
 
         // Redstone wire drops redstone dust (vanilla-ish).
         assert_eq!(ItemType::from_block(43), Some((ItemType::RedstoneDust, 1)));
+
+        // Redstone repeater drops itself.
+        assert_eq!(
+            ItemType::from_block(123),
+            Some((ItemType::RedstoneRepeater, 1))
+        );
+
+        // Redstone comparator drops itself.
+        assert_eq!(
+            ItemType::from_block(124),
+            Some((ItemType::RedstoneComparator, 1))
+        );
+
+        // Nether quartz ore drops nether quartz.
+        assert_eq!(ItemType::from_block(125), Some((ItemType::NetherQuartz, 1)));
+
+        // Observer drops itself.
+        assert_eq!(
+            ItemType::from_block(126),
+            Some((ItemType::RedstoneObserver, 1))
+        );
+
+        // Pistons drop themselves (either base or head).
+        assert_eq!(ItemType::from_block(127), Some((ItemType::Piston, 1)));
+        assert_eq!(ItemType::from_block(128), Some((ItemType::Piston, 1)));
+
+        assert_eq!(ItemType::from_block(129), Some((ItemType::Dispenser, 1)));
+        assert_eq!(ItemType::from_block(130), Some((ItemType::Dropper, 1)));
+        assert_eq!(ItemType::from_block(131), Some((ItemType::Hopper, 1)));
     }
 
     #[test]
@@ -1764,6 +1921,13 @@ mod tests {
         assert_eq!(ItemType::StoneBrickSlab.to_block(), Some(117));
         assert_eq!(ItemType::StoneBrickStairs.to_block(), Some(118));
         assert_eq!(ItemType::StoneBrickWall.to_block(), Some(119));
+        assert_eq!(ItemType::RedstoneRepeater.to_block(), Some(123));
+        assert_eq!(ItemType::RedstoneComparator.to_block(), Some(124));
+        assert_eq!(ItemType::RedstoneObserver.to_block(), Some(126));
+        assert_eq!(ItemType::Piston.to_block(), Some(127));
+        assert_eq!(ItemType::Dispenser.to_block(), Some(129));
+        assert_eq!(ItemType::Dropper.to_block(), Some(130));
+        assert_eq!(ItemType::Hopper.to_block(), Some(131));
 
         // Non-placeable items
         assert_eq!(ItemType::RawPork.to_block(), None);
@@ -1803,6 +1967,22 @@ mod tests {
             ItemType::from_placeable_block(119),
             Some(ItemType::StoneBrickWall)
         );
+        assert_eq!(
+            ItemType::from_placeable_block(123),
+            Some(ItemType::RedstoneRepeater)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(124),
+            Some(ItemType::RedstoneComparator)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(126),
+            Some(ItemType::RedstoneObserver)
+        );
+        assert_eq!(ItemType::from_placeable_block(127), Some(ItemType::Piston));
+        assert_eq!(ItemType::from_placeable_block(129), Some(ItemType::Dispenser));
+        assert_eq!(ItemType::from_placeable_block(130), Some(ItemType::Dropper));
+        assert_eq!(ItemType::from_placeable_block(131), Some(ItemType::Hopper));
     }
 
     #[test]
@@ -1986,6 +2166,36 @@ mod tests {
         assert_eq!(picked_up.len(), 1);
         assert_eq!(picked_up[0], (ItemType::Stone, 5));
         assert_eq!(manager.count(), 1);
+    }
+
+    #[test]
+    fn test_item_manager_take_one_near_picks_lowest_id() {
+        let mut manager = ItemManager::new();
+        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 2);
+        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Dirt, 2);
+
+        let first = manager.take_one_near(10.0, 64.0, 20.0, 0.01);
+        assert_eq!(first, Some((ItemType::Stone, 1)));
+        assert_eq!(manager.get(1).unwrap().count, 1);
+
+        let second = manager.take_one_near(10.0, 64.0, 20.0, 0.01);
+        assert_eq!(second, Some((ItemType::Stone, 1)));
+        assert!(manager.get(1).is_none());
+
+        let third = manager.take_one_near(10.0, 64.0, 20.0, 0.01);
+        assert_eq!(third, Some((ItemType::Dirt, 1)));
+        assert_eq!(manager.get(2).unwrap().count, 1);
+    }
+
+    #[test]
+    fn test_item_manager_take_one_near_respects_radius() {
+        let mut manager = ItemManager::new();
+        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 1);
+        manager.spawn_item(12.0, 64.0, 20.0, ItemType::Dirt, 1);
+
+        assert_eq!(manager.take_one_near(10.0, 64.0, 20.0, 0.5), Some((ItemType::Stone, 1)));
+        assert_eq!(manager.take_one_near(10.0, 64.0, 20.0, 0.5), None);
+        assert_eq!(manager.take_one_near(12.0, 64.0, 20.0, 0.5), Some((ItemType::Dirt, 1)));
     }
 
     #[test]
@@ -2393,6 +2603,9 @@ mod tests {
         assert!(ItemType::OakPressurePlate.to_block().is_some());
         assert!(ItemType::RedstoneWire.to_block().is_some());
         assert!(ItemType::RedstoneTorch.to_block().is_some());
+        assert!(ItemType::RedstoneRepeater.to_block().is_some());
+        assert!(ItemType::RedstoneComparator.to_block().is_some());
+        assert!(ItemType::RedstoneObserver.to_block().is_some());
     }
 
     #[test]

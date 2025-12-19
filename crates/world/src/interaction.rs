@@ -317,6 +317,8 @@ pub fn is_full_cube_block(block_id: BlockId) -> bool {
             | crate::redstone_blocks::OAK_PRESSURE_PLATE
             | crate::redstone_blocks::REDSTONE_WIRE
             | crate::redstone_blocks::REDSTONE_TORCH
+            | crate::redstone_blocks::REDSTONE_REPEATER
+            | crate::redstone_blocks::REDSTONE_COMPARATOR
             | BLOCK_ENCHANTING_TABLE
             | BLOCK_BREWING_STAND
             | crate::BLOCK_SUGAR_CANE

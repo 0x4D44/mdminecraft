@@ -145,5 +145,14 @@
   { "name": "stone_brick_wall", "opaque": false, "texture": "blocks/stone" },
   { "name": "double_stone_slab", "opaque": true, "texture": "blocks/stone" },
   { "name": "double_oak_slab", "opaque": true, "texture": "blocks/planks" },
-  { "name": "double_stone_brick_slab", "opaque": true, "texture": "blocks/stone" }
+  { "name": "double_stone_brick_slab", "opaque": true, "texture": "blocks/stone" },
+  { "name": "redstone_repeater", "opaque": false, "texture": "blocks/stone" },
+  { "name": "redstone_comparator", "opaque": false, "texture": "blocks/stone" },
+  { "name": "nether_quartz_ore", "opaque": true, "texture": "blocks/stone" },
+  { "name": "redstone_observer", "opaque": true, "texture": "blocks/cobblestone" },
+  { "name": "piston", "opaque": true, "texture": "blocks/stone" },
+  { "name": "piston_head", "opaque": true, "texture": "blocks/stone" },
+  { "name": "dispenser", "opaque": true, "texture": "blocks/stone" },
+  { "name": "dropper", "opaque": true, "texture": "blocks/stone" },
+  { "name": "hopper", "opaque": true, "texture": "blocks/stone" }
 ]
