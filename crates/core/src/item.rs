@@ -180,6 +180,17 @@ pub mod item_ids {
     pub const ENDER_PEARL: u16 = 512;
 }
 
+/// Client-reserved `ItemType::Item` IDs for newly-added gameplay items.
+///
+/// These are kept separate from the low/legacy ID space to avoid collisions with
+/// older saves and other in-game item IDs.
+#[allow(missing_docs)]
+pub mod client_item_ids {
+    pub const BUCKET: u16 = 2020;
+    pub const WATER_BUCKET: u16 = 2021;
+    pub const LAVA_BUCKET: u16 = 2022;
+}
+
 impl ToolMaterial {
     /// Get the mining speed multiplier for this material
     pub fn speed_multiplier(self) -> f32 {
@@ -336,6 +347,11 @@ impl ItemStack {
             ItemType::Food(_) => 64,
             ItemType::Potion(_) => 1,       // Potions don't stack
             ItemType::SplashPotion(_) => 1, // Splash potions don't stack
+            ItemType::Item(
+                client_item_ids::BUCKET
+                | client_item_ids::WATER_BUCKET
+                | client_item_ids::LAVA_BUCKET,
+            ) => 1,
             ItemType::Item(_) => 64,
         }
     }
@@ -540,6 +556,22 @@ mod tests {
         assert_eq!(stack.count, 64);
         assert_eq!(stack.max_stack_size(), 64);
         assert!(stack.durability.is_none());
+    }
+
+    #[test]
+    fn test_bucket_stack_size() {
+        assert_eq!(
+            ItemStack::new(ItemType::Item(client_item_ids::BUCKET), 1).max_stack_size(),
+            1
+        );
+        assert_eq!(
+            ItemStack::new(ItemType::Item(client_item_ids::WATER_BUCKET), 1).max_stack_size(),
+            1
+        );
+        assert_eq!(
+            ItemStack::new(ItemType::Item(client_item_ids::LAVA_BUCKET), 1).max_stack_size(),
+            1
+        );
     }
 
     #[test]

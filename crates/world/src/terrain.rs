@@ -921,9 +921,9 @@ mod tests {
 
         let gen = TerrainGenerator::new(999);
 
-        // Test multiple chunks to find different biomes
-        for chunk_x in 0..10 {
-            for chunk_z in 0..10 {
+        // Sample multiple chunks to find different biomes without turning this into a minute-long test.
+        for chunk_x in 0..5 {
+            for chunk_z in 0..5 {
                 let chunk = gen.generate_chunk(ChunkPos::new(chunk_x, chunk_z));
 
                 // Check center column

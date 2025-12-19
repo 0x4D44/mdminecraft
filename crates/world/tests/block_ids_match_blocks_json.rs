@@ -124,6 +124,42 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::interactive_blocks::TORCH,
         id_of(&map, "torch")
     );
+    assert_eq!(
+        mdminecraft_world::interactive_blocks::COBBLESTONE_WALL,
+        id_of(&map, "cobblestone_wall")
+    );
+    assert_eq!(
+        mdminecraft_world::interactive_blocks::IRON_BARS,
+        id_of(&map, "iron_bars")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_STONE_BRICKS,
+        id_of(&map, "stone_bricks")
+    );
+    assert_eq!(
+        mdminecraft_world::interactive_blocks::STONE_BRICK_SLAB,
+        id_of(&map, "stone_brick_slab")
+    );
+    assert_eq!(
+        mdminecraft_world::interactive_blocks::STONE_BRICK_STAIRS,
+        id_of(&map, "stone_brick_stairs")
+    );
+    assert_eq!(
+        mdminecraft_world::interactive_blocks::STONE_BRICK_WALL,
+        id_of(&map, "stone_brick_wall")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_DOUBLE_STONE_SLAB,
+        id_of(&map, "double_stone_slab")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_DOUBLE_OAK_SLAB,
+        id_of(&map, "double_oak_slab")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_DOUBLE_STONE_BRICK_SLAB,
+        id_of(&map, "double_stone_brick_slab")
+    );
 
     // Redstone blocks.
     assert_eq!(

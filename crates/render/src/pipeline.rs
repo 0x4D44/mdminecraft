@@ -574,8 +574,10 @@ impl VoxelPipeline {
         queue: &wgpu::Queue,
         time: &crate::time::TimeOfDay,
         weather_intensity: f32,
+        night_vision: f32,
     ) {
-        let uniform = crate::time::TimeUniform::from_time_of_day(time, weather_intensity);
+        let uniform =
+            crate::time::TimeUniform::from_time_of_day(time, weather_intensity, night_vision);
         queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
@@ -781,8 +783,10 @@ impl SkyboxPipeline {
         queue: &wgpu::Queue,
         time: &crate::time::TimeOfDay,
         weather_intensity: f32,
+        night_vision: f32,
     ) {
-        let uniform = crate::time::TimeUniform::from_time_of_day(time, weather_intensity);
+        let uniform =
+            crate::time::TimeUniform::from_time_of_day(time, weather_intensity, night_vision);
         queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 

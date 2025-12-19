@@ -3,14 +3,8 @@ use mdminecraft_assets::{BlockFace, BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_world::{
     interactive_blocks, BlockId, Chunk, Voxel, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
-use std::sync::OnceLock;
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
-
-fn default_block_properties() -> &'static mdminecraft_world::BlockPropertiesRegistry {
-    static PROPERTIES: OnceLock<mdminecraft_world::BlockPropertiesRegistry> = OnceLock::new();
-    PROPERTIES.get_or_init(mdminecraft_world::BlockPropertiesRegistry::new)
-}
 
 /// Hash of the combined vertex/index buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +91,9 @@ where
     GreedyMesher::mesh(chunk, &mut builder);
     mesh_glass_panes(chunk, &mut builder, registry, &voxel_at_world);
     mesh_oak_fences(chunk, &mut builder, registry, &voxel_at_world);
+    mesh_cobblestone_walls(chunk, &mut builder, registry, &voxel_at_world);
     mesh_oak_fence_gates(chunk, &mut builder);
-    mesh_stairs(chunk, &mut builder);
+    mesh_stairs(chunk, &mut builder, &voxel_at_world);
     mesh_slabs(chunk, &mut builder);
     mesh_trapdoors(chunk, &mut builder);
     mesh_doors(chunk, &mut builder);
@@ -454,13 +449,6 @@ fn mesh_glass_panes<F>(
     let post_min = 0.5 - half;
     let post_max = 0.5 + half;
 
-    let block_properties = default_block_properties();
-    let connects_to = |voxel: Voxel| -> bool {
-        voxel.id == interactive_blocks::GLASS_PANE
-            || voxel.id == interactive_blocks::GLASS
-            || block_properties.get(voxel.id).is_solid
-    };
-
     let chunk_pos = chunk.position();
     let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
     let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
@@ -469,9 +457,18 @@ fn mesh_glass_panes<F>(
         for z in 0..CHUNK_SIZE_Z {
             for x in 0..CHUNK_SIZE_X {
                 let voxel = chunk.voxel(x, y, z);
-                if voxel.id != interactive_blocks::GLASS_PANE {
+                if voxel.id != interactive_blocks::GLASS_PANE
+                    && voxel.id != interactive_blocks::IRON_BARS
+                {
                     continue;
                 }
+
+                let connects_to = |neighbor: Voxel| -> bool {
+                    matches!(
+                        neighbor.id,
+                        interactive_blocks::GLASS_PANE | interactive_blocks::IRON_BARS
+                    ) || mdminecraft_world::is_full_cube_block(neighbor.id)
+                };
 
                 let world_x = origin_x + x as i32;
                 let world_y = y as i32;
@@ -565,11 +562,10 @@ fn mesh_oak_fences<F>(
     let upper_rail_min_y = 12.0 / 16.0;
     let upper_rail_max_y = 15.0 / 16.0;
 
-    let block_properties = default_block_properties();
     let connects_to = |voxel: Voxel| -> bool {
         voxel.id == interactive_blocks::OAK_FENCE
             || voxel.id == interactive_blocks::OAK_FENCE_GATE
-            || block_properties.get(voxel.id).is_solid
+            || mdminecraft_world::is_full_cube_block(voxel.id)
     };
 
     let chunk_pos = chunk.position();
@@ -659,6 +655,120 @@ fn mesh_oak_fences<F>(
     }
 }
 
+fn mesh_cobblestone_walls<F>(
+    chunk: &Chunk,
+    builder: &mut MeshBuilder,
+    _registry: &BlockRegistry,
+    voxel_at_world: &F,
+) where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    let thickness = 6.0 / 16.0;
+    let half = thickness * 0.5;
+
+    let post_min = 0.5 - half;
+    let post_max = 0.5 + half;
+
+    let arm_height = 1.0;
+
+    let connects_to = |voxel: Voxel| -> bool {
+        matches!(
+            voxel.id,
+            interactive_blocks::COBBLESTONE_WALL | interactive_blocks::STONE_BRICK_WALL
+        ) || voxel.id == interactive_blocks::OAK_FENCE_GATE
+            || mdminecraft_world::is_full_cube_block(voxel.id)
+    };
+
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !matches!(
+                    voxel.id,
+                    interactive_blocks::COBBLESTONE_WALL | interactive_blocks::STONE_BRICK_WALL
+                ) {
+                    continue;
+                }
+
+                let world_x = origin_x + x as i32;
+                let world_y = y as i32;
+                let world_z = origin_z + z as i32;
+
+                let connect_west =
+                    voxel_at_world(world_x - 1, world_y, world_z).is_some_and(connects_to);
+                let connect_east =
+                    voxel_at_world(world_x + 1, world_y, world_z).is_some_and(connects_to);
+                let connect_north =
+                    voxel_at_world(world_x, world_y, world_z - 1).is_some_and(connects_to);
+                let connect_south =
+                    voxel_at_world(world_x, world_y, world_z + 1).is_some_and(connects_to);
+
+                let post_height = if connect_west || connect_east || connect_north || connect_south
+                {
+                    1.5
+                } else {
+                    1.0
+                };
+
+                let light = voxel.light_sky.max(voxel.light_block);
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                // Center post.
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x + post_min, base_y, base_z + post_min],
+                    [base_x + post_max, base_y + post_height, base_z + post_max],
+                    light,
+                );
+
+                if connect_west {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x, base_y, base_z + post_min],
+                        [base_x + 0.5, base_y + arm_height, base_z + post_max],
+                        light,
+                    );
+                }
+                if connect_east {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + 0.5, base_y, base_z + post_min],
+                        [base_x + 1.0, base_y + arm_height, base_z + post_max],
+                        light,
+                    );
+                }
+                if connect_north {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + post_min, base_y, base_z],
+                        [base_x + post_max, base_y + arm_height, base_z + 0.5],
+                        light,
+                    );
+                }
+                if connect_south {
+                    emit_box(
+                        builder,
+                        voxel.id,
+                        [base_x + post_min, base_y, base_z + 0.5],
+                        [base_x + post_max, base_y + arm_height, base_z + 1.0],
+                        light,
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn mesh_oak_fence_gates(chunk: &Chunk, builder: &mut MeshBuilder) {
     let thickness = 3.0 / 16.0;
 
@@ -718,17 +828,21 @@ fn mesh_oak_fence_gates(chunk: &Chunk, builder: &mut MeshBuilder) {
     }
 }
 
-fn mesh_stairs(chunk: &Chunk, builder: &mut MeshBuilder) {
+fn mesh_stairs<F>(chunk: &Chunk, builder: &mut MeshBuilder, voxel_at_world: &F)
+where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
     let half = 0.5;
+
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
 
     for y in 0..CHUNK_SIZE_Y {
         for z in 0..CHUNK_SIZE_Z {
             for x in 0..CHUNK_SIZE_X {
                 let voxel = chunk.voxel(x, y, z);
-                if !matches!(
-                    voxel.id,
-                    interactive_blocks::STONE_STAIRS | interactive_blocks::OAK_STAIRS
-                ) {
+                if !mdminecraft_world::is_stairs(voxel.id) {
                     continue;
                 }
 
@@ -740,15 +854,22 @@ fn mesh_stairs(chunk: &Chunk, builder: &mut MeshBuilder) {
                 let base_y = y as f32;
                 let base_z = z as f32;
 
-                let (half_min, half_max) = match facing {
-                    mdminecraft_world::Facing::North => ([0.0, 0.0, 0.0], [1.0, 1.0, half]),
-                    mdminecraft_world::Facing::South => ([0.0, 0.0, half], [1.0, 1.0, 1.0]),
-                    mdminecraft_world::Facing::East => ([half, 0.0, 0.0], [1.0, 1.0, 1.0]),
-                    mdminecraft_world::Facing::West => ([0.0, 0.0, 0.0], [half, 1.0, 1.0]),
-                };
+                let world_x = origin_x + x as i32;
+                let world_y = y as i32;
+                let world_z = origin_z + z as i32;
+
+                let shape = mdminecraft_world::stairs_shape_at(
+                    world_x,
+                    world_y,
+                    world_z,
+                    voxel,
+                    voxel_at_world,
+                );
+                let (footprints, footprint_count) =
+                    mdminecraft_world::stairs_step_footprints(facing, shape);
 
                 if top {
-                    // Upper full block.
+                    // Upside-down stairs: upper half is a full slab.
                     emit_box(
                         builder,
                         voxel.id,
@@ -757,17 +878,23 @@ fn mesh_stairs(chunk: &Chunk, builder: &mut MeshBuilder) {
                         light,
                     );
 
-                    // Lower half-footprint.
-                    emit_box_masked(
-                        builder,
-                        voxel.id,
-                        [base_x + half_min[0], base_y, base_z + half_min[2]],
-                        [base_x + half_max[0], base_y + half, base_z + half_max[2]],
-                        light,
-                        FACES_ALL & !FACE_UP,
-                    );
+                    // Lower half-height step, shaped via neighbor-aware corner resolution.
+                    for footprint in footprints.iter().take(footprint_count) {
+                        emit_box_masked(
+                            builder,
+                            voxel.id,
+                            [base_x + footprint.min_x, base_y, base_z + footprint.min_z],
+                            [
+                                base_x + footprint.max_x,
+                                base_y + half,
+                                base_z + footprint.max_z,
+                            ],
+                            light,
+                            FACES_ALL & !FACE_UP,
+                        );
+                    }
                 } else {
-                    // Bottom full block.
+                    // Normal stairs: lower half is a full slab.
                     emit_box(
                         builder,
                         voxel.id,
@@ -776,15 +903,25 @@ fn mesh_stairs(chunk: &Chunk, builder: &mut MeshBuilder) {
                         light,
                     );
 
-                    // Upper half-footprint.
-                    emit_box_masked(
-                        builder,
-                        voxel.id,
-                        [base_x + half_min[0], base_y + half, base_z + half_min[2]],
-                        [base_x + half_max[0], base_y + 1.0, base_z + half_max[2]],
-                        light,
-                        FACES_ALL & !FACE_DOWN,
-                    );
+                    // Upper half-height step, shaped via neighbor-aware corner resolution.
+                    for footprint in footprints.iter().take(footprint_count) {
+                        emit_box_masked(
+                            builder,
+                            voxel.id,
+                            [
+                                base_x + footprint.min_x,
+                                base_y + half,
+                                base_z + footprint.min_z,
+                            ],
+                            [
+                                base_x + footprint.max_x,
+                                base_y + 1.0,
+                                base_z + footprint.max_z,
+                            ],
+                            light,
+                            FACES_ALL & !FACE_DOWN,
+                        );
+                    }
                 }
             }
         }
@@ -1924,8 +2061,11 @@ fn is_solid(voxel: Voxel) -> bool {
         && voxel.id != interactive_blocks::TORCH
         && voxel.id != mdminecraft_world::redstone_blocks::REDSTONE_TORCH
         && voxel.id != interactive_blocks::GLASS_PANE
+        && voxel.id != interactive_blocks::IRON_BARS
         && voxel.id != interactive_blocks::OAK_FENCE
         && voxel.id != interactive_blocks::OAK_FENCE_GATE
+        && voxel.id != interactive_blocks::COBBLESTONE_WALL
+        && voxel.id != interactive_blocks::STONE_BRICK_WALL
 }
 
 #[cfg(test)]
@@ -2107,6 +2247,131 @@ mod tests {
     }
 
     #[test]
+    fn iron_bars_connect_across_chunk_seam_with_sampler() {
+        let bars_id = interactive_blocks::IRON_BARS as usize;
+        let mut descriptors = Vec::with_capacity(bars_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for _ in 1..bars_id {
+            descriptors.push(BlockDescriptor::simple("solid", true));
+        }
+        descriptors.push(BlockDescriptor::simple("iron_bars", false));
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        chunk_a.set_voxel(
+            15,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::IRON_BARS,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk_b.set_voxel(
+            0,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::IRON_BARS,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |_wx, _wy, _wz| None);
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wx == 16 && wy == 1 && wz == 1 {
+                Some(chunk_b.voxel(0, 1, 1))
+            } else {
+                None
+            }
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            36,
+            "Disconnected bars should render only the center post"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            72,
+            "Connected bars should render an extra arm (one more box)"
+        );
+    }
+
+    #[test]
+    fn glass_pane_connects_to_iron_bars_across_chunk_seam_with_sampler() {
+        let max_id = interactive_blocks::IRON_BARS as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for id in 1..=max_id {
+            if id == interactive_blocks::GLASS_PANE as usize {
+                descriptors.push(BlockDescriptor::simple("glass_pane", false));
+            } else if id == interactive_blocks::IRON_BARS as usize {
+                descriptors.push(BlockDescriptor::simple("iron_bars", false));
+            } else {
+                descriptors.push(BlockDescriptor::simple("solid", true));
+            }
+        }
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        chunk_a.set_voxel(
+            15,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::GLASS_PANE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk_b.set_voxel(
+            0,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::IRON_BARS,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |_wx, _wy, _wz| None);
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wx == 16 && wy == 1 && wz == 1 {
+                Some(chunk_b.voxel(0, 1, 1))
+            } else {
+                None
+            }
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            36,
+            "Disconnected pane should render only the center post"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            72,
+            "Pane should connect to adjacent bars and render one extra arm"
+        );
+    }
+
+    #[test]
     fn oak_fence_connects_across_chunk_seam_with_sampler() {
         let fence_id = interactive_blocks::OAK_FENCE as usize;
         let mut descriptors = Vec::with_capacity(fence_id + 1);
@@ -2180,6 +2445,160 @@ mod tests {
             mesh_connected.indices.len(),
             108,
             "Connected fence should render a post plus two rail boxes"
+        );
+    }
+
+    #[test]
+    fn cobblestone_wall_connects_across_chunk_seam_with_sampler() {
+        let wall_id = interactive_blocks::COBBLESTONE_WALL as usize;
+        let mut descriptors = Vec::with_capacity(wall_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for _ in 1..wall_id {
+            descriptors.push(BlockDescriptor::simple("solid", true));
+        }
+        descriptors.push(BlockDescriptor::simple("cobblestone_wall", false));
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        let wall_voxel = Voxel {
+            id: interactive_blocks::COBBLESTONE_WALL,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+
+        chunk_a.set_voxel(15, 1, 1, wall_voxel);
+        chunk_b.set_voxel(0, 1, 1, wall_voxel);
+
+        let origin_a_x = chunk_a.position().x * CHUNK_SIZE_X as i32;
+        let origin_a_z = chunk_a.position().z * CHUNK_SIZE_Z as i32;
+        let origin_b_x = chunk_b.position().x * CHUNK_SIZE_X as i32;
+        let origin_b_z = chunk_b.position().z * CHUNK_SIZE_Z as i32;
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                    return None;
+                }
+
+                let ax = wx - origin_a_x;
+                let az = wz - origin_a_z;
+                if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
+                {
+                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                }
+
+                None
+            });
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+
+            let ax = wx - origin_a_x;
+            let az = wz - origin_a_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
+                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+            }
+
+            let bx = wx - origin_b_x;
+            let bz = wz - origin_b_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
+                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+            }
+
+            None
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            36,
+            "Disconnected wall should render only the center post"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            72,
+            "Connected wall should render a post plus one arm"
+        );
+    }
+
+    #[test]
+    fn stone_brick_wall_connects_across_chunk_seam_with_sampler() {
+        let wall_id = interactive_blocks::STONE_BRICK_WALL as usize;
+        let mut descriptors = Vec::with_capacity(wall_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+        for _ in 1..wall_id {
+            descriptors.push(BlockDescriptor::simple("solid", true));
+        }
+        descriptors.push(BlockDescriptor::simple("stone_brick_wall", false));
+        let registry = BlockRegistry::new(descriptors);
+
+        let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
+        let mut chunk_b = Chunk::new(ChunkPos::new(1, 0));
+
+        let wall_voxel = Voxel {
+            id: interactive_blocks::STONE_BRICK_WALL,
+            state: 0,
+            light_sky: 0,
+            light_block: 0,
+        };
+
+        chunk_a.set_voxel(15, 1, 1, wall_voxel);
+        chunk_b.set_voxel(0, 1, 1, wall_voxel);
+
+        let origin_a_x = chunk_a.position().x * CHUNK_SIZE_X as i32;
+        let origin_a_z = chunk_a.position().z * CHUNK_SIZE_Z as i32;
+        let origin_b_x = chunk_b.position().x * CHUNK_SIZE_X as i32;
+        let origin_b_z = chunk_b.position().z * CHUNK_SIZE_Z as i32;
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                    return None;
+                }
+
+                let ax = wx - origin_a_x;
+                let az = wz - origin_a_z;
+                if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
+                {
+                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                }
+
+                None
+            });
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
+                return None;
+            }
+
+            let ax = wx - origin_a_x;
+            let az = wz - origin_a_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
+                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+            }
+
+            let bx = wx - origin_b_x;
+            let bz = wz - origin_b_z;
+            if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
+                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+            }
+
+            None
+        });
+
+        assert_eq!(
+            mesh_disconnected.indices.len(),
+            36,
+            "Disconnected wall should render only the center post"
+        );
+        assert_eq!(
+            mesh_connected.indices.len(),
+            72,
+            "Connected wall should render a post plus one arm"
         );
     }
 

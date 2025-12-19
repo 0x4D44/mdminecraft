@@ -298,6 +298,23 @@ pub enum ItemType {
 
     // Brewing ingredients (appended to preserve stable IDs)
     Pufferfish,
+
+    // Buckets (appended to preserve stable IDs)
+    Bucket,
+    WaterBucket,
+    LavaBucket,
+
+    // Walls (appended to preserve stable IDs)
+    CobblestoneWall,
+
+    // Bars (appended to preserve stable IDs)
+    IronBars,
+
+    // Stone bricks family (appended to preserve stable IDs)
+    StoneBricks,
+    StoneBrickSlab,
+    StoneBrickStairs,
+    StoneBrickWall,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -515,6 +532,15 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::SplashPotionWeaknessLong,
     ItemType::SplashPotionSlowFallingLong,
     ItemType::Pufferfish,
+    ItemType::Bucket,
+    ItemType::WaterBucket,
+    ItemType::LavaBucket,
+    ItemType::CobblestoneWall,
+    ItemType::IronBars,
+    ItemType::StoneBricks,
+    ItemType::StoneBrickSlab,
+    ItemType::StoneBrickStairs,
+    ItemType::StoneBrickWall,
 ];
 
 impl ItemType {
@@ -588,11 +614,17 @@ impl ItemType {
             | ItemType::Obsidian
             | ItemType::OakFence
             | ItemType::OakFenceGate
+            | ItemType::CobblestoneWall
             | ItemType::StoneSlab
             | ItemType::OakSlab
             | ItemType::StoneStairs
             | ItemType::OakStairs
+            | ItemType::StoneBricks
+            | ItemType::StoneBrickSlab
+            | ItemType::StoneBrickStairs
+            | ItemType::StoneBrickWall
             | ItemType::GlassPane
+            | ItemType::IronBars
             | ItemType::Trapdoor
             | ItemType::Chest
             | ItemType::OakDoor
@@ -745,7 +777,10 @@ impl ItemType {
             | ItemType::StoneHoe
             | ItemType::IronHoe
             | ItemType::DiamondHoe
-            | ItemType::GoldHoe => 1,
+            | ItemType::GoldHoe
+            | ItemType::Bucket
+            | ItemType::WaterBucket
+            | ItemType::LavaBucket => 1,
 
             // Brewing ingredients stack to 64
             ItemType::GlassBottle
@@ -820,6 +855,15 @@ impl ItemType {
             // Building blocks
             31 => Some((ItemType::OakFence, 1)),
             32 => Some((ItemType::OakFenceGate, 1)),
+            114 => Some((ItemType::CobblestoneWall, 1)),
+            115 => Some((ItemType::IronBars, 1)),
+            116 => Some((ItemType::StoneBricks, 1)),
+            117 => Some((ItemType::StoneBrickSlab, 1)),
+            118 => Some((ItemType::StoneBrickStairs, 1)),
+            119 => Some((ItemType::StoneBrickWall, 1)),
+            120 => Some((ItemType::StoneSlab, 2)),
+            121 => Some((ItemType::OakSlab, 2)),
+            122 => Some((ItemType::StoneBrickSlab, 2)),
             33 => Some((ItemType::StoneSlab, 1)),
             34 => Some((ItemType::OakSlab, 1)),
             35 => Some((ItemType::StoneStairs, 1)),
@@ -878,7 +922,8 @@ impl ItemType {
             40 => Some((ItemType::OakButton, 1)),
             41 => Some((ItemType::StonePressurePlate, 1)),
             42 => Some((ItemType::OakPressurePlate, 1)),
-            43 => Some((ItemType::RedstoneWire, 1)),
+            // Vanilla-ish: breaking redstone wire drops redstone dust.
+            43 => Some((ItemType::RedstoneDust, 1)),
             44 => Some((ItemType::RedstoneTorch, 1)),
 
             // No drops: Air (0), Water (6), Ice (7; needs Silk Touch), Bedrock (10), Glass (25; needs Silk Touch)
@@ -1027,11 +1072,17 @@ impl ItemType {
             ItemType::Obsidian => Some(23),
             ItemType::OakFence => Some(31),
             ItemType::OakFenceGate => Some(32),
+            ItemType::CobblestoneWall => Some(114),
             ItemType::StoneSlab => Some(33),
             ItemType::OakSlab => Some(34),
             ItemType::StoneStairs => Some(35),
             ItemType::OakStairs => Some(36),
+            ItemType::StoneBricks => Some(116),
+            ItemType::StoneBrickSlab => Some(117),
+            ItemType::StoneBrickStairs => Some(118),
+            ItemType::StoneBrickWall => Some(119),
             ItemType::GlassPane => Some(37),
+            ItemType::IronBars => Some(115),
             ItemType::Trapdoor => Some(68),
             ItemType::Chest => Some(67),
             ItemType::OakDoor => Some(26),
@@ -1091,11 +1142,17 @@ impl ItemType {
             25 => Some(ItemType::Glass),
             31 => Some(ItemType::OakFence),
             32 => Some(ItemType::OakFenceGate),
+            114 => Some(ItemType::CobblestoneWall),
             33 => Some(ItemType::StoneSlab),
             34 => Some(ItemType::OakSlab),
             35 => Some(ItemType::StoneStairs),
             36 => Some(ItemType::OakStairs),
             37 => Some(ItemType::GlassPane),
+            115 => Some(ItemType::IronBars),
+            116 => Some(ItemType::StoneBricks),
+            117 => Some(ItemType::StoneBrickSlab),
+            118 => Some(ItemType::StoneBrickStairs),
+            119 => Some(ItemType::StoneBrickWall),
             26 | 27 => Some(ItemType::OakDoor),
             28 | 29 => Some(ItemType::IronDoor),
             45 | 46 => Some(ItemType::RedstoneLamp),
@@ -1550,7 +1607,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::Pufferfish as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::StoneBrickWall as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1573,6 +1630,12 @@ mod tests {
         assert_eq!(ItemType::Wheat.max_stack_size(), 64);
         assert_eq!(ItemType::Bread.max_stack_size(), 64);
         assert_eq!(ItemType::Bookshelf.max_stack_size(), 64);
+        assert_eq!(ItemType::CobblestoneWall.max_stack_size(), 64);
+        assert_eq!(ItemType::IronBars.max_stack_size(), 64);
+        assert_eq!(ItemType::StoneBricks.max_stack_size(), 64);
+        assert_eq!(ItemType::StoneBrickSlab.max_stack_size(), 64);
+        assert_eq!(ItemType::StoneBrickStairs.max_stack_size(), 64);
+        assert_eq!(ItemType::StoneBrickWall.max_stack_size(), 64);
         assert_eq!(ItemType::Carrot.max_stack_size(), 64);
         assert_eq!(ItemType::Potato.max_stack_size(), 64);
         assert_eq!(ItemType::BakedPotato.max_stack_size(), 64);
@@ -1584,6 +1647,9 @@ mod tests {
         // Tools don't stack
         assert_eq!(ItemType::WoodenPickaxe.max_stack_size(), 1);
         assert_eq!(ItemType::DiamondSword.max_stack_size(), 1);
+        assert_eq!(ItemType::Bucket.max_stack_size(), 1);
+        assert_eq!(ItemType::WaterBucket.max_stack_size(), 1);
+        assert_eq!(ItemType::LavaBucket.max_stack_size(), 1);
     }
 
     #[test]
@@ -1637,6 +1703,25 @@ mod tests {
         assert_eq!(ItemType::from_block(34), Some((ItemType::OakSlab, 1)));
         assert_eq!(ItemType::from_block(35), Some((ItemType::StoneStairs, 1)));
         assert_eq!(ItemType::from_block(36), Some((ItemType::OakStairs, 1)));
+        assert_eq!(ItemType::from_block(116), Some((ItemType::StoneBricks, 1)));
+        assert_eq!(
+            ItemType::from_block(117),
+            Some((ItemType::StoneBrickSlab, 1))
+        );
+        assert_eq!(
+            ItemType::from_block(118),
+            Some((ItemType::StoneBrickStairs, 1))
+        );
+        assert_eq!(
+            ItemType::from_block(119),
+            Some((ItemType::StoneBrickWall, 1))
+        );
+        assert_eq!(ItemType::from_block(120), Some((ItemType::StoneSlab, 2)));
+        assert_eq!(ItemType::from_block(121), Some((ItemType::OakSlab, 2)));
+        assert_eq!(
+            ItemType::from_block(122),
+            Some((ItemType::StoneBrickSlab, 2))
+        );
         assert_eq!(ItemType::from_block(67), Some((ItemType::Chest, 1)));
         assert_eq!(ItemType::from_block(68), Some((ItemType::Trapdoor, 1)));
 
@@ -1656,6 +1741,9 @@ mod tests {
         assert_eq!(ItemType::from_block(61), Some((ItemType::Potato, 1)));
         assert_eq!(ItemType::from_block(64), Some((ItemType::Potato, 1)));
         assert_eq!(ItemType::from_block(103), Some((ItemType::Bookshelf, 1)));
+
+        // Redstone wire drops redstone dust (vanilla-ish).
+        assert_eq!(ItemType::from_block(43), Some((ItemType::RedstoneDust, 1)));
     }
 
     #[test]
@@ -1670,6 +1758,12 @@ mod tests {
         assert_eq!(ItemType::DiamondOre.to_block(), Some(17));
         assert_eq!(ItemType::Bed.to_block(), Some(66));
         assert_eq!(ItemType::Bookshelf.to_block(), Some(103));
+        assert_eq!(ItemType::CobblestoneWall.to_block(), Some(114));
+        assert_eq!(ItemType::IronBars.to_block(), Some(115));
+        assert_eq!(ItemType::StoneBricks.to_block(), Some(116));
+        assert_eq!(ItemType::StoneBrickSlab.to_block(), Some(117));
+        assert_eq!(ItemType::StoneBrickStairs.to_block(), Some(118));
+        assert_eq!(ItemType::StoneBrickWall.to_block(), Some(119));
 
         // Non-placeable items
         assert_eq!(ItemType::RawPork.to_block(), None);
@@ -1684,6 +1778,30 @@ mod tests {
         assert_eq!(
             ItemType::from_placeable_block(103),
             Some(ItemType::Bookshelf)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(114),
+            Some(ItemType::CobblestoneWall)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(115),
+            Some(ItemType::IronBars)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(116),
+            Some(ItemType::StoneBricks)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(117),
+            Some(ItemType::StoneBrickSlab)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(118),
+            Some(ItemType::StoneBrickStairs)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(119),
+            Some(ItemType::StoneBrickWall)
         );
     }
 

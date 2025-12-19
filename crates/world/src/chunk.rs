@@ -132,6 +132,21 @@ pub const BLOCK_GLOWSTONE_DUST_ORE: BlockId = 112;
 /// ID for pufferfish ore (Overworld proxy block).
 pub const BLOCK_PUFFERFISH_ORE: BlockId = 113;
 
+/// ID for cobblestone wall.
+pub const BLOCK_COBBLESTONE_WALL: BlockId = 114;
+
+/// ID for stone bricks.
+pub const BLOCK_STONE_BRICKS: BlockId = 116;
+
+/// ID for double stone slab.
+pub const BLOCK_DOUBLE_STONE_SLAB: BlockId = 120;
+
+/// ID for double oak slab.
+pub const BLOCK_DOUBLE_OAK_SLAB: BlockId = 121;
+
+/// ID for double stone brick slab.
+pub const BLOCK_DOUBLE_STONE_BRICK_SLAB: BlockId = 122;
+
 /// ID for moss block.
 pub const BLOCK_MOSS_BLOCK: BlockId = 75;
 
