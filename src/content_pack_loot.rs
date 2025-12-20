@@ -174,8 +174,8 @@ fn apply_loot_file(
 
     let mut seen_mobs = BTreeSet::new();
     for def in &file.mobs {
-        let mob =
-            MobType::parse(&def.mob).ok_or_else(|| anyhow::anyhow!("Unknown mob '{}'", def.mob))?;
+        let mob = parse_pack_mob_type(&def.mob)
+            .ok_or_else(|| anyhow::anyhow!("Unknown mob '{}'", def.mob))?;
 
         if !seen_mobs.insert(mob) {
             anyhow::bail!(
@@ -215,7 +215,27 @@ fn parse_block_id(token: &str, blocks: &BlockRegistry) -> Result<BlockId> {
 
     blocks
         .id_by_name(token)
+        .or_else(|| {
+            token
+                .strip_prefix("minecraft:")
+                .filter(|rest| !rest.contains(':'))
+                .and_then(|rest| blocks.id_by_name(rest))
+        })
         .ok_or_else(|| anyhow::anyhow!("Unknown block '{}'", token))
+}
+
+fn parse_pack_mob_type(token: &str) -> Option<MobType> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+
+    MobType::parse(token).or_else(|| {
+        token
+            .strip_prefix("minecraft:")
+            .or_else(|| token.strip_prefix("mdm:"))
+            .and_then(MobType::parse)
+    })
 }
 
 fn parse_loot_table(defs: &[PackLootDropDefinition], blocks: &BlockRegistry) -> Result<LootTable> {
@@ -455,5 +475,24 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&packs_root);
+    }
+
+    #[test]
+    fn loot_parses_minecraft_namespaced_block_and_mob_keys() {
+        let blocks = test_block_registry();
+        let stone_id = blocks.id_by_name("stone").expect("stone id");
+
+        assert_eq!(
+            super::parse_block_id("minecraft:stone", &blocks).expect("minecraft block key"),
+            stone_id
+        );
+        assert_eq!(
+            super::parse_block_id("block:minecraft:stone", &blocks).expect("minecraft block: key"),
+            stone_id
+        );
+        assert_eq!(
+            super::parse_pack_mob_type("minecraft:zombie"),
+            Some(MobType::Zombie)
+        );
     }
 }

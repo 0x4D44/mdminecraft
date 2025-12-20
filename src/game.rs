@@ -58,35 +58,67 @@ const PRECIPITATION_RADIUS: f32 = 18.0;
 const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
+const WORLDGEN_CHEST_LOOT_SALT: u64 = 0x0043_4845_5354_4C4F_u64; // "CHESTLO"
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorldgenChestLootTable {
+    Generic,
+    Dungeon,
+    Mineshaft,
+    Ruin,
+    Village,
+}
+
+impl WorldgenChestLootTable {
+    fn from_structure_kind(kind: Option<mdminecraft_world::WorldgenStructureKind>) -> Self {
+        match kind {
+            Some(mdminecraft_world::WorldgenStructureKind::Village) => Self::Village,
+            Some(mdminecraft_world::WorldgenStructureKind::Dungeon) => Self::Dungeon,
+            Some(mdminecraft_world::WorldgenStructureKind::Mineshaft) => Self::Mineshaft,
+            Some(mdminecraft_world::WorldgenStructureKind::Ruin) => Self::Ruin,
+            None => Self::Generic,
+        }
+    }
+
+    const fn salt(self) -> u64 {
+        match self {
+            Self::Generic => 0x4745_4E45_5249_4300_u64, // "GENERIC\0"
+            Self::Dungeon => 0x4455_4E47_454F_4E00_u64, // "DUNGEON\0"
+            Self::Mineshaft => 0x4D49_4E45_5348_4654_u64, // "MINESHFT"
+            Self::Ruin => 0x5255_494E_0000_0000_u64,    // "RUIN"
+            Self::Village => 0x5649_4C4C_4147_4500_u64, // "VILLAGE\0"
+        }
+    }
+}
 
 // Core `ItemType::Item` IDs used by the client for non-legacy items.
 // These are intentionally kept separate from the world brewing ingredient IDs
 // (see `mdminecraft_core::item::item_ids`) to avoid collisions with legacy
 // saves and other in-game item IDs.
-const CORE_ITEM_GLASS_BOTTLE: u16 = 2000;
-const CORE_ITEM_WATER_BOTTLE: u16 = 2001;
-const CORE_ITEM_NETHER_WART: u16 = 2002;
-const CORE_ITEM_BLAZE_POWDER: u16 = 2003;
-const CORE_ITEM_GUNPOWDER: u16 = 2004;
-const CORE_ITEM_WHEAT_SEEDS: u16 = 2005;
-const CORE_ITEM_WHEAT: u16 = 2006;
-const CORE_ITEM_SPIDER_EYE: u16 = 2007;
-const CORE_ITEM_SUGAR: u16 = 2008;
-const CORE_ITEM_PAPER: u16 = 2009;
-const CORE_ITEM_BOOK: u16 = 2010;
-const CORE_ITEM_FERMENTED_SPIDER_EYE: u16 = 2011;
-const CORE_ITEM_MAGMA_CREAM: u16 = 2012;
-const CORE_ITEM_GHAST_TEAR: u16 = 2013;
-const CORE_ITEM_GLISTERING_MELON: u16 = 2014;
-const CORE_ITEM_RABBIT_FOOT: u16 = 2015;
-const CORE_ITEM_PHANTOM_MEMBRANE: u16 = 2016;
-const CORE_ITEM_REDSTONE_DUST: u16 = 2017;
-const CORE_ITEM_GLOWSTONE_DUST: u16 = 2018;
-const CORE_ITEM_PUFFERFISH: u16 = 2019;
-const CORE_ITEM_NETHER_QUARTZ: u16 = 2023;
-const CORE_ITEM_BUCKET: u16 = client_item_ids::BUCKET;
-const CORE_ITEM_WATER_BUCKET: u16 = client_item_ids::WATER_BUCKET;
-const CORE_ITEM_LAVA_BUCKET: u16 = client_item_ids::LAVA_BUCKET;
+pub(crate) const CORE_ITEM_GLASS_BOTTLE: u16 = 2000;
+pub(crate) const CORE_ITEM_WATER_BOTTLE: u16 = 2001;
+pub(crate) const CORE_ITEM_NETHER_WART: u16 = 2002;
+pub(crate) const CORE_ITEM_BLAZE_POWDER: u16 = 2003;
+pub(crate) const CORE_ITEM_GUNPOWDER: u16 = 2004;
+pub(crate) const CORE_ITEM_WHEAT_SEEDS: u16 = 2005;
+pub(crate) const CORE_ITEM_WHEAT: u16 = 2006;
+pub(crate) const CORE_ITEM_SPIDER_EYE: u16 = 2007;
+pub(crate) const CORE_ITEM_SUGAR: u16 = 2008;
+pub(crate) const CORE_ITEM_PAPER: u16 = 2009;
+pub(crate) const CORE_ITEM_BOOK: u16 = 2010;
+pub(crate) const CORE_ITEM_FERMENTED_SPIDER_EYE: u16 = 2011;
+pub(crate) const CORE_ITEM_MAGMA_CREAM: u16 = 2012;
+pub(crate) const CORE_ITEM_GHAST_TEAR: u16 = 2013;
+pub(crate) const CORE_ITEM_GLISTERING_MELON: u16 = 2014;
+pub(crate) const CORE_ITEM_RABBIT_FOOT: u16 = 2015;
+pub(crate) const CORE_ITEM_PHANTOM_MEMBRANE: u16 = 2016;
+pub(crate) const CORE_ITEM_REDSTONE_DUST: u16 = 2017;
+pub(crate) const CORE_ITEM_GLOWSTONE_DUST: u16 = 2018;
+pub(crate) const CORE_ITEM_PUFFERFISH: u16 = 2019;
+pub(crate) const CORE_ITEM_NETHER_QUARTZ: u16 = 2023;
+pub(crate) const CORE_ITEM_BUCKET: u16 = client_item_ids::BUCKET;
+pub(crate) const CORE_ITEM_WATER_BUCKET: u16 = client_item_ids::WATER_BUCKET;
+pub(crate) const CORE_ITEM_LAVA_BUCKET: u16 = client_item_ids::LAVA_BUCKET;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -4370,18 +4402,30 @@ impl GameWorld {
         // But for initial load we might want more.
         // For now, load all to ensure correctness, optimization later.
         for pos in chunks_to_load {
-            let chunk = if let Ok(loaded) = self.region_store.load_chunk(pos) {
-                loaded
+            let (chunk, chunk_was_generated) = if let Ok(loaded) = self.region_store.load_chunk(pos)
+            {
+                (loaded, false)
             } else {
-                self.terrain_generator.generate_chunk(pos)
+                (self.terrain_generator.generate_chunk(pos), true)
             };
 
             let mut crops_to_register = Vec::new();
             let mut sugar_cane_bases_to_register = Vec::new();
+            let mut worldgen_chests = std::collections::BTreeSet::<BlockEntityKey>::new();
             for y in 0..CHUNK_SIZE_Y {
                 for z in 0..CHUNK_SIZE_Z {
                     for x in 0..CHUNK_SIZE_X {
                         let voxel = chunk.voxel(x, y, z);
+                        if chunk_was_generated && voxel.id == interactive_blocks::CHEST {
+                            let world_x = pos.x * CHUNK_SIZE_X as i32 + x as i32;
+                            let world_z = pos.z * CHUNK_SIZE_Z as i32 + z as i32;
+                            worldgen_chests.insert(BlockEntityKey {
+                                dimension: DimensionId::Overworld,
+                                x: world_x,
+                                y: y as i32,
+                                z: world_z,
+                            });
+                        }
                         if !mdminecraft_world::CropType::is_crop(voxel.id) {
                             if voxel.id == mdminecraft_world::BLOCK_SUGAR_CANE {
                                 if y == 0 {
@@ -4411,6 +4455,11 @@ impl GameWorld {
             }
 
             self.chunks.insert(pos, chunk);
+            if chunk_was_generated {
+                for key in worldgen_chests {
+                    self.populate_worldgen_chest(key);
+                }
+            }
             self.refresh_container_signals_for_loaded_chunk(pos);
             for crop in crops_to_register {
                 self.crop_growth.register_crop(crop);
@@ -4476,18 +4525,30 @@ impl GameWorld {
             return;
         }
 
-        let chunk = if let Ok(loaded) = self.region_store.load_chunk(chunk_pos) {
-            loaded
-        } else {
-            self.terrain_generator.generate_chunk(chunk_pos)
-        };
+        let (chunk, chunk_was_generated) =
+            if let Ok(loaded) = self.region_store.load_chunk(chunk_pos) {
+                (loaded, false)
+            } else {
+                (self.terrain_generator.generate_chunk(chunk_pos), true)
+            };
 
         let mut crops_to_register = Vec::new();
         let mut sugar_cane_bases_to_register = Vec::new();
+        let mut worldgen_chests = std::collections::BTreeSet::<BlockEntityKey>::new();
         for y in 0..CHUNK_SIZE_Y {
             for z in 0..CHUNK_SIZE_Z {
                 for x in 0..CHUNK_SIZE_X {
                     let voxel = chunk.voxel(x, y, z);
+                    if chunk_was_generated && voxel.id == interactive_blocks::CHEST {
+                        let world_x = chunk_pos.x * CHUNK_SIZE_X as i32 + x as i32;
+                        let world_z = chunk_pos.z * CHUNK_SIZE_Z as i32 + z as i32;
+                        worldgen_chests.insert(BlockEntityKey {
+                            dimension: DimensionId::Overworld,
+                            x: world_x,
+                            y: y as i32,
+                            z: world_z,
+                        });
+                    }
                     if !mdminecraft_world::CropType::is_crop(voxel.id) {
                         if voxel.id == mdminecraft_world::BLOCK_SUGAR_CANE {
                             if y == 0 {
@@ -4517,6 +4578,11 @@ impl GameWorld {
         }
 
         self.chunks.insert(chunk_pos, chunk);
+        if chunk_was_generated {
+            for key in worldgen_chests {
+                self.populate_worldgen_chest(key);
+            }
+        }
         self.refresh_container_signals_for_loaded_chunk(chunk_pos);
         for crop in crops_to_register {
             self.crop_growth.register_crop(crop);
@@ -4604,6 +4670,148 @@ impl GameWorld {
                 RedstonePos::new(key.x, key.y, key.z),
                 &dropper.slots,
             );
+        }
+    }
+
+    fn populate_worldgen_chest(&mut self, key: BlockEntityKey) {
+        let chest = self.chests.entry(key).or_default();
+        Self::populate_worldgen_chest_loot(chest, self.world_seed, key);
+    }
+
+    fn populate_worldgen_chest_loot(chest: &mut ChestState, world_seed: u64, key: BlockEntityKey) {
+        if chest.slots.iter().any(|slot| slot.is_some()) {
+            return;
+        }
+
+        let structure_kind = if key.dimension == DimensionId::Overworld {
+            mdminecraft_world::worldgen_structure_kind_at(world_seed, key.x, key.y, key.z)
+        } else {
+            None
+        };
+        let loot_table = WorldgenChestLootTable::from_structure_kind(structure_kind);
+
+        let seed = world_seed
+            ^ (key.x as u64).wrapping_mul(0xB529_7A4D_8B9D_7B3D)
+            ^ (key.y as u64).wrapping_mul(0x68E3_1DA4_BB37_12C1)
+            ^ (key.z as u64).wrapping_mul(0x1D8E_4E27_C47D_124F)
+            ^ WORLDGEN_CHEST_LOOT_SALT
+            ^ loot_table.salt();
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let mut empty_slots: Vec<usize> = (0..chest.slots.len())
+            .filter(|idx| chest.slots[*idx].is_none())
+            .collect();
+
+        let roll_count = rng.gen_range(2..=5);
+        for _ in 0..roll_count {
+            if empty_slots.is_empty() {
+                break;
+            }
+
+            let idx = rng.gen_range(0..empty_slots.len());
+            let slot = empty_slots.swap_remove(idx);
+            chest.slots[slot] = Some(Self::roll_worldgen_chest_stack(&mut rng, loot_table));
+        }
+    }
+
+    fn roll_worldgen_chest_stack(
+        rng: &mut StdRng,
+        loot_table: WorldgenChestLootTable,
+    ) -> ItemStack {
+        let roll = rng.gen_range(0..100);
+        match loot_table {
+            WorldgenChestLootTable::Generic => match roll {
+                0..=6 => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
+                7..=18 => {
+                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
+                }
+                19..=30 => {
+                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=3))
+                }
+                31..=44 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
+                45..=56 => {
+                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
+                }
+                57..=67 => {
+                    ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1)
+                }
+                68..=78 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(1..=4)),
+                79..=90 => ItemStack::new(ItemType::Item(item_ids::BONE), rng.gen_range(1..=4)),
+                _ => ItemStack::new(ItemType::Item(item_ids::ENDER_PEARL), 1),
+            },
+            WorldgenChestLootTable::Dungeon => match roll {
+                0..=29 => ItemStack::new(ItemType::Item(item_ids::BONE), rng.gen_range(2..=6)),
+                30..=49 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(2..=6)),
+                50..=64 => {
+                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
+                }
+                65..=74 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
+                75..=82 => {
+                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
+                }
+                83..=88 => {
+                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=2))
+                }
+                89..=94 => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
+                95..=97 => ItemStack::new(ItemType::Item(item_ids::ENDER_PEARL), 1),
+                _ => ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1),
+            },
+            WorldgenChestLootTable::Mineshaft => match roll {
+                0..=29 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=8)),
+                30..=49 => {
+                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
+                }
+                50..=64 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(1..=4)),
+                65..=74 => {
+                    ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1)
+                }
+                75..=84 => {
+                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=2))
+                }
+                85..=92 => {
+                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
+                }
+                _ => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
+            },
+            WorldgenChestLootTable::Ruin => match roll {
+                0..=24 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
+                25..=39 => {
+                    ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1)
+                }
+                40..=54 => {
+                    ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT_SEEDS), rng.gen_range(2..=6))
+                }
+                55..=69 => {
+                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
+                }
+                70..=79 => {
+                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
+                }
+                80..=86 => {
+                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=2))
+                }
+                87..=93 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(1..=4)),
+                94..=98 => ItemStack::new(ItemType::Item(item_ids::BONE), rng.gen_range(1..=4)),
+                _ => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
+            },
+            WorldgenChestLootTable::Village => match roll {
+                0..=34 => ItemStack::new(
+                    ItemType::Food(mdminecraft_core::item::FoodType::Bread),
+                    rng.gen_range(1..=3),
+                ),
+                35..=59 => ItemStack::new(
+                    ItemType::Food(mdminecraft_core::item::FoodType::Apple),
+                    rng.gen_range(1..=3),
+                ),
+                60..=79 => {
+                    ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT_SEEDS), rng.gen_range(2..=6))
+                }
+                80..=91 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
+                92..=97 => {
+                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=2))
+                }
+                _ => ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), 1),
+            },
         }
     }
 
@@ -9297,6 +9505,61 @@ impl GameWorld {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn should_drop_support_removed_block(
+        removed_support: &[(IVec3, BlockId)],
+        removed_pos: IVec3,
+        removed_block_id: BlockId,
+    ) -> bool {
+        if mdminecraft_world::is_door_upper(removed_block_id) {
+            let lower_pos = IVec3::new(removed_pos.x, removed_pos.y - 1, removed_pos.z);
+            !removed_support.iter().any(|(other_pos, other_id)| {
+                *other_pos == lower_pos && mdminecraft_world::is_door_lower(*other_id)
+            })
+        } else {
+            removed_block_id != interactive_blocks::BED_HEAD
+        }
+    }
+
+    fn spawn_support_removed_block_drop(
+        &mut self,
+        removed_support: &[(IVec3, BlockId)],
+        removed_pos: IVec3,
+        removed_block_id: BlockId,
+    ) {
+        if !Self::should_drop_support_removed_block(removed_support, removed_pos, removed_block_id)
+        {
+            return;
+        }
+
+        let drop_x = removed_pos.x as f64 + 0.5;
+        let drop_y = removed_pos.y as f64 + 0.5;
+        let drop_z = removed_pos.z as f64 + 0.5;
+
+        if let Some(table) = self.loot_tables.block.get(&removed_block_id) {
+            let mut rng = {
+                let pos_seed = (removed_pos.x as u64)
+                    ^ ((removed_pos.y as u64).rotate_left(21))
+                    ^ ((removed_pos.z as u64).rotate_left(42));
+                let seed = self.world_seed
+                    ^ self.sim_tick.0.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ pos_seed.wrapping_mul(0xD6E8_FEB8_6659_FD93)
+                    ^ 0x10B1_0B15_EA4E_102E_u64;
+                StdRng::seed_from_u64(seed)
+            };
+
+            for (drop_type, count) in table.roll(&mut rng) {
+                self.item_manager
+                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+            }
+            return;
+        }
+
+        if let Some((drop_type, count)) = DroppedItemType::from_block(removed_block_id) {
+            self.item_manager
+                .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
         }
     }
 
@@ -14374,6 +14637,22 @@ fn parse_pack_item_type(token: &str, blocks: &BlockRegistry) -> Option<ItemType>
     mdminecraft_assets::parse_item_type_with_blocks(token, Some(blocks))
 }
 
+fn parse_pack_block_tag(token: &str, blocks: &BlockRegistry) -> Option<RegistryKey> {
+    let tag = RegistryKey::parse(token).ok()?;
+    if !blocks.blocks_with_tag(&tag).is_empty() {
+        return Some(tag);
+    }
+
+    if tag.namespace() == "minecraft" {
+        let alias = RegistryKey::parse(tag.path()).ok()?;
+        if !blocks.blocks_with_tag(&alias).is_empty() {
+            return Some(alias);
+        }
+    }
+
+    None
+}
+
 fn parse_pack_crafting_ingredient(
     token: &str,
     blocks: &BlockRegistry,
@@ -14384,26 +14663,17 @@ fn parse_pack_crafting_ingredient(
     }
 
     if let Some(rest) = token.strip_prefix('#') {
-        let tag = RegistryKey::parse(rest).ok()?;
-        if blocks.blocks_with_tag(&tag).is_empty() {
-            return None;
-        }
+        let tag = parse_pack_block_tag(rest, blocks)?;
         return Some(CraftingIngredient::BlockTag(tag));
     }
 
     if let Some(rest) = token.strip_prefix("tag:") {
-        let tag = RegistryKey::parse(rest).ok()?;
-        if blocks.blocks_with_tag(&tag).is_empty() {
-            return None;
-        }
+        let tag = parse_pack_block_tag(rest, blocks)?;
         return Some(CraftingIngredient::BlockTag(tag));
     }
 
     if let Some(rest) = token.strip_prefix("block_tag:") {
-        let tag = RegistryKey::parse(rest).ok()?;
-        if blocks.blocks_with_tag(&tag).is_empty() {
-            return None;
-        }
+        let tag = parse_pack_block_tag(rest, blocks)?;
         return Some(CraftingIngredient::BlockTag(tag));
     }
 
@@ -20031,7 +20301,7 @@ impl commands::CommandContext for GameWorld {
             &self.block_properties,
             changed_positions.iter().copied(),
         );
-        for (removed_pos, removed_block_id) in removed_support {
+        for &(removed_pos, removed_block_id) in &removed_support {
             if mdminecraft_world::CropType::is_crop(removed_block_id) {
                 let removed_chunk = ChunkPos::new(
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -20045,12 +20315,13 @@ impl commands::CommandContext for GameWorld {
                 });
             }
 
-            self.purge_block_entity_state(removed_pos, removed_block_id);
+            self.on_block_entity_removed(removed_pos, removed_block_id);
             self.fluid_sim.on_fluid_removed(
                 FluidPos::new(removed_pos.x, removed_pos.y, removed_pos.z),
                 &self.chunks,
             );
             self.schedule_redstone_updates_around(removed_pos);
+            self.spawn_support_removed_block_drop(&removed_support, removed_pos, removed_block_id);
             changed_positions.push(removed_pos);
         }
 
@@ -20357,7 +20628,7 @@ impl commands::CommandContext for GameWorld {
         let mut changed_positions = vec![pos];
         let removed_support =
             Self::remove_unsupported_blocks(&mut self.chunks, &self.block_properties, [pos]);
-        for (removed_pos, removed_block_id) in removed_support {
+        for &(removed_pos, removed_block_id) in &removed_support {
             if mdminecraft_world::CropType::is_crop(removed_block_id) {
                 let removed_chunk = ChunkPos::new(
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -20371,12 +20642,13 @@ impl commands::CommandContext for GameWorld {
                 });
             }
 
-            self.purge_block_entity_state(removed_pos, removed_block_id);
+            self.on_block_entity_removed(removed_pos, removed_block_id);
             self.fluid_sim.on_fluid_removed(
                 FluidPos::new(removed_pos.x, removed_pos.y, removed_pos.z),
                 &self.chunks,
             );
             self.schedule_redstone_updates_around(removed_pos);
+            self.spawn_support_removed_block_drop(&removed_support, removed_pos, removed_block_id);
             changed_positions.push(removed_pos);
         }
 
@@ -20499,7 +20771,7 @@ impl commands::CommandContext for GameWorld {
             &self.block_properties,
             changed_positions.iter().copied(),
         );
-        for (removed_pos, removed_block_id) in removed_support {
+        for &(removed_pos, removed_block_id) in &removed_support {
             if mdminecraft_world::CropType::is_crop(removed_block_id) {
                 let removed_chunk = ChunkPos::new(
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -20513,12 +20785,13 @@ impl commands::CommandContext for GameWorld {
                 });
             }
 
-            self.purge_block_entity_state(removed_pos, removed_block_id);
+            self.on_block_entity_removed(removed_pos, removed_block_id);
             self.fluid_sim.on_fluid_removed(
                 FluidPos::new(removed_pos.x, removed_pos.y, removed_pos.z),
                 &self.chunks,
             );
             self.schedule_redstone_updates_around(removed_pos);
+            self.spawn_support_removed_block_drop(&removed_support, removed_pos, removed_block_id);
             changed_positions.push(removed_pos);
         }
 
@@ -20629,6 +20902,34 @@ mod tests {
             &block_properties,
             &torch_aabb
         ));
+    }
+
+    #[test]
+    fn worldgen_chest_loot_is_deterministic_and_non_empty() {
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: mdminecraft_core::DimensionId::Overworld,
+            x: 10,
+            y: 30,
+            z: -5,
+        };
+
+        let mut chest_a = ChestState::new();
+        let mut chest_b = ChestState::new();
+
+        GameWorld::populate_worldgen_chest_loot(&mut chest_a, 12345, key);
+        GameWorld::populate_worldgen_chest_loot(&mut chest_b, 12345, key);
+
+        assert_eq!(chest_a.slots, chest_b.slots);
+        assert!(
+            chest_a.slots.iter().any(|slot| slot.is_some()),
+            "expected worldgen chest loot to fill at least one slot"
+        );
+
+        let mut chest_with_item = ChestState::new();
+        chest_with_item.slots[0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
+        let before = chest_with_item.slots.clone();
+        GameWorld::populate_worldgen_chest_loot(&mut chest_with_item, 12345, key);
+        assert_eq!(chest_with_item.slots, before);
     }
 
     #[test]
@@ -21085,6 +21386,56 @@ mod tests {
             mdminecraft_world::BLOCK_AIR,
             "Door upper should be cleared when its support is removed"
         );
+    }
+
+    #[test]
+    fn support_removed_drop_skips_door_upper_when_lower_removed() {
+        let removed_support = vec![
+            (
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
+            ),
+            (
+                glam::IVec3::new(0, 66, 0),
+                mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER,
+            ),
+        ];
+
+        assert!(GameWorld::should_drop_support_removed_block(
+            &removed_support,
+            glam::IVec3::new(0, 65, 0),
+            mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER
+        ));
+        assert!(!GameWorld::should_drop_support_removed_block(
+            &removed_support,
+            glam::IVec3::new(0, 66, 0),
+            mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER
+        ));
+    }
+
+    #[test]
+    fn support_removed_drop_skips_bed_head_when_both_halves_removed() {
+        let removed_support = vec![
+            (
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::interactive_blocks::BED_FOOT,
+            ),
+            (
+                glam::IVec3::new(1, 65, 0),
+                mdminecraft_world::interactive_blocks::BED_HEAD,
+            ),
+        ];
+
+        assert!(GameWorld::should_drop_support_removed_block(
+            &removed_support,
+            glam::IVec3::new(0, 65, 0),
+            mdminecraft_world::interactive_blocks::BED_FOOT
+        ));
+        assert!(!GameWorld::should_drop_support_removed_block(
+            &removed_support,
+            glam::IVec3::new(1, 65, 0),
+            mdminecraft_world::interactive_blocks::BED_HEAD
+        ));
     }
 
     #[test]
@@ -24226,6 +24577,60 @@ mod tests {
             Some(super::CraftingIngredient::BlockTag(tag))
         );
         assert!(super::parse_pack_crafting_ingredient("#test:missing", &blocks).is_none());
+    }
+
+    #[test]
+    fn pack_crafting_ingredient_accepts_minecraft_tag_alias() {
+        let blocks = mdminecraft_assets::BlockRegistry::new(vec![
+            mdminecraft_assets::BlockDescriptor::from_definition(
+                mdminecraft_assets::BlockDefinition {
+                    name: "test:plank".to_string(),
+                    key: None,
+                    tags: vec!["planks".to_string()],
+                    opaque: true,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                },
+            ),
+        ]);
+
+        let tag = mdminecraft_core::RegistryKey::parse("planks").expect("tag parses");
+        assert_eq!(
+            super::parse_pack_crafting_ingredient("#minecraft:planks", &blocks),
+            Some(super::CraftingIngredient::BlockTag(tag.clone()))
+        );
+        assert_eq!(
+            super::parse_pack_crafting_ingredient("tag:minecraft:planks", &blocks),
+            Some(super::CraftingIngredient::BlockTag(tag.clone()))
+        );
+        assert_eq!(
+            super::parse_pack_crafting_ingredient("block_tag:minecraft:planks", &blocks),
+            Some(super::CraftingIngredient::BlockTag(tag))
+        );
+    }
+
+    #[test]
+    fn pack_crafting_ingredient_prefers_explicit_minecraft_tag() {
+        let blocks = mdminecraft_assets::BlockRegistry::new(vec![
+            mdminecraft_assets::BlockDescriptor::from_definition(
+                mdminecraft_assets::BlockDefinition {
+                    name: "test:plank".to_string(),
+                    key: None,
+                    tags: vec!["minecraft:planks".to_string()],
+                    opaque: true,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                },
+            ),
+        ]);
+
+        let tag = mdminecraft_core::RegistryKey::parse("minecraft:planks").expect("tag parses");
+        assert_eq!(
+            super::parse_pack_crafting_ingredient("#minecraft:planks", &blocks),
+            Some(super::CraftingIngredient::BlockTag(tag))
+        );
     }
 
     #[test]

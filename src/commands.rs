@@ -1,7 +1,7 @@
 use std::fmt;
 
 use mdminecraft_assets::BlockRegistry;
-use mdminecraft_core::{item::FoodType, ItemType, RegistryKey};
+use mdminecraft_core::{item::FoodType, ItemType, RegistryKey, ToolMaterial, ToolType};
 use mdminecraft_world::{
     BrewingStandState, ChestState, DispenserState, EnchantingTableState, FurnaceState, HopperState,
     MobType, StatusEffectType, WeatherState,
@@ -774,9 +774,10 @@ pub fn parse_command(input: &str, blocks: &BlockRegistry) -> Result<GameCommand,
         .next()
         .ok_or_else(|| CommandError::new("Missing command"))?
         .to_ascii_lowercase();
+    let cmd = cmd.strip_prefix("minecraft:").unwrap_or(&cmd);
     let args: Vec<&str> = parts.collect();
 
-    match cmd.as_str() {
+    match cmd {
         "help" | "?" => Ok(GameCommand::Help),
         "seed" => {
             if !args.is_empty() {
@@ -793,8 +794,11 @@ pub fn parse_command(input: &str, blocks: &BlockRegistry) -> Result<GameCommand,
             })
         }
         "clear" => {
+            let args = strip_optional_self_target(&args)?;
             if args.len() > 2 {
-                return Err(CommandError::new("Usage: /clear [item] [maxCount]"));
+                return Err(CommandError::new(
+                    "Usage: /clear [@s/@p/@a/@r] [item] [maxCount]",
+                ));
             }
             let item = args
                 .first()
@@ -813,14 +817,20 @@ pub fn parse_command(input: &str, blocks: &BlockRegistry) -> Result<GameCommand,
             Ok(GameCommand::Clear { item, max_count })
         }
         "kill" => {
+            let args = strip_optional_self_target(&args)?;
             if !args.is_empty() {
-                return Err(CommandError::new("Usage: /kill"));
+                return Err(CommandError::new("Usage: /kill [@s/@p/@a/@r]"));
             }
             Ok(GameCommand::Kill)
         }
         "tp" | "teleport" => {
+            let args = if args.len() == 4 {
+                strip_optional_self_target(&args)?
+            } else {
+                &args
+            };
             if args.len() != 3 {
-                return Err(CommandError::new("Usage: /tp <x> <y> <z>"));
+                return Err(CommandError::new("Usage: /tp [@s/@p/@a/@r] <x> <y> <z>"));
             }
             Ok(GameCommand::Tp {
                 x: parse_coord(args[0])?,
@@ -829,8 +839,16 @@ pub fn parse_command(input: &str, blocks: &BlockRegistry) -> Result<GameCommand,
             })
         }
         "give" => {
+            if !(1..=3).contains(&args.len()) {
+                return Err(CommandError::new(
+                    "Usage: /give [@s/@p/@a/@r] <item> [count]",
+                ));
+            }
+            let args = strip_optional_self_target(&args)?;
             if !(1..=2).contains(&args.len()) {
-                return Err(CommandError::new("Usage: /give <item> [count]"));
+                return Err(CommandError::new(
+                    "Usage: /give [@s/@p/@a/@r] <item> [count]",
+                ));
             }
             let item = parse_item(args[0], blocks)?;
             let count = if args.len() == 2 {
@@ -902,6 +920,31 @@ fn parse_item(token: &str, blocks: &BlockRegistry) -> Result<ItemType, CommandEr
         return Err(CommandError::new("Missing item"));
     }
 
+    // Vanilla-ish: accept "minecraft:<name>" for blocks/foods that this build knows about.
+    if let Some(rest) = token.strip_prefix("minecraft:") {
+        if let Some(block_id) = blocks.id_by_name(rest) {
+            return Ok(ItemType::Block(block_id));
+        }
+        if let Some(food) = parse_food(rest) {
+            return Ok(food);
+        }
+        if let Some(item) = parse_vanilla_item(rest) {
+            return Ok(item);
+        }
+    }
+    // Vanilla-ish: accept "item:minecraft:<name>" as an alias for "minecraft:<name>" (when known).
+    if let Some(rest) = token.strip_prefix("item:minecraft:") {
+        if let Some(item) = parse_vanilla_item(rest) {
+            return Ok(item);
+        }
+    }
+    // Vanilla-ish: accept "block:minecraft:<name>" as an alias for "block:<name>".
+    if let Some(rest) = token.strip_prefix("block:minecraft:") {
+        if let Some(block_id) = blocks.id_by_name(rest) {
+            return Ok(ItemType::Block(block_id));
+        }
+    }
+
     // Convenience: treat a bare token as a block key if possible.
     if !token.contains(':') {
         if let Some(block_id) = blocks.id_by_name(token) {
@@ -950,6 +993,115 @@ fn parse_food(token: &str) -> Option<ItemType> {
     Some(ItemType::Food(food))
 }
 
+fn parse_vanilla_item(token: &str) -> Option<ItemType> {
+    let token = token.trim().to_ascii_lowercase();
+    let token = token.as_str();
+
+    let legacy_item_id = match token {
+        "bow" => Some(1),
+        "arrow" => Some(2),
+        "stick" => Some(3),
+        "string" => Some(4),
+        "flint" => Some(5),
+        "feather" => Some(6),
+        "iron_ingot" => Some(7),
+        "coal" => Some(8),
+        "gold_ingot" => Some(9),
+        "iron_helmet" => Some(10),
+        "iron_chestplate" => Some(11),
+        "iron_leggings" => Some(12),
+        "iron_boots" => Some(13),
+        "diamond" => Some(14),
+        "lapis_lazuli" | "lapis" => Some(15),
+        "leather_helmet" => Some(20),
+        "leather_chestplate" => Some(21),
+        "leather_leggings" => Some(22),
+        "leather_boots" => Some(23),
+        "diamond_helmet" => Some(30),
+        "diamond_chestplate" => Some(31),
+        "diamond_leggings" => Some(32),
+        "diamond_boots" => Some(33),
+        "leather" => Some(102),
+        "wool" => Some(103),
+        "egg" => Some(104),
+        "sapling" | "oak_sapling" => Some(105),
+        _ => None,
+    };
+    if let Some(id) = legacy_item_id {
+        return Some(ItemType::Item(id));
+    }
+
+    let core_item_id = match token {
+        "glass_bottle" => Some(crate::game::CORE_ITEM_GLASS_BOTTLE),
+        "water_bottle" => Some(crate::game::CORE_ITEM_WATER_BOTTLE),
+        "nether_wart" => Some(crate::game::CORE_ITEM_NETHER_WART),
+        "blaze_powder" => Some(crate::game::CORE_ITEM_BLAZE_POWDER),
+        "gunpowder" => Some(crate::game::CORE_ITEM_GUNPOWDER),
+        "wheat_seeds" => Some(crate::game::CORE_ITEM_WHEAT_SEEDS),
+        "wheat" => Some(crate::game::CORE_ITEM_WHEAT),
+        "spider_eye" => Some(crate::game::CORE_ITEM_SPIDER_EYE),
+        "fermented_spider_eye" => Some(crate::game::CORE_ITEM_FERMENTED_SPIDER_EYE),
+        "magma_cream" => Some(crate::game::CORE_ITEM_MAGMA_CREAM),
+        "ghast_tear" => Some(crate::game::CORE_ITEM_GHAST_TEAR),
+        "glistering_melon" | "glistering_melon_slice" => {
+            Some(crate::game::CORE_ITEM_GLISTERING_MELON)
+        }
+        "rabbit_foot" => Some(crate::game::CORE_ITEM_RABBIT_FOOT),
+        "phantom_membrane" => Some(crate::game::CORE_ITEM_PHANTOM_MEMBRANE),
+        "redstone" | "redstone_dust" => Some(crate::game::CORE_ITEM_REDSTONE_DUST),
+        "glowstone_dust" => Some(crate::game::CORE_ITEM_GLOWSTONE_DUST),
+        "pufferfish" => Some(crate::game::CORE_ITEM_PUFFERFISH),
+        "nether_quartz" | "quartz" => Some(crate::game::CORE_ITEM_NETHER_QUARTZ),
+        "bucket" => Some(crate::game::CORE_ITEM_BUCKET),
+        "water_bucket" => Some(crate::game::CORE_ITEM_WATER_BUCKET),
+        "lava_bucket" => Some(crate::game::CORE_ITEM_LAVA_BUCKET),
+        "sugar" => Some(crate::game::CORE_ITEM_SUGAR),
+        "paper" => Some(crate::game::CORE_ITEM_PAPER),
+        "book" => Some(crate::game::CORE_ITEM_BOOK),
+        _ => None,
+    };
+    if let Some(id) = core_item_id {
+        return Some(ItemType::Item(id));
+    }
+
+    match token {
+        "wood_pickaxe" | "wooden_pickaxe" => {
+            Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Wood))
+        }
+        "stone_pickaxe" => Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Stone)),
+        "iron_pickaxe" => Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Iron)),
+        "diamond_pickaxe" => Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond)),
+        "gold_pickaxe" | "golden_pickaxe" => {
+            Some(ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Gold))
+        }
+        "wood_axe" | "wooden_axe" => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Wood)),
+        "stone_axe" => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Stone)),
+        "iron_axe" => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Iron)),
+        "diamond_axe" => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Diamond)),
+        "gold_axe" | "golden_axe" => Some(ItemType::Tool(ToolType::Axe, ToolMaterial::Gold)),
+        "wood_shovel" | "wooden_shovel" => {
+            Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Wood))
+        }
+        "stone_shovel" => Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Stone)),
+        "iron_shovel" => Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Iron)),
+        "diamond_shovel" => Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Diamond)),
+        "gold_shovel" | "golden_shovel" => {
+            Some(ItemType::Tool(ToolType::Shovel, ToolMaterial::Gold))
+        }
+        "wood_sword" | "wooden_sword" => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Wood)),
+        "stone_sword" => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Stone)),
+        "iron_sword" => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Iron)),
+        "diamond_sword" => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Diamond)),
+        "gold_sword" | "golden_sword" => Some(ItemType::Tool(ToolType::Sword, ToolMaterial::Gold)),
+        "wood_hoe" | "wooden_hoe" => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Wood)),
+        "stone_hoe" => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Stone)),
+        "iron_hoe" => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Iron)),
+        "diamond_hoe" => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Diamond)),
+        "gold_hoe" | "golden_hoe" => Some(ItemType::Tool(ToolType::Hoe, ToolMaterial::Gold)),
+        _ => None,
+    }
+}
+
 fn parse_time_command(args: &[&str]) -> Result<GameCommand, CommandError> {
     if args.len() != 2 {
         return Err(CommandError::new("Usage: /time <set|add> <value>"));
@@ -993,14 +1145,29 @@ fn parse_weather_command(args: &[&str]) -> Result<GameCommand, CommandError> {
 }
 
 fn parse_gamemode_command(args: &[&str]) -> Result<GameCommand, CommandError> {
-    if args.len() != 1 {
-        return Err(CommandError::new("Usage: /gamemode <survival|creative>"));
+    if !(1..=2).contains(&args.len()) {
+        return Err(CommandError::new(
+            "Usage: /gamemode <survival|creative> [@s/@p/@a/@r]",
+        ));
+    }
+
+    if args.len() == 2 {
+        let rest = strip_optional_self_target(&args[1..])?;
+        if !rest.is_empty() {
+            return Err(CommandError::new(
+                "Only @s/@p/@a/@r targets are supported in this build",
+            ));
+        }
     }
     let value = args[0].to_ascii_lowercase();
     let mode = match value.as_str() {
         "0" | "survival" | "s" => Gamemode::Survival,
         "1" | "creative" | "c" => Gamemode::Creative,
-        _ => return Err(CommandError::new("Usage: /gamemode <survival|creative>")),
+        _ => {
+            return Err(CommandError::new(
+                "Usage: /gamemode <survival|creative> [@s/@p/@a/@r]",
+            ))
+        }
     };
     Ok(GameCommand::Gamemode { mode })
 }
@@ -1008,29 +1175,36 @@ fn parse_gamemode_command(args: &[&str]) -> Result<GameCommand, CommandError> {
 fn parse_effect_command(args: &[&str]) -> Result<GameCommand, CommandError> {
     if args.is_empty() {
         return Err(CommandError::new(
-            "Usage: /effect <give|clear> <effect> [seconds] [amplifier]",
+            "Usage: /effect <give|clear> [@s/@p/@a/@r] <effect> [seconds] [amplifier]",
         ));
     }
 
     let sub = args[0].to_ascii_lowercase();
     match sub.as_str() {
         "give" => {
-            if !(2..=4).contains(&args.len()) {
+            if !(2..=5).contains(&args.len()) {
                 return Err(CommandError::new(
-                    "Usage: /effect give <effect> [seconds] [amplifier]",
+                    "Usage: /effect give [@s/@p/@a/@r] <effect> [seconds] [amplifier]",
                 ));
             }
 
-            let effect = parse_status_effect_type(args[1])?;
-            let seconds = if args.len() >= 3 {
-                args[2]
+            let args = strip_optional_self_target(&args[1..])?;
+            if !(1..=3).contains(&args.len()) {
+                return Err(CommandError::new(
+                    "Usage: /effect give [@s/@p/@a/@r] <effect> [seconds] [amplifier]",
+                ));
+            }
+
+            let effect = parse_status_effect_type(args[0])?;
+            let seconds = if args.len() >= 2 {
+                args[1]
                     .parse::<u32>()
                     .map_err(|_| CommandError::new("Invalid effect duration (expected seconds)"))?
             } else {
                 30
             };
-            let amplifier = if args.len() >= 4 {
-                args[3]
+            let amplifier = if args.len() >= 3 {
+                args[2]
                     .parse::<u8>()
                     .map_err(|_| CommandError::new("Invalid effect amplifier (expected u8)"))?
             } else {
@@ -1043,17 +1217,51 @@ fn parse_effect_command(args: &[&str]) -> Result<GameCommand, CommandError> {
                 amplifier,
             })
         }
-        "clear" => match args.len() {
-            1 => Ok(GameCommand::EffectClear { effect: None }),
-            2 => Ok(GameCommand::EffectClear {
-                effect: Some(parse_status_effect_type(args[1])?),
-            }),
-            _ => Err(CommandError::new("Usage: /effect clear [effect]")),
-        },
+        "clear" => {
+            let args = strip_optional_self_target(&args[1..])?;
+            match args.len() {
+                0 => Ok(GameCommand::EffectClear { effect: None }),
+                1 => Ok(GameCommand::EffectClear {
+                    effect: Some(parse_status_effect_type(args[0])?),
+                }),
+                _ => Err(CommandError::new(
+                    "Usage: /effect clear [@s/@p/@a/@r] [effect]",
+                )),
+            }
+        }
         _ => Err(CommandError::new(
-            "Usage: /effect <give|clear> <effect> [seconds] [amplifier]",
+            "Usage: /effect <give|clear> [@s/@p/@a/@r] <effect> [seconds] [amplifier]",
         )),
     }
+}
+
+fn strip_optional_self_target<'a>(args: &'a [&'a str]) -> Result<&'a [&'a str], CommandError> {
+    let Some(first) = args.first() else {
+        return Ok(args);
+    };
+    let token = first.trim();
+    if token.is_empty() {
+        return Ok(args);
+    }
+
+    let token_lc = token.to_ascii_lowercase();
+    let token_lc = token_lc.as_str();
+    let supported = matches!(token_lc, "@s" | "@p" | "@a" | "@r" | "player")
+        || matches!(
+            token_lc,
+            s if (s.starts_with("@s[") || s.starts_with("@p[") || s.starts_with("@a[") || s.starts_with("@r["))
+                && s.ends_with(']')
+        );
+
+    if supported {
+        return Ok(&args[1..]);
+    }
+    if token.starts_with('@') {
+        return Err(CommandError::new(
+            "Only @s/@p/@a/@r are supported in this build",
+        ));
+    }
+    Ok(args)
 }
 
 fn parse_setblock_command(
@@ -1215,6 +1423,7 @@ fn parse_block_and_state(
     let block_id = if let Ok(id) = base.parse::<u16>() {
         id
     } else {
+        let base = base.strip_prefix("minecraft:").unwrap_or(base);
         blocks
             .id_by_name(base)
             .ok_or_else(|| CommandError::new("Unknown block name"))?
@@ -1499,7 +1708,9 @@ fn parse_summon_command(args: &[&str]) -> Result<GameCommand, CommandError> {
 }
 
 fn parse_mob(token: &str) -> Result<MobType, CommandError> {
-    let mob = match token.trim().to_ascii_lowercase().as_str() {
+    let token = token.trim().to_ascii_lowercase();
+    let token = token.strip_prefix("minecraft:").unwrap_or(&token);
+    let mob = match token {
         "pig" => MobType::Pig,
         "cow" => MobType::Cow,
         "sheep" => MobType::Sheep,
@@ -1547,6 +1758,7 @@ fn parse_fill_filter(
     let block_id = if let Ok(id) = base.parse::<u16>() {
         id
     } else {
+        let base = base.strip_prefix("minecraft:").unwrap_or(base);
         blocks
             .id_by_name(base)
             .ok_or_else(|| CommandError::new("Unknown block name"))?
@@ -1597,11 +1809,19 @@ fn parse_status_effect_type(token: &str) -> Result<StatusEffectType, CommandErro
         "water_breathing" | "waterbreathing" => StatusEffectType::WaterBreathing,
         "invisibility" => StatusEffectType::Invisibility,
         "night_vision" | "nightvision" => StatusEffectType::NightVision,
+        "absorption" => StatusEffectType::Absorption,
+        "saturation" => StatusEffectType::Saturation,
         "slow_falling" | "slowfalling" => StatusEffectType::SlowFalling,
+        "luck" => StatusEffectType::Luck,
         "slowness" => StatusEffectType::Slowness,
         "mining_fatigue" | "miningfatigue" => StatusEffectType::MiningFatigue,
+        "nausea" | "confusion" => StatusEffectType::Nausea,
+        "blindness" => StatusEffectType::Blindness,
+        "hunger" => StatusEffectType::Hunger,
         "weakness" => StatusEffectType::Weakness,
         "poison" => StatusEffectType::Poison,
+        "wither" => StatusEffectType::Wither,
+        "bad_luck" | "badluck" | "unluck" => StatusEffectType::BadLuck,
         "instant_health" | "instanthealth" | "health" => StatusEffectType::InstantHealth,
         "instant_damage" | "instantdamage" | "harm" => StatusEffectType::InstantDamage,
         _ => return Err(CommandError::new("Unknown effect type")),
@@ -1616,17 +1836,17 @@ fn help_lines() -> Vec<String> {
         "  /help".to_string(),
         "  /seed".to_string(),
         "  /say <message...>".to_string(),
-        "  /clear [item] [maxCount]".to_string(),
-        "  /kill".to_string(),
-        "  /tp <x> <y> <z>            (supports ~offset)".to_string(),
-        "  /give <item> [count]        item = block:<name> | item:<id> | tool:<type>:<material>"
+        "  /clear [@s/@p/@a/@r] [item] [maxCount]".to_string(),
+        "  /kill [@s/@p/@a/@r]".to_string(),
+        "  /tp [@s/@p/@a/@r] <x> <y> <z>  (supports ~offset)".to_string(),
+        "  /give [@s/@p/@a/@r] <item> [count]  item = minecraft:<name> | block:<name> | item:<id> | tool:<type>:<material>"
             .to_string(),
         "  /time set <tick|day|noon|night|midnight>".to_string(),
         "  /time add <delta>".to_string(),
         "  /weather <clear|rain>".to_string(),
-        "  /gamemode <survival|creative>".to_string(),
-        "  /effect give <effect> [seconds] [amplifier]".to_string(),
-        "  /effect clear [effect]".to_string(),
+        "  /gamemode <survival|creative> [@s/@p/@a/@r]".to_string(),
+        "  /effect give [@s/@p/@a/@r] <effect> [seconds] [amplifier]".to_string(),
+        "  /effect clear [@s/@p/@a/@r] [effect]".to_string(),
         "  /setblock <x> <y> <z> <block|id>[props] [state] [replace|keep|destroy]   (supports ~offset; coords are ints)"
             .to_string(),
         "  /fill <x1> <y1> <z1> <x2> <y2> <z2> <block|id>[props] [state] [replace|outline|hollow|keep|destroy] [filter]"
@@ -1835,6 +2055,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_tp_with_selector_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/tp @p ~1 64 ~-2", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Tp {
+                x: CoordArg::Relative(1.0),
+                y: CoordArg::Absolute(64.0),
+                z: CoordArg::Relative(-2.0),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_minecraft_namespaced_tp() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/minecraft:tp ~1 64 ~-2", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Tp {
+                x: CoordArg::Relative(1.0),
+                y: CoordArg::Absolute(64.0),
+                z: CoordArg::Relative(-2.0),
+            }
+        );
+    }
+
+    #[test]
     fn executes_tp_with_relative_coords() {
         let mut ctx = FakeCtx {
             pos: (10.0, 60.0, 10.0),
@@ -1861,6 +2109,149 @@ mod tests {
             GameCommand::Give {
                 item: ItemType::Block(1),
                 count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_minecraft_namespaced_give() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/minecraft:give minecraft:stick 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(3),
+                count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_gamemode_with_selector_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/gamemode creative @p", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Gamemode {
+                mode: Gamemode::Creative
+            }
+        );
+    }
+
+    #[test]
+    fn gamemode_rejects_non_self_target() {
+        let blocks = test_blocks();
+        let err = parse_command("/gamemode creative Steve", &blocks).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Only @s/@p/@a/@r targets are supported in this build"
+        );
+    }
+
+    #[test]
+    fn parses_give_block_by_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give minecraft:stone 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Block(1),
+                count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_item_by_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give minecraft:stick 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(3),
+                count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_with_selector_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give @p minecraft:stick 2", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(3),
+                count: 2
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_item_by_item_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give item:minecraft:stick 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(3),
+                count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_core_item_by_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give minecraft:sugar 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(crate::game::CORE_ITEM_SUGAR),
+                count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_tool_by_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give minecraft:diamond_pickaxe 1", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Tool(ToolType::Pickaxe, ToolMaterial::Diamond),
+                count: 1
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_block_by_block_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/give block:minecraft:stone 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Block(1),
+                count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_setblock_with_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/setblock 10 64 10 minecraft:stone", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Setblock {
+                x: BlockCoordArg::Absolute(10),
+                y: BlockCoordArg::Absolute(64),
+                z: BlockCoordArg::Absolute(10),
+                block_id: 1,
+                state: 0,
+                mode: SetblockMode::Replace,
             }
         );
     }
@@ -2115,6 +2506,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_fill_replace_filter_with_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/fill 0 0 0 1 0 1 dirt replace minecraft:stone", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Fill {
+                x1: BlockCoordArg::Absolute(0),
+                y1: BlockCoordArg::Absolute(0),
+                z1: BlockCoordArg::Absolute(0),
+                x2: BlockCoordArg::Absolute(1),
+                y2: BlockCoordArg::Absolute(0),
+                z2: BlockCoordArg::Absolute(1),
+                block_id: 2,
+                state: 0,
+                mode: FillMode::Replace,
+                filter: Some(BlockFilter {
+                    block_id: 1,
+                    state: None,
+                }),
+            }
+        );
+    }
+
+    #[test]
     fn executes_fill_destroy_calls_destroy_hook_and_sets_blocks() {
         let blocks = test_blocks();
         let cmd = parse_command("/fill ~0 ~0 ~0 ~1 ~0 ~1 stone destroy", &blocks).unwrap();
@@ -2300,6 +2715,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_summon_with_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/summon minecraft:cow", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Summon {
+                mob: MobType::Cow,
+                x: CoordArg::Relative(0.0),
+                y: CoordArg::Relative(0.0),
+                z: CoordArg::Relative(0.0),
+            }
+        );
+    }
+
+    #[test]
     fn parses_effect_give_with_defaults() {
         let blocks = test_blocks();
         let cmd = parse_command("/effect give speed", &blocks).unwrap();
@@ -2311,6 +2741,67 @@ mod tests {
                 amplifier: 0,
             }
         );
+    }
+
+    #[test]
+    fn parses_effect_give_with_self_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/effect give @s speed 5 1", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::EffectGive {
+                effect: StatusEffectType::Speed,
+                seconds: 5,
+                amplifier: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_effect_give_absorption() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/effect give absorption", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::EffectGive {
+                effect: StatusEffectType::Absorption,
+                seconds: 30,
+                amplifier: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_effect_give_bad_luck_by_minecraft_namespace() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/effect give minecraft:unluck 5 0", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::EffectGive {
+                effect: StatusEffectType::BadLuck,
+                seconds: 5,
+                amplifier: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_effect_clear_with_self_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/effect clear @s speed", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::EffectClear {
+                effect: Some(StatusEffectType::Speed),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_effect_clear_all_with_self_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/effect clear @s", &blocks).unwrap();
+        assert_eq!(cmd, GameCommand::EffectClear { effect: None });
     }
 
     #[test]
@@ -2484,6 +2975,45 @@ mod tests {
     }
 
     #[test]
+    fn executes_clear_accepts_self_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/clear @s stone 3", &blocks).unwrap();
+        let mut ctx = FakeCtx {
+            inventory: vec![ItemStack::new(ItemType::Block(1), 5)],
+            ..Default::default()
+        };
+        let out = execute_command(&mut ctx, cmd);
+        assert_eq!(out.lines, vec!["Cleared 3 items".to_string()]);
+        assert_eq!(ctx.inventory, vec![ItemStack::new(ItemType::Block(1), 2)]);
+    }
+
+    #[test]
+    fn executes_clear_accepts_player_selector() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/clear @p stone 3", &blocks).unwrap();
+        let mut ctx = FakeCtx {
+            inventory: vec![ItemStack::new(ItemType::Block(1), 5)],
+            ..Default::default()
+        };
+        let out = execute_command(&mut ctx, cmd);
+        assert_eq!(out.lines, vec!["Cleared 3 items".to_string()]);
+        assert_eq!(ctx.inventory, vec![ItemStack::new(ItemType::Block(1), 2)]);
+    }
+
+    #[test]
+    fn executes_clear_accepts_selector_with_args() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/clear @s[limit=1] stone 3", &blocks).unwrap();
+        let mut ctx = FakeCtx {
+            inventory: vec![ItemStack::new(ItemType::Block(1), 5)],
+            ..Default::default()
+        };
+        let out = execute_command(&mut ctx, cmd);
+        assert_eq!(out.lines, vec!["Cleared 3 items".to_string()]);
+        assert_eq!(ctx.inventory, vec![ItemStack::new(ItemType::Block(1), 2)]);
+    }
+
+    #[test]
     fn executes_clear_query_does_not_remove_items() {
         let blocks = test_blocks();
         let cmd = parse_command("/clear stone 0", &blocks).unwrap();
@@ -2513,5 +3043,35 @@ mod tests {
         let out = execute_command(&mut ctx, cmd);
         assert_eq!(out.lines, vec!["Killed player".to_string()]);
         assert!(ctx.killed);
+    }
+
+    #[test]
+    fn executes_kill_accepts_self_target() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/kill @s", &blocks).unwrap();
+        let mut ctx = FakeCtx::default();
+        let out = execute_command(&mut ctx, cmd);
+        assert_eq!(out.lines, vec!["Killed player".to_string()]);
+        assert!(ctx.killed);
+    }
+
+    #[test]
+    fn executes_kill_accepts_player_selector() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/kill @p", &blocks).unwrap();
+        let mut ctx = FakeCtx::default();
+        let out = execute_command(&mut ctx, cmd);
+        assert_eq!(out.lines, vec!["Killed player".to_string()]);
+        assert!(ctx.killed);
+    }
+
+    #[test]
+    fn kill_rejects_unsupported_selectors() {
+        let blocks = test_blocks();
+        let err = parse_command("/kill @e", &blocks).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Only @s/@p/@a/@r are supported in this build"
+        );
     }
 }

@@ -5,10 +5,14 @@
 use crate::aquifer::AquiferGenerator;
 use crate::biome::{BiomeAssigner, BiomeData, BiomeId};
 use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::dungeon::DungeonGenerator;
 use crate::geode::GeodeGenerator;
 use crate::heightmap::Heightmap;
+use crate::mineshaft::MineshaftGenerator;
 use crate::noise::{NoiseConfig, NoiseGenerator};
+use crate::ruin::RuinGenerator;
 use crate::trees::{generate_tree_positions, Tree, TreeType};
+use crate::village::VillageGenerator;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use tracing::{debug, instrument};
@@ -66,6 +70,10 @@ pub struct TerrainGenerator {
     cave_noise: NoiseGenerator,
     aquifer_gen: AquiferGenerator,
     geode_gen: GeodeGenerator,
+    dungeon_gen: DungeonGenerator,
+    ruin_gen: RuinGenerator,
+    mineshaft_gen: MineshaftGenerator,
+    village_gen: VillageGenerator,
 }
 
 impl TerrainGenerator {
@@ -94,6 +102,10 @@ impl TerrainGenerator {
             cave_noise: NoiseGenerator::new(cave_config),
             aquifer_gen: AquiferGenerator::new(world_seed),
             geode_gen: GeodeGenerator::new(world_seed),
+            dungeon_gen: DungeonGenerator::new(world_seed),
+            ruin_gen: RuinGenerator::new(world_seed),
+            mineshaft_gen: MineshaftGenerator::new(world_seed),
+            village_gen: VillageGenerator::new(world_seed),
         }
     }
 
@@ -227,6 +239,12 @@ impl TerrainGenerator {
             .fill_aquifers(&mut chunk, chunk_pos.x, chunk_pos.z);
         self.geode_gen
             .try_generate_geode(&mut chunk, chunk_pos.x, chunk_pos.z);
+        self.dungeon_gen.try_generate_dungeon(&mut chunk);
+        self.ruin_gen
+            .try_generate_ruin(&mut chunk, &self.biome_assigner);
+        self.mineshaft_gen.try_generate_mineshaft(&mut chunk);
+        self.village_gen
+            .try_generate_village(&mut chunk, &self.biome_assigner);
 
         // Population pass: Add trees
         self.populate_trees(&mut chunk, chunk_origin_x, chunk_origin_z);
@@ -289,6 +307,19 @@ impl TerrainGenerator {
             // Check if surface is suitable for trees (grass or dirt)
             let surface_block = chunk.voxel(local_x, surface_height, local_z);
             if surface_block.id == blocks::GRASS || surface_block.id == blocks::DIRT {
+                // Don't place vegetation inside surface structure bounds (e.g. villages/ruins).
+                if crate::structures::worldgen_structure_kind_at_with_biome_assigner(
+                    self.world_seed,
+                    world_x,
+                    world_y,
+                    world_z,
+                    &self.biome_assigner,
+                )
+                .is_some()
+                {
+                    continue;
+                }
+
                 // Create and place tree
                 let tree = Tree::new(world_x, world_y, world_z, tree_type);
                 tree.generate_into_chunk(chunk);
@@ -299,6 +330,8 @@ impl TerrainGenerator {
     /// Populate chunk with sugar cane near water.
     fn populate_sugar_cane(&self, chunk: &mut Chunk) {
         let chunk_pos = chunk.position();
+        let chunk_origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+        let chunk_origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
 
         // Deterministic per-chunk RNG (independent of generation order).
         let seed = self.world_seed
@@ -352,6 +385,23 @@ impl TerrainGenerator {
             };
 
             let base_y = ground_y + 1;
+            let world_x = chunk_origin_x + local_x as i32;
+            let world_z = chunk_origin_z + local_z as i32;
+            let world_y = base_y as i32;
+
+            // Don't spawn sugar cane inside surface structures.
+            if crate::structures::worldgen_structure_kind_at_with_biome_assigner(
+                self.world_seed,
+                world_x,
+                world_y,
+                world_z,
+                &self.biome_assigner,
+            )
+            .is_some()
+            {
+                continue;
+            }
+
             let target_height = rng.gen_range(1..=3);
             for dy in 0..target_height {
                 let y = base_y + dy;
@@ -769,6 +819,137 @@ mod tests {
             surface_count > 0,
             "Should have at least some surface blocks (found {})",
             surface_count
+        );
+    }
+
+    #[test]
+    fn test_dungeon_generation_places_structure_blocks_for_known_seed() {
+        let seed = 0x44_55_4E_47_45_4F_4E_u64; // "DUNGEON"
+        let bounds =
+            crate::dungeon::dungeon_bounds_for_region(seed, 0, 0).expect("missing dungeon");
+        let chunk_pos = ChunkPos::new(
+            bounds.min_x.div_euclid(CHUNK_SIZE_X as i32),
+            bounds.min_z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+
+        let gen = TerrainGenerator::new(seed);
+        let chunk = gen.generate_chunk(chunk_pos);
+
+        let mut found_structure_block = false;
+        'outer: for y in 0..CHUNK_SIZE_Y {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    let id = chunk.voxel(x, y, z).id;
+                    if id == crate::BLOCK_COBBLESTONE
+                        || id == crate::BLOCK_MOSS_BLOCK
+                        || id == crate::interaction::interactive_blocks::CHEST
+                    {
+                        found_structure_block = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found_structure_block,
+            "Expected at least one dungeon structure block in chunk"
+        );
+    }
+
+    #[test]
+    fn test_ruin_generation_places_stone_bricks_for_known_seed() {
+        let seed = 0x52_55_49_4E_u64; // "RUIN"
+        let biome_assigner = BiomeAssigner::new(seed);
+        let bounds =
+            crate::ruin::ruin_bounds_for_region(seed, 0, 0, &biome_assigner).expect("missing ruin");
+        let chunk_pos = ChunkPos::new(
+            bounds.min_x.div_euclid(CHUNK_SIZE_X as i32),
+            bounds.min_z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+
+        let gen = TerrainGenerator::new(seed);
+        let chunk = gen.generate_chunk(chunk_pos);
+
+        let mut found_stone_bricks = false;
+        'outer: for y in 0..CHUNK_SIZE_Y {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    if chunk.voxel(x, y, z).id == crate::BLOCK_STONE_BRICKS {
+                        found_stone_bricks = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found_stone_bricks,
+            "Expected at least one stone bricks block from a ruin in chunk"
+        );
+    }
+
+    #[test]
+    fn test_mineshaft_generation_places_oak_planks_for_known_seed() {
+        let seed = 0x4D_49_4E_45_u64; // "MINE"
+        let bounds =
+            crate::mineshaft::mineshaft_bounds_for_region(seed, 0, 0).expect("missing mineshaft");
+        let chunk_pos = ChunkPos::new(
+            bounds.min_x.div_euclid(CHUNK_SIZE_X as i32),
+            bounds.min_z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+
+        let gen = TerrainGenerator::new(seed);
+        let chunk = gen.generate_chunk(chunk_pos);
+
+        let mut found_oak_planks = false;
+        'outer: for y in 0..64 {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    if chunk.voxel(x, y, z).id == crate::BLOCK_OAK_PLANKS {
+                        found_oak_planks = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        assert!(found_oak_planks, "Expected mineshaft planks in chunk");
+    }
+
+    #[test]
+    fn test_village_generation_places_crafting_table_for_known_seed() {
+        let seed = 0x56_49_4C_4C_41_47_45_u64; // "VILLAGE"
+        let biome_assigner = BiomeAssigner::new(seed);
+        let bounds = crate::village::village_bounds_for_region(seed, 0, 0, &biome_assigner)
+            .expect("missing village");
+        let gen = TerrainGenerator::new(seed);
+
+        let mut found_crafting_table = false;
+        let min_chunk_x = bounds.min_x.div_euclid(CHUNK_SIZE_X as i32);
+        let max_chunk_x = bounds.max_x.div_euclid(CHUNK_SIZE_X as i32);
+        let min_chunk_z = bounds.min_z.div_euclid(CHUNK_SIZE_Z as i32);
+        let max_chunk_z = bounds.max_z.div_euclid(CHUNK_SIZE_Z as i32);
+
+        'outer: for chunk_z in min_chunk_z..=max_chunk_z {
+            for chunk_x in min_chunk_x..=max_chunk_x {
+                let chunk = gen.generate_chunk(ChunkPos::new(chunk_x, chunk_z));
+                for y in 0..CHUNK_SIZE_Y {
+                    for z in 0..CHUNK_SIZE_Z {
+                        for x in 0..CHUNK_SIZE_X {
+                            if chunk.voxel(x, y, z).id == crate::BLOCK_CRAFTING_TABLE {
+                                found_crafting_table = true;
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found_crafting_table,
+            "Expected at least one crafting table from a village in chunk"
         );
     }
 
