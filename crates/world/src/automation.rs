@@ -328,7 +328,7 @@ where
             if let Some(above_voxel) = voxel_at(chunks, above_pos) {
                 if above_voxel.id == interactive_blocks::CHEST {
                     let chest_key = BlockEntityKey {
-                        dimension: DimensionId::Overworld,
+                        dimension: key.dimension,
                         x: above_pos.x,
                         y: above_pos.y,
                         z: above_pos.z,
@@ -340,7 +340,7 @@ where
                     }
                 } else if above_voxel.id == mechanical_blocks::HOPPER {
                     let source_key = BlockEntityKey {
-                        dimension: DimensionId::Overworld,
+                        dimension: key.dimension,
                         x: above_pos.x,
                         y: above_pos.y,
                         z: above_pos.z,
@@ -352,7 +352,7 @@ where
                     }
                 } else if above_voxel.id == mechanical_blocks::DISPENSER {
                     let source_key = BlockEntityKey {
-                        dimension: DimensionId::Overworld,
+                        dimension: key.dimension,
                         x: above_pos.x,
                         y: above_pos.y,
                         z: above_pos.z,
@@ -364,7 +364,7 @@ where
                     }
                 } else if above_voxel.id == mechanical_blocks::DROPPER {
                     let source_key = BlockEntityKey {
-                        dimension: DimensionId::Overworld,
+                        dimension: key.dimension,
                         x: above_pos.x,
                         y: above_pos.y,
                         z: above_pos.z,
@@ -385,6 +385,7 @@ where
             let pickup_z = pos.z as f64 + 0.5;
 
             let taken = item_manager.take_one_near_if(
+                key.dimension,
                 pickup_x,
                 pickup_y,
                 pickup_z,

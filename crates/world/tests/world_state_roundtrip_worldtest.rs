@@ -49,10 +49,13 @@ fn simulate_tick(state: &mut WorldState) {
     }
 
     // Dropped items (use a deterministic, fixed ground height).
-    let _ = state.entities.dropped_items.update(|_x, _z| 64.0);
+    let _ = state
+        .entities
+        .dropped_items
+        .update(DimensionId::Overworld, |_x, _z| 64.0);
 
     // Projectiles.
-    state.entities.projectiles.update();
+    state.entities.projectiles.update(DimensionId::Overworld);
 }
 
 fn make_initial_state() -> WorldState {
@@ -96,10 +99,20 @@ fn make_initial_state() -> WorldState {
 
     // Entities.
     let mut dropped_items = ItemManager::new();
-    dropped_items.spawn_item(1.0, 70.0, 2.0, mdminecraft_world::ItemType::IronIngot, 3);
+    dropped_items.spawn_item(
+        DimensionId::Overworld,
+        1.0,
+        70.0,
+        2.0,
+        mdminecraft_world::ItemType::IronIngot,
+        3,
+    );
 
     let mut projectiles = ProjectileManager::new();
-    projectiles.spawn(Projectile::shoot_arrow(0.0, 70.0, 0.0, 0.0, 0.0, 1.0));
+    projectiles.spawn(
+        DimensionId::Overworld,
+        Projectile::shoot_arrow(0.0, 70.0, 0.0, 0.0, 0.0, 1.0),
+    );
 
     let entities = WorldEntitiesState {
         mobs: vec![Mob::new(2.0, 65.0, 2.0, MobType::Pig)],

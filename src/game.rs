@@ -38,8 +38,9 @@ use mdminecraft_world::{
     StatusEffects, SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState,
     WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR,
     BLOCK_BOOKSHELF, BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE,
-    BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_OAK_LOG,
-    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
+    BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE,
+    CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
@@ -58,6 +59,9 @@ const PRECIPITATION_RADIUS: f32 = 18.0;
 const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
+const NETHER_PORTAL_CHARGE_TICKS: u16 = 80;
+const NETHER_PORTAL_COOLDOWN_TICKS: u16 = 100;
+const NETHER_PORTAL_SEARCH_RADIUS: i32 = 16;
 const WORLDGEN_CHEST_LOOT_SALT: u64 = 0x0043_4845_5354_4C4F_u64; // "CHESTLO"
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -141,6 +145,7 @@ pub(crate) const CORE_ITEM_NETHER_QUARTZ: u16 = 2023;
 pub(crate) const CORE_ITEM_BUCKET: u16 = client_item_ids::BUCKET;
 pub(crate) const CORE_ITEM_WATER_BUCKET: u16 = client_item_ids::WATER_BUCKET;
 pub(crate) const CORE_ITEM_LAVA_BUCKET: u16 = client_item_ids::LAVA_BUCKET;
+pub(crate) const CORE_ITEM_FLINT_AND_STEEL: u16 = client_item_ids::FLINT_AND_STEEL;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -498,6 +503,7 @@ impl Hotbar {
                     CORE_ITEM_BUCKET => "Bucket".to_string(),
                     CORE_ITEM_WATER_BUCKET => "Water Bucket".to_string(),
                     CORE_ITEM_LAVA_BUCKET => "Lava Bucket".to_string(),
+                    CORE_ITEM_FLINT_AND_STEEL => "Flint and Steel".to_string(),
                     CORE_ITEM_SUGAR => "Sugar".to_string(),
                     CORE_ITEM_PAPER => "Paper".to_string(),
                     CORE_ITEM_BOOK => "Book".to_string(),
@@ -1574,6 +1580,8 @@ pub struct GameWorld {
     spawn_point: glam::Vec3,
     spawn_point_dimension: DimensionId,
     active_dimension: DimensionId,
+    portal_charge_ticks: u16,
+    portal_cooldown_ticks: u16,
     controls: Arc<ControlsConfig>,
     input_processor: InputProcessor,
     #[allow(dead_code)]
@@ -2088,6 +2096,8 @@ impl GameWorld {
             spawn_point: glam::Vec3::ZERO, // Temp
             spawn_point_dimension: initial_spawn_dimension,
             active_dimension: initial_dimension,
+            portal_charge_ticks: 0,
+            portal_cooldown_ticks: 0,
             controls,
             input_processor,
             actions: ActionState::default(),
@@ -2225,6 +2235,9 @@ impl GameWorld {
                     world
                         .mob_spawner
                         .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                for mob in &mut new_mobs {
+                    mob.dimension = world.active_dimension;
+                }
                 world.assign_mob_ids(&mut new_mobs);
                 world.mobs.append(&mut new_mobs);
             }
@@ -2262,6 +2275,7 @@ impl GameWorld {
                     let mob_y = spawn_feet.y as f64 + 1.0; // Spawn at player's ground level + 1
 
                     let mut mob = Mob::new(mob_x, mob_y, mob_z, *mob_type);
+                    mob.dimension = world.active_dimension;
                     world.assign_mob_id(&mut mob);
                     world.mobs.push(mob);
                 }
@@ -3402,7 +3416,10 @@ impl GameWorld {
 
     fn persist_loaded_chunks(&mut self) {
         for (pos, chunk) in &self.chunks {
-            if let Err(err) = self.region_store.save_chunk(chunk) {
+            if let Err(err) = self
+                .region_store
+                .save_chunk_in_dimension(self.active_dimension, chunk)
+            {
                 tracing::error!(?pos, ?err, "Failed to save chunk");
             }
         }
@@ -3907,7 +3924,7 @@ impl GameWorld {
 
         // Render mobs
         for mob in &self.mobs {
-            if mob.dead {
+            if mob.dimension != self.active_dimension || mob.dead {
                 continue;
             }
 
@@ -4329,6 +4346,9 @@ impl GameWorld {
         // Update projectiles (arrows)
         self.update_projectiles();
 
+        // Portal travel (dimension switching).
+        self.tick_nether_portal_travel();
+
         // Check for death
         if self.player_health.is_dead() && self.player_state != PlayerState::Dead {
             self.handle_death("You died!");
@@ -4418,6 +4438,345 @@ impl GameWorld {
         }
     }
 
+    fn tick_nether_portal_travel(&mut self) {
+        if self.player_state != PlayerState::Alive || self.player_health.is_dead() {
+            self.portal_charge_ticks = 0;
+            self.portal_cooldown_ticks = 0;
+            return;
+        }
+
+        self.portal_cooldown_ticks = self.portal_cooldown_ticks.saturating_sub(1);
+
+        let Some((_pos, axis)) = self.player_portal_contact() else {
+            self.portal_charge_ticks = 0;
+            return;
+        };
+
+        if self.portal_cooldown_ticks > 0 {
+            self.portal_charge_ticks = 0;
+            return;
+        }
+
+        self.portal_charge_ticks = self.portal_charge_ticks.saturating_add(1);
+        if self.portal_charge_ticks < NETHER_PORTAL_CHARGE_TICKS {
+            return;
+        }
+
+        self.portal_charge_ticks = 0;
+        self.portal_cooldown_ticks = NETHER_PORTAL_COOLDOWN_TICKS;
+        if let Err(err) = self.travel_through_nether_portal(axis) {
+            tracing::warn!("Nether portal travel failed: {err:#}");
+        }
+    }
+
+    fn player_portal_contact(&self) -> Option<(IVec3, PortalAxis)> {
+        let camera_pos = self.renderer.camera().position;
+        let eye_pos = IVec3::new(
+            camera_pos.x.floor() as i32,
+            camera_pos.y.floor() as i32,
+            camera_pos.z.floor() as i32,
+        );
+        if let Some(voxel) = self.get_voxel_at(eye_pos) {
+            if voxel.id == BLOCK_NETHER_PORTAL {
+                return Some((eye_pos, portal_axis_from_state(voxel.state)));
+            }
+        }
+
+        let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
+        let feet_sample = feet_pos + glam::Vec3::new(0.0, 0.1, 0.0);
+        let feet_block = IVec3::new(
+            feet_sample.x.floor() as i32,
+            feet_sample.y.floor() as i32,
+            feet_sample.z.floor() as i32,
+        );
+        if let Some(voxel) = self.get_voxel_at(feet_block) {
+            if voxel.id == BLOCK_NETHER_PORTAL {
+                return Some((feet_block, portal_axis_from_state(voxel.state)));
+            }
+        }
+
+        None
+    }
+
+    fn travel_through_nether_portal(&mut self, preferred_axis: PortalAxis) -> anyhow::Result<()> {
+        let from = self.active_dimension;
+        let target = match from {
+            DimensionId::Overworld => DimensionId::Nether,
+            DimensionId::Nether => DimensionId::Overworld,
+            _ => return Ok(()),
+        };
+
+        let camera = self.renderer.camera();
+        let mut target_x = camera.position.x;
+        let mut target_z = camera.position.z;
+        match (from, target) {
+            (DimensionId::Overworld, DimensionId::Nether) => {
+                target_x /= 8.0;
+                target_z /= 8.0;
+            }
+            (DimensionId::Nether, DimensionId::Overworld) => {
+                target_x *= 8.0;
+                target_z *= 8.0;
+            }
+            _ => {}
+        }
+
+        self.switch_dimension(target)?;
+
+        if let Some(feet) = self.ensure_or_create_portal_near(target_x, target_z, preferred_axis) {
+            let eye_height = self.player_physics.eye_height;
+            let camera = self.renderer.camera_mut();
+            camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
+            self.player_physics.velocity = glam::Vec3::ZERO;
+            self.player_physics.on_ground = false;
+            self.player_physics.last_ground_y = feet.y;
+        }
+
+        Ok(())
+    }
+
+    fn ensure_or_create_portal_near(
+        &mut self,
+        target_x: f32,
+        target_z: f32,
+        preferred_axis: PortalAxis,
+    ) -> Option<glam::Vec3> {
+        let camera_pos = self.renderer.camera().position;
+        let center_y = (camera_pos.y - self.player_physics.eye_height)
+            .floor()
+            .clamp(0.0, 255.0) as i32;
+        let center = IVec3::new(target_x.floor() as i32, center_y, target_z.floor() as i32);
+
+        if let Some((portal_block, _axis)) =
+            self.find_portal_block_near(center, NETHER_PORTAL_SEARCH_RADIUS)
+        {
+            let mut bottom = portal_block;
+            while bottom.y > 0 {
+                let below = bottom + IVec3::new(0, -1, 0);
+                if self.get_block_at(below) != Some(BLOCK_NETHER_PORTAL) {
+                    break;
+                }
+                bottom.y -= 1;
+            }
+
+            return Some(glam::Vec3::new(
+                bottom.x as f32 + 0.5,
+                bottom.y as f32 + PlayerPhysics::GROUND_EPS,
+                bottom.z as f32 + 0.5,
+            ));
+        }
+
+        let spawn_feet = self
+            .find_safe_spawn_near(target_x, target_z)
+            .unwrap_or_else(|| {
+                camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0)
+            });
+
+        let base_x = spawn_feet.x.floor() as i32;
+        let base_y = (spawn_feet.y.floor() as i32).saturating_sub(1);
+        let base_z = spawn_feet.z.floor() as i32;
+
+        let axis_order = match preferred_axis {
+            PortalAxis::X => [PortalAxis::X, PortalAxis::Z],
+            PortalAxis::Z => [PortalAxis::Z, PortalAxis::X],
+        };
+
+        for axis in axis_order {
+            for dist in 0..=NETHER_PORTAL_SEARCH_RADIUS {
+                for dz in -dist..=dist {
+                    for dx in -dist..=dist {
+                        if dx.abs() != dist && dz.abs() != dist {
+                            continue;
+                        }
+
+                        let origin = match axis {
+                            PortalAxis::X => IVec3::new(base_x + dx - 1, base_y, base_z + dz),
+                            PortalAxis::Z => IVec3::new(base_x + dx, base_y, base_z + dz - 1),
+                        };
+
+                        let Some(changed) = self.try_place_generated_portal(origin, axis) else {
+                            continue;
+                        };
+
+                        self.refresh_after_voxel_changes(&changed);
+
+                        return Some(match axis {
+                            PortalAxis::X => glam::Vec3::new(
+                                origin.x as f32 + 1.5,
+                                origin.y as f32 + 1.0 + PlayerPhysics::GROUND_EPS,
+                                origin.z as f32 + 0.5,
+                            ),
+                            PortalAxis::Z => glam::Vec3::new(
+                                origin.x as f32 + 0.5,
+                                origin.y as f32 + 1.0 + PlayerPhysics::GROUND_EPS,
+                                origin.z as f32 + 1.5,
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_portal_block_near(&self, center: IVec3, radius: i32) -> Option<(IVec3, PortalAxis)> {
+        let center_y = center.y;
+
+        for dist in 0..=radius {
+            for dz in -dist..=dist {
+                for dx in -dist..=dist {
+                    if dx.abs() != dist && dz.abs() != dist {
+                        continue;
+                    }
+
+                    let x = center.x + dx;
+                    let z = center.z + dz;
+
+                    for dy in -16..=16 {
+                        let y = center_y + dy;
+                        if y < 0 || y >= CHUNK_SIZE_Y as i32 {
+                            continue;
+                        }
+
+                        let pos = IVec3::new(x, y, z);
+                        let Some(voxel) = self.get_voxel_at(pos) else {
+                            continue;
+                        };
+                        if voxel.id == BLOCK_NETHER_PORTAL {
+                            return Some((pos, portal_axis_from_state(voxel.state)));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn try_place_generated_portal(
+        &mut self,
+        origin: IVec3,
+        axis: PortalAxis,
+    ) -> Option<Vec<IVec3>> {
+        if origin.y < 1 || origin.y + 4 >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let portal_state = axis.to_state();
+        let mut changed = Vec::with_capacity(64);
+
+        let set_voxel =
+            |chunks: &mut HashMap<ChunkPos, Chunk>, pos: IVec3, voxel: Voxel| -> Option<()> {
+                let chunk_pos = ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16));
+                let chunk = chunks.get_mut(&chunk_pos)?;
+                let local_y = pos.y as usize;
+                if local_y >= CHUNK_SIZE_Y {
+                    return None;
+                }
+                let local_x = pos.x.rem_euclid(16) as usize;
+                let local_z = pos.z.rem_euclid(16) as usize;
+                chunk.set_voxel(local_x, local_y, local_z, voxel);
+                Some(())
+            };
+
+        let check_pos = |pos: IVec3| -> Option<()> {
+            let voxel = self.get_voxel_at(pos)?;
+            if get_fluid_type(voxel.id).is_some() {
+                return None;
+            }
+            Some(())
+        };
+
+        // Validate region (frame + portal interior + clearance on both sides of the plane).
+        for w in 0..4 {
+            for h in 0..5 {
+                let pos = match axis {
+                    PortalAxis::X => IVec3::new(origin.x + w, origin.y + h, origin.z),
+                    PortalAxis::Z => IVec3::new(origin.x, origin.y + h, origin.z + w),
+                };
+                check_pos(pos)?;
+            }
+        }
+
+        for w in 1..=2 {
+            for h in 1..=3 {
+                let interior = match axis {
+                    PortalAxis::X => IVec3::new(origin.x + w, origin.y + h, origin.z),
+                    PortalAxis::Z => IVec3::new(origin.x, origin.y + h, origin.z + w),
+                };
+
+                let (side_a, side_b) = match axis {
+                    PortalAxis::X => (
+                        interior + IVec3::new(0, 0, -1),
+                        interior + IVec3::new(0, 0, 1),
+                    ),
+                    PortalAxis::Z => (
+                        interior + IVec3::new(-1, 0, 0),
+                        interior + IVec3::new(1, 0, 0),
+                    ),
+                };
+                check_pos(side_a)?;
+                check_pos(side_b)?;
+            }
+        }
+
+        for w in 0..4 {
+            for h in 0..5 {
+                let pos = match axis {
+                    PortalAxis::X => IVec3::new(origin.x + w, origin.y + h, origin.z),
+                    PortalAxis::Z => IVec3::new(origin.x, origin.y + h, origin.z + w),
+                };
+
+                let is_border = w == 0 || w == 3 || h == 0 || h == 4;
+                let (id, state) = if is_border {
+                    (BLOCK_OBSIDIAN, 0)
+                } else {
+                    (BLOCK_NETHER_PORTAL, portal_state)
+                };
+
+                set_voxel(
+                    &mut self.chunks,
+                    pos,
+                    Voxel {
+                        id,
+                        state,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                )?;
+                changed.push(pos);
+            }
+        }
+
+        for w in 1..=2 {
+            for h in 1..=3 {
+                let interior = match axis {
+                    PortalAxis::X => IVec3::new(origin.x + w, origin.y + h, origin.z),
+                    PortalAxis::Z => IVec3::new(origin.x, origin.y + h, origin.z + w),
+                };
+
+                let (side_a, side_b) = match axis {
+                    PortalAxis::X => (
+                        interior + IVec3::new(0, 0, -1),
+                        interior + IVec3::new(0, 0, 1),
+                    ),
+                    PortalAxis::Z => (
+                        interior + IVec3::new(-1, 0, 0),
+                        interior + IVec3::new(1, 0, 0),
+                    ),
+                };
+
+                for pos in [side_a, side_b] {
+                    set_voxel(&mut self.chunks, pos, Voxel::default())?;
+                    changed.push(pos);
+                }
+            }
+        }
+
+        Some(changed)
+    }
+
     fn update_chunks(&mut self, max_load: usize) {
         let camera_pos = self.renderer.camera().position;
         let center_chunk_x = (camera_pos.x / 16.0).floor() as i32;
@@ -4439,7 +4798,10 @@ impl GameWorld {
             self.crop_growth.unregister_chunk(pos);
             self.sugar_cane_growth.unregister_chunk(pos);
             if let Some(chunk) = self.chunks.remove(&pos) {
-                if let Err(e) = self.region_store.save_chunk(&chunk) {
+                if let Err(e) = self
+                    .region_store
+                    .save_chunk_in_dimension(self.active_dimension, &chunk)
+                {
                     tracing::error!("Failed to save chunk {:?}: {}", pos, e);
                 }
             }
@@ -4486,8 +4848,9 @@ impl GameWorld {
         // But for initial load we might want more.
         // For now, load all to ensure correctness, optimization later.
         for pos in chunks_to_load {
-            let (chunk, chunk_was_generated) = if let Ok(loaded) =
-                self.region_store.load_chunk_in_dimension(self.active_dimension, pos)
+            let (chunk, chunk_was_generated) = if let Ok(loaded) = self
+                .region_store
+                .load_chunk_in_dimension(self.active_dimension, pos)
             {
                 (loaded, false)
             } else {
@@ -4556,6 +4919,9 @@ impl GameWorld {
                             pos,
                             self.terrain_generator.biome_assigner(),
                         );
+                    for villager in &mut village_villagers {
+                        villager.dimension = self.active_dimension;
+                    }
                     self.assign_mob_ids(&mut village_villagers);
                     self.mobs.append(&mut village_villagers);
                 }
@@ -4610,6 +4976,9 @@ impl GameWorld {
                 let mut new_mobs =
                     self.mob_spawner
                         .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                for mob in &mut new_mobs {
+                    mob.dimension = self.active_dimension;
+                }
                 self.assign_mob_ids(&mut new_mobs);
                 if !new_mobs.is_empty() {
                     tracing::info!(
@@ -4630,19 +4999,18 @@ impl GameWorld {
             return;
         }
 
-        let (chunk, chunk_was_generated) =
-            if let Ok(loaded) =
-                self.region_store
-                    .load_chunk_in_dimension(self.active_dimension, chunk_pos)
-            {
-                (loaded, false)
-            } else {
-                (
-                    self.terrain_generator
-                        .generate_chunk_in_dimension(self.active_dimension, chunk_pos),
-                    true,
-                )
-            };
+        let (chunk, chunk_was_generated) = if let Ok(loaded) = self
+            .region_store
+            .load_chunk_in_dimension(self.active_dimension, chunk_pos)
+        {
+            (loaded, false)
+        } else {
+            (
+                self.terrain_generator
+                    .generate_chunk_in_dimension(self.active_dimension, chunk_pos),
+                true,
+            )
+        };
 
         let mut crops_to_register = Vec::new();
         let mut sugar_cane_bases_to_register = Vec::new();
@@ -4709,7 +5077,7 @@ impl GameWorld {
         let chunk_z = chunk_pos.z;
 
         for (key, chest) in &self.chests {
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != self.active_dimension {
                 continue;
             }
 
@@ -4728,7 +5096,7 @@ impl GameWorld {
         }
 
         for (key, hopper) in &self.hoppers {
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != self.active_dimension {
                 continue;
             }
 
@@ -4747,7 +5115,7 @@ impl GameWorld {
         }
 
         for (key, dispenser) in &self.dispensers {
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != self.active_dimension {
                 continue;
             }
 
@@ -4766,7 +5134,7 @@ impl GameWorld {
         }
 
         for (key, dropper) in &self.droppers {
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != self.active_dimension {
                 continue;
             }
 
@@ -5087,7 +5455,7 @@ impl GameWorld {
                             camera.pitch,
                             self.bow_charge,
                         );
-                        self.projectiles.spawn(arrow);
+                        self.projectiles.spawn(self.active_dimension, arrow);
                         tracing::debug!("Shot arrow with charge {:.2}", self.bow_charge);
                     }
                 }
@@ -5192,6 +5560,8 @@ impl GameWorld {
                     // Skip other interactions when throwing
                 } else if self.try_use_bucket(hit) {
                     // Skip other interactions when using buckets
+                } else if self.try_use_flint_and_steel(hit) {
+                    // Skip other interactions when using flint and steel
                 } else {
                     self.handle_block_placement(hit);
                 }
@@ -5229,6 +5599,29 @@ impl GameWorld {
 
         self.refresh_after_voxel_changes(&changed_positions);
 
+        true
+    }
+
+    fn try_use_flint_and_steel(&mut self, hit: RaycastHit) -> bool {
+        let Some(stack) = self.hotbar.selected_item() else {
+            return false;
+        };
+
+        if !matches!(stack.item_type, ItemType::Item(CORE_ITEM_FLINT_AND_STEEL)) {
+            return false;
+        }
+
+        let ignite_pos = hit.block_pos + hit.face_normal;
+        if ignite_pos.y < 0 || ignite_pos.y >= CHUNK_SIZE_Y as i32 {
+            return false;
+        }
+
+        let Some(changed_positions) = try_activate_nether_portal(&mut self.chunks, ignite_pos)
+        else {
+            return false;
+        };
+
+        self.refresh_after_voxel_changes(&changed_positions);
         true
     }
 
@@ -5285,7 +5678,8 @@ impl GameWorld {
 
         // Vanilla checks a radius around the bed. Keep simple: any living hostile within 8 blocks.
         let monsters_nearby = self.mobs.iter().any(|mob| {
-            !mob.dead
+            mob.dimension == self.active_dimension
+                && !mob.dead
                 && mob.is_hostile()
                 && mob.distance_to(bed_center_x, bed_center_y, bed_center_z) <= 8.0
         });
@@ -5910,14 +6304,26 @@ impl GameWorld {
                                 };
 
                                 for (drop_type, count) in table.roll(&mut rng) {
-                                    self.item_manager
-                                        .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                                    self.item_manager.spawn_item(
+                                        self.active_dimension,
+                                        drop_x,
+                                        drop_y,
+                                        drop_z,
+                                        drop_type,
+                                        count,
+                                    );
                                 }
                             } else if let Some((drop_type, count)) =
                                 DroppedItemType::from_block(*removed_block_id)
                             {
-                                self.item_manager
-                                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                                self.item_manager.spawn_item(
+                                    self.active_dimension,
+                                    drop_x,
+                                    drop_y,
+                                    drop_z,
+                                    drop_type,
+                                    count,
+                                );
                             }
                         }
                     }
@@ -5973,8 +6379,14 @@ impl GameWorld {
 
                         if let Some(table) = self.loot_tables.block.get(&block_id) {
                             for (drop_type, count) in table.roll(&mut rng) {
-                                self.item_manager
-                                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                                self.item_manager.spawn_item(
+                                    self.active_dimension,
+                                    drop_x,
+                                    drop_y,
+                                    drop_z,
+                                    drop_type,
+                                    count,
+                                );
                             }
                         } else {
                             let random = (rng.gen::<u32>() as f64) / (u32::MAX as f64);
@@ -6002,8 +6414,14 @@ impl GameWorld {
                             };
 
                             if let Some((drop_type, count)) = drop {
-                                self.item_manager
-                                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                                self.item_manager.spawn_item(
+                                    self.active_dimension,
+                                    drop_x,
+                                    drop_y,
+                                    drop_z,
+                                    drop_type,
+                                    count,
+                                );
                                 tracing::debug!(
                                     "Dropped {:?} x{} at ({:.1}, {:.1}, {:.1}){}",
                                     drop_type,
@@ -6025,6 +6443,7 @@ impl GameWorld {
                                     // Keep a simple 1/8 chance; deterministic via the per-block RNG.
                                     if random < 0.125 {
                                         self.item_manager.spawn_item(
+                                            self.active_dimension,
                                             drop_x,
                                             drop_y,
                                             drop_z,
@@ -6039,6 +6458,7 @@ impl GameWorld {
                                     let extra_seeds = ((random * 3.0).floor() as u32).min(2);
                                     let seeds = 1 + extra_seeds;
                                     self.item_manager.spawn_item(
+                                        self.active_dimension,
                                         drop_x,
                                         drop_y,
                                         drop_z,
@@ -6052,6 +6472,7 @@ impl GameWorld {
                                     let extra = ((random * 4.0).floor() as u32).min(3);
                                     if extra > 0 {
                                         self.item_manager.spawn_item(
+                                            self.active_dimension,
                                             drop_x,
                                             drop_y,
                                             drop_z,
@@ -6064,6 +6485,7 @@ impl GameWorld {
                                     let extra = ((random * 4.0).floor() as u32).min(3);
                                     if extra > 0 {
                                         self.item_manager.spawn_item(
+                                            self.active_dimension,
                                             drop_x,
                                             drop_y,
                                             drop_z,
@@ -7485,7 +7907,9 @@ impl GameWorld {
                         if villager_trade_open {
                             if let Some(villager_id) = open_villager_trade_id {
                                 let villager_exists = self.mobs.iter().any(|mob| {
-                                    mob.id == villager_id && mob.mob_type == MobType::Villager
+                                    mob.dimension == self.active_dimension
+                                        && mob.id == villager_id
+                                        && mob.mob_type == MobType::Villager
                                 });
                                 if villager_exists {
                                     let (profession, offers) =
@@ -7918,6 +8342,149 @@ impl GameWorld {
         self.player_physics.velocity = glam::Vec3::ZERO;
     }
 
+    fn find_safe_spawn_near(&self, world_x: f32, world_z: f32) -> Option<glam::Vec3> {
+        let base_x = world_x.floor() as i32;
+        let base_z = world_z.floor() as i32;
+
+        // Prefer near the requested coordinates, then expand outwards.
+        for dz in -2i32..=2 {
+            for dx in -2i32..=2 {
+                let x = base_x + dx;
+                let z = base_z + dz;
+                let chunk_pos = ChunkPos::new(
+                    x.div_euclid(CHUNK_SIZE_X as i32),
+                    z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                let Some(chunk) = self.chunks.get(&chunk_pos) else {
+                    continue;
+                };
+
+                let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                let start_y = match self.active_dimension {
+                    DimensionId::Nether => 140,
+                    _ => (CHUNK_SIZE_Y - 2) as i32,
+                };
+                for y in (1..=start_y).rev() {
+                    let y_usize = y as usize;
+                    if y_usize + 1 >= CHUNK_SIZE_Y {
+                        continue;
+                    }
+
+                    let below = chunk.voxel(local_x, (y - 1) as usize, local_z).id;
+                    let feet = chunk.voxel(local_x, y_usize, local_z).id;
+                    let head = chunk.voxel(local_x, y_usize + 1, local_z).id;
+
+                    if !self.block_properties.get(below).is_solid {
+                        continue;
+                    }
+
+                    if self.block_properties.get(feet).is_solid || mdminecraft_world::is_fluid(feet)
+                    {
+                        continue;
+                    }
+                    if self.block_properties.get(head).is_solid || mdminecraft_world::is_fluid(head)
+                    {
+                        continue;
+                    }
+
+                    return Some(glam::Vec3::new(
+                        x as f32 + 0.5,
+                        y as f32 + PlayerPhysics::GROUND_EPS,
+                        z as f32 + 0.5,
+                    ));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn switch_dimension(&mut self, target: DimensionId) -> anyhow::Result<()> {
+        let from = self.active_dimension;
+        if target == from {
+            return Ok(());
+        }
+
+        self.portal_charge_ticks = 0;
+
+        // Ensure no UI state keeps references into the outgoing dimension.
+        self.stash_ui_items_for_save();
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        self.enchanting_open = false;
+        self.brewing_open = false;
+        self.chest_open = false;
+        self.hopper_open = false;
+        self.dispenser_open = false;
+        self.dropper_open = false;
+        self.villager_trade_open = false;
+        self.open_villager_trade_id = None;
+        self.open_furnace_pos = None;
+        self.open_enchanting_pos = None;
+        self.open_brewing_pos = None;
+        self.open_chest_pos = None;
+        self.open_hopper_pos = None;
+        self.open_dispenser_pos = None;
+        self.open_dropper_pos = None;
+        self.ui_drag_state.reset();
+        self.ui_cursor_stack = None;
+
+        // Save and drop all currently loaded chunks in the outgoing dimension.
+        self.persist_loaded_chunks();
+        let loaded_positions: Vec<_> = self.chunks.keys().copied().collect();
+        for pos in loaded_positions {
+            self.crop_growth.unregister_chunk(pos);
+            self.sugar_cane_growth.unregister_chunk(pos);
+        }
+        self.chunks.clear();
+        self.chunk_manager = ChunkManager::new();
+        self.redstone_sim = RedstoneSimulator::new();
+        self.fluid_sim = FluidSimulator::new();
+        self.selected_block = None;
+
+        let camera = self.renderer.camera_mut();
+        let mut new_x = camera.position.x;
+        let mut new_z = camera.position.z;
+        match (from, target) {
+            (DimensionId::Overworld, DimensionId::Nether) => {
+                new_x /= 8.0;
+                new_z /= 8.0;
+            }
+            (DimensionId::Nether, DimensionId::Overworld) => {
+                new_x *= 8.0;
+                new_z *= 8.0;
+            }
+            _ => {}
+        }
+
+        let eye_height = self.player_physics.eye_height;
+        let provisional_y = if target == DimensionId::Nether {
+            80.0 + eye_height
+        } else {
+            camera.position.y
+        };
+
+        camera.position = glam::Vec3::new(new_x, provisional_y, new_z);
+        self.player_physics.velocity = glam::Vec3::ZERO;
+        self.player_physics.on_ground = false;
+
+        self.active_dimension = target;
+
+        // Load/generate destination chunks, then snap to a safe nearby location.
+        self.update_chunks(usize::MAX);
+        let camera_pos = self.renderer.camera().position;
+        if let Some(feet) = self.find_safe_spawn_near(camera_pos.x, camera_pos.z) {
+            let camera = self.renderer.camera_mut();
+            camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
+            self.player_physics.last_ground_y = feet.y;
+        }
+
+        Ok(())
+    }
+
     /// Respawn the player at spawn point
     fn respawn(&mut self) {
         tracing::info!("Respawning player at spawn point...");
@@ -7981,13 +8548,16 @@ impl GameWorld {
         };
 
         // Update item physics
-        self.item_manager.update(get_ground_height);
+        self.item_manager
+            .update(self.active_dimension, get_ground_height);
 
         // Merge nearby items
-        self.item_manager.merge_nearby_items();
+        self.item_manager.merge_nearby_items(self.active_dimension);
 
         // Check for item pickup
-        let picked_up = self.item_manager.pickup_items(player_x, player_y, player_z);
+        let picked_up =
+            self.item_manager
+                .pickup_items(self.active_dimension, player_x, player_y, player_z);
         let mut played_pickup_sound = false;
 
         // Add picked up items to player storage (hotbar → main inventory)
@@ -8008,6 +8578,7 @@ impl GameWorld {
                     // `pickup_items` already removed the drop from the world; re-spawn any remainder
                     // just outside the pickup radius to avoid immediate re-pickup loops.
                     self.item_manager.spawn_item(
+                        self.active_dimension,
                         player_x + 2.0,
                         player_y + 0.5,
                         player_z,
@@ -8030,6 +8601,7 @@ impl GameWorld {
         // Use frame count as tick for deterministic behavior
         // TODO: Use proper SimTick for multiplayer sync
         let tick = self.sim_tick.0;
+        let active_dimension = self.active_dimension;
 
         // Get player position for hostile mob targeting
         let player_pos = self.renderer.camera().position;
@@ -8052,6 +8624,9 @@ impl GameWorld {
         let mut exploded_creeper = false;
         let mut explosion_positions: Vec<(f64, f64, f64, f32)> = Vec::new();
         for mob in &mut self.mobs {
+            if mob.dimension != active_dimension {
+                continue;
+            }
             // Update fire damage (from Fire Aspect enchantment)
             mob.update_fire();
 
@@ -8108,9 +8683,17 @@ impl GameWorld {
             // Determine damage source for potential death message
             let source = if exploded_creeper {
                 "Creeper"
-            } else if self.mobs.iter().any(|m| m.mob_type == MobType::Spider) {
+            } else if self
+                .mobs
+                .iter()
+                .any(|m| m.dimension == active_dimension && m.mob_type == MobType::Spider)
+            {
                 "Spider"
-            } else if self.mobs.iter().any(|m| m.mob_type == MobType::Zombie) {
+            } else if self
+                .mobs
+                .iter()
+                .any(|m| m.dimension == active_dimension && m.mob_type == MobType::Zombie)
+            {
                 "Zombie"
             } else {
                 "Skeleton"
@@ -8133,6 +8716,9 @@ impl GameWorld {
         let world_seed = self.world_seed;
         let sim_tick = self.sim_tick;
         self.mobs.retain(|mob| {
+            if mob.dimension != active_dimension {
+                return true;
+            }
             if mob.dead {
                 // Spawn XP orb based on mob type
                 let xp_value = match mob.mob_type {
@@ -8310,7 +8896,8 @@ impl GameWorld {
         // Spawn loot drops
         for (x, y, z, item_type, count) in loot_drops {
             if count > 0 {
-                self.item_manager.spawn_item(x, y, z, item_type, count);
+                self.item_manager
+                    .spawn_item(active_dimension, x, y, z, item_type, count);
             }
         }
 
@@ -8330,7 +8917,11 @@ impl GameWorld {
         // Use integer offsets to avoid platform-dependent trig differences; validity checks gate
         // spawns (solid ground, empty headroom, low light).
         if is_night && tick.is_multiple_of(100) {
-            let hostile_count = self.mobs.iter().filter(|m| m.is_hostile()).count();
+            let hostile_count = self
+                .mobs
+                .iter()
+                .filter(|m| m.dimension == active_dimension && m.is_hostile())
+                .count();
             if hostile_count < 10 {
                 const MIN_RADIUS: i32 = 16;
                 const MAX_RADIUS: i32 = 32;
@@ -8416,6 +9007,7 @@ impl GameWorld {
                         spawn_block_z as f64 + 0.5,
                         mob_type,
                     );
+                    mob.dimension = active_dimension;
                     self.assign_mob_id(&mut mob);
                     self.mobs.push(mob);
                     spawned = true;
@@ -8438,6 +9030,9 @@ impl GameWorld {
         // Despawn hostile mobs during the day (too far from player or day time)
         if !is_night {
             self.mobs.retain(|mob| {
+                if mob.dimension != active_dimension {
+                    return true;
+                }
                 if mob.is_hostile() {
                     // Despawn hostile mobs during the day
                     let dist = ((mob.x - player_x).powi(2) + (mob.z - player_z).powi(2)).sqrt();
@@ -8457,12 +9052,14 @@ impl GameWorld {
 
     /// Update all projectiles - physics, collisions, and damage
     fn update_projectiles(&mut self) {
+        let active_dimension = self.active_dimension;
+
         // Update projectile physics
-        self.projectiles.update();
+        self.projectiles.update(active_dimension);
 
         // Check for block collisions (stick arrows)
         for projectile in &mut self.projectiles.projectiles {
-            if projectile.stuck || projectile.dead {
+            if projectile.dimension != active_dimension || projectile.stuck || projectile.dead {
                 continue;
             }
 
@@ -8499,12 +9096,12 @@ impl GameWorld {
 
         // Check for mob collisions (arrows deal damage, splash potions trigger on hit)
         for projectile in &mut self.projectiles.projectiles {
-            if projectile.stuck || projectile.dead {
+            if projectile.dimension != active_dimension || projectile.stuck || projectile.dead {
                 continue;
             }
 
             for mob in &mut self.mobs {
-                if mob.dead {
+                if mob.dimension != active_dimension || mob.dead {
                     continue;
                 }
 
@@ -8555,6 +9152,9 @@ impl GameWorld {
         // Collect splash potion impact data before applying (to avoid borrow conflicts)
         let mut splash_impacts: Vec<(f64, f64, f64, u16)> = Vec::new();
         for projectile in &self.projectiles.projectiles {
+            if projectile.dimension != active_dimension {
+                continue;
+            }
             if projectile.dead && projectile.hit_entity {
                 if let Some(potion_id) = projectile.projectile_type.potion_id() {
                     splash_impacts.push((projectile.x, projectile.y, projectile.z, potion_id));
@@ -8581,7 +9181,7 @@ impl GameWorld {
 
             // Apply effect to mobs in range
             for mob in &mut self.mobs {
-                if mob.dead {
+                if mob.dimension != active_dimension || mob.dead {
                     continue;
                 }
 
@@ -8646,6 +9246,10 @@ impl GameWorld {
         let mut arrows_to_pickup = 0u32;
 
         self.projectiles.projectiles.retain(|projectile| {
+            if projectile.dimension != active_dimension {
+                return true;
+            }
+
             if projectile.stuck && !projectile.dead {
                 // Check distance to player
                 let dx = projectile.x - player_pos.x as f64;
@@ -8786,6 +9390,8 @@ impl GameWorld {
     /// Try to attack a mob that the player is looking at.
     /// Returns true if a mob was attacked.
     fn try_attack_mob(&mut self) -> bool {
+        let active_dimension = self.active_dimension;
+
         // Get camera position and direction
         let camera = self.renderer.camera();
         let origin = camera.position;
@@ -8798,6 +9404,9 @@ impl GameWorld {
         let mut closest_hit: Option<(usize, f32)> = None;
 
         for (idx, mob) in self.mobs.iter().enumerate() {
+            if mob.dimension != active_dimension || mob.dead {
+                continue;
+            }
             // Simple AABB collision for mob
             let mob_size = mob.mob_type.size();
             let mob_height = mob_size * 2.0; // Approximate height
@@ -8925,6 +9534,9 @@ impl GameWorld {
                         if i == idx {
                             return None; // Skip primary target
                         }
+                        if m.dimension != active_dimension || m.dead {
+                            return None;
+                        }
                         let dx = m.x - target_x;
                         let dz = m.z - target_z;
                         let dist_sq = dx * dx + dz * dz;
@@ -8989,6 +9601,8 @@ impl GameWorld {
             return false;
         }
 
+        let active_dimension = self.active_dimension;
+
         let camera = self.renderer.camera();
         let origin = camera.position;
         let dir = camera.forward();
@@ -9001,6 +9615,9 @@ impl GameWorld {
 
         let mut closest: Option<(u64, f32)> = None;
         for mob in &self.mobs {
+            if mob.dimension != active_dimension || mob.dead {
+                continue;
+            }
             if mob.mob_type != MobType::Villager {
                 continue;
             }
@@ -9072,7 +9689,7 @@ impl GameWorld {
         let z = camera_pos.z as f64;
 
         self.item_manager
-            .spawn_item(x, y, z, dropped_type, stack.count);
+            .spawn_item(self.active_dimension, x, y, z, dropped_type, stack.count);
     }
 
     fn drop_selected_hotbar_item(&mut self, drop_stack: bool) {
@@ -9133,7 +9750,8 @@ impl GameWorld {
         while remaining > 0 {
             let batch = remaining.min(max);
             remaining -= batch;
-            self.item_manager.spawn_item(x, y, z, dropped_type, batch);
+            self.item_manager
+                .spawn_item(self.active_dimension, x, y, z, dropped_type, batch);
         }
     }
 
@@ -9610,6 +10228,7 @@ impl GameWorld {
                     };
 
                     self.item_manager.spawn_item(
+                        key.dimension,
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
@@ -9643,6 +10262,7 @@ impl GameWorld {
                     };
 
                     self.item_manager.spawn_item(
+                        key.dimension,
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
@@ -9676,6 +10296,7 @@ impl GameWorld {
                     };
 
                     self.item_manager.spawn_item(
+                        key.dimension,
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
@@ -9709,6 +10330,7 @@ impl GameWorld {
                     };
 
                     self.item_manager.spawn_item(
+                        key.dimension,
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
@@ -9730,8 +10352,14 @@ impl GameWorld {
                     .into_iter()
                     .flatten()
                 {
-                    self.item_manager
-                        .spawn_item(drop_pos.0, drop_pos.1, drop_pos.2, drop_type, count);
+                    self.item_manager.spawn_item(
+                        key.dimension,
+                        drop_pos.0,
+                        drop_pos.1,
+                        drop_pos.2,
+                        drop_type,
+                        count,
+                    );
                 }
             }
             BLOCK_BREWING_STAND => {
@@ -9755,6 +10383,7 @@ impl GameWorld {
 
                 if fuel > 0 {
                     self.item_manager.spawn_item(
+                        key.dimension,
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
@@ -9767,8 +10396,14 @@ impl GameWorld {
                     if let Some(core_item) = brew_ingredient_id_to_core_item_type(ingredient_id) {
                         if let Some(drop_type) = Self::convert_core_item_type_to_dropped(core_item)
                         {
-                            self.item_manager
-                                .spawn_item(drop_pos.0, drop_pos.1, drop_pos.2, drop_type, count);
+                            self.item_manager.spawn_item(
+                                key.dimension,
+                                drop_pos.0,
+                                drop_pos.1,
+                                drop_pos.2,
+                                drop_type,
+                                count,
+                            );
                         }
                     }
                 }
@@ -9786,8 +10421,14 @@ impl GameWorld {
                     if let Some(drop_type) =
                         Self::convert_core_item_type_to_dropped(core_stack.item_type)
                     {
-                        self.item_manager
-                            .spawn_item(drop_pos.0, drop_pos.1, drop_pos.2, drop_type, 1);
+                        self.item_manager.spawn_item(
+                            key.dimension,
+                            drop_pos.0,
+                            drop_pos.1,
+                            drop_pos.2,
+                            drop_type,
+                            1,
+                        );
                     }
                 }
             }
@@ -9802,6 +10443,7 @@ impl GameWorld {
 
                 if table.lapis_count > 0 {
                     self.item_manager.spawn_item(
+                        key.dimension,
                         drop_pos.0,
                         drop_pos.1,
                         drop_pos.2,
@@ -9857,15 +10499,27 @@ impl GameWorld {
             };
 
             for (drop_type, count) in table.roll(&mut rng) {
-                self.item_manager
-                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                self.item_manager.spawn_item(
+                    self.active_dimension,
+                    drop_x,
+                    drop_y,
+                    drop_z,
+                    drop_type,
+                    count,
+                );
             }
             return;
         }
 
         if let Some((drop_type, count)) = DroppedItemType::from_block(removed_block_id) {
-            self.item_manager
-                .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+            self.item_manager.spawn_item(
+                self.active_dimension,
+                drop_x,
+                drop_y,
+                drop_z,
+                drop_type,
+                count,
+            );
         }
     }
 
@@ -10017,7 +10671,7 @@ impl GameWorld {
         );
 
         // Add to projectile manager
-        self.projectiles.spawn(projectile);
+        self.projectiles.spawn(self.active_dimension, projectile);
 
         tracing::info!("Threw splash potion (ID: {})", potion_id);
     }
@@ -10117,12 +10771,25 @@ impl GameWorld {
         None
     }
 
+    fn get_voxel_at(&self, pos: IVec3) -> Option<Voxel> {
+        let chunk_pos = ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16));
+        let chunk = self.chunks.get(&chunk_pos)?;
+        let local_y = pos.y as usize;
+        if local_y >= CHUNK_SIZE_Y {
+            return None;
+        }
+
+        let local_x = pos.x.rem_euclid(16) as usize;
+        let local_z = pos.z.rem_euclid(16) as usize;
+        Some(chunk.voxel(local_x, local_y, local_z))
+    }
+
     /// Update all furnaces in the world
     fn update_furnaces(&mut self, dt: f32) {
         let mut lit_changes: Vec<(IVec3, bool)> = Vec::new();
 
         for (key, furnace) in &mut self.furnaces {
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != self.active_dimension {
                 continue;
             }
             let was_lit = furnace.is_lit;
@@ -10159,7 +10826,10 @@ impl GameWorld {
 
     /// Update all brewing stands in the world
     fn update_brewing_stands(&mut self, dt: f32) {
-        for stand in self.brewing_stands.values_mut() {
+        for (key, stand) in &mut self.brewing_stands {
+            if key.dimension != self.active_dimension {
+                continue;
+            }
             stand.update(dt);
         }
     }
@@ -10187,6 +10857,7 @@ impl GameWorld {
 
         let changed_positions = Self::tick_dispensers_and_droppers(
             DISPENSER_COOLDOWN_TICKS,
+            self.active_dimension,
             DispenserTickContext {
                 chunks: &mut self.chunks,
                 redstone_sim: &mut self.redstone_sim,
@@ -10202,6 +10873,7 @@ impl GameWorld {
 
     fn tick_dispensers_and_droppers(
         cooldown_ticks: u8,
+        active_dimension: DimensionId,
         ctx: DispenserTickContext<'_>,
     ) -> Vec<IVec3> {
         let DispenserTickContext {
@@ -10239,7 +10911,7 @@ impl GameWorld {
                 continue;
             };
 
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != active_dimension {
                 dispensers_state.insert(key, dispenser);
                 continue;
             }
@@ -10341,7 +11013,7 @@ impl GameWorld {
                             mdminecraft_world::ProjectileType::Arrow,
                             0.4,
                         );
-                        projectiles.spawn(arrow);
+                        projectiles.spawn(key.dimension, arrow);
                     }
                     ItemType::SplashPotion(potion_id) => {
                         let speed = 0.8;
@@ -10355,7 +11027,7 @@ impl GameWorld {
                             mdminecraft_world::ProjectileType::SplashPotion(potion_id),
                             1.0,
                         );
-                        projectiles.spawn(projectile);
+                        projectiles.spawn(key.dimension, projectile);
                     }
                     other => {
                         let Some(drop_type) = Self::convert_core_item_type_to_dropped(other) else {
@@ -10363,7 +11035,14 @@ impl GameWorld {
                             dispensers_state.insert(key, dispenser);
                             continue;
                         };
-                        item_manager.spawn_item(spawn_x, spawn_y, spawn_z, drop_type, 1);
+                        item_manager.spawn_item(
+                            key.dimension,
+                            spawn_x,
+                            spawn_y,
+                            spawn_z,
+                            drop_type,
+                            1,
+                        );
                     }
                 }
 
@@ -10385,7 +11064,7 @@ impl GameWorld {
                 continue;
             };
 
-            if key.dimension != DimensionId::Overworld {
+            if key.dimension != active_dimension {
                 droppers_state.insert(key, dropper);
                 continue;
             }
@@ -10428,7 +11107,7 @@ impl GameWorld {
                     continue;
                 };
 
-                item_manager.spawn_item(spawn_x, spawn_y, spawn_z, drop_type, 1);
+                item_manager.spawn_item(key.dimension, spawn_x, spawn_y, spawn_z, drop_type, 1);
                 dropper.cooldown_ticks = cooldown_ticks;
                 mdminecraft_world::update_container_signal(
                     chunks,
@@ -10480,6 +11159,7 @@ impl GameWorld {
             DroppedItemType::Stick => Some(ItemType::Item(3)),
             DroppedItemType::String => Some(ItemType::Item(4)),
             DroppedItemType::Flint => Some(ItemType::Item(5)),
+            DroppedItemType::FlintAndSteel => Some(ItemType::Item(CORE_ITEM_FLINT_AND_STEEL)),
             DroppedItemType::Feather => Some(ItemType::Item(6)),
             DroppedItemType::IronIngot => Some(ItemType::Item(7)),
             DroppedItemType::Coal => Some(ItemType::Item(8)),
@@ -10813,6 +11493,7 @@ impl GameWorld {
                 CORE_ITEM_BUCKET => Some(DroppedItemType::Bucket),
                 CORE_ITEM_WATER_BUCKET => Some(DroppedItemType::WaterBucket),
                 CORE_ITEM_LAVA_BUCKET => Some(DroppedItemType::LavaBucket),
+                CORE_ITEM_FLINT_AND_STEEL => Some(DroppedItemType::FlintAndSteel),
                 CORE_ITEM_PAPER => Some(DroppedItemType::Paper),
                 CORE_ITEM_BOOK => Some(DroppedItemType::Book),
                 CORE_ITEM_WHEAT_SEEDS => Some(DroppedItemType::WheatSeeds),
@@ -11020,6 +11701,152 @@ fn try_bucket_interaction(
         }
         _ => None,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortalAxis {
+    X,
+    Z,
+}
+
+impl PortalAxis {
+    fn to_state(self) -> BlockState {
+        match self {
+            PortalAxis::X => 0,
+            PortalAxis::Z => 1,
+        }
+    }
+}
+
+fn portal_axis_from_state(state: BlockState) -> PortalAxis {
+    if (state & 0x01) != 0 {
+        PortalAxis::Z
+    } else {
+        PortalAxis::X
+    }
+}
+
+fn try_activate_nether_portal(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    ignition_pos: IVec3,
+) -> Option<Vec<IVec3>> {
+    let chunk_and_local = |pos: IVec3| -> Option<(ChunkPos, usize, usize, usize)> {
+        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+            return None;
+        }
+
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_y = pos.y as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+        Some((chunk_pos, local_x, local_y, local_z))
+    };
+
+    let voxel_id_at = |pos: IVec3| -> Option<BlockId> {
+        let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(pos)?;
+        Some(chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z).id)
+    };
+
+    let set_voxel = |chunks: &mut HashMap<ChunkPos, Chunk>,
+                     pos: IVec3,
+                     id: BlockId,
+                     state: BlockState|
+     -> Option<()> {
+        let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(pos)?;
+        let chunk = chunks.get_mut(&chunk_pos)?;
+        chunk.set_voxel(
+            local_x,
+            local_y,
+            local_z,
+            Voxel {
+                id,
+                state,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        Some(())
+    };
+
+    // Only allow igniting in empty space (or re-lighting existing portal blocks).
+    match voxel_id_at(ignition_pos)? {
+        BLOCK_AIR | BLOCK_NETHER_PORTAL => {}
+        _ => return None,
+    }
+
+    let frame_matches = |origin: IVec3, axis: PortalAxis| -> bool {
+        if origin.y < 0 || origin.y + 4 >= CHUNK_SIZE_Y as i32 {
+            return false;
+        }
+
+        for w in 0..4 {
+            for h in 0..5 {
+                let pos = match axis {
+                    PortalAxis::X => IVec3::new(origin.x + w, origin.y + h, origin.z),
+                    PortalAxis::Z => IVec3::new(origin.x, origin.y + h, origin.z + w),
+                };
+
+                let Some(id) = voxel_id_at(pos) else {
+                    return false;
+                };
+
+                let is_border = w == 0 || w == 3 || h == 0 || h == 4;
+                if is_border {
+                    if id != BLOCK_OBSIDIAN {
+                        return false;
+                    }
+                } else if id != BLOCK_AIR && id != BLOCK_NETHER_PORTAL {
+                    return false;
+                }
+            }
+        }
+
+        true
+    };
+
+    for axis in [PortalAxis::X, PortalAxis::Z] {
+        for offset_w in 0..=1 {
+            for offset_h in 0..=2 {
+                let origin = match axis {
+                    PortalAxis::X => IVec3::new(
+                        ignition_pos.x - 1 - offset_w,
+                        ignition_pos.y - 1 - offset_h,
+                        ignition_pos.z,
+                    ),
+                    PortalAxis::Z => IVec3::new(
+                        ignition_pos.x,
+                        ignition_pos.y - 1 - offset_h,
+                        ignition_pos.z - 1 - offset_w,
+                    ),
+                };
+
+                if !frame_matches(origin, axis) {
+                    continue;
+                }
+
+                let state = axis.to_state();
+                let mut changed = Vec::with_capacity(6);
+                for w in 1..=2 {
+                    for h in 1..=3 {
+                        let pos = match axis {
+                            PortalAxis::X => IVec3::new(origin.x + w, origin.y + h, origin.z),
+                            PortalAxis::Z => IVec3::new(origin.x, origin.y + h, origin.z + w),
+                        };
+
+                        set_voxel(chunks, pos, BLOCK_NETHER_PORTAL, state)?;
+                        changed.push(pos);
+                    }
+                }
+
+                return Some(changed);
+            }
+        }
+    }
+
+    None
 }
 
 fn render_hotbar(ctx: &egui::Context, hotbar: &Hotbar, registry: &BlockRegistry) {
@@ -15641,6 +16468,24 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             )),
             allow_horizontal_mirror: false,
             min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Flint and Steel (vanilla-ish): 1 iron ingot + 1 flint → flint and steel
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(7).into(), 1), (ItemType::Item(5).into(), 1)],
+            output: ItemType::Item(CORE_ITEM_FLINT_AND_STEEL),
+            output_count: 1,
+            pattern: Some(CraftingPattern::from_exact_cells(
+                2,
+                2,
+                [
+                    [Some(ItemType::Item(7)), None, None],
+                    [None, Some(ItemType::Item(5)), None],
+                    [None, None, None],
+                ],
+            )),
+            allow_horizontal_mirror: true,
+            min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         },
         // Trapdoor: 6 planks → 2 trapdoors
@@ -20656,6 +21501,10 @@ impl commands::CommandContext for GameWorld {
         Ok(())
     }
 
+    fn set_dimension(&mut self, dimension: DimensionId) -> anyhow::Result<()> {
+        self.switch_dimension(dimension)
+    }
+
     fn world_seed(&self) -> u64 {
         self.world_seed
     }
@@ -20836,8 +21685,14 @@ impl commands::CommandContext for GameWorld {
                 let drop_x = x as f64 + 0.5;
                 let drop_y = y as f64 + 0.5;
                 let drop_z = z as f64 + 0.5;
-                self.item_manager
-                    .spawn_item(drop_x, drop_y, drop_z, drop_type, count);
+                self.item_manager.spawn_item(
+                    self.active_dimension,
+                    drop_x,
+                    drop_y,
+                    drop_z,
+                    drop_type,
+                    count,
+                );
             }
         }
 
@@ -21350,6 +22205,7 @@ impl commands::CommandContext for GameWorld {
 
     fn summon_mob(&mut self, mob: MobType, x: f64, y: f64, z: f64) -> anyhow::Result<()> {
         let mut mob = Mob::new(x, y, z, mob);
+        mob.dimension = self.active_dimension;
         self.assign_mob_id(&mut mob);
         self.mobs.push(mob);
         Ok(())
@@ -21377,9 +22233,10 @@ mod tests {
         PlayerPhysics, StatusEffectType, StatusEffects, ToolMaterial, ToolType, UiCoreSlotId,
         UiSlotClick, Voxel, AABB, BLOCK_AIR, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
         BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
-        BLOCK_FURNACE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE,
-        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_BUCKET, CORE_ITEM_FERMENTED_SPIDER_EYE,
-        CORE_ITEM_GHAST_TEAR, CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
+        BLOCK_FURNACE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
+        BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_BUCKET,
+        CORE_ITEM_FLINT_AND_STEEL, CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_GHAST_TEAR,
+        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
         CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET,
         CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ, CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER,
         CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH, CORE_ITEM_RABBIT_FOOT,
@@ -23506,6 +24363,7 @@ mod tests {
 
         let changed = GameWorld::tick_dispensers_and_droppers(
             4,
+            DimensionId::Overworld,
             super::DispenserTickContext {
                 chunks: &mut chunks,
                 redstone_sim: &mut redstone_sim,
@@ -23577,6 +24435,7 @@ mod tests {
 
         let changed = GameWorld::tick_dispensers_and_droppers(
             4,
+            DimensionId::Overworld,
             super::DispenserTickContext {
                 chunks: &mut chunks,
                 redstone_sim: &mut redstone_sim,
@@ -23644,6 +24503,7 @@ mod tests {
 
         let changed = GameWorld::tick_dispensers_and_droppers(
             4,
+            DimensionId::Overworld,
             super::DispenserTickContext {
                 chunks: &mut chunks,
                 redstone_sim: &mut redstone_sim,
@@ -24832,6 +25692,26 @@ mod tests {
     }
 
     #[test]
+    fn crafting_flint_and_steel_vanillaish_recipe() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(7), 1)); // iron ingot
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(5), 1)); // flint
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_FLINT_AND_STEEL), 1))
+        );
+
+        // Mirrored variant should also match.
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(7), 1)); // iron ingot
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(5), 1)); // flint
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_FLINT_AND_STEEL), 1))
+        );
+    }
+
+    #[test]
     fn bucket_picks_up_water_source_block() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -24900,6 +25780,90 @@ mod tests {
         let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(2, 64, 1);
         assert_eq!(voxel.id, FluidType::Water.source_block_id());
         assert_eq!(fluid_sim.pending_count(), 1);
+    }
+
+    #[test]
+    fn nether_portal_activation_fills_minimal_frame_axis_x() {
+        let origin = glam::IVec3::new(1, 10, 1);
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        for w in 0..4 {
+            for h in 0..5 {
+                let is_border = w == 0 || w == 3 || h == 0 || h == 4;
+                if !is_border {
+                    continue;
+                }
+
+                chunk.set_voxel(
+                    (origin.x + w) as usize,
+                    (origin.y + h) as usize,
+                    origin.z as usize,
+                    Voxel {
+                        id: BLOCK_OBSIDIAN,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let ignite_pos = glam::IVec3::new(2, 11, 1);
+        let changed =
+            super::try_activate_nether_portal(&mut chunks, ignite_pos).expect("portal activates");
+        assert_eq!(changed.len(), 6);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        for x in 2..=3 {
+            for y in 11..=13 {
+                let voxel = chunk.voxel(x as usize, y as usize, 1);
+                assert_eq!(voxel.id, BLOCK_NETHER_PORTAL);
+                assert_eq!(voxel.state, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn nether_portal_activation_fills_minimal_frame_axis_z() {
+        let origin = glam::IVec3::new(1, 10, 1);
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        for w in 0..4 {
+            for h in 0..5 {
+                let is_border = w == 0 || w == 3 || h == 0 || h == 4;
+                if !is_border {
+                    continue;
+                }
+
+                chunk.set_voxel(
+                    origin.x as usize,
+                    (origin.y + h) as usize,
+                    (origin.z + w) as usize,
+                    Voxel {
+                        id: BLOCK_OBSIDIAN,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let ignite_pos = glam::IVec3::new(1, 11, 2);
+        let changed =
+            super::try_activate_nether_portal(&mut chunks, ignite_pos).expect("portal activates");
+        assert_eq!(changed.len(), 6);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        for z in 2..=3 {
+            for y in 11..=13 {
+                let voxel = chunk.voxel(1, y as usize, z as usize);
+                assert_eq!(voxel.id, BLOCK_NETHER_PORTAL);
+                assert_eq!(voxel.state, 1);
+            }
+        }
     }
 
     #[test]

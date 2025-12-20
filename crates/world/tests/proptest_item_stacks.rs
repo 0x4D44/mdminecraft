@@ -6,8 +6,11 @@
 //! - Stack splitting maintains conservation
 //! - Different item types don't merge
 
+use mdminecraft_core::DimensionId;
 use mdminecraft_world::{DroppedItem, ItemManager, ItemType};
 use proptest::prelude::*;
+
+const DIM: DimensionId = DimensionId::Overworld;
 
 proptest! {
     /// Property: Max stack size is always positive and reasonable
@@ -46,8 +49,8 @@ proptest! {
         count1 in 1u32..32,
         count2 in 1u32..32,
     ) {
-        let mut item1 = DroppedItem::new(1, 0.0, 64.0, 0.0, item_type, count1);
-        let item2 = DroppedItem::new(2, 0.0, 64.0, 0.0, item_type, count2);
+        let mut item1 = DroppedItem::new(1, DIM, 0.0, 64.0, 0.0, item_type, count1);
+        let item2 = DroppedItem::new(2, DIM, 0.0, 64.0, 0.0, item_type, count2);
 
         let total_before = count1 + count2;
         let merged = item1.try_merge(&item2);
@@ -79,8 +82,8 @@ proptest! {
         type2 in prop_oneof![Just(ItemType::Sand), Just(ItemType::Gravel)],
         count in 1u32..32,
     ) {
-        let mut item1 = DroppedItem::new(1, 0.0, 64.0, 0.0, type1, count);
-        let item2 = DroppedItem::new(2, 0.0, 64.0, 0.0, type2, count);
+        let mut item1 = DroppedItem::new(1, DIM, 0.0, 64.0, 0.0, type1, count);
+        let item2 = DroppedItem::new(2, DIM, 0.0, 64.0, 0.0, type2, count);
 
         let original_count = item1.count;
         let merged = item1.try_merge(&item2);
@@ -105,7 +108,7 @@ proptest! {
         let mut manager = ItemManager::new();
 
         for i in 0..spawn_count {
-            manager.spawn_item(i as f64, 64.0, 0.0, ItemType::Stone, 1);
+            manager.spawn_item(DIM, i as f64, 64.0, 0.0, ItemType::Stone, 1);
         }
 
         prop_assert_eq!(
@@ -126,11 +129,11 @@ proptest! {
 
         // Spawn items at same location
         for _ in 0..item_count {
-            manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 1);
+            manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 1);
         }
 
         let before_count = manager.count();
-        let picked_up = manager.pickup_items(10.0, 64.0, 20.0);
+        let picked_up = manager.pickup_items(DIM, 10.0, 64.0, 20.0);
 
         prop_assert_eq!(
             picked_up.len(), before_count,
@@ -155,11 +158,11 @@ proptest! {
         // Spawn items very close together (will merge)
         for i in 0..base_count {
             let x = 10.0 + (i as f64 * 0.1); // Within 1 block
-            manager.spawn_item(x, 64.0, 20.0, ItemType::Stone, 5);
+            manager.spawn_item(DIM, x, 64.0, 20.0, ItemType::Stone, 5);
         }
 
         let before_count = manager.count();
-        let merged = manager.merge_nearby_items();
+        let merged = manager.merge_nearby_items(DIM);
 
         prop_assert!(
             manager.count() < before_count || merged == 0,
@@ -230,8 +233,8 @@ mod unit_tests {
 
     #[test]
     fn merge_same_type_works() {
-        let mut item1 = DroppedItem::new(1, 0.0, 64.0, 0.0, ItemType::Stone, 10);
-        let item2 = DroppedItem::new(2, 0.0, 64.0, 0.0, ItemType::Stone, 5);
+        let mut item1 = DroppedItem::new(1, DIM, 0.0, 64.0, 0.0, ItemType::Stone, 10);
+        let item2 = DroppedItem::new(2, DIM, 0.0, 64.0, 0.0, ItemType::Stone, 5);
 
         let merged = item1.try_merge(&item2);
         assert_eq!(merged, 5);
@@ -240,8 +243,8 @@ mod unit_tests {
 
     #[test]
     fn merge_different_type_fails() {
-        let mut item1 = DroppedItem::new(1, 0.0, 64.0, 0.0, ItemType::Stone, 10);
-        let item2 = DroppedItem::new(2, 0.0, 64.0, 0.0, ItemType::Dirt, 5);
+        let mut item1 = DroppedItem::new(1, DIM, 0.0, 64.0, 0.0, ItemType::Stone, 10);
+        let item2 = DroppedItem::new(2, DIM, 0.0, 64.0, 0.0, ItemType::Dirt, 5);
 
         let merged = item1.try_merge(&item2);
         assert_eq!(merged, 0);

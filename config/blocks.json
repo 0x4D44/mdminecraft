@@ -154,5 +154,7 @@
   { "name": "piston_head", "opaque": true, "texture": "blocks/stone" },
   { "name": "dispenser", "opaque": true, "texture": "blocks/stone" },
   { "name": "dropper", "opaque": true, "texture": "blocks/stone" },
-  { "name": "hopper", "opaque": true, "texture": "blocks/stone" }
+  { "name": "hopper", "opaque": true, "texture": "blocks/stone" },
+  { "name": "nether_portal", "opaque": false, "texture": "blocks/amethyst_block" },
+  { "name": "end_stone", "opaque": true, "texture": "blocks/sand" }
 ]

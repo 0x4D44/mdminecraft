@@ -2,6 +2,7 @@
 //!
 //! Provides projectile physics, collision detection, and damage calculation.
 
+use mdminecraft_core::DimensionId;
 use serde::{Deserialize, Serialize};
 
 /// Types of projectiles
@@ -79,6 +80,9 @@ impl ProjectileType {
 /// A projectile instance in the world
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Projectile {
+    /// Dimension this projectile exists in.
+    #[serde(default)]
+    pub dimension: DimensionId,
     /// World X position
     pub x: f64,
     /// World Y position
@@ -119,6 +123,7 @@ impl Projectile {
         charge: f32,
     ) -> Self {
         Self {
+            dimension: DimensionId::DEFAULT,
             x,
             y,
             z,
@@ -315,19 +320,36 @@ impl ProjectileManager {
     }
 
     /// Spawn a new projectile
-    pub fn spawn(&mut self, projectile: Projectile) {
+    pub fn spawn(&mut self, dimension: DimensionId, mut projectile: Projectile) {
+        projectile.dimension = dimension;
         self.projectiles.push(projectile);
     }
 
     /// Update all projectiles and remove dead ones
-    pub fn update(&mut self) {
-        self.projectiles.retain_mut(|p| !p.update());
+    pub fn update(&mut self, dimension: DimensionId) {
+        self.projectiles.retain_mut(|projectile| {
+            if projectile.dimension != dimension {
+                return !projectile.dead;
+            }
+
+            !projectile.update()
+        });
     }
 
     /// Check for collision with a point (mob/player position)
     /// Returns the damage if hit
-    pub fn check_hit(&mut self, x: f64, y: f64, z: f64, radius: f64) -> Option<f32> {
+    pub fn check_hit(
+        &mut self,
+        dimension: DimensionId,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius: f64,
+    ) -> Option<f32> {
         for projectile in &mut self.projectiles {
+            if projectile.dimension != dimension {
+                continue;
+            }
             if projectile.hits_point(x, y, z, radius) {
                 let damage = projectile.damage();
                 projectile.hit();
@@ -389,10 +411,10 @@ mod tests {
     fn test_projectile_hit() {
         let mut manager = ProjectileManager::new();
         let arrow = Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
-        manager.spawn(arrow);
+        manager.spawn(DimensionId::Overworld, arrow);
 
         // Should hit nearby point
-        let damage = manager.check_hit(5.0, 5.0, 5.0, 0.5);
+        let damage = manager.check_hit(DimensionId::Overworld, 5.0, 5.0, 5.0, 0.5);
         assert!(damage.is_some());
 
         // Arrow should be dead after hit
@@ -545,8 +567,14 @@ mod tests {
     #[test]
     fn test_projectile_manager_spawn() {
         let mut manager = ProjectileManager::new();
-        manager.spawn(Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0));
-        manager.spawn(Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0));
+        manager.spawn(
+            DimensionId::Overworld,
+            Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        );
+        manager.spawn(
+            DimensionId::Overworld,
+            Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        );
         assert_eq!(manager.count(), 2);
     }
 
@@ -556,9 +584,9 @@ mod tests {
 
         let mut arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
         arrow.dead = true;
-        manager.spawn(arrow);
+        manager.spawn(DimensionId::Overworld, arrow);
 
-        manager.update();
+        manager.update(DimensionId::Overworld);
         assert_eq!(manager.count(), 0);
     }
 
@@ -566,10 +594,10 @@ mod tests {
     fn test_projectile_manager_check_hit_miss() {
         let mut manager = ProjectileManager::new();
         let arrow = Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
-        manager.spawn(arrow);
+        manager.spawn(DimensionId::Overworld, arrow);
 
         // Miss
-        let damage = manager.check_hit(100.0, 100.0, 100.0, 0.5);
+        let damage = manager.check_hit(DimensionId::Overworld, 100.0, 100.0, 100.0, 0.5);
         assert!(damage.is_none());
         assert_eq!(manager.count(), 1);
     }
@@ -579,11 +607,75 @@ mod tests {
         let mut manager = ProjectileManager::new();
         let mut arrow = Projectile::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0);
         arrow.age = 1199;
-        manager.spawn(arrow);
+        manager.spawn(DimensionId::Overworld, arrow);
 
         // Should be removed after update (age reaches 1200)
-        manager.update();
+        manager.update(DimensionId::Overworld);
         assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_projectile_manager_update_is_dimension_scoped() {
+        let mut manager = ProjectileManager::new();
+        manager.spawn(
+            DimensionId::Overworld,
+            Projectile::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, ProjectileType::Arrow, 1.0),
+        );
+        manager.spawn(
+            DimensionId::Nether,
+            Projectile::new(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, ProjectileType::Arrow, 1.0),
+        );
+
+        manager.update(DimensionId::Overworld);
+
+        let overworld_age = manager
+            .projectiles
+            .iter()
+            .find(|p| p.dimension == DimensionId::Overworld)
+            .expect("overworld projectile exists")
+            .age;
+        let nether_age = manager
+            .projectiles
+            .iter()
+            .find(|p| p.dimension == DimensionId::Nether)
+            .expect("nether projectile exists")
+            .age;
+
+        assert_eq!(overworld_age, 1);
+        assert_eq!(nether_age, 0);
+    }
+
+    #[test]
+    fn test_projectile_manager_check_hit_is_dimension_scoped() {
+        let mut manager = ProjectileManager::new();
+        manager.spawn(
+            DimensionId::Overworld,
+            Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0),
+        );
+        manager.spawn(
+            DimensionId::Nether,
+            Projectile::new(5.0, 5.0, 5.0, 0.0, 0.0, 0.0, ProjectileType::Arrow, 1.0),
+        );
+
+        assert!(manager
+            .check_hit(DimensionId::Overworld, 5.0, 5.0, 5.0, 0.5)
+            .is_some());
+        assert!(manager
+            .projectiles
+            .iter()
+            .any(|p| p.dimension == DimensionId::Overworld && p.dead));
+        assert!(manager
+            .projectiles
+            .iter()
+            .any(|p| p.dimension == DimensionId::Nether && !p.dead));
+
+        assert!(manager
+            .check_hit(DimensionId::Nether, 5.0, 5.0, 5.0, 0.5)
+            .is_some());
+        assert!(manager
+            .projectiles
+            .iter()
+            .any(|p| p.dimension == DimensionId::Nether && p.dead));
     }
 
     #[test]

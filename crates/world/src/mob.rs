@@ -6,6 +6,7 @@
 use crate::biome::BiomeId;
 use crate::chunk::CHUNK_SIZE_X;
 use crate::chunk::CHUNK_SIZE_Z;
+use mdminecraft_core::DimensionId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -222,6 +223,9 @@ pub struct Mob {
     /// `0` indicates an uninitialized ID (legacy saves or pre-assignment).
     #[serde(default)]
     pub id: u64,
+    /// Dimension this mob exists in.
+    #[serde(default)]
+    pub dimension: DimensionId,
     /// World X position (floating point for smooth movement)
     pub x: f64,
     /// World Y position
@@ -276,6 +280,7 @@ impl Mob {
     pub fn new(x: f64, y: f64, z: f64, mob_type: MobType) -> Self {
         Self {
             id: 0,
+            dimension: DimensionId::DEFAULT,
             x,
             y,
             z,

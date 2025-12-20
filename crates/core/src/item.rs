@@ -189,6 +189,7 @@ pub mod client_item_ids {
     pub const BUCKET: u16 = 2020;
     pub const WATER_BUCKET: u16 = 2021;
     pub const LAVA_BUCKET: u16 = 2022;
+    pub const FLINT_AND_STEEL: u16 = 2024;
 }
 
 impl ToolMaterial {
@@ -350,7 +351,8 @@ impl ItemStack {
             ItemType::Item(
                 client_item_ids::BUCKET
                 | client_item_ids::WATER_BUCKET
-                | client_item_ids::LAVA_BUCKET,
+                | client_item_ids::LAVA_BUCKET
+                | client_item_ids::FLINT_AND_STEEL,
             ) => 1,
             ItemType::Item(_) => 64,
         }

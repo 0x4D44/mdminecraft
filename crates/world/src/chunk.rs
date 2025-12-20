@@ -204,6 +204,12 @@ pub const BLOCK_AMETHYST_BLOCK: BlockId = 84;
 /// ID for budding amethyst.
 pub const BLOCK_BUDDING_AMETHYST: BlockId = 85;
 
+/// ID for nether portal (from blocks.json index).
+pub const BLOCK_NETHER_PORTAL: BlockId = 132;
+
+/// ID for end stone (from blocks.json index).
+pub const BLOCK_END_STONE: BlockId = 133;
+
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {

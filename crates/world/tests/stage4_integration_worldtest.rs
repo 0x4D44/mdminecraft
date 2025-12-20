@@ -13,7 +13,7 @@
 //! the integration surface. Override with `MDM_STAGE4_INTEGRATION_CHUNK_RADIUS`
 //! for the full run.
 
-use mdminecraft_core::SimTick;
+use mdminecraft_core::{DimensionId, SimTick};
 use mdminecraft_testkit::{EventRecord, JsonlSink};
 use mdminecraft_world::{
     BiomeAssigner, BiomeId, ChunkPos, Heightmap, ItemManager, ItemType, MobSpawner,
@@ -33,6 +33,8 @@ fn chunk_radius() -> i32 {
 
 #[test]
 fn stage4_integration_worldtest() {
+    const DIM: DimensionId = DimensionId::Overworld;
+
     let test_start = Instant::now();
     let chunk_radius = chunk_radius().max(0);
 
@@ -243,7 +245,7 @@ fn stage4_integration_worldtest() {
         if let Some((item_type, count)) = ItemType::from_block(block_id) {
             let x = ((rng_seed / 100) % 256) as f64;
             let z = ((rng_seed / 10000) % 256) as f64;
-            item_manager.spawn_item(x, 70.0, z, item_type, count);
+            item_manager.spawn_item(DIM, x, 70.0, z, item_type, count);
         }
     }
 
@@ -252,11 +254,11 @@ fn stage4_integration_worldtest() {
     // Simulate physics for items
     let ground_height = |_x: f64, _z: f64| 64.0;
     for _ in 0..100 {
-        item_manager.update(ground_height);
+        item_manager.update(DIM, ground_height);
     }
 
     // Merge nearby items
-    let merged = item_manager.merge_nearby_items();
+    let merged = item_manager.merge_nearby_items(DIM);
     println!("  Items after merge: {}", item_manager.count());
     println!("  Items merged: {}\n", merged);
 
