@@ -63,10 +63,10 @@ fn apply_spawn_override(
     table: &mut BTreeMap<BiomeId, Vec<(MobType, f32)>>,
     def: &PackSpawnOverrideDefinition,
 ) -> Result<()> {
-    let biome = BiomeId::parse(&def.biome)
+    let biome = parse_pack_biome_id(&def.biome)
         .ok_or_else(|| anyhow::anyhow!("Unknown biome '{}'", def.biome))?;
-    let mob =
-        MobType::parse(&def.mob).ok_or_else(|| anyhow::anyhow!("Unknown mob '{}'", def.mob))?;
+    let mob = parse_pack_mob_type(&def.mob)
+        .ok_or_else(|| anyhow::anyhow!("Unknown mob '{}'", def.mob))?;
 
     if !def.weight.is_finite() {
         anyhow::bail!(
@@ -102,6 +102,34 @@ fn apply_spawn_override(
     }
 
     Ok(())
+}
+
+fn parse_pack_biome_id(token: &str) -> Option<BiomeId> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+
+    BiomeId::parse(token).or_else(|| {
+        token
+            .strip_prefix("minecraft:")
+            .or_else(|| token.strip_prefix("mdm:"))
+            .and_then(BiomeId::parse)
+    })
+}
+
+fn parse_pack_mob_type(token: &str) -> Option<MobType> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+
+    MobType::parse(token).or_else(|| {
+        token
+            .strip_prefix("minecraft:")
+            .or_else(|| token.strip_prefix("mdm:"))
+            .and_then(MobType::parse)
+    })
 }
 
 #[cfg(test)]
@@ -208,5 +236,22 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&packs_root);
+    }
+
+    #[test]
+    fn pack_spawn_override_accepts_minecraft_namespaced_tokens() {
+        let mut table = mdminecraft_world::default_spawn_table();
+        let def = PackSpawnOverrideDefinition {
+            biome: "minecraft:ocean".to_string(),
+            mob: "minecraft:chicken".to_string(),
+            weight: 5.0,
+        };
+
+        apply_spawn_override(&mut table, &def).expect("override applies");
+
+        let ocean = table
+            .get(&BiomeId::Ocean)
+            .expect("ocean biome should exist");
+        assert_eq!(ocean, &vec![(MobType::Chicken, 5.0)]);
     }
 }

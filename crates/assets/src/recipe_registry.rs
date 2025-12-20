@@ -68,11 +68,19 @@ pub fn parse_item_type_with_blocks(s: &str, blocks: Option<&BlockRegistry>) -> O
     let (kind, rest) = s.split_once(':')?;
     match kind {
         "block" => {
+            let rest = rest.trim();
             if let Ok(id) = rest.parse::<u16>() {
                 Some(ItemType::Block(id))
             } else {
-                blocks
-                    .and_then(|registry| registry.id_by_name(rest))
+                let registry = blocks?;
+                if let Some(id) = registry.id_by_name(rest) {
+                    return Some(ItemType::Block(id));
+                }
+
+                let alias = rest.strip_prefix("minecraft:")?;
+                (!alias.contains(':'))
+                    .then(|| registry.id_by_name(alias))
+                    .flatten()
                     .map(ItemType::Block)
             }
         }
@@ -214,6 +222,10 @@ mod tests {
         );
         assert_eq!(
             parse_item_type_with_blocks("block:mdm:stone", Some(&blocks)),
+            Some(ItemType::Block(1))
+        );
+        assert_eq!(
+            parse_item_type_with_blocks("block:minecraft:stone", Some(&blocks)),
             Some(ItemType::Block(1))
         );
         assert_eq!(
