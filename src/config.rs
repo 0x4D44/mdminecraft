@@ -1,11 +1,19 @@
 use anyhow::Result;
-use mdminecraft_assets::{registry_from_file, BlockDescriptor, BlockRegistry};
+use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
+use mdminecraft_core::RegistryKey;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fs,
+    path::Path,
+};
 use tracing::warn;
+
+use crate::content_packs;
 
 const DEFAULT_CONTROLS_PATH: &str = "config/controls.toml";
 const DEFAULT_BLOCKS_PATH: &str = "config/blocks.json";
+const DEFAULT_CONTENT_PACKS_DIR: &str = content_packs::CONTENT_PACKS_DIR;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -106,20 +114,10 @@ impl ControlsConfig {
 
 /// Load block registry from JSON definition, falling back to defaults.
 pub fn load_block_registry() -> BlockRegistry {
-    load_block_registry_from_path(Path::new(DEFAULT_BLOCKS_PATH))
-}
-
-fn load_block_registry_from_path(path: &Path) -> BlockRegistry {
-    match registry_from_file(path) {
-        Ok(registry) => registry,
-        Err(err) => {
-            warn!(
-                "Failed to load block pack {}: {err}. Using defaults",
-                path.display()
-            );
-            default_block_registry()
-        }
-    }
+    load_block_registry_lenient(
+        Path::new(DEFAULT_BLOCKS_PATH),
+        Path::new(DEFAULT_CONTENT_PACKS_DIR),
+    )
 }
 
 fn default_block_registry() -> BlockRegistry {
@@ -129,4 +127,168 @@ fn default_block_registry() -> BlockRegistry {
         BlockDescriptor::simple("dirt", true),
         BlockDescriptor::simple("grass", true),
     ])
+}
+
+/// Load the block registry from base config + content packs, returning errors to the caller.
+///
+/// This is intended for tests/validation. The game uses [`load_block_registry`] instead, which
+/// logs and skips invalid packs.
+#[cfg(test)]
+pub fn load_block_registry_strict() -> Result<BlockRegistry> {
+    load_block_registry_strict_from_paths(
+        Path::new(DEFAULT_BLOCKS_PATH),
+        Path::new(DEFAULT_CONTENT_PACKS_DIR),
+    )
+}
+
+fn load_block_registry_lenient(base_path: &Path, packs_root: &Path) -> BlockRegistry {
+    let mut descriptors = match load_block_descriptors_from_file(base_path) {
+        Ok(descriptors) => descriptors,
+        Err(err) => {
+            warn!(
+                "Failed to load block pack {}: {err:#}. Using defaults",
+                base_path.display()
+            );
+            return default_block_registry();
+        }
+    };
+
+    let mut used_keys: BTreeSet<RegistryKey> = descriptors.iter().map(|d| d.key.clone()).collect();
+
+    for pack in content_packs::discover_packs_lenient(packs_root) {
+        let blocks_path = pack.dir.join("blocks.json");
+        if !blocks_path.exists() {
+            continue;
+        }
+
+        match load_block_descriptors_from_file(&blocks_path) {
+            Ok(pack_descriptors) => {
+                for descriptor in pack_descriptors {
+                    if !used_keys.insert(descriptor.key.clone()) {
+                        warn!(
+                            "Ignoring duplicate block key {} from {}",
+                            descriptor.key,
+                            blocks_path.display()
+                        );
+                        continue;
+                    }
+                    descriptors.push(descriptor);
+                }
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to load content pack blocks {}: {err:#}",
+                    blocks_path.display()
+                );
+            }
+        }
+    }
+
+    BlockRegistry::new(descriptors)
+}
+
+#[cfg(test)]
+fn load_block_registry_strict_from_paths(
+    base_path: &Path,
+    packs_root: &Path,
+) -> Result<BlockRegistry> {
+    let mut descriptors = load_block_descriptors_from_file(base_path)?;
+    let mut used_keys: BTreeSet<RegistryKey> = descriptors.iter().map(|d| d.key.clone()).collect();
+
+    for pack in content_packs::discover_packs_strict(packs_root)? {
+        let blocks_path = pack.dir.join("blocks.json");
+        if !blocks_path.exists() {
+            continue;
+        }
+
+        for descriptor in load_block_descriptors_from_file(&blocks_path)? {
+            if !used_keys.insert(descriptor.key.clone()) {
+                anyhow::bail!(
+                    "Duplicate block key {} while loading {}",
+                    descriptor.key,
+                    blocks_path.display()
+                );
+            }
+            descriptors.push(descriptor);
+        }
+    }
+
+    Ok(BlockRegistry::new(descriptors))
+}
+
+fn load_block_descriptors_from_file(path: &Path) -> Result<Vec<BlockDescriptor>> {
+    let contents = fs::read_to_string(path)?;
+    let defs = mdminecraft_assets::load_blocks_from_str(&contents)?;
+    let mut descriptors = Vec::with_capacity(defs.len());
+    for def in defs {
+        descriptors.push(BlockDescriptor::try_from_definition(def)?);
+    }
+    Ok(descriptors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdminecraft_assets::BlockFace;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn content_pack_blocks_load_and_append_deterministically() {
+        let registry = load_block_registry_strict().expect("block registry should load");
+
+        // Base registry IDs stay stable (as defined by config/blocks.json).
+        assert_eq!(registry.id_by_name("stone"), Some(1));
+
+        // Example pack block is present and uses the expected metadata.
+        let id = registry
+            .id_by_name("example:polished_stone")
+            .expect("example_pack block should be registered");
+        let desc = registry.descriptor(id).expect("descriptor should exist");
+        assert_eq!(desc.name, "polished_stone");
+        assert!(desc.opaque);
+        assert_eq!(desc.texture_for(BlockFace::Up), "blocks/stone");
+    }
+
+    #[test]
+    fn disabled_packs_are_ignored_when_loading_block_registry() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let packs_root = std::env::temp_dir().join(format!("mdminecraft_pack_blocks_{timestamp}"));
+        fs::create_dir_all(&packs_root).expect("packs root create");
+
+        let enabled_pack = packs_root.join("enabled_pack");
+        fs::create_dir_all(&enabled_pack).expect("enabled pack create");
+        fs::write(
+            enabled_pack.join("blocks.json"),
+            r#"[{"name":"enabled_block","key":"test:enabled_block","opaque":true,"texture":"blocks/stone"}]"#,
+        )
+        .expect("write enabled blocks");
+
+        let disabled_pack = packs_root.join("disabled_pack");
+        fs::create_dir_all(&disabled_pack).expect("disabled pack create");
+        fs::write(disabled_pack.join("pack.json"), r#"{"enabled":false}"#)
+            .expect("write disabled manifest");
+        fs::write(
+            disabled_pack.join("blocks.json"),
+            r#"[{"name":"disabled_block","key":"test:disabled_block","opaque":true,"texture":"blocks/stone"}]"#,
+        )
+        .expect("write disabled blocks");
+
+        let registry =
+            load_block_registry_strict_from_paths(Path::new(DEFAULT_BLOCKS_PATH), &packs_root)
+                .expect("registry loads with custom packs root");
+
+        assert!(
+            registry.id_by_name("test:enabled_block").is_some(),
+            "enabled pack block should be present"
+        );
+        assert!(
+            registry.id_by_name("test:disabled_block").is_none(),
+            "disabled pack block should not be present"
+        );
+
+        let _ = fs::remove_dir_all(&packs_root);
+    }
 }

@@ -1,0 +1,6 @@
+{
+  "name": "Example Pack",
+  "description": "Demonstrates pack-defined blocks and crafting recipes.",
+  "enabled": true,
+  "priority": 0
+}
