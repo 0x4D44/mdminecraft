@@ -1,9 +1,11 @@
 use crate::biome::{BiomeAssigner, BiomeData};
-use crate::chunk::{Chunk, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
 use crate::heightmap::Heightmap;
 use crate::interaction::interactive_blocks;
+use crate::structure_template::{place_ascii_volume_in_chunk, YRotation};
 use crate::structures::{region_coords_for_chunk, region_seed, region_world_bounds};
 use crate::structures::{set_world_voxel_if_in_chunk, world_to_chunk_local, StructureBounds};
+use crate::{Mob, MobType};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -15,6 +17,13 @@ const HOUSE_HEIGHT: i32 = 5;
 const WELL_SIZE: i32 = 5;
 const FARM_SIZE_X: i32 = 7;
 const FARM_SIZE_Z: i32 = 5;
+
+const WELL_FLOOR_LAYER: [&str; 5] = ["#####", "#####", "#####", "#####", "#####"];
+const WELL_WATER_LAYER: [&str; 5] = ["#####", "#~~~#", "#~~~#", "#~~~#", "#####"];
+const WELL_BASE_VOLUME: [&[&str]; 2] = [&WELL_FLOOR_LAYER, &WELL_WATER_LAYER];
+
+const WELL_ROOF_LAYER: [&str; 7] = ["ppppppp"; 7];
+const WELL_ROOF_VOLUME: [&[&str]; 1] = [&WELL_ROOF_LAYER];
 
 /// Minimal deterministic village v0 generator.
 ///
@@ -75,6 +84,59 @@ pub(crate) fn village_bounds_for_region(
     biome_assigner: &BiomeAssigner,
 ) -> Option<StructureBounds> {
     plan_village_for_region(world_seed, region_x, region_z, biome_assigner).map(|plan| plan.bounds)
+}
+
+/// Deterministically spawn villagers for a generated chunk that intersects a village.
+///
+/// This is intended to be called by the game layer only when a chunk is generated for the
+/// first time (to avoid villager duplication on revisits).
+pub fn village_villager_spawns_for_chunk(
+    world_seed: u64,
+    chunk_pos: ChunkPos,
+    biome_assigner: &BiomeAssigner,
+) -> Vec<Mob> {
+    let (region_x, region_z) = region_coords_for_chunk(chunk_pos);
+    let Some(plan) = plan_village_for_region(world_seed, region_x, region_z, biome_assigner) else {
+        return Vec::new();
+    };
+
+    if !plan.bounds.intersects_chunk(chunk_pos) {
+        return Vec::new();
+    }
+
+    let mut spawns = Vec::new();
+    let candidates = [
+        (
+            plan.house_a_origin_x + HOUSE_SIZE / 2,
+            plan.base_y + 1,
+            plan.house_a_origin_z + 2,
+        ),
+        (
+            plan.house_b_origin_x + HOUSE_SIZE / 2,
+            plan.base_y + 1,
+            plan.house_b_origin_z + 2,
+        ),
+        (
+            plan.well_origin_x + WELL_SIZE / 2,
+            plan.base_y,
+            plan.well_origin_z + WELL_SIZE,
+        ),
+    ];
+
+    for (world_x, world_y, world_z) in candidates {
+        if world_to_chunk_local(chunk_pos, world_x, world_z).is_none() {
+            continue;
+        }
+
+        spawns.push(Mob::new(
+            world_x as f64 + 0.5,
+            world_y as f64,
+            world_z as f64 + 0.5,
+            MobType::Villager,
+        ));
+    }
+
+    spawns
 }
 
 fn plan_village_for_region(
@@ -384,48 +446,41 @@ fn render_well(chunk: &mut Chunk, base_y: i32, origin_x: i32, origin_z: i32) {
     }
 
     // Floor + walls.
-    for dz in 0..WELL_SIZE {
-        for dx in 0..WELL_SIZE {
-            let x = origin_x + dx;
-            let z = origin_z + dz;
+    let cobblestone = Voxel {
+        id: crate::BLOCK_COBBLESTONE,
+        ..Default::default()
+    };
+    let water = Voxel {
+        id: crate::BLOCK_WATER,
+        ..Default::default()
+    };
 
-            set_world_voxel_if_in_chunk(
-                chunk,
-                x,
-                base_y - 1,
-                z,
-                Voxel {
-                    id: crate::BLOCK_COBBLESTONE,
-                    ..Default::default()
-                },
-            );
+    let rotation = {
+        let hash = (origin_x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (origin_z as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+            ^ (base_y as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
 
-            let is_wall = dx == 0 || dz == 0 || dx + 1 == WELL_SIZE || dz + 1 == WELL_SIZE;
-            if is_wall {
-                set_world_voxel_if_in_chunk(
-                    chunk,
-                    x,
-                    base_y,
-                    z,
-                    Voxel {
-                        id: crate::BLOCK_COBBLESTONE,
-                        ..Default::default()
-                    },
-                );
-            } else {
-                set_world_voxel_if_in_chunk(
-                    chunk,
-                    x,
-                    base_y,
-                    z,
-                    Voxel {
-                        id: crate::BLOCK_WATER,
-                        ..Default::default()
-                    },
-                );
-            }
+        match hash & 3 {
+            0 => YRotation::R0,
+            1 => YRotation::R90,
+            2 => YRotation::R180,
+            _ => YRotation::R270,
         }
-    }
+    };
+
+    place_ascii_volume_in_chunk(
+        chunk,
+        origin_x,
+        base_y - 1,
+        origin_z,
+        rotation,
+        &WELL_BASE_VOLUME,
+        |byte| match byte {
+            b'#' => Some(cobblestone),
+            b'~' => Some(water),
+            _ => None,
+        },
+    );
 
     // Corner posts + simple roof.
     for (dx, dz) in [
@@ -450,22 +505,22 @@ fn render_well(chunk: &mut Chunk, base_y: i32, origin_x: i32, origin_z: i32) {
         }
     }
 
-    for dz in -1..=(WELL_SIZE) {
-        for dx in -1..=(WELL_SIZE) {
-            let x = origin_x + dx;
-            let z = origin_z + dz;
-            set_world_voxel_if_in_chunk(
-                chunk,
-                x,
-                base_y + 4,
-                z,
-                Voxel {
-                    id: crate::BLOCK_OAK_PLANKS,
-                    ..Default::default()
-                },
-            );
-        }
-    }
+    let planks = Voxel {
+        id: crate::BLOCK_OAK_PLANKS,
+        ..Default::default()
+    };
+    place_ascii_volume_in_chunk(
+        chunk,
+        origin_x - 1,
+        base_y + 4,
+        origin_z - 1,
+        rotation,
+        &WELL_ROOF_VOLUME,
+        |byte| match byte {
+            b'p' => Some(planks),
+            _ => None,
+        },
+    );
 }
 
 fn render_house(chunk: &mut Chunk, rng: &mut StdRng, base_y: i32, origin_x: i32, origin_z: i32) {
@@ -754,6 +809,61 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn village_villager_spawns_match_expected_points_for_known_seed() {
+        let biome_assigner = BiomeAssigner::new(VILLAGE_SEED_SALT);
+        let plan = plan_village_for_region(VILLAGE_SEED_SALT, 0, 0, &biome_assigner).expect("plan");
+
+        let candidates = [
+            (
+                plan.house_a_origin_x + HOUSE_SIZE / 2,
+                plan.base_y + 1,
+                plan.house_a_origin_z + 2,
+            ),
+            (
+                plan.house_b_origin_x + HOUSE_SIZE / 2,
+                plan.base_y + 1,
+                plan.house_b_origin_z + 2,
+            ),
+            (
+                plan.well_origin_x + WELL_SIZE / 2,
+                plan.base_y,
+                plan.well_origin_z + WELL_SIZE,
+            ),
+        ];
+
+        let mut unique_chunks = std::collections::BTreeSet::new();
+        for (x, _y, z) in candidates {
+            unique_chunks.insert(ChunkPos::new(
+                x.div_euclid(CHUNK_SIZE_X as i32),
+                z.div_euclid(CHUNK_SIZE_Z as i32),
+            ));
+        }
+
+        let mut found = std::collections::BTreeSet::new();
+        for chunk_pos in unique_chunks {
+            let spawns =
+                village_villager_spawns_for_chunk(VILLAGE_SEED_SALT, chunk_pos, &biome_assigner);
+            for mob in spawns {
+                if mob.mob_type != MobType::Villager {
+                    continue;
+                }
+
+                let wx = (mob.x - 0.5).round() as i32;
+                let wy = mob.y.round() as i32;
+                let wz = (mob.z - 0.5).round() as i32;
+                found.insert((wx, wy, wz));
+            }
+        }
+
+        for (x, y, z) in candidates {
+            assert!(
+                found.contains(&(x, y, z)),
+                "expected villager spawn at ({x}, {y}, {z}), got: {found:?}"
+            );
         }
     }
 }

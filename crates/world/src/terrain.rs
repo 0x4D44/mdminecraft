@@ -926,6 +926,8 @@ mod tests {
         let gen = TerrainGenerator::new(seed);
 
         let mut found_crafting_table = false;
+        let mut found_farmland = false;
+        let mut found_door = false;
         let min_chunk_x = bounds.min_x.div_euclid(CHUNK_SIZE_X as i32);
         let max_chunk_x = bounds.max_x.div_euclid(CHUNK_SIZE_X as i32);
         let min_chunk_z = bounds.min_z.div_euclid(CHUNK_SIZE_Z as i32);
@@ -937,8 +939,26 @@ mod tests {
                 for y in 0..CHUNK_SIZE_Y {
                     for z in 0..CHUNK_SIZE_Z {
                         for x in 0..CHUNK_SIZE_X {
-                            if chunk.voxel(x, y, z).id == crate::BLOCK_CRAFTING_TABLE {
+                            let id = chunk.voxel(x, y, z).id;
+                            if id == crate::BLOCK_CRAFTING_TABLE {
                                 found_crafting_table = true;
+                            }
+                            if matches!(
+                                id,
+                                crate::farming_blocks::FARMLAND
+                                    | crate::farming_blocks::FARMLAND_WET
+                            ) {
+                                found_farmland = true;
+                            }
+                            if matches!(
+                                id,
+                                crate::interaction::interactive_blocks::OAK_DOOR_LOWER
+                                    | crate::interaction::interactive_blocks::OAK_DOOR_UPPER
+                            ) {
+                                found_door = true;
+                            }
+
+                            if found_crafting_table && found_farmland && found_door {
                                 break 'outer;
                             }
                         }
@@ -950,6 +970,14 @@ mod tests {
         assert!(
             found_crafting_table,
             "Expected at least one crafting table from a village in chunk"
+        );
+        assert!(
+            found_farmland,
+            "Expected at least one farmland block from a village farm patch in chunk"
+        );
+        assert!(
+            found_door,
+            "Expected at least one door block from a village house"
         );
     }
 

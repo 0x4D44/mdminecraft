@@ -60,8 +60,8 @@ const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
 const TICK_RATE: f64 = 1.0 / 20.0;
 const WORLDGEN_CHEST_LOOT_SALT: u64 = 0x0043_4845_5354_4C4F_u64; // "CHESTLO"
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorldgenChestLootTable {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum WorldgenChestLootTable {
     Generic,
     Dungeon,
     Mineshaft,
@@ -77,6 +77,28 @@ impl WorldgenChestLootTable {
             Some(mdminecraft_world::WorldgenStructureKind::Mineshaft) => Self::Mineshaft,
             Some(mdminecraft_world::WorldgenStructureKind::Ruin) => Self::Ruin,
             None => Self::Generic,
+        }
+    }
+
+    pub(crate) fn parse(token: &str) -> Option<Self> {
+        let token = token.trim();
+        if token.is_empty() {
+            return None;
+        }
+
+        let token = token.to_ascii_lowercase();
+        let token = token
+            .strip_prefix("minecraft:")
+            .or_else(|| token.strip_prefix("mdm:"))
+            .unwrap_or(&token);
+
+        match token {
+            "generic" => Some(Self::Generic),
+            "dungeon" => Some(Self::Dungeon),
+            "mineshaft" => Some(Self::Mineshaft),
+            "ruin" => Some(Self::Ruin),
+            "village" => Some(Self::Village),
+            _ => None,
         }
     }
 
@@ -436,6 +458,8 @@ impl Hotbar {
                     13 => "Iron Boots".to_string(),
                     14 => "Diamond".to_string(),
                     15 => "Lapis Lazuli".to_string(),
+                    16 => "Bone".to_string(),
+                    17 => "Emerald".to_string(),
                     // Leather armor
                     20 => "Leather Helmet".to_string(),
                     21 => "Leather Chestplate".to_string(),
@@ -1548,6 +1572,8 @@ pub struct GameWorld {
     chunks_visible: usize,
     mining_progress: Option<MiningProgress>,
     spawn_point: glam::Vec3,
+    spawn_point_dimension: DimensionId,
+    active_dimension: DimensionId,
     controls: Arc<ControlsConfig>,
     input_processor: InputProcessor,
     #[allow(dead_code)]
@@ -1581,6 +1607,12 @@ pub struct GameWorld {
     loot_tables: content_pack_loot::LootTables,
     /// Whether the inventory UI is open
     inventory_open: bool,
+    /// Whether the villager trading UI is open.
+    villager_trade_open: bool,
+    /// Currently open villager identifier (if any).
+    open_villager_trade_id: Option<u64>,
+    /// Currently selected villager trade index.
+    selected_villager_trade_idx: usize,
     /// Temporary cursor-held stack for UI drag/drop interactions.
     ui_cursor_stack: Option<ItemStack>,
     /// UI drag state for click-drag stack distribution.
@@ -1592,6 +1624,8 @@ pub struct GameWorld {
     mob_spawner: MobSpawner,
     /// Active mobs in the world
     mobs: Vec<Mob>,
+    /// Next stable mob identifier to assign.
+    next_mob_id: u64,
     /// Fluid simulation
     fluid_sim: FluidSimulator,
     /// Redstone simulation
@@ -1725,9 +1759,9 @@ impl GameWorld {
         }
     }
 
-    fn overworld_block_entity_key(block_pos: IVec3) -> BlockEntityKey {
+    fn block_entity_key(&self, block_pos: IVec3) -> BlockEntityKey {
         BlockEntityKey {
-            dimension: DimensionId::Overworld,
+            dimension: self.active_dimension,
             x: block_pos.x,
             y: block_pos.y,
             z: block_pos.z,
@@ -1952,6 +1986,15 @@ impl GameWorld {
             sim_tick.advance(delay_ticks)
         };
 
+        let initial_dimension = loaded_player
+            .as_ref()
+            .map(|player| player.transform.dimension)
+            .unwrap_or(DimensionId::DEFAULT);
+        let initial_spawn_dimension = loaded_player
+            .as_ref()
+            .map(|player| player.spawn_point.dimension)
+            .unwrap_or(DimensionId::DEFAULT);
+
         if let Some(player) = &loaded_player {
             renderer.camera_mut().position = glam::Vec3::new(
                 player.transform.x as f32,
@@ -1986,6 +2029,20 @@ impl GameWorld {
             dropped_items,
             projectiles,
         } = loaded_entities;
+        let mut mobs = mobs;
+        let mut next_mob_id = mobs
+            .iter()
+            .map(|mob| mob.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+            .max(1);
+        for mob in &mut mobs {
+            if mob.id == 0 {
+                mob.id = next_mob_id;
+                next_mob_id = next_mob_id.saturating_add(1).max(1);
+            }
+        }
         let furnaces = loaded_block_entities.furnaces;
         let enchanting_tables = loaded_block_entities.enchanting_tables;
         let brewing_stands = loaded_block_entities.brewing_stands;
@@ -2029,6 +2086,8 @@ impl GameWorld {
             chunks_visible: 0,
             mining_progress: None,
             spawn_point: glam::Vec3::ZERO, // Temp
+            spawn_point_dimension: initial_spawn_dimension,
+            active_dimension: initial_dimension,
             controls,
             input_processor,
             actions: ActionState::default(),
@@ -2053,11 +2112,15 @@ impl GameWorld {
             item_manager: dropped_items,
             loot_tables,
             inventory_open: false,
+            villager_trade_open: false,
+            open_villager_trade_id: None,
+            selected_villager_trade_idx: 0,
             ui_cursor_stack: None,
             ui_drag_state: UiDragState::default(),
             main_inventory: MainInventory::new(),
             mob_spawner,
             mobs,
+            next_mob_id,
             fluid_sim: FluidSimulator::new(),
             redstone_sim: RedstoneSimulator::new(),
             crop_growth: CropGrowthSystem::new(world_seed),
@@ -2162,6 +2225,7 @@ impl GameWorld {
                     world
                         .mob_spawner
                         .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                world.assign_mob_ids(&mut new_mobs);
                 world.mobs.append(&mut new_mobs);
             }
         }
@@ -2197,7 +2261,8 @@ impl GameWorld {
                     let mob_z = spawn_feet.z as f64 + (angle.sin() * distance) as f64;
                     let mob_y = spawn_feet.y as f64 + 1.0; // Spawn at player's ground level + 1
 
-                    let mob = Mob::new(mob_x, mob_y, mob_z, *mob_type);
+                    let mut mob = Mob::new(mob_x, mob_y, mob_z, *mob_type);
+                    world.assign_mob_id(&mut mob);
                     world.mobs.push(mob);
                 }
             }
@@ -3079,7 +3144,7 @@ impl GameWorld {
         let camera = self.renderer.camera();
         PlayerSave {
             transform: PlayerTransform {
-                dimension: DimensionId::DEFAULT,
+                dimension: self.active_dimension,
                 x: camera.position.x as f64,
                 y: camera.position.y as f64,
                 z: camera.position.z as f64,
@@ -3087,7 +3152,7 @@ impl GameWorld {
                 pitch: camera.pitch,
             },
             spawn_point: WorldPoint {
-                dimension: DimensionId::DEFAULT,
+                dimension: self.spawn_point_dimension,
                 x: self.spawn_point.x as f64,
                 y: self.spawn_point.y as f64,
                 z: self.spawn_point.z as f64,
@@ -3192,6 +3257,8 @@ impl GameWorld {
             save.spawn_point.y as f32,
             save.spawn_point.z as f32,
         );
+        self.spawn_point_dimension = save.spawn_point.dimension;
+        self.active_dimension = save.transform.dimension;
 
         self.hotbar.slots = save.hotbar;
         self.hotbar.selected = save.hotbar_selected.min(8);
@@ -3243,6 +3310,21 @@ impl GameWorld {
         self.death_message.clear();
         self.respawn_requested = false;
         self.menu_requested = false;
+    }
+
+    fn assign_mob_id(&mut self, mob: &mut Mob) {
+        if mob.id != 0 {
+            return;
+        }
+
+        mob.id = self.next_mob_id;
+        self.next_mob_id = self.next_mob_id.saturating_add(1).max(1);
+    }
+
+    fn assign_mob_ids(&mut self, mobs: &mut [Mob]) {
+        for mob in mobs {
+            self.assign_mob_id(mob);
+        }
     }
 
     fn world_entities_state(&self) -> WorldEntitiesState {
@@ -3475,7 +3557,9 @@ impl GameWorld {
                 tracing::info!(state = ?self.weather.state, "Weather toggled");
             }
             PhysicalKey::Code(KeyCode::KeyE) => {
-                if self.chest_open {
+                if self.villager_trade_open {
+                    self.close_villager_trade();
+                } else if self.chest_open {
                     self.close_chest();
                 } else if self.brewing_open {
                     self.close_brewing_stand();
@@ -4402,11 +4486,16 @@ impl GameWorld {
         // But for initial load we might want more.
         // For now, load all to ensure correctness, optimization later.
         for pos in chunks_to_load {
-            let (chunk, chunk_was_generated) = if let Ok(loaded) = self.region_store.load_chunk(pos)
+            let (chunk, chunk_was_generated) = if let Ok(loaded) =
+                self.region_store.load_chunk_in_dimension(self.active_dimension, pos)
             {
                 (loaded, false)
             } else {
-                (self.terrain_generator.generate_chunk(pos), true)
+                (
+                    self.terrain_generator
+                        .generate_chunk_in_dimension(self.active_dimension, pos),
+                    true,
+                )
             };
 
             let mut crops_to_register = Vec::new();
@@ -4420,7 +4509,7 @@ impl GameWorld {
                             let world_x = pos.x * CHUNK_SIZE_X as i32 + x as i32;
                             let world_z = pos.z * CHUNK_SIZE_Z as i32 + z as i32;
                             worldgen_chests.insert(BlockEntityKey {
-                                dimension: DimensionId::Overworld,
+                                dimension: self.active_dimension,
                                 x: world_x,
                                 y: y as i32,
                                 z: world_z,
@@ -4459,6 +4548,17 @@ impl GameWorld {
                 for key in worldgen_chests {
                     self.populate_worldgen_chest(key);
                 }
+
+                if self.active_dimension == DimensionId::Overworld {
+                    let mut village_villagers =
+                        mdminecraft_world::village_villager_spawns_for_chunk(
+                            self.world_seed,
+                            pos,
+                            self.terrain_generator.biome_assigner(),
+                        );
+                    self.assign_mob_ids(&mut village_villagers);
+                    self.mobs.append(&mut village_villagers);
+                }
             }
             self.refresh_container_signals_for_loaded_chunk(pos);
             for crop in crops_to_register {
@@ -4482,7 +4582,11 @@ impl GameWorld {
             }
 
             // Spawn mobs in new chunk
-            if let Some(chunk) = self.chunks.get(&pos) {
+            if self.active_dimension == DimensionId::Overworld {
+                let Some(chunk) = self.chunks.get(&pos) else {
+                    continue;
+                };
+
                 let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
                 let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
                 let biome = self
@@ -4506,6 +4610,7 @@ impl GameWorld {
                 let mut new_mobs =
                     self.mob_spawner
                         .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                self.assign_mob_ids(&mut new_mobs);
                 if !new_mobs.is_empty() {
                     tracing::info!(
                         chunk_x = pos.x,
@@ -4526,10 +4631,17 @@ impl GameWorld {
         }
 
         let (chunk, chunk_was_generated) =
-            if let Ok(loaded) = self.region_store.load_chunk(chunk_pos) {
+            if let Ok(loaded) =
+                self.region_store
+                    .load_chunk_in_dimension(self.active_dimension, chunk_pos)
+            {
                 (loaded, false)
             } else {
-                (self.terrain_generator.generate_chunk(chunk_pos), true)
+                (
+                    self.terrain_generator
+                        .generate_chunk_in_dimension(self.active_dimension, chunk_pos),
+                    true,
+                )
             };
 
         let mut crops_to_register = Vec::new();
@@ -4543,7 +4655,7 @@ impl GameWorld {
                         let world_x = chunk_pos.x * CHUNK_SIZE_X as i32 + x as i32;
                         let world_z = chunk_pos.z * CHUNK_SIZE_Z as i32 + z as i32;
                         worldgen_chests.insert(BlockEntityKey {
-                            dimension: DimensionId::Overworld,
+                            dimension: self.active_dimension,
                             x: world_x,
                             y: y as i32,
                             z: world_z,
@@ -4675,10 +4787,15 @@ impl GameWorld {
 
     fn populate_worldgen_chest(&mut self, key: BlockEntityKey) {
         let chest = self.chests.entry(key).or_default();
-        Self::populate_worldgen_chest_loot(chest, self.world_seed, key);
+        Self::populate_worldgen_chest_loot(chest, self.world_seed, key, &self.loot_tables);
     }
 
-    fn populate_worldgen_chest_loot(chest: &mut ChestState, world_seed: u64, key: BlockEntityKey) {
+    fn populate_worldgen_chest_loot(
+        chest: &mut ChestState,
+        world_seed: u64,
+        key: BlockEntityKey,
+        loot_tables: &content_pack_loot::LootTables,
+    ) {
         if chest.slots.iter().any(|slot| slot.is_some()) {
             return;
         }
@@ -4697,6 +4814,7 @@ impl GameWorld {
             ^ WORLDGEN_CHEST_LOOT_SALT
             ^ loot_table.salt();
         let mut rng = StdRng::seed_from_u64(seed);
+        let override_table = loot_tables.worldgen_chests.get(&loot_table);
 
         let mut empty_slots: Vec<usize> = (0..chest.slots.len())
             .filter(|idx| chest.slots[*idx].is_none())
@@ -4710,89 +4828,74 @@ impl GameWorld {
 
             let idx = rng.gen_range(0..empty_slots.len());
             let slot = empty_slots.swap_remove(idx);
-            chest.slots[slot] = Some(Self::roll_worldgen_chest_stack(&mut rng, loot_table));
+            chest.slots[slot] = Some(Self::roll_worldgen_chest_stack(
+                &mut rng,
+                loot_table,
+                override_table,
+            ));
         }
     }
 
     fn roll_worldgen_chest_stack(
         rng: &mut StdRng,
         loot_table: WorldgenChestLootTable,
+        override_table: Option<&content_pack_loot::WorldgenChestLootTableDefinition>,
     ) -> ItemStack {
+        if let Some(table) = override_table {
+            return table.roll_stack(rng);
+        }
+
         let roll = rng.gen_range(0..100);
         match loot_table {
             WorldgenChestLootTable::Generic => match roll {
-                0..=6 => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
-                7..=18 => {
-                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
-                }
-                19..=30 => {
-                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=3))
-                }
-                31..=44 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
-                45..=56 => {
-                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
-                }
+                0..=6 => ItemStack::new(ItemType::Item(14), 1),
+                7..=18 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=3)),
+                19..=30 => ItemStack::new(ItemType::Item(9), rng.gen_range(1..=3)),
+                31..=44 => ItemStack::new(ItemType::Item(8), rng.gen_range(2..=6)),
+                45..=56 => ItemStack::new(ItemType::Item(15), rng.gen_range(1..=4)),
                 57..=67 => {
                     ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1)
                 }
-                68..=78 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(1..=4)),
-                79..=90 => ItemStack::new(ItemType::Item(item_ids::BONE), rng.gen_range(1..=4)),
-                _ => ItemStack::new(ItemType::Item(item_ids::ENDER_PEARL), 1),
+                68..=78 => ItemStack::new(ItemType::Item(4), rng.gen_range(1..=4)),
+                79..=90 => ItemStack::new(ItemType::Item(16), rng.gen_range(1..=4)),
+                _ => ItemStack::new(ItemType::Item(2), rng.gen_range(1..=4)),
             },
             WorldgenChestLootTable::Dungeon => match roll {
-                0..=29 => ItemStack::new(ItemType::Item(item_ids::BONE), rng.gen_range(2..=6)),
-                30..=49 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(2..=6)),
-                50..=64 => {
-                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
-                }
-                65..=74 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
-                75..=82 => {
-                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
-                }
-                83..=88 => {
-                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=2))
-                }
-                89..=94 => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
-                95..=97 => ItemStack::new(ItemType::Item(item_ids::ENDER_PEARL), 1),
+                0..=29 => ItemStack::new(ItemType::Item(16), rng.gen_range(2..=6)),
+                30..=49 => ItemStack::new(ItemType::Item(4), rng.gen_range(2..=6)),
+                50..=64 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=3)),
+                65..=74 => ItemStack::new(ItemType::Item(8), rng.gen_range(2..=6)),
+                75..=82 => ItemStack::new(ItemType::Item(15), rng.gen_range(1..=4)),
+                83..=88 => ItemStack::new(ItemType::Item(9), rng.gen_range(1..=2)),
+                89..=94 => ItemStack::new(ItemType::Item(14), 1),
+                95..=97 => ItemStack::new(ItemType::Item(2), rng.gen_range(1..=4)),
                 _ => ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1),
             },
             WorldgenChestLootTable::Mineshaft => match roll {
-                0..=29 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=8)),
-                30..=49 => {
-                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
-                }
-                50..=64 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(1..=4)),
+                0..=29 => ItemStack::new(ItemType::Item(8), rng.gen_range(2..=8)),
+                30..=49 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=3)),
+                50..=64 => ItemStack::new(ItemType::Item(4), rng.gen_range(1..=4)),
                 65..=74 => {
                     ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1)
                 }
-                75..=84 => {
-                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=2))
-                }
-                85..=92 => {
-                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
-                }
-                _ => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
+                75..=84 => ItemStack::new(ItemType::Item(9), rng.gen_range(1..=2)),
+                85..=92 => ItemStack::new(ItemType::Item(15), rng.gen_range(1..=4)),
+                _ => ItemStack::new(ItemType::Item(14), 1),
             },
             WorldgenChestLootTable::Ruin => match roll {
-                0..=24 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
+                0..=24 => ItemStack::new(ItemType::Item(8), rng.gen_range(2..=6)),
                 25..=39 => {
                     ItemStack::new(ItemType::Food(mdminecraft_core::item::FoodType::Bread), 1)
                 }
                 40..=54 => {
                     ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT_SEEDS), rng.gen_range(2..=6))
                 }
-                55..=69 => {
-                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=3))
-                }
-                70..=79 => {
-                    ItemStack::new(ItemType::Item(item_ids::LAPIS_LAZULI), rng.gen_range(1..=4))
-                }
-                80..=86 => {
-                    ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), rng.gen_range(1..=2))
-                }
-                87..=93 => ItemStack::new(ItemType::Item(item_ids::STRING), rng.gen_range(1..=4)),
-                94..=98 => ItemStack::new(ItemType::Item(item_ids::BONE), rng.gen_range(1..=4)),
-                _ => ItemStack::new(ItemType::Item(item_ids::DIAMOND), 1),
+                55..=69 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=3)),
+                70..=79 => ItemStack::new(ItemType::Item(15), rng.gen_range(1..=4)),
+                80..=86 => ItemStack::new(ItemType::Item(9), rng.gen_range(1..=2)),
+                87..=93 => ItemStack::new(ItemType::Item(4), rng.gen_range(1..=4)),
+                94..=98 => ItemStack::new(ItemType::Item(16), rng.gen_range(1..=4)),
+                _ => ItemStack::new(ItemType::Item(14), 1),
             },
             WorldgenChestLootTable::Village => match roll {
                 0..=34 => ItemStack::new(
@@ -4806,11 +4909,9 @@ impl GameWorld {
                 60..=79 => {
                     ItemStack::new(ItemType::Item(CORE_ITEM_WHEAT_SEEDS), rng.gen_range(2..=6))
                 }
-                80..=91 => ItemStack::new(ItemType::Item(item_ids::COAL), rng.gen_range(2..=6)),
-                92..=97 => {
-                    ItemStack::new(ItemType::Item(item_ids::IRON_INGOT), rng.gen_range(1..=2))
-                }
-                _ => ItemStack::new(ItemType::Item(item_ids::GOLD_INGOT), 1),
+                80..=91 => ItemStack::new(ItemType::Item(8), rng.gen_range(2..=6)),
+                92..=97 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=2)),
+                _ => ItemStack::new(ItemType::Item(9), 1),
             },
         }
     }
@@ -5015,6 +5116,11 @@ impl GameWorld {
             // Attacked a mob successfully - set cooldown to 0.6 seconds
             self.attack_cooldown = 0.6;
             // Don't mine
+            self.mining_progress = None;
+            return;
+        }
+
+        if self.input.is_mouse_clicked(MouseButton::Right) && self.try_open_villager_trade() {
             self.mining_progress = None;
             return;
         }
@@ -6217,15 +6323,15 @@ impl GameWorld {
             if placed {
                 // Initialize block-entity state for blocks that need it even when never opened.
                 if place_block_id == mdminecraft_world::mechanical_blocks::HOPPER {
-                    let key = Self::overworld_block_entity_key(place_pos);
+                    let key = self.block_entity_key(place_pos);
                     self.hoppers.entry(key).or_default();
                 }
                 if place_block_id == mdminecraft_world::mechanical_blocks::DISPENSER {
-                    let key = Self::overworld_block_entity_key(place_pos);
+                    let key = self.block_entity_key(place_pos);
                     self.dispensers.entry(key).or_default();
                 }
                 if place_block_id == mdminecraft_world::mechanical_blocks::DROPPER {
-                    let key = Self::overworld_block_entity_key(place_pos);
+                    let key = self.block_entity_key(place_pos);
                     self.droppers.entry(key).or_default();
                 }
 
@@ -7152,6 +7258,7 @@ impl GameWorld {
         let mut close_hopper_requested = false;
         let mut close_dispenser_requested = false;
         let mut close_dropper_requested = false;
+        let mut close_villager_trade_requested = false;
         let mut command_close_requested = false;
         let mut command_submit: Option<String> = None;
         let mut enchanting_result: Option<EnchantingResult> = None;
@@ -7321,6 +7428,8 @@ impl GameWorld {
             let is_dead = self.player_state == PlayerState::Dead;
             let death_msg = self.death_message.clone();
             let inventory_open = self.inventory_open;
+            let villager_trade_open = self.villager_trade_open;
+            let open_villager_trade_id = self.open_villager_trade_id;
             let crafting_open = self.crafting_open;
             let furnace_open = self.furnace_open;
             let enchanting_open = self.enchanting_open;
@@ -7371,6 +7480,35 @@ impl GameWorld {
                             );
                             close_inventory_requested = close;
                             spill_items.extend(items);
+                        }
+
+                        if villager_trade_open {
+                            if let Some(villager_id) = open_villager_trade_id {
+                                let villager_exists = self.mobs.iter().any(|mob| {
+                                    mob.id == villager_id && mob.mob_type == MobType::Villager
+                                });
+                                if villager_exists {
+                                    let (profession, offers) =
+                                        villager_trade_offers(self.world_seed, villager_id);
+                                    let (close, spill) = render_villager_trade(
+                                        ctx,
+                                        profession,
+                                        &offers,
+                                        &mut self.selected_villager_trade_idx,
+                                        &mut self.hotbar,
+                                        &mut self.main_inventory,
+                                        &self.registry,
+                                    );
+                                    close_villager_trade_requested = close;
+                                    if let Some(stack) = spill {
+                                        spill_items.push(stack);
+                                    }
+                                } else {
+                                    close_villager_trade_requested = true;
+                                }
+                            } else {
+                                close_villager_trade_requested = true;
+                            }
                         }
 
                         // Show crafting if open
@@ -7673,6 +7811,10 @@ impl GameWorld {
         // Handle dropper close
         if close_dropper_requested {
             self.close_dropper();
+        }
+
+        if close_villager_trade_requested {
+            self.close_villager_trade();
         }
 
         if command_close_requested {
@@ -8183,33 +8325,84 @@ impl GameWorld {
             self.xp_orbs.push(XPOrb::new(pos, xp_value, seed));
         }
 
-        // Spawn hostile mobs at night (every ~100 frames, max 10 hostile mobs)
+        // Spawn hostile mobs at night (every ~100 ticks, max 10 hostile mobs).
+        //
+        // Use integer offsets to avoid platform-dependent trig differences; validity checks gate
+        // spawns (solid ground, empty headroom, low light).
         if is_night && tick.is_multiple_of(100) {
             let hostile_count = self.mobs.iter().filter(|m| m.is_hostile()).count();
             if hostile_count < 10 {
-                // Spawn at random position around player (16-32 blocks away)
-                let angle = ((tick * 7) % 360) as f64 * std::f64::consts::PI / 180.0;
-                let distance = 16.0 + ((tick * 13) % 16) as f64;
-                let spawn_x = player_x + angle.cos() * distance;
-                let spawn_z = player_z + angle.sin() * distance;
+                const MIN_RADIUS: i32 = 16;
+                const MAX_RADIUS: i32 = 32;
+                const LIGHT_THRESHOLD: u8 = 7;
 
-                // Get ground height at spawn position
-                let chunk_x = (spawn_x as i32).div_euclid(CHUNK_SIZE_X as i32);
-                let chunk_z = (spawn_z as i32).div_euclid(CHUNK_SIZE_Z as i32);
-                let local_x = (spawn_x as i32).rem_euclid(CHUNK_SIZE_X as i32) as usize;
-                let local_z = (spawn_z as i32).rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                let seed = self.world_seed
+                    ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ 0x484F_5354_494C_4553_u64; // "HOSTILES"
+                let mut rng = StdRng::seed_from_u64(seed);
 
-                if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
-                    // Find ground level
-                    let mut ground_y = 64;
-                    for y in (0..CHUNK_SIZE_Y).rev() {
-                        if chunk.voxel(local_x, y, local_z).id != BLOCK_AIR {
-                            ground_y = y + 1;
-                            break;
-                        }
+                let base_x = player_x.floor() as i32;
+                let base_z = player_z.floor() as i32;
+                let min_sq = MIN_RADIUS * MIN_RADIUS;
+                let max_sq = MAX_RADIUS * MAX_RADIUS;
+
+                let mut spawned = false;
+                for _attempt in 0..32 {
+                    let dx = rng.gen_range(-MAX_RADIUS..=MAX_RADIUS);
+                    let dz = rng.gen_range(-MAX_RADIUS..=MAX_RADIUS);
+                    let dist_sq = dx * dx + dz * dz;
+                    if dist_sq < min_sq || dist_sq > max_sq {
+                        continue;
                     }
 
-                    // Choose mob type (zombie, skeleton, spider, or creeper)
+                    let spawn_block_x = base_x + dx;
+                    let spawn_block_z = base_z + dz;
+
+                    let chunk_x = spawn_block_x.div_euclid(CHUNK_SIZE_X as i32);
+                    let chunk_z = spawn_block_z.div_euclid(CHUNK_SIZE_Z as i32);
+                    let local_x = spawn_block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let local_z = spawn_block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                    let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) else {
+                        continue;
+                    };
+
+                    let mut ground_y = None;
+                    for y in (0..CHUNK_SIZE_Y).rev() {
+                        let id = chunk.voxel(local_x, y, local_z).id;
+                        if id == BLOCK_AIR {
+                            continue;
+                        }
+                        if !self.block_properties.get(id).is_solid {
+                            continue;
+                        }
+                        ground_y = Some(y as i32);
+                        break;
+                    }
+
+                    let Some(ground_y) = ground_y else {
+                        continue;
+                    };
+                    let spawn_y = ground_y + 1;
+                    if spawn_y + 1 >= CHUNK_SIZE_Y as i32 {
+                        continue;
+                    }
+
+                    let spawn_voxel = chunk.voxel(local_x, spawn_y as usize, local_z);
+                    if spawn_voxel.id != BLOCK_AIR {
+                        continue;
+                    }
+                    let head_voxel = chunk.voxel(local_x, (spawn_y + 1) as usize, local_z);
+                    if head_voxel.id != BLOCK_AIR {
+                        continue;
+                    }
+
+                    let light = Self::effective_spawn_light_level(spawn_voxel, &self.sim_time);
+                    if light > LIGHT_THRESHOLD {
+                        continue;
+                    }
+
+                    // Choose mob type (zombie, skeleton, spider, or creeper).
                     let mob_type = match tick % 4 {
                         0 => MobType::Zombie,
                         1 => MobType::Skeleton,
@@ -8217,15 +8410,27 @@ impl GameWorld {
                         _ => MobType::Creeper,
                     };
 
-                    let mob = Mob::new(spawn_x, ground_y as f64 + 0.5, spawn_z, mob_type);
-                    self.mobs.push(mob);
-                    tracing::debug!(
-                        "Spawned {:?} at ({:.1}, {}, {:.1})",
+                    let mut mob = Mob::new(
+                        spawn_block_x as f64 + 0.5,
+                        spawn_y as f64,
+                        spawn_block_z as f64 + 0.5,
                         mob_type,
-                        spawn_x,
-                        ground_y,
-                        spawn_z
                     );
+                    self.assign_mob_id(&mut mob);
+                    self.mobs.push(mob);
+                    spawned = true;
+                    tracing::debug!(
+                        "Spawned {:?} at ({}, {}, {})",
+                        mob_type,
+                        spawn_block_x,
+                        spawn_y,
+                        spawn_block_z
+                    );
+                    break;
+                }
+
+                if !spawned {
+                    tracing::debug!("Hostile spawn attempt failed to find a valid location");
                 }
             }
         }
@@ -8242,6 +8447,12 @@ impl GameWorld {
                 }
             });
         }
+    }
+
+    fn effective_spawn_light_level(voxel: Voxel, time: &SimTime) -> u8 {
+        let effective_skylight = time.effective_skylight() as u16;
+        let scaled_sky = ((voxel.light_sky as u16) * effective_skylight + 7) / 15;
+        scaled_sky.max(voxel.light_block as u16) as u8
     }
 
     /// Update all projectiles - physics, collisions, and damage
@@ -8770,6 +8981,69 @@ impl GameWorld {
         false
     }
 
+    fn try_open_villager_trade(&mut self) -> bool {
+        if self.player_state != PlayerState::Alive {
+            return false;
+        }
+        if self.villager_trade_open {
+            return false;
+        }
+
+        let camera = self.renderer.camera();
+        let origin = camera.position;
+        let dir = camera.forward();
+
+        const INTERACT_REACH: f32 = 4.0;
+        let blocking_distance = self
+            .selected_block
+            .map(|hit| hit.distance)
+            .unwrap_or(f32::INFINITY);
+
+        let mut closest: Option<(u64, f32)> = None;
+        for mob in &self.mobs {
+            if mob.mob_type != MobType::Villager {
+                continue;
+            }
+            if mob.id == 0 {
+                continue;
+            }
+
+            let mob_size = mob.mob_type.size();
+            let mob_height = mob_size * 2.0;
+            let mob_min = glam::Vec3::new(
+                mob.x as f32 - mob_size,
+                mob.y as f32,
+                mob.z as f32 - mob_size,
+            );
+            let mob_max = glam::Vec3::new(
+                mob.x as f32 + mob_size,
+                mob.y as f32 + mob_height,
+                mob.z as f32 + mob_size,
+            );
+
+            let Some(t) = ray_aabb_intersect(origin, dir, mob_min, mob_max) else {
+                continue;
+            };
+            if !(0.0..INTERACT_REACH).contains(&t) {
+                continue;
+            }
+            if t >= blocking_distance {
+                continue;
+            }
+
+            if closest.is_none_or(|(_, prev_t)| t < prev_t) {
+                closest = Some((mob.id, t));
+            }
+        }
+
+        let Some((villager_id, _distance)) = closest else {
+            return false;
+        };
+
+        self.open_villager_trade(villager_id);
+        true
+    }
+
     fn try_add_stack_to_storage(&mut self, stack: ItemStack) -> Option<ItemStack> {
         let remainder = self.hotbar.add_stack(stack)?;
         self.main_inventory.add_stack(remainder)
@@ -8990,7 +9264,7 @@ impl GameWorld {
 
     /// Open furnace UI at the given position
     fn open_furnace(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.furnace_open = true;
         self.open_furnace_pos = Some(key);
         self.inventory_open = false;
@@ -9020,7 +9294,7 @@ impl GameWorld {
 
     /// Open enchanting table UI at the given position
     fn open_enchanting_table(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.enchanting_open = true;
         self.open_enchanting_pos = Some(key);
         self.inventory_open = false;
@@ -9058,7 +9332,7 @@ impl GameWorld {
 
     /// Open brewing stand UI at the given position
     fn open_brewing_stand(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.brewing_open = true;
         self.open_brewing_pos = Some(key);
         self.inventory_open = false;
@@ -9090,7 +9364,7 @@ impl GameWorld {
 
     /// Open chest UI at the given position
     fn open_chest(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.chest_open = true;
         self.open_chest_pos = Some(key);
         self.inventory_open = false;
@@ -9121,9 +9395,41 @@ impl GameWorld {
         tracing::info!("Chest closed");
     }
 
+    fn open_villager_trade(&mut self, villager_id: u64) {
+        self.villager_trade_open = true;
+        self.open_villager_trade_id = Some(villager_id);
+        self.selected_villager_trade_idx = 0;
+        self.inventory_open = false;
+        self.crafting_open = false;
+        self.furnace_open = false;
+        self.enchanting_open = false;
+        self.brewing_open = false;
+        self.chest_open = false;
+        self.hopper_open = false;
+        self.dispenser_open = false;
+        self.dropper_open = false;
+        self.ui_drag_state.reset();
+        let _ = self.input.enter_ui_overlay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryOpen);
+        tracing::info!(villager_id, "Villager trade opened");
+    }
+
+    fn close_villager_trade(&mut self) {
+        self.villager_trade_open = false;
+        self.open_villager_trade_id = None;
+        self.selected_villager_trade_idx = 0;
+        self.ui_drag_state.reset();
+        if let Some(stack) = self.ui_cursor_stack.take() {
+            self.return_stack_to_storage_or_spill(stack);
+        }
+        let _ = self.input.enter_gameplay(&self.window);
+        self.audio.play_sfx(SoundId::InventoryClose);
+        tracing::info!("Villager trade closed");
+    }
+
     /// Open hopper UI at the given position
     fn open_hopper(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.hopper_open = true;
         self.open_hopper_pos = Some(key);
         self.inventory_open = false;
@@ -9156,7 +9462,7 @@ impl GameWorld {
 
     /// Open dispenser UI at the given position
     fn open_dispenser(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.dispenser_open = true;
         self.open_dispenser_pos = Some(key);
         self.inventory_open = false;
@@ -9189,7 +9495,7 @@ impl GameWorld {
 
     /// Open dropper UI at the given position
     fn open_dropper(&mut self, block_pos: IVec3) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         self.dropper_open = true;
         self.open_dropper_pos = Some(key);
         self.inventory_open = false;
@@ -9221,7 +9527,7 @@ impl GameWorld {
     }
 
     fn purge_block_entity_state(&mut self, block_pos: IVec3, removed_block_id: BlockId) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
         match removed_block_id {
             interactive_blocks::CHEST => {
                 if self.chest_open && self.open_chest_pos == Some(key) {
@@ -9270,7 +9576,7 @@ impl GameWorld {
     }
 
     fn on_block_entity_removed(&mut self, block_pos: IVec3, removed_block_id: BlockId) {
-        let key = Self::overworld_block_entity_key(block_pos);
+        let key = self.block_entity_key(block_pos);
 
         let drop_pos = (
             block_pos.x as f64 + 0.5,
@@ -9589,6 +9895,10 @@ impl GameWorld {
             return;
         }
 
+        if self.villager_trade_open {
+            self.close_villager_trade();
+            return;
+        }
         if self.hopper_open {
             self.close_hopper();
             return;
@@ -10176,6 +10486,8 @@ impl GameWorld {
             DroppedItemType::GoldIngot => Some(ItemType::Item(9)),
             DroppedItemType::Diamond => Some(ItemType::Item(14)),
             DroppedItemType::LapisLazuli => Some(ItemType::Item(15)),
+            DroppedItemType::Bone => Some(ItemType::Item(16)),
+            DroppedItemType::Emerald => Some(ItemType::Item(17)),
             DroppedItemType::Leather => Some(ItemType::Item(102)),
             DroppedItemType::Wool => Some(ItemType::Item(103)),
             DroppedItemType::Egg => Some(ItemType::Item(104)),
@@ -10475,6 +10787,8 @@ impl GameWorld {
                 9 => Some(DroppedItemType::GoldIngot),
                 14 => Some(DroppedItemType::Diamond),
                 15 => Some(DroppedItemType::LapisLazuli),
+                16 => Some(DroppedItemType::Bone),
+                17 => Some(DroppedItemType::Emerald),
                 102 => Some(DroppedItemType::Leather),
                 103 => Some(DroppedItemType::Wool),
                 104 => Some(DroppedItemType::Egg),
@@ -18273,6 +18587,241 @@ fn render_crafting_output_slot_interactive(
     response
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VillagerTradeOffer {
+    buy_a: (ItemType, u32),
+    buy_b: Option<(ItemType, u32)>,
+    sell: (ItemType, u32),
+}
+
+fn villager_trade_offers(
+    world_seed: u64,
+    villager_id: u64,
+) -> (&'static str, Vec<VillagerTradeOffer>) {
+    let hash =
+        world_seed ^ villager_id.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x5649_4C4C_4147_4552_u64; // "VILLAGER"
+
+    let emerald = ItemType::Item(17);
+    match hash % 3 {
+        0 => (
+            "Farmer",
+            vec![
+                VillagerTradeOffer {
+                    buy_a: (ItemType::Item(CORE_ITEM_WHEAT), 20),
+                    buy_b: None,
+                    sell: (emerald, 1),
+                },
+                VillagerTradeOffer {
+                    buy_a: (emerald, 1),
+                    buy_b: None,
+                    sell: (ItemType::Food(mdminecraft_core::item::FoodType::Bread), 3),
+                },
+                VillagerTradeOffer {
+                    buy_a: (emerald, 1),
+                    buy_b: None,
+                    sell: (ItemType::Food(mdminecraft_core::item::FoodType::Apple), 3),
+                },
+            ],
+        ),
+        1 => (
+            "Fletcher",
+            vec![
+                VillagerTradeOffer {
+                    buy_a: (ItemType::Item(3), 32),
+                    buy_b: None,
+                    sell: (emerald, 1),
+                },
+                VillagerTradeOffer {
+                    buy_a: (emerald, 1),
+                    buy_b: None,
+                    sell: (ItemType::Item(2), 16),
+                },
+                VillagerTradeOffer {
+                    buy_a: (emerald, 1),
+                    buy_b: None,
+                    sell: (ItemType::Block(interactive_blocks::TORCH), 16),
+                },
+            ],
+        ),
+        _ => (
+            "Librarian",
+            vec![
+                VillagerTradeOffer {
+                    buy_a: (ItemType::Item(CORE_ITEM_PAPER), 24),
+                    buy_b: None,
+                    sell: (emerald, 1),
+                },
+                VillagerTradeOffer {
+                    buy_a: (emerald, 1),
+                    buy_b: None,
+                    sell: (ItemType::Item(CORE_ITEM_BOOK), 1),
+                },
+                VillagerTradeOffer {
+                    buy_a: (emerald, 3),
+                    buy_b: None,
+                    sell: (ItemType::Block(BLOCK_BOOKSHELF), 1),
+                },
+            ],
+        ),
+    }
+}
+
+fn render_villager_trade(
+    ctx: &egui::Context,
+    profession: &str,
+    offers: &[VillagerTradeOffer],
+    selected_trade: &mut usize,
+    hotbar: &mut Hotbar,
+    main_inventory: &mut MainInventory,
+    registry: &BlockRegistry,
+) -> (bool, Option<ItemStack>) {
+    let mut close_clicked = false;
+    let mut spill: Option<ItemStack> = None;
+
+    egui::Area::new(egui::Id::new("villager_trade_overlay"))
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .show(ctx, |ui| {
+            let screen_rect = ctx.screen_rect();
+            ui.painter().rect_filled(
+                screen_rect,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+            );
+        });
+
+    egui::Window::new("Trading")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_min_width(520.0);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Trading").size(18.0).strong());
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(format!("({})", profession))
+                        .size(12.0)
+                        .color(egui::Color32::GRAY),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("X").clicked() {
+                        close_clicked = true;
+                    }
+                });
+            });
+
+            ui.separator();
+
+            if offers.is_empty() {
+                ui.label(
+                    egui::RichText::new("No trades available.")
+                        .size(12.0)
+                        .color(egui::Color32::GRAY),
+                );
+                return;
+            }
+
+            if *selected_trade >= offers.len() {
+                *selected_trade = 0;
+            }
+
+            ui.label(
+                egui::RichText::new("Select an offer, then click Trade.")
+                    .size(11.0)
+                    .color(egui::Color32::GRAY),
+            );
+            ui.add_space(8.0);
+
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for (idx, offer) in offers.iter().enumerate() {
+                        let buy_a_name = hotbar.item_name(
+                            Some(&ItemStack::new(offer.buy_a.0, offer.buy_a.1)),
+                            registry,
+                        );
+                        let sell_name = hotbar
+                            .item_name(Some(&ItemStack::new(offer.sell.0, offer.sell.1)), registry);
+                        let buy_b_name = offer.buy_b.as_ref().map(|(ty, count)| {
+                            hotbar.item_name(Some(&ItemStack::new(*ty, *count)), registry)
+                        });
+
+                        let have_a = storage_count_item_type(hotbar, main_inventory, offer.buy_a.0);
+                        let can_trade = have_a >= offer.buy_a.1
+                            && offer
+                                .buy_b
+                                .as_ref()
+                                .map(|(ty, needed)| {
+                                    storage_count_item_type(hotbar, main_inventory, *ty) >= *needed
+                                })
+                                .unwrap_or(true);
+
+                        ui.horizontal(|ui| {
+                            let selected = *selected_trade == idx;
+                            let label = if let Some(buy_b_name) = buy_b_name.as_ref() {
+                                format!("{buy_a_name} + {buy_b_name} → {sell_name}")
+                            } else {
+                                format!("{buy_a_name} → {sell_name}")
+                            };
+                            let mut response = ui.selectable_label(selected, label);
+                            if !can_trade {
+                                response = response.on_hover_text("Not enough items to trade");
+                            }
+                            if response.clicked() {
+                                *selected_trade = idx;
+                            }
+
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let trade_enabled = can_trade && idx == *selected_trade;
+                                    if ui
+                                        .add_enabled(trade_enabled, egui::Button::new("Trade"))
+                                        .clicked()
+                                    {
+                                        let ok = take_items_from_storage(
+                                            hotbar,
+                                            main_inventory,
+                                            offer.buy_a.0,
+                                            offer.buy_a.1,
+                                        );
+                                        debug_assert!(ok, "can_trade gate should ensure buy_a");
+
+                                        if let Some((ty, needed)) = offer.buy_b {
+                                            let ok = take_items_from_storage(
+                                                hotbar,
+                                                main_inventory,
+                                                ty,
+                                                needed,
+                                            );
+                                            debug_assert!(ok, "can_trade gate should ensure buy_b");
+                                        }
+
+                                        let remainder = add_stack_to_storage(
+                                            hotbar,
+                                            main_inventory,
+                                            ItemStack::new(offer.sell.0, offer.sell.1),
+                                        );
+                                        spill = remainder;
+                                    }
+                                },
+                            );
+                        });
+                    }
+                });
+
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new("Escape or X to close")
+                    .size(11.0)
+                    .color(egui::Color32::DARK_GRAY),
+            );
+        });
+
+    (close_clicked, spill)
+}
+
 /// Render the chest UI
 /// Returns true if the close button was clicked
 fn render_chest(
@@ -20422,7 +20971,7 @@ impl commands::CommandContext for GameWorld {
             anyhow::bail!("Y out of bounds: {y}");
         }
 
-        let key = Self::overworld_block_entity_key(IVec3::new(x, y, z));
+        let key = self.block_entity_key(IVec3::new(x, y, z));
         let data = match block_id {
             interactive_blocks::CHEST => Some(commands::BlockEntityData::Chest(Box::new(
                 self.chests.entry(key).or_default().clone(),
@@ -20469,7 +21018,7 @@ impl commands::CommandContext for GameWorld {
 
         let chunk_pos = ChunkPos::new(x.div_euclid(16), z.div_euclid(16));
         self.ensure_chunk_loaded_for_command(chunk_pos);
-        let key = Self::overworld_block_entity_key(IVec3::new(x, y, z));
+        let key = self.block_entity_key(IVec3::new(x, y, z));
 
         match data {
             commands::BlockEntityData::Chest(state) => {
@@ -20594,7 +21143,7 @@ impl commands::CommandContext for GameWorld {
         }
 
         // Initialize block-entity state when needed.
-        let key = Self::overworld_block_entity_key(pos);
+        let key = self.block_entity_key(pos);
         match block_id {
             interactive_blocks::CHEST => {
                 self.chests.entry(key).or_default();
@@ -20732,7 +21281,7 @@ impl commands::CommandContext for GameWorld {
             }
 
             // Initialize block-entity state when needed.
-            let key = Self::overworld_block_entity_key(pos);
+            let key = self.block_entity_key(pos);
             match block_id {
                 interactive_blocks::CHEST => {
                     self.chests.entry(key).or_default();
@@ -20800,7 +21349,9 @@ impl commands::CommandContext for GameWorld {
     }
 
     fn summon_mob(&mut self, mob: MobType, x: f64, y: f64, z: f64) -> anyhow::Result<()> {
-        self.mobs.push(Mob::new(x, y, z, mob));
+        let mut mob = Mob::new(x, y, z, mob);
+        self.assign_mob_id(&mut mob);
+        self.mobs.push(mob);
         Ok(())
     }
 }
@@ -20835,6 +21386,7 @@ mod tests {
         CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
         CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
+    use crate::content_pack_loot;
     use mdminecraft_world::StatusEffect;
 
     #[test]
@@ -20915,9 +21467,10 @@ mod tests {
 
         let mut chest_a = ChestState::new();
         let mut chest_b = ChestState::new();
+        let loot_tables = content_pack_loot::LootTables::default();
 
-        GameWorld::populate_worldgen_chest_loot(&mut chest_a, 12345, key);
-        GameWorld::populate_worldgen_chest_loot(&mut chest_b, 12345, key);
+        GameWorld::populate_worldgen_chest_loot(&mut chest_a, 12345, key, &loot_tables);
+        GameWorld::populate_worldgen_chest_loot(&mut chest_b, 12345, key, &loot_tables);
 
         assert_eq!(chest_a.slots, chest_b.slots);
         assert!(
@@ -20928,8 +21481,81 @@ mod tests {
         let mut chest_with_item = ChestState::new();
         chest_with_item.slots[0] = Some(ItemStack::new(ItemType::Block(BLOCK_COBBLESTONE), 1));
         let before = chest_with_item.slots.clone();
-        GameWorld::populate_worldgen_chest_loot(&mut chest_with_item, 12345, key);
+        GameWorld::populate_worldgen_chest_loot(&mut chest_with_item, 12345, key, &loot_tables);
         assert_eq!(chest_with_item.slots, before);
+    }
+
+    #[test]
+    fn worldgen_chest_loot_respects_content_pack_table_overrides() {
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: mdminecraft_core::DimensionId::Nether,
+            x: 10,
+            y: 30,
+            z: -5,
+        };
+
+        let mut loot_tables = content_pack_loot::LootTables::default();
+        let override_table =
+            content_pack_loot::WorldgenChestLootTableDefinition::from_weighted_entries(vec![(
+                ItemType::Item(14),
+                1,
+                1,
+                1,
+            )])
+            .expect("override table should build");
+        loot_tables
+            .worldgen_chests
+            .insert(super::WorldgenChestLootTable::Generic, override_table);
+
+        let mut chest = ChestState::new();
+        GameWorld::populate_worldgen_chest_loot(&mut chest, 12345, key, &loot_tables);
+
+        let expected = ItemStack::new(ItemType::Item(14), 1);
+        assert!(
+            chest.slots.iter().any(|slot| slot.is_some()),
+            "expected overridden loot table to populate at least one slot"
+        );
+        for slot in chest.slots.iter().flatten() {
+            assert_eq!(slot, &expected);
+        }
+    }
+
+    #[test]
+    fn villager_trade_offers_are_deterministic_for_seed_and_id() {
+        let (profession_a, offers_a) = super::villager_trade_offers(12345, 99);
+        let (profession_b, offers_b) = super::villager_trade_offers(12345, 99);
+        assert_eq!(profession_a, profession_b);
+        assert_eq!(offers_a, offers_b);
+    }
+
+    #[test]
+    fn effective_spawn_light_level_scales_skylight_and_respects_block_light() {
+        let mut noon = mdminecraft_world::SimTime::new(24000);
+        for _ in 0..12000 {
+            noon.advance();
+        }
+
+        let voxel = Voxel {
+            id: BLOCK_AIR,
+            state: 0,
+            light_sky: 15,
+            light_block: 0,
+        };
+        assert_eq!(GameWorld::effective_spawn_light_level(voxel, &noon), 15);
+
+        let midnight = mdminecraft_world::SimTime::new(24000);
+        assert_eq!(GameWorld::effective_spawn_light_level(voxel, &midnight), 3);
+
+        let torchlit = Voxel {
+            id: BLOCK_AIR,
+            state: 0,
+            light_sky: 0,
+            light_block: 10,
+        };
+        assert_eq!(
+            GameWorld::effective_spawn_light_level(torchlit, &midnight),
+            10
+        );
     }
 
     #[test]
@@ -25377,6 +26003,30 @@ mod tests {
         assert_eq!(
             GameWorld::convert_core_item_type_to_dropped(ItemType::Item(14)),
             Some(DroppedItemType::Diamond)
+        );
+    }
+
+    #[test]
+    fn bone_converts_between_dropped_and_core_item_ids() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Bone),
+            Some(ItemType::Item(16))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(16)),
+            Some(DroppedItemType::Bone)
+        );
+    }
+
+    #[test]
+    fn emerald_converts_between_dropped_and_core_item_ids() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::Emerald),
+            Some(ItemType::Item(17))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(17)),
+            Some(DroppedItemType::Emerald)
         );
     }
 

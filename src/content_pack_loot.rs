@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use mdminecraft_assets::BlockRegistry;
-use mdminecraft_core::{item::FoodType, ItemType};
+use mdminecraft_core::item::{FoodType, ItemStack};
+use mdminecraft_core::ItemType;
 use mdminecraft_world::{BlockId, ItemType as DroppedItemType, MobType};
 use rand::Rng;
 use serde::Deserialize;
@@ -19,6 +20,8 @@ const LOOT_FILE: &str = "loot.json";
 pub struct LootTables {
     pub block: BTreeMap<BlockId, LootTable>,
     pub mob: BTreeMap<MobType, LootTable>,
+    pub worldgen_chests:
+        BTreeMap<crate::game::WorldgenChestLootTable, WorldgenChestLootTableDefinition>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -32,6 +35,91 @@ struct LootDrop {
     min: u32,
     max: u32,
     chance_out_of_2p32: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WorldgenChestLootTableDefinition {
+    entries: Vec<WorldgenChestLootEntry>,
+    total_weight: u32,
+}
+
+#[derive(Debug, Clone)]
+struct WorldgenChestLootEntry {
+    item: ItemType,
+    min: u32,
+    max: u32,
+    weight: u32,
+}
+
+impl WorldgenChestLootTableDefinition {
+    #[cfg(test)]
+    pub(crate) fn from_weighted_entries(entries: Vec<(ItemType, u32, u32, u32)>) -> Result<Self> {
+        if entries.is_empty() {
+            anyhow::bail!("Worldgen chest loot table must contain at least one entry");
+        }
+
+        let mut parsed = Vec::with_capacity(entries.len());
+        let mut total_weight: u32 = 0;
+
+        for (item, min, max, weight) in entries {
+            if weight == 0 {
+                anyhow::bail!("Worldgen chest loot entry weight must be > 0");
+            }
+            if max < min {
+                anyhow::bail!("Worldgen chest loot entry has max {max} < min {min}");
+            }
+
+            total_weight = total_weight
+                .checked_add(weight)
+                .ok_or_else(|| anyhow::anyhow!("Worldgen chest loot table weight overflow"))?;
+
+            parsed.push(WorldgenChestLootEntry {
+                item,
+                min,
+                max,
+                weight,
+            });
+        }
+
+        if total_weight == 0 {
+            anyhow::bail!("Worldgen chest loot table total weight must be > 0");
+        }
+
+        Ok(Self {
+            entries: parsed,
+            total_weight,
+        })
+    }
+
+    pub(crate) fn roll_stack(&self, rng: &mut impl Rng) -> ItemStack {
+        debug_assert!(self.total_weight > 0);
+        debug_assert!(!self.entries.is_empty());
+
+        let mut roll = rng.gen_range(0..self.total_weight);
+        for entry in &self.entries {
+            if roll < entry.weight {
+                let count = if entry.min == entry.max {
+                    entry.min
+                } else {
+                    rng.gen_range(entry.min..=entry.max)
+                };
+                return ItemStack::new(entry.item, count);
+            }
+            roll -= entry.weight;
+        }
+
+        // If due to bugs or unexpected state we reach here, fall back to the last entry.
+        let entry = self
+            .entries
+            .last()
+            .expect("worldgen chest loot entry exists");
+        let count = if entry.min == entry.max {
+            entry.min
+        } else {
+            rng.gen_range(entry.min..=entry.max)
+        };
+        ItemStack::new(entry.item, count)
+    }
 }
 
 impl LootTable {
@@ -67,6 +155,8 @@ struct PackLootFile {
     blocks: Vec<PackBlockLootDefinition>,
     #[serde(default)]
     mobs: Vec<PackMobLootDefinition>,
+    #[serde(default)]
+    worldgen_chests: Vec<PackWorldgenChestLootDefinition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +171,25 @@ struct PackMobLootDefinition {
     mob: String,
     #[serde(default)]
     drops: Vec<PackLootDropDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackWorldgenChestLootDefinition {
+    table: String,
+    #[serde(default)]
+    entries: Vec<PackWorldgenChestLootEntryDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackWorldgenChestLootEntryDefinition {
+    item: String,
+    weight: u32,
+    #[serde(default)]
+    count: Option<u32>,
+    #[serde(default)]
+    min: Option<u32>,
+    #[serde(default)]
+    max: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +304,36 @@ fn apply_loot_file(
         tables.mob.insert(mob, table);
     }
 
+    let mut seen_chest_tables = BTreeSet::new();
+    for def in &file.worldgen_chests {
+        let table = crate::game::WorldgenChestLootTable::parse(&def.table).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown worldgen chest loot table '{}' in {}",
+                def.table,
+                source.display()
+            )
+        })?;
+
+        if !seen_chest_tables.insert(table) {
+            anyhow::bail!(
+                "Duplicate worldgen chest loot table '{}' in {}",
+                def.table,
+                source.display()
+            );
+        }
+
+        let loot_table =
+            parse_worldgen_chest_loot_table(&def.entries, blocks).with_context(|| {
+                format!(
+                    "Invalid entries for worldgen chest loot table '{}' in {}",
+                    def.table,
+                    source.display()
+                )
+            })?;
+
+        tables.worldgen_chests.insert(table, loot_table);
+    }
+
     Ok(())
 }
 
@@ -294,6 +433,84 @@ fn parse_loot_drop(def: &PackLootDropDefinition, blocks: &BlockRegistry) -> Resu
         min,
         max,
         chance_out_of_2p32,
+    })
+}
+
+fn parse_worldgen_chest_loot_table(
+    defs: &[PackWorldgenChestLootEntryDefinition],
+    blocks: &BlockRegistry,
+) -> Result<WorldgenChestLootTableDefinition> {
+    if defs.is_empty() {
+        anyhow::bail!("Worldgen chest loot table must contain at least one entry");
+    }
+
+    let mut entries = Vec::with_capacity(defs.len());
+    let mut total_weight: u32 = 0;
+
+    for def in defs {
+        let entry = parse_worldgen_chest_loot_entry(def, blocks)?;
+        total_weight = total_weight
+            .checked_add(entry.weight)
+            .ok_or_else(|| anyhow::anyhow!("Worldgen chest loot table weight overflow"))?;
+        entries.push(entry);
+    }
+
+    if total_weight == 0 {
+        anyhow::bail!("Worldgen chest loot table total weight must be > 0");
+    }
+
+    Ok(WorldgenChestLootTableDefinition {
+        entries,
+        total_weight,
+    })
+}
+
+fn parse_worldgen_chest_loot_entry(
+    def: &PackWorldgenChestLootEntryDefinition,
+    blocks: &BlockRegistry,
+) -> Result<WorldgenChestLootEntry> {
+    let token = def.item.trim();
+    if token.is_empty() {
+        anyhow::bail!("Worldgen chest loot entry item cannot be empty");
+    }
+
+    let item = parse_core_item_type(token, blocks)
+        .ok_or_else(|| anyhow::anyhow!("Unknown item token '{}'", token))?;
+
+    if def.weight == 0 {
+        anyhow::bail!("Worldgen chest loot entry '{}' weight must be > 0", token);
+    }
+
+    if def.count.is_some() && (def.min.is_some() || def.max.is_some()) {
+        anyhow::bail!(
+            "Use either 'count' or 'min'/'max' for worldgen chest item '{}'",
+            token
+        );
+    }
+
+    let (min, max) = match (def.count, def.min, def.max) {
+        (Some(count), None, None) => (count, count),
+        (None, min, max) => {
+            let min = min.unwrap_or(1);
+            let max = max.unwrap_or(min);
+            if max < min {
+                anyhow::bail!(
+                    "Worldgen chest item '{}' has max {} < min {}",
+                    token,
+                    max,
+                    min
+                );
+            }
+            (min, max)
+        }
+        _ => unreachable!("validated above"),
+    };
+
+    Ok(WorldgenChestLootEntry {
+        item,
+        min,
+        max,
+        weight: def.weight,
     })
 }
 
@@ -403,7 +620,7 @@ mod tests {
         fs::write(low_pack.join("pack.json"), r#"{"priority":0}"#).expect("write manifest");
         fs::write(
             low_pack.join("loot.json"),
-            r#"{"blocks":[{"block":"stone","drops":[{"item":"item:7","count":1}]}],"mobs":[{"mob":"zombie","drops":[{"item":"item:7","count":1}]}]}"#,
+            r#"{"blocks":[{"block":"stone","drops":[{"item":"item:7","count":1}]}],"mobs":[{"mob":"zombie","drops":[{"item":"item:7","count":1}]}],"worldgen_chests":[{"table":"dungeon","entries":[{"item":"stone","weight":1,"count":1}]}]}"#,
         )
         .expect("write loot");
 
@@ -425,7 +642,7 @@ mod tests {
         fs::write(high_pack.join("pack.json"), r#"{"priority":10}"#).expect("write manifest");
         fs::write(
             high_pack.join("loot.json"),
-            r#"{"blocks":[{"block":"stone","drops":[{"item":"item:9","count":1}]}]}"#,
+            r#"{"blocks":[{"block":"stone","drops":[{"item":"item:9","count":1}]}],"worldgen_chests":[{"table":"dungeon","entries":[{"item":"dirt","weight":1,"count":1}]}]}"#,
         )
         .expect("write loot");
 
@@ -447,6 +664,18 @@ mod tests {
             mob_table.roll(&mut rng),
             vec![(DroppedItemType::IronIngot, 1)],
             "disabled pack should be ignored for mob overrides"
+        );
+
+        let chest_table = tables
+            .worldgen_chests
+            .get(&crate::game::WorldgenChestLootTable::Dungeon)
+            .expect("dungeon chest table");
+        let dirt_id = blocks.id_by_name("dirt").expect("dirt id");
+        let mut rng = StdRng::seed_from_u64(123);
+        assert_eq!(
+            chest_table.roll_stack(&mut rng),
+            ItemStack::new(ItemType::Block(dirt_id), 1),
+            "high priority pack should override worldgen chest loot"
         );
 
         let _ = fs::remove_dir_all(&packs_root);
