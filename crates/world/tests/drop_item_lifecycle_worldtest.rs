@@ -8,10 +8,12 @@
 //! - Lifecycle management and despawning
 //! - Performance at scale
 
-use mdminecraft_core::SimTick;
+use mdminecraft_core::{DimensionId, SimTick};
 use mdminecraft_testkit::{EventRecord, JsonlSink};
 use mdminecraft_world::{DroppedItem, ItemManager, ItemType, ITEM_DESPAWN_TICKS};
 use std::time::Instant;
+
+const DIM: DimensionId = DimensionId::Overworld;
 
 #[test]
 fn drop_item_lifecycle_worldtest() {
@@ -41,7 +43,7 @@ fn drop_item_lifecycle_worldtest() {
             _ => ItemType::Sand,
         };
 
-        manager.spawn_item(x, y, z, item_type, 1);
+        manager.spawn_item(DIM, x, y, z, item_type, 1);
     }
 
     assert_eq!(manager.count(), spawn_count);
@@ -62,7 +64,7 @@ fn drop_item_lifecycle_worldtest() {
     let max_physics_ticks = 200;
 
     for tick in 0..max_physics_ticks {
-        manager.update(ground_height);
+        manager.update(DIM, ground_height);
 
         // Check if all items are on ground
         let all_grounded = manager.items().iter().all(|item| item.on_ground);
@@ -105,14 +107,14 @@ fn drop_item_lifecycle_worldtest() {
 
     // Spawn some items close together
     let mut merge_manager = ItemManager::new();
-    merge_manager.spawn_item(10.0, 64.25, 20.0, ItemType::Stone, 5);
-    merge_manager.spawn_item(10.5, 64.25, 20.0, ItemType::Stone, 3);
-    merge_manager.spawn_item(10.2, 64.25, 20.2, ItemType::Stone, 7);
-    merge_manager.spawn_item(15.0, 64.25, 25.0, ItemType::Dirt, 10); // Too far to merge
+    merge_manager.spawn_item(DIM, 10.0, 64.25, 20.0, ItemType::Stone, 5);
+    merge_manager.spawn_item(DIM, 10.5, 64.25, 20.0, ItemType::Stone, 3);
+    merge_manager.spawn_item(DIM, 10.2, 64.25, 20.2, ItemType::Stone, 7);
+    merge_manager.spawn_item(DIM, 15.0, 64.25, 25.0, ItemType::Dirt, 10); // Too far to merge
 
     assert_eq!(merge_manager.count(), 4);
 
-    let merged_count = merge_manager.merge_nearby_items();
+    let merged_count = merge_manager.merge_nearby_items(DIM);
     println!("  Merged {} item stacks", merged_count);
 
     // Should have merged the 3 stone items together
@@ -147,12 +149,12 @@ fn drop_item_lifecycle_worldtest() {
     println!("Phase 4: Testing item pickup...");
 
     let mut pickup_manager = ItemManager::new();
-    pickup_manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
-    pickup_manager.spawn_item(10.5, 64.0, 20.5, ItemType::Dirt, 3);
-    pickup_manager.spawn_item(20.0, 64.0, 30.0, ItemType::OakLog, 7);
+    pickup_manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+    pickup_manager.spawn_item(DIM, 10.5, 64.0, 20.5, ItemType::Dirt, 3);
+    pickup_manager.spawn_item(DIM, 20.0, 64.0, 30.0, ItemType::OakLog, 7);
 
     // Pickup items near (10, 64, 20)
-    let picked_up = pickup_manager.pickup_items(10.0, 64.0, 20.0);
+    let picked_up = pickup_manager.pickup_items(DIM, 10.0, 64.0, 20.0);
     println!("  Picked up {} item stacks", picked_up.len());
 
     assert!(!picked_up.is_empty(), "Should pick up at least one item");
@@ -177,8 +179,8 @@ fn drop_item_lifecycle_worldtest() {
     println!("Phase 5: Testing item despawn lifecycle...");
 
     let mut despawn_manager = ItemManager::new();
-    let id1 = despawn_manager.spawn_item(10.0, 64.25, 20.0, ItemType::Stone, 1);
-    let id2 = despawn_manager.spawn_item(15.0, 64.25, 25.0, ItemType::Dirt, 1);
+    let id1 = despawn_manager.spawn_item(DIM, 10.0, 64.25, 20.0, ItemType::Stone, 1);
+    let id2 = despawn_manager.spawn_item(DIM, 15.0, 64.25, 25.0, ItemType::Dirt, 1);
 
     // Manually set lifetime to near-despawn
     if let Some(item) = despawn_manager.get_mut(id1) {
@@ -193,7 +195,7 @@ fn drop_item_lifecycle_worldtest() {
     // Simulate ticks and count despawns
     let mut total_despawned = 0;
     for _ in 0..10 {
-        let despawned = despawn_manager.update(ground_height);
+        let despawned = despawn_manager.update(DIM, ground_height);
         total_despawned += despawned;
     }
 
@@ -218,14 +220,14 @@ fn drop_item_lifecycle_worldtest() {
     for i in 0..scale_count {
         let x = (i % 32) as f64 * 2.0;
         let z = (i / 32) as f64 * 2.0;
-        perf_manager.spawn_item(x, 70.0, z, ItemType::Stone, 1);
+        perf_manager.spawn_item(DIM, x, 70.0, z, ItemType::Stone, 1);
     }
 
     let perf_start = Instant::now();
     let physics_ticks = 100;
 
     for _ in 0..physics_ticks {
-        perf_manager.update(ground_height);
+        perf_manager.update(DIM, ground_height);
     }
 
     let perf_duration = perf_start.elapsed();
@@ -318,14 +320,14 @@ fn test_item_despawn_constant() {
     assert_eq!(ITEM_DESPAWN_TICKS, 6000);
 
     // Create an item and verify it starts with full lifetime
-    let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+    let item = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 1);
     assert_eq!(item.lifetime_ticks, ITEM_DESPAWN_TICKS);
 }
 
 #[test]
 fn test_item_stack_merging_limits() {
-    let mut item_a = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 60);
-    let item_b = DroppedItem::new(2, 10.0, 64.0, 20.0, ItemType::Stone, 10);
+    let mut item_a = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 60);
+    let item_b = DroppedItem::new(2, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 10);
 
     // Can only merge 4 items (64 max - 60 current)
     let merged = item_a.try_merge(&item_b);
@@ -333,8 +335,8 @@ fn test_item_stack_merging_limits() {
     assert_eq!(item_a.count, 64);
 
     // Verify food items have 16 stack limit
-    let mut food_a = DroppedItem::new(3, 10.0, 64.0, 20.0, ItemType::RawPork, 15);
-    let food_b = DroppedItem::new(4, 10.0, 64.0, 20.0, ItemType::RawPork, 5);
+    let mut food_a = DroppedItem::new(3, DIM, 10.0, 64.0, 20.0, ItemType::RawPork, 15);
+    let food_b = DroppedItem::new(4, DIM, 10.0, 64.0, 20.0, ItemType::RawPork, 5);
 
     let merged_food = food_a.try_merge(&food_b);
     assert_eq!(merged_food, 1); // Can only add 1 more (16 max - 15 current)

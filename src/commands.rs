@@ -1,7 +1,9 @@
 use std::fmt;
 
 use mdminecraft_assets::BlockRegistry;
-use mdminecraft_core::{item::FoodType, ItemType, RegistryKey, ToolMaterial, ToolType};
+use mdminecraft_core::{
+    item::FoodType, DimensionId, ItemType, RegistryKey, ToolMaterial, ToolType,
+};
 use mdminecraft_world::{
     BrewingStandState, ChestState, DispenserState, EnchantingTableState, FurnaceState, HopperState,
     MobType, StatusEffectType, WeatherState,
@@ -138,6 +140,9 @@ pub enum GameCommand {
         y: CoordArg,
         z: CoordArg,
     },
+    Dimension {
+        dimension: DimensionId,
+    },
     Give {
         item: ItemType,
         count: u32,
@@ -227,6 +232,7 @@ pub enum BlockEntityData {
 pub trait CommandContext {
     fn player_position(&self) -> (f64, f64, f64);
     fn teleport_player(&mut self, x: f64, y: f64, z: f64) -> anyhow::Result<()>;
+    fn set_dimension(&mut self, dimension: DimensionId) -> anyhow::Result<()>;
     fn world_seed(&self) -> u64;
 
     /// Attempt to give items to the player. Returns leftover count if inventory is full.
@@ -336,6 +342,12 @@ pub fn execute_command(ctx: &mut impl CommandContext, cmd: GameCommand) -> Comma
                 Err(err) => out.lines.push(format!("Error: {err:#}")),
             }
         }
+        GameCommand::Dimension { dimension } => match ctx.set_dimension(dimension) {
+            Ok(()) => out
+                .lines
+                .push(format!("Changed dimension to {}", dimension.as_str())),
+            Err(err) => out.lines.push(format!("Error: {err:#}")),
+        },
         GameCommand::Give { item, count } => {
             if count == 0 {
                 out.lines.push("Error: give count must be > 0".to_string());
@@ -838,6 +850,16 @@ pub fn parse_command(input: &str, blocks: &BlockRegistry) -> Result<GameCommand,
                 z: parse_coord(args[2])?,
             })
         }
+        "dimension" | "dim" => {
+            if args.len() != 1 {
+                return Err(CommandError::new(
+                    "Usage: /dimension <overworld|nether|end>",
+                ));
+            }
+            Ok(GameCommand::Dimension {
+                dimension: parse_dimension(args[0])?,
+            })
+        }
         "give" => {
             if !(1..=3).contains(&args.len()) {
                 return Err(CommandError::new(
@@ -895,6 +917,19 @@ fn parse_coord(s: &str) -> Result<CoordArg, CommandError> {
         .parse::<f64>()
         .map_err(|_| CommandError::new(format!("Invalid coordinate: {s}")))?;
     Ok(CoordArg::Absolute(value))
+}
+
+fn parse_dimension(token: &str) -> Result<DimensionId, CommandError> {
+    let token = token.trim().to_ascii_lowercase();
+    let token = token.strip_prefix("minecraft:").unwrap_or(&token);
+    match token {
+        "overworld" => Ok(DimensionId::Overworld),
+        "nether" => Ok(DimensionId::Nether),
+        "end" => Ok(DimensionId::End),
+        _ => Err(CommandError::new(format!(
+            "Invalid dimension: {token}. Expected overworld|nether|end"
+        ))),
+    }
 }
 
 fn parse_block_coord(s: &str) -> Result<BlockCoordArg, CommandError> {
@@ -1036,6 +1071,7 @@ fn parse_vanilla_item(token: &str) -> Option<ItemType> {
     let core_item_id = match token {
         "glass_bottle" => Some(crate::game::CORE_ITEM_GLASS_BOTTLE),
         "water_bottle" => Some(crate::game::CORE_ITEM_WATER_BOTTLE),
+        "flint_and_steel" | "flintandsteel" => Some(crate::game::CORE_ITEM_FLINT_AND_STEEL),
         "nether_wart" => Some(crate::game::CORE_ITEM_NETHER_WART),
         "blaze_powder" => Some(crate::game::CORE_ITEM_BLAZE_POWDER),
         "gunpowder" => Some(crate::game::CORE_ITEM_GUNPOWDER),
@@ -1841,6 +1877,7 @@ fn help_lines() -> Vec<String> {
         "  /clear [@s/@p/@a/@r] [item] [maxCount]".to_string(),
         "  /kill [@s/@p/@a/@r]".to_string(),
         "  /tp [@s/@p/@a/@r] <x> <y> <z>  (supports ~offset)".to_string(),
+        "  /dimension <overworld|nether|end>".to_string(),
         "  /give [@s/@p/@a/@r] <item> [count]  item = minecraft:<name> | block:<name> | item:<id> | tool:<type>:<material>"
             .to_string(),
         "  /time set <tick|day|noon|night|midnight>".to_string(),
@@ -1870,6 +1907,7 @@ mod tests {
     #[derive(Default)]
     struct FakeCtx {
         pos: (f64, f64, f64),
+        dimension: Option<DimensionId>,
         seed: u64,
         time: u64,
         weather: WeatherState,
@@ -1892,6 +1930,11 @@ mod tests {
 
         fn teleport_player(&mut self, x: f64, y: f64, z: f64) -> anyhow::Result<()> {
             self.pos = (x, y, z);
+            Ok(())
+        }
+
+        fn set_dimension(&mut self, dimension: DimensionId) -> anyhow::Result<()> {
+            self.dimension = Some(dimension);
             Ok(())
         }
 
@@ -2082,6 +2125,34 @@ mod tests {
                 z: CoordArg::Relative(-2.0),
             }
         );
+    }
+
+    #[test]
+    fn parses_dimension_nether() {
+        let blocks = test_blocks();
+        let cmd = parse_command("/dimension nether", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Dimension {
+                dimension: DimensionId::Nether
+            }
+        );
+    }
+
+    #[test]
+    fn executes_dimension_sets_context() {
+        let mut ctx = FakeCtx::default();
+        let out = execute_command(
+            &mut ctx,
+            GameCommand::Dimension {
+                dimension: DimensionId::Nether,
+            },
+        );
+        assert_eq!(ctx.dimension, Some(DimensionId::Nether));
+        assert!(out
+            .lines
+            .iter()
+            .any(|line| line.contains("Changed dimension")));
     }
 
     #[test]

@@ -1325,12 +1325,20 @@ mod tests {
         };
 
         let mut dropped_items = ItemManager::new();
-        let dropped_id = dropped_items.spawn_item(1.0, 65.0, 2.0, crate::ItemType::IronIngot, 3);
+        let dropped_id = dropped_items.spawn_item(
+            DimensionId::Overworld,
+            1.0,
+            65.0,
+            2.0,
+            crate::ItemType::IronIngot,
+            3,
+        );
 
         let mut projectiles = ProjectileManager::new();
-        projectiles.spawn(crate::Projectile::shoot_arrow(
-            0.0, 70.0, 0.0, 0.0, 0.0, 1.0,
-        ));
+        projectiles.spawn(
+            DimensionId::Overworld,
+            crate::Projectile::shoot_arrow(0.0, 70.0, 0.0, 0.0, 0.0, 1.0),
+        );
 
         let entities = WorldEntitiesState {
             mobs: vec![Mob::new(2.0, 65.0, 2.0, crate::MobType::Pig)],

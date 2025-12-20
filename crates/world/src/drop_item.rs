@@ -3,6 +3,7 @@
 //! Items can be dropped from breaking blocks or defeating mobs.
 //! They have physics (gravity, collision), a pickup radius, and despawn after 5 minutes.
 
+use mdminecraft_core::DimensionId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -336,6 +337,12 @@ pub enum ItemType {
 
     // Trading currency (appended to preserve stable IDs)
     Emerald,
+
+    // Ignition tools (appended to preserve stable IDs)
+    FlintAndSteel,
+
+    // End blocks (appended to preserve stable IDs)
+    EndStone,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -571,6 +578,8 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::Dropper,
     ItemType::Hopper,
     ItemType::Emerald,
+    ItemType::FlintAndSteel,
+    ItemType::EndStone,
 ];
 
 impl ItemType {
@@ -685,6 +694,7 @@ impl ItemType {
             | ItemType::Paper
             | ItemType::Book
             | ItemType::BrownMushroom
+            | ItemType::EndStone
             | ItemType::FermentedSpiderEye => 64,
             ItemType::MagmaCream
             | ItemType::GhastTear
@@ -819,7 +829,8 @@ impl ItemType {
             | ItemType::GoldHoe
             | ItemType::Bucket
             | ItemType::WaterBucket
-            | ItemType::LavaBucket => 1,
+            | ItemType::LavaBucket
+            | ItemType::FlintAndSteel => 1,
 
             // Brewing ingredients stack to 64
             ItemType::GlassBottle
@@ -972,6 +983,7 @@ impl ItemType {
             129 => Some((ItemType::Dispenser, 1)),
             130 => Some((ItemType::Dropper, 1)),
             131 => Some((ItemType::Hopper, 1)),
+            133 => Some((ItemType::EndStone, 1)),
 
             // No drops: Air (0), Water (6), Ice (7; needs Silk Touch), Bedrock (10), Glass (25; needs Silk Touch)
             _ => None,
@@ -1150,6 +1162,7 @@ impl ItemType {
             ItemType::SugarCane => Some(104),
             ItemType::BrownMushroom => Some(105),
             ItemType::Bed => Some(66),
+            ItemType::EndStone => Some(133),
             // Non-placeable items (mob drops, food, crafted items)
             _ => None,
         }
@@ -1227,6 +1240,7 @@ impl ItemType {
             104 => Some(ItemType::SugarCane),
             105 => Some(ItemType::BrownMushroom),
             65 | 66 => Some(ItemType::Bed),
+            133 => Some(ItemType::EndStone),
             _ => None,
         }
     }
@@ -1352,6 +1366,9 @@ impl ItemType {
 pub struct DroppedItem {
     /// Unique ID for this dropped item.
     pub id: u64,
+    /// Dimension this dropped item exists in.
+    #[serde(default)]
+    pub dimension: DimensionId,
     /// World X position.
     pub x: f64,
     /// World Y position.
@@ -1379,12 +1396,21 @@ impl DroppedItem {
     ///
     /// # Arguments
     /// * `id` - Unique identifier for this item
+    /// * `dimension` - Dimension this item exists in
     /// * `x, y, z` - World position
     /// * `item_type` - Type of item
     /// * `count` - Stack size
     ///
     /// Items spawn with small random velocity for visual scatter.
-    pub fn new(id: u64, x: f64, y: f64, z: f64, item_type: ItemType, count: u32) -> Self {
+    pub fn new(
+        id: u64,
+        dimension: DimensionId,
+        x: f64,
+        y: f64,
+        z: f64,
+        item_type: ItemType,
+        count: u32,
+    ) -> Self {
         // Simple pseudo-random velocity based on ID
         let vel_x = ((id % 100) as f64 - 50.0) / 200.0; // -0.25 to 0.25
         let vel_z = (((id / 100) % 100) as f64 - 50.0) / 200.0;
@@ -1392,6 +1418,7 @@ impl DroppedItem {
 
         Self {
             id,
+            dimension,
             x,
             y,
             z,
@@ -1476,6 +1503,9 @@ impl DroppedItem {
     /// # Returns
     /// Number of items successfully merged (may be less than other.count if stack limit reached).
     pub fn try_merge(&mut self, other: &DroppedItem) -> u32 {
+        if self.dimension != other.dimension {
+            return 0; // Can't merge across dimensions
+        }
         if self.item_type != other.item_type {
             return 0; // Can't merge different item types
         }
@@ -1515,11 +1545,19 @@ impl ItemManager {
     ///
     /// # Returns
     /// The ID of the newly spawned item.
-    pub fn spawn_item(&mut self, x: f64, y: f64, z: f64, item_type: ItemType, count: u32) -> u64 {
+    pub fn spawn_item(
+        &mut self,
+        dimension: DimensionId,
+        x: f64,
+        y: f64,
+        z: f64,
+        item_type: ItemType,
+        count: u32,
+    ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
 
-        let item = DroppedItem::new(id, x, y, z, item_type, count);
+        let item = DroppedItem::new(id, dimension, x, y, z, item_type, count);
         self.items.insert(id, item);
         id
     }
@@ -1531,13 +1569,16 @@ impl ItemManager {
     ///
     /// # Returns
     /// Number of items that despawned this tick.
-    pub fn update<F>(&mut self, get_ground_height: F) -> usize
+    pub fn update<F>(&mut self, dimension: DimensionId, get_ground_height: F) -> usize
     where
         F: Fn(f64, f64) -> f64,
     {
         let mut to_remove = Vec::new();
 
         for (id, item) in self.items.iter_mut() {
+            if item.dimension != dimension {
+                continue;
+            }
             let ground_height = get_ground_height(item.x, item.z);
             if item.update(ground_height) {
                 to_remove.push(*id);
@@ -1559,11 +1600,20 @@ impl ItemManager {
     ///
     /// # Returns
     /// List of (item_type, count) tuples that were picked up.
-    pub fn pickup_items(&mut self, x: f64, y: f64, z: f64) -> Vec<(ItemType, u32)> {
+    pub fn pickup_items(
+        &mut self,
+        dimension: DimensionId,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> Vec<(ItemType, u32)> {
         let mut picked_up = Vec::new();
         let mut to_remove = Vec::new();
 
         for (id, item) in self.items.iter() {
+            if item.dimension != dimension {
+                continue;
+            }
             if item.can_pickup(x, y, z) {
                 picked_up.push((item.item_type, item.count));
                 to_remove.push(*id);
@@ -1583,12 +1633,13 @@ impl ItemManager {
     /// dropped item that matches the radius check.
     pub fn take_one_near(
         &mut self,
+        dimension: DimensionId,
         x: f64,
         y: f64,
         z: f64,
         radius: f64,
     ) -> Option<(ItemType, u32)> {
-        self.take_one_near_if(x, y, z, radius, |_| true)
+        self.take_one_near_if(dimension, x, y, z, radius, |_| true)
     }
 
     /// Take (and remove) a single item from the first dropped stack within `radius` of (x, y, z)
@@ -1598,6 +1649,7 @@ impl ItemManager {
     /// they cannot accept: selection is still deterministic (lowest-ID first).
     pub fn take_one_near_if<F>(
         &mut self,
+        dimension: DimensionId,
         x: f64,
         y: f64,
         z: f64,
@@ -1612,6 +1664,9 @@ impl ItemManager {
 
         let mut picked_id: Option<u64> = None;
         for (id, item) in self.items.iter() {
+            if item.dimension != dimension {
+                continue;
+            }
             let dx = item.x - x;
             let dy = item.y - y;
             let dz = item.z - z;
@@ -1667,13 +1722,17 @@ impl ItemManager {
     ///
     /// # Returns
     /// Number of items merged (removed).
-    pub fn merge_nearby_items(&mut self) -> usize {
+    pub fn merge_nearby_items(&mut self, dimension: DimensionId) -> usize {
         const MERGE_RADIUS: f64 = 1.0;
         let mut merged_count = 0;
         let mut to_remove = Vec::new();
 
         // Get all item IDs
-        let ids: Vec<u64> = self.items.keys().copied().collect();
+        let ids: Vec<u64> = self
+            .items
+            .iter()
+            .filter_map(|(id, item)| (item.dimension == dimension).then_some(*id))
+            .collect();
 
         for i in 0..ids.len() {
             if to_remove.contains(&ids[i]) {
@@ -1730,9 +1789,11 @@ impl Default for ItemManager {
 mod tests {
     use super::*;
 
+    const DIM: DimensionId = DimensionId::Overworld;
+
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::Emerald as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::EndStone as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1783,6 +1844,8 @@ mod tests {
         assert_eq!(ItemType::Bucket.max_stack_size(), 1);
         assert_eq!(ItemType::WaterBucket.max_stack_size(), 1);
         assert_eq!(ItemType::LavaBucket.max_stack_size(), 1);
+        assert_eq!(ItemType::FlintAndSteel.max_stack_size(), 1);
+        assert_eq!(ItemType::EndStone.max_stack_size(), 64);
     }
 
     #[test]
@@ -2028,9 +2091,10 @@ mod tests {
 
     #[test]
     fn test_dropped_item_creation() {
-        let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+        let item = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
 
         assert_eq!(item.id, 1);
+        assert_eq!(item.dimension, DIM);
         assert_eq!(item.x, 10.0);
         assert_eq!(item.y, 64.0);
         assert_eq!(item.z, 20.0);
@@ -2042,7 +2106,7 @@ mod tests {
 
     #[test]
     fn test_dropped_item_physics() {
-        let mut item = DroppedItem::new(1, 10.0, 70.0, 20.0, ItemType::Stone, 1);
+        let mut item = DroppedItem::new(1, DIM, 10.0, 70.0, 20.0, ItemType::Stone, 1);
         let ground_height = 64.0;
 
         // Simulate falling
@@ -2059,7 +2123,7 @@ mod tests {
 
     #[test]
     fn test_dropped_item_lifetime() {
-        let mut item = DroppedItem::new(1, 10.0, 64.25, 20.0, ItemType::Stone, 1);
+        let mut item = DroppedItem::new(1, DIM, 10.0, 64.25, 20.0, ItemType::Stone, 1);
         item.on_ground = true;
         item.lifetime_ticks = 2;
 
@@ -2070,7 +2134,7 @@ mod tests {
 
     #[test]
     fn test_item_pickup_radius() {
-        let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+        let item = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 1);
 
         // Within range
         assert!(item.can_pickup(10.0, 64.0, 20.0));
@@ -2084,8 +2148,8 @@ mod tests {
 
     #[test]
     fn test_item_merge() {
-        let mut item1 = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 10);
-        let item2 = DroppedItem::new(2, 10.5, 64.0, 20.0, ItemType::Stone, 5);
+        let mut item1 = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 10);
+        let item2 = DroppedItem::new(2, DIM, 10.5, 64.0, 20.0, ItemType::Stone, 5);
 
         let merged = item1.try_merge(&item2);
         assert_eq!(merged, 5);
@@ -2094,8 +2158,8 @@ mod tests {
 
     #[test]
     fn test_item_merge_different_types() {
-        let mut item1 = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 10);
-        let item2 = DroppedItem::new(2, 10.5, 64.0, 20.0, ItemType::Dirt, 5);
+        let mut item1 = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 10);
+        let item2 = DroppedItem::new(2, DIM, 10.5, 64.0, 20.0, ItemType::Dirt, 5);
 
         let merged = item1.try_merge(&item2);
         assert_eq!(merged, 0);
@@ -2104,8 +2168,8 @@ mod tests {
 
     #[test]
     fn test_item_merge_stack_limit() {
-        let mut item1 = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 62);
-        let item2 = DroppedItem::new(2, 10.5, 64.0, 20.0, ItemType::Stone, 5);
+        let mut item1 = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 62);
+        let item2 = DroppedItem::new(2, DIM, 10.5, 64.0, 20.0, ItemType::Stone, 5);
 
         let merged = item1.try_merge(&item2);
         assert_eq!(merged, 2); // Can only add 2 more (64 - 62)
@@ -2116,8 +2180,8 @@ mod tests {
     fn test_item_manager_spawn() {
         let mut manager = ItemManager::new();
 
-        let id1 = manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
-        let id2 = manager.spawn_item(15.0, 64.0, 25.0, ItemType::Dirt, 3);
+        let id1 = manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+        let id2 = manager.spawn_item(DIM, 15.0, 64.0, 25.0, ItemType::Dirt, 3);
 
         assert_eq!(manager.count(), 2);
         assert_eq!(id1, 1);
@@ -2127,13 +2191,13 @@ mod tests {
     #[test]
     fn test_item_manager_update() {
         let mut manager = ItemManager::new();
-        manager.spawn_item(10.0, 70.0, 20.0, ItemType::Stone, 1);
+        manager.spawn_item(DIM, 10.0, 70.0, 20.0, ItemType::Stone, 1);
 
         let ground_height = |_x: f64, _z: f64| 64.0;
 
         // Simulate some ticks
         for _ in 0..50 {
-            manager.update(ground_height);
+            manager.update(DIM, ground_height);
         }
 
         assert_eq!(manager.count(), 1);
@@ -2146,7 +2210,7 @@ mod tests {
     #[test]
     fn test_item_manager_despawn() {
         let mut manager = ItemManager::new();
-        let id = manager.spawn_item(10.0, 64.25, 20.0, ItemType::Stone, 1);
+        let id = manager.spawn_item(DIM, 10.0, 64.25, 20.0, ItemType::Stone, 1);
 
         if let Some(item) = manager.items.get_mut(&id) {
             item.on_ground = true;
@@ -2155,10 +2219,10 @@ mod tests {
 
         let ground_height = |_x: f64, _z: f64| 64.0;
 
-        manager.update(ground_height);
+        manager.update(DIM, ground_height);
         assert_eq!(manager.count(), 1);
 
-        let despawned = manager.update(ground_height);
+        let despawned = manager.update(DIM, ground_height);
         assert_eq!(despawned, 1);
         assert_eq!(manager.count(), 0);
     }
@@ -2166,31 +2230,97 @@ mod tests {
     #[test]
     fn test_item_manager_pickup() {
         let mut manager = ItemManager::new();
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
-        manager.spawn_item(15.0, 64.0, 25.0, ItemType::Dirt, 3);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+        manager.spawn_item(DIM, 15.0, 64.0, 25.0, ItemType::Dirt, 3);
 
         // Pickup near first item
-        let picked_up = manager.pickup_items(10.0, 64.0, 20.0);
+        let picked_up = manager.pickup_items(DIM, 10.0, 64.0, 20.0);
         assert_eq!(picked_up.len(), 1);
         assert_eq!(picked_up[0], (ItemType::Stone, 5));
         assert_eq!(manager.count(), 1);
     }
 
     #[test]
+    fn test_item_manager_pickup_is_dimension_scoped() {
+        let mut manager = ItemManager::new();
+        let overworld_id =
+            manager.spawn_item(DimensionId::Overworld, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+        let nether_id =
+            manager.spawn_item(DimensionId::Nether, 10.0, 64.0, 20.0, ItemType::Dirt, 1);
+
+        let picked_up = manager.pickup_items(DimensionId::Overworld, 10.0, 64.0, 20.0);
+        assert_eq!(picked_up, vec![(ItemType::Stone, 1)]);
+        assert!(manager.get(overworld_id).is_none());
+        assert!(manager.get(nether_id).is_some());
+
+        let picked_up = manager.pickup_items(DimensionId::Nether, 10.0, 64.0, 20.0);
+        assert_eq!(picked_up, vec![(ItemType::Dirt, 1)]);
+        assert!(manager.get(nether_id).is_none());
+    }
+
+    #[test]
+    fn test_item_manager_merge_is_dimension_scoped() {
+        let mut manager = ItemManager::new();
+        manager.spawn_item(
+            DimensionId::Overworld,
+            10.0,
+            64.0,
+            20.0,
+            ItemType::Stone,
+            10,
+        );
+        manager.spawn_item(DimensionId::Nether, 10.1, 64.0, 20.1, ItemType::Stone, 10);
+
+        assert_eq!(manager.merge_nearby_items(DimensionId::Overworld), 0);
+        assert_eq!(manager.merge_nearby_items(DimensionId::Nether), 0);
+        assert_eq!(manager.count(), 2);
+    }
+
+    #[test]
+    fn test_item_manager_update_is_dimension_scoped() {
+        let mut manager = ItemManager::new();
+        let overworld_id = manager.spawn_item(
+            DimensionId::Overworld,
+            10.0,
+            64.25,
+            20.0,
+            ItemType::Stone,
+            1,
+        );
+        let nether_id =
+            manager.spawn_item(DimensionId::Nether, 10.0, 64.25, 20.0, ItemType::Dirt, 1);
+
+        for id in [overworld_id, nether_id] {
+            let item = manager.get_mut(id).expect("item exists");
+            item.on_ground = true;
+            item.lifetime_ticks = 0;
+        }
+
+        let ground_height = |_x: f64, _z: f64| 64.0;
+
+        assert_eq!(manager.update(DimensionId::Overworld, ground_height), 1);
+        assert!(manager.get(overworld_id).is_none());
+        assert_eq!(manager.get(nether_id).unwrap().lifetime_ticks, 0);
+
+        assert_eq!(manager.update(DimensionId::Nether, ground_height), 1);
+        assert!(manager.get(nether_id).is_none());
+    }
+
+    #[test]
     fn test_item_manager_take_one_near_picks_lowest_id() {
         let mut manager = ItemManager::new();
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 2);
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Dirt, 2);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 2);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Dirt, 2);
 
-        let first = manager.take_one_near(10.0, 64.0, 20.0, 0.01);
+        let first = manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.01);
         assert_eq!(first, Some((ItemType::Stone, 1)));
         assert_eq!(manager.get(1).unwrap().count, 1);
 
-        let second = manager.take_one_near(10.0, 64.0, 20.0, 0.01);
+        let second = manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.01);
         assert_eq!(second, Some((ItemType::Stone, 1)));
         assert!(manager.get(1).is_none());
 
-        let third = manager.take_one_near(10.0, 64.0, 20.0, 0.01);
+        let third = manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.01);
         assert_eq!(third, Some((ItemType::Dirt, 1)));
         assert_eq!(manager.get(2).unwrap().count, 1);
     }
@@ -2198,16 +2328,16 @@ mod tests {
     #[test]
     fn test_item_manager_take_one_near_respects_radius() {
         let mut manager = ItemManager::new();
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 1);
-        manager.spawn_item(12.0, 64.0, 20.0, ItemType::Dirt, 1);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+        manager.spawn_item(DIM, 12.0, 64.0, 20.0, ItemType::Dirt, 1);
 
         assert_eq!(
-            manager.take_one_near(10.0, 64.0, 20.0, 0.5),
+            manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.5),
             Some((ItemType::Stone, 1))
         );
-        assert_eq!(manager.take_one_near(10.0, 64.0, 20.0, 0.5), None);
+        assert_eq!(manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.5), None);
         assert_eq!(
-            manager.take_one_near(12.0, 64.0, 20.0, 0.5),
+            manager.take_one_near(DIM, 12.0, 64.0, 20.0, 0.5),
             Some((ItemType::Dirt, 1))
         );
     }
@@ -2215,10 +2345,10 @@ mod tests {
     #[test]
     fn test_item_manager_merge() {
         let mut manager = ItemManager::new();
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
-        manager.spawn_item(10.5, 64.0, 20.0, ItemType::Stone, 3);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+        manager.spawn_item(DIM, 10.5, 64.0, 20.0, ItemType::Stone, 3);
 
-        let merged = manager.merge_nearby_items();
+        let merged = manager.merge_nearby_items(DIM);
         assert_eq!(merged, 1);
         assert_eq!(manager.count(), 1);
 
@@ -2235,11 +2365,11 @@ mod tests {
         let mut manager = ItemManager::new();
 
         // Spawn items (IDs will be 1, 2, 3, 4, 5 in order)
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 1);
-        manager.spawn_item(20.0, 64.0, 30.0, ItemType::Dirt, 2);
-        manager.spawn_item(30.0, 64.0, 40.0, ItemType::Sand, 3);
-        manager.spawn_item(15.0, 64.0, 25.0, ItemType::Ice, 4);
-        manager.spawn_item(5.0, 64.0, 10.0, ItemType::Gravel, 5);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+        manager.spawn_item(DIM, 20.0, 64.0, 30.0, ItemType::Dirt, 2);
+        manager.spawn_item(DIM, 30.0, 64.0, 40.0, ItemType::Sand, 3);
+        manager.spawn_item(DIM, 15.0, 64.0, 25.0, ItemType::Ice, 4);
+        manager.spawn_item(DIM, 5.0, 64.0, 10.0, ItemType::Gravel, 5);
 
         // Collect items multiple times - should always be in same (ID) order
         let order1: Vec<u64> = manager.items().iter().map(|i| i.id).collect();
@@ -2511,7 +2641,7 @@ mod tests {
     #[test]
     fn test_item_manager_get() {
         let mut manager = ItemManager::new();
-        let id = manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
+        let id = manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
 
         assert!(manager.get(id).is_some());
         assert_eq!(manager.get(id).unwrap().item_type, ItemType::Stone);
@@ -2522,7 +2652,7 @@ mod tests {
 
     #[test]
     fn test_dropped_item_serialization() {
-        let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Diamond, 5);
+        let item = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Diamond, 5);
 
         let serialized = serde_json::to_string(&item).unwrap();
         let deserialized: DroppedItem = serde_json::from_str(&serialized).unwrap();
@@ -2545,8 +2675,8 @@ mod tests {
     #[test]
     fn test_dropped_item_velocity_based_on_id() {
         // Different IDs should have different velocities
-        let item1 = DroppedItem::new(1, 0.0, 0.0, 0.0, ItemType::Stone, 1);
-        let item2 = DroppedItem::new(100, 0.0, 0.0, 0.0, ItemType::Stone, 1);
+        let item1 = DroppedItem::new(1, DIM, 0.0, 0.0, 0.0, ItemType::Stone, 1);
+        let item2 = DroppedItem::new(100, DIM, 0.0, 0.0, 0.0, ItemType::Stone, 1);
 
         // Velocities should differ (based on ID modulo)
         assert!(
@@ -2557,20 +2687,20 @@ mod tests {
     #[test]
     fn test_item_manager_pickup_removes_items() {
         let mut manager = ItemManager::new();
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
-        manager.spawn_item(20.0, 64.0, 30.0, ItemType::Dirt, 3);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+        manager.spawn_item(DIM, 20.0, 64.0, 30.0, ItemType::Dirt, 3);
 
         assert_eq!(manager.count(), 2);
 
         // Pickup first item
-        let picked = manager.pickup_items(10.0, 64.0, 20.0);
+        let picked = manager.pickup_items(DIM, 10.0, 64.0, 20.0);
         assert_eq!(picked.len(), 1);
         assert_eq!(manager.count(), 1);
     }
 
     #[test]
     fn test_item_pickup_out_of_range() {
-        let item = DroppedItem::new(1, 10.0, 64.0, 20.0, ItemType::Stone, 1);
+        let item = DroppedItem::new(1, DIM, 10.0, 64.0, 20.0, ItemType::Stone, 1);
 
         // Test various out-of-range positions
         assert!(!item.can_pickup(20.0, 64.0, 20.0)); // Far X
@@ -2585,10 +2715,10 @@ mod tests {
         let mut manager = ItemManager::new();
 
         // Spawn two items far apart - they should NOT merge
-        manager.spawn_item(10.0, 64.0, 20.0, ItemType::Stone, 5);
-        manager.spawn_item(200.0, 64.0, 200.0, ItemType::Stone, 3);
+        manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Stone, 5);
+        manager.spawn_item(DIM, 200.0, 64.0, 200.0, ItemType::Stone, 3);
 
-        let merged = manager.merge_nearby_items();
+        let merged = manager.merge_nearby_items(DIM);
         assert_eq!(merged, 0); // Too far apart to merge
         assert_eq!(manager.count(), 2);
     }

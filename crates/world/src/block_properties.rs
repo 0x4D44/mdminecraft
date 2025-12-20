@@ -8,10 +8,11 @@ use crate::{
     BLOCK_FURNACE_LIT, BLOCK_GHAST_TEAR_ORE, BLOCK_GLASS, BLOCK_GLISTERING_MELON_ORE,
     BLOCK_GLOWSTONE_DUST_ORE, BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL,
     BLOCK_HANGING_ROOTS, BLOCK_ICE, BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING,
-    BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET, BLOCK_NETHER_QUARTZ_ORE, BLOCK_OAK_LOG,
-    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_PHANTOM_MEMBRANE_ORE, BLOCK_POINTED_DRIPSTONE,
-    BLOCK_PUFFERFISH_ORE, BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE, BLOCK_SAND,
-    BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_STONE_BRICKS,
+    BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET, BLOCK_NETHER_PORTAL, BLOCK_END_STONE,
+    BLOCK_NETHER_QUARTZ_ORE,
+    BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_PHANTOM_MEMBRANE_ORE,
+    BLOCK_POINTED_DRIPSTONE, BLOCK_PUFFERFISH_ORE, BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE,
+    BLOCK_SAND, BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_STONE_BRICKS,
     BLOCK_SUGAR_CANE, BLOCK_WATER, BLOCK_WATER_FLOWING,
 };
 use mdminecraft_core::{ToolMaterial, ToolType};
@@ -327,10 +328,12 @@ impl BlockPropertiesRegistry {
         properties[BLOCK_FURNACE_LIT as usize] = BlockProperties::stone();
         properties[BLOCK_OBSIDIAN as usize] = BlockProperties::obsidian();
         properties[BLOCK_GLASS as usize] = BlockProperties::glass();
+        properties[BLOCK_END_STONE as usize] = BlockProperties::stone();
 
         // Non-solid interaction blocks (collision should ignore these; shapes handled elsewhere).
         properties[interactive_blocks::TORCH as usize] = BlockProperties::air();
         properties[interactive_blocks::LADDER as usize] = BlockProperties::air();
+        properties[BLOCK_NETHER_PORTAL as usize] = BlockProperties::air();
 
         // Redstone components that should not block movement.
         properties[redstone_blocks::LEVER as usize] = BlockProperties::air();

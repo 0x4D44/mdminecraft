@@ -3,6 +3,7 @@
 //! This test validates all Stage 4 systems and exports standardized metrics
 //! for CI/CD integration, performance tracking, and regression detection.
 
+use mdminecraft_core::DimensionId;
 use mdminecraft_testkit::{
     ItemMetrics, MetricsReportBuilder, MetricsSink, MobMetrics, SeamValidation, TerrainMetrics,
     TestExecutionMetrics, TestResult,
@@ -164,6 +165,7 @@ fn stage4_metrics_worldtest() {
 
         let item = DroppedItem::new(
             idx as u64,
+            DimensionId::Overworld,
             mob.x + 0.5,
             mob.y + 1.0,
             mob.z + 0.5,

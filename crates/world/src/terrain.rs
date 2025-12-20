@@ -13,6 +13,7 @@ use crate::noise::{NoiseConfig, NoiseGenerator};
 use crate::ruin::RuinGenerator;
 use crate::trees::{generate_tree_positions, Tree, TreeType};
 use crate::village::VillageGenerator;
+use mdminecraft_core::DimensionId;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use tracing::{debug, instrument};
@@ -52,6 +53,9 @@ pub mod blocks {
     pub const GLOWSTONE_DUST_ORE: BlockId = 112;
     pub const PUFFERFISH_ORE: BlockId = 113;
     pub const NETHER_QUARTZ_ORE: BlockId = 125;
+
+    // End blocks
+    pub const END_STONE: BlockId = 133;
 
     // Plants
     pub const SUGAR_CANE: BlockId = 104;
@@ -515,6 +519,185 @@ impl TerrainGenerator {
         }
     }
 
+    /// Generate terrain for a chunk in the specified dimension.
+    pub fn generate_chunk_in_dimension(
+        &self,
+        dimension: DimensionId,
+        chunk_pos: ChunkPos,
+    ) -> Chunk {
+        match dimension {
+            DimensionId::Overworld => self.generate_chunk(chunk_pos),
+            DimensionId::Nether => self.generate_nether_chunk(chunk_pos),
+            DimensionId::End => self.generate_end_chunk(chunk_pos),
+        }
+    }
+
+    fn generate_nether_chunk(&self, chunk_pos: ChunkPos) -> Chunk {
+        use crate::fluid::BLOCK_LAVA;
+
+        let mut chunk = Chunk::new(chunk_pos);
+        let chunk_origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+        let chunk_origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+        for local_x in 0..CHUNK_SIZE_X {
+            for local_z in 0..CHUNK_SIZE_Z {
+                let world_x = chunk_origin_x + local_x as i32;
+                let world_z = chunk_origin_z + local_z as i32;
+
+                for y in 0..CHUNK_SIZE_Y {
+                    let mut voxel = Voxel {
+                        id: if y == 0 || y == CHUNK_SIZE_Y - 1 {
+                            blocks::BEDROCK
+                        } else {
+                            blocks::NETHER_WART_BLOCK
+                        },
+                        ..Default::default()
+                    };
+
+                    if voxel.id == blocks::NETHER_WART_BLOCK {
+                        let y_f = y as f64;
+                        let carve_noise = self.cave_noise.sample_3d(
+                            world_x as f64 + 10_000.0,
+                            y_f * 0.8,
+                            world_z as f64 + 10_000.0,
+                        );
+
+                        let threshold = if (40..=120).contains(&y) { 0.05 } else { 0.35 };
+                        if carve_noise > threshold {
+                            voxel.id = blocks::AIR;
+                        }
+
+                        // Simple lava ocean/pockets in open space.
+                        if voxel.id == blocks::AIR && y <= 28 {
+                            voxel.id = BLOCK_LAVA;
+                        }
+                    }
+
+                    chunk.set_voxel(local_x, y, local_z, voxel);
+                }
+            }
+        }
+
+        // Scatter Nether-ish ores and materials deterministically in "netherrack" (wart block).
+        let chunk_hash = (chunk_origin_x as u64)
+            .wrapping_mul(73856093)
+            .wrapping_add((chunk_origin_z as u64).wrapping_mul(19349663));
+        let ore_seed = self
+            .world_seed
+            .wrapping_add(chunk_hash)
+            .wrapping_add(0x4E45_5448); // "NETH"
+        let mut rng = StdRng::seed_from_u64(ore_seed);
+
+        for local_y in 1..(CHUNK_SIZE_Y - 1) {
+            if !(10..=120).contains(&local_y) {
+                continue;
+            }
+
+            for local_z in 0..CHUNK_SIZE_Z {
+                for local_x in 0..CHUNK_SIZE_X {
+                    let voxel = chunk.voxel(local_x, local_y, local_z);
+                    if voxel.id != blocks::NETHER_WART_BLOCK {
+                        continue;
+                    }
+
+                    let roll: f32 = rng.gen();
+                    if roll < 0.0025 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::NETHER_QUARTZ_ORE,
+                                ..Default::default()
+                            },
+                        );
+                    } else if roll < 0.0032 && (30..=70).contains(&local_y) {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: blocks::SOUL_SAND,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        chunk
+    }
+
+    fn generate_end_chunk(&self, chunk_pos: ChunkPos) -> Chunk {
+        let mut chunk = Chunk::new(chunk_pos);
+        let chunk_origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+        let chunk_origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+        for local_x in 0..CHUNK_SIZE_X {
+            for local_z in 0..CHUNK_SIZE_Z {
+                let world_x = chunk_origin_x + local_x as i32;
+                let world_z = chunk_origin_z + local_z as i32;
+
+                // Keep a bedrock floor to preserve invariants elsewhere in the engine, even though
+                // vanilla End is void.
+                chunk.set_voxel(
+                    local_x,
+                    0,
+                    local_z,
+                    Voxel {
+                        id: blocks::BEDROCK,
+                        ..Default::default()
+                    },
+                );
+
+                let world_x_f = world_x as f64;
+                let world_z_f = world_z as f64;
+                let dist = (world_x_f * world_x_f + world_z_f * world_z_f).sqrt();
+
+                // Deterministic island profile: a central landmass that falls off into void.
+                // This is intentionally simple (no structures yet) but stable across platforms.
+                let top_noise = self.density_noise.sample_3d(
+                    world_x_f * 0.015 + 20_000.0,
+                    0.0,
+                    world_z_f * 0.015 + 20_000.0,
+                );
+                let thickness_noise = self.cave_noise.sample_3d(
+                    world_x_f * 0.02 + 21_000.0,
+                    0.0,
+                    world_z_f * 0.02 + 21_000.0,
+                );
+
+                let bump = ((200.0 - dist).max(0.0) / 200.0).powi(2) * 16.0;
+                let top_y_f = 64.0 - dist * 0.2 + bump + top_noise * 6.0;
+
+                if top_y_f <= 1.0 {
+                    continue;
+                }
+
+                let thickness = (25.0 + thickness_noise.abs() * 8.0).clamp(8.0, 40.0);
+                let bottom_y_f = top_y_f - thickness;
+
+                let top_y = (top_y_f.round() as i32).clamp(1, (CHUNK_SIZE_Y - 2) as i32);
+                let bottom_y = (bottom_y_f.round() as i32).clamp(1, top_y);
+
+                for y in bottom_y..=top_y {
+                    chunk.set_voxel(
+                        local_x,
+                        y as usize,
+                        local_z,
+                        Voxel {
+                            id: blocks::END_STONE,
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        chunk
+    }
+
     /// Get the biome assigner for external use.
     pub fn biome_assigner(&self) -> &BiomeAssigner {
         &self.biome_assigner
@@ -759,6 +942,48 @@ mod tests {
 
         // Should have created a chunk at correct position
         assert_eq!(chunk.position(), ChunkPos::new(0, 0));
+    }
+
+    #[test]
+    fn nether_generation_is_deterministic_for_chunk() {
+        let seed = 0x4E45_5448_u64; // "NETH"
+        let pos = ChunkPos::new(5, -3);
+        let gen1 = TerrainGenerator::new(seed);
+        let gen2 = TerrainGenerator::new(seed);
+
+        let chunk_a = gen1.generate_chunk_in_dimension(DimensionId::Nether, pos);
+        let chunk_b = gen2.generate_chunk_in_dimension(DimensionId::Nether, pos);
+
+        for y in 0..CHUNK_SIZE_Y {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    assert_eq!(chunk_a.voxel(x, y, z), chunk_b.voxel(x, y, z));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nether_generation_has_bedrock_roof_and_floor() {
+        let gen = TerrainGenerator::new(12345);
+        let chunk = gen.generate_chunk_in_dimension(DimensionId::Nether, ChunkPos::new(0, 0));
+        assert_eq!(chunk.voxel(0, 0, 0).id, blocks::BEDROCK);
+        assert_eq!(chunk.voxel(0, CHUNK_SIZE_Y - 1, 0).id, blocks::BEDROCK);
+    }
+
+    #[test]
+    fn nether_generation_differs_from_overworld() {
+        let gen = TerrainGenerator::new(42);
+        let pos = ChunkPos::new(0, 0);
+        let overworld = gen.generate_chunk_in_dimension(DimensionId::Overworld, pos);
+        let nether = gen.generate_chunk_in_dimension(DimensionId::Nether, pos);
+
+        assert_eq!(overworld.voxel(0, 1, 0).id, blocks::STONE);
+        let nether_id = nether.voxel(0, 1, 0).id;
+        assert!(
+            nether_id == blocks::NETHER_WART_BLOCK || nether_id == crate::BLOCK_LAVA,
+            "expected nether block at y=1 to be netherrack-like or lava, got {nether_id}"
+        );
     }
 
     #[test]
