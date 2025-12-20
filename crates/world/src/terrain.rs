@@ -972,6 +972,47 @@ mod tests {
     }
 
     #[test]
+    fn end_generation_is_deterministic_for_chunk() {
+        let seed = 0x454E_4421_u64; // "END!"
+        let pos = ChunkPos::new(-7, 9);
+        let gen1 = TerrainGenerator::new(seed);
+        let gen2 = TerrainGenerator::new(seed);
+
+        let chunk_a = gen1.generate_chunk_in_dimension(DimensionId::End, pos);
+        let chunk_b = gen2.generate_chunk_in_dimension(DimensionId::End, pos);
+
+        for y in 0..CHUNK_SIZE_Y {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    assert_eq!(chunk_a.voxel(x, y, z), chunk_b.voxel(x, y, z));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn end_generation_has_bedrock_floor() {
+        let gen = TerrainGenerator::new(12345);
+        let chunk = gen.generate_chunk_in_dimension(DimensionId::End, ChunkPos::new(0, 0));
+        assert_eq!(chunk.voxel(0, 0, 0).id, blocks::BEDROCK);
+    }
+
+    #[test]
+    fn end_generation_has_end_stone_near_origin() {
+        let gen = TerrainGenerator::new(42);
+        let chunk = gen.generate_chunk_in_dimension(DimensionId::End, ChunkPos::new(0, 0));
+        assert_eq!(chunk.voxel(0, 64, 0).id, blocks::END_STONE);
+        assert_eq!(chunk.voxel(0, 200, 0).id, blocks::AIR);
+    }
+
+    #[test]
+    fn end_generation_far_from_origin_is_void() {
+        let gen = TerrainGenerator::new(42);
+        let chunk = gen.generate_chunk_in_dimension(DimensionId::End, ChunkPos::new(100, 100));
+        assert_eq!(chunk.voxel(0, 64, 0).id, blocks::AIR);
+    }
+
+    #[test]
     fn nether_generation_differs_from_overworld() {
         let gen = TerrainGenerator::new(42);
         let pos = ChunkPos::new(0, 0);
