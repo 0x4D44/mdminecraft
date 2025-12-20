@@ -7,9 +7,10 @@ use crate::biome::BiomeId;
 use crate::chunk::CHUNK_SIZE_X;
 use crate::chunk::CHUNK_SIZE_Z;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Types of mobs that can spawn in the world.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MobType {
     // Passive mobs
     /// Pig - spawns in plains, forests
@@ -37,6 +38,38 @@ pub enum MobType {
 }
 
 impl MobType {
+    /// Canonical lowercase string key for configs/logging.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            MobType::Pig => "pig",
+            MobType::Cow => "cow",
+            MobType::Sheep => "sheep",
+            MobType::Chicken => "chicken",
+            MobType::Villager => "villager",
+            MobType::Zombie => "zombie",
+            MobType::Skeleton => "skeleton",
+            MobType::Spider => "spider",
+            MobType::Creeper => "creeper",
+        }
+    }
+
+    /// Parse a mob type from a string key (case-insensitive).
+    pub fn parse(input: &str) -> Option<Self> {
+        let key = input.trim().to_lowercase();
+        match key.as_str() {
+            "pig" => Some(MobType::Pig),
+            "cow" => Some(MobType::Cow),
+            "sheep" => Some(MobType::Sheep),
+            "chicken" => Some(MobType::Chicken),
+            "villager" => Some(MobType::Villager),
+            "zombie" => Some(MobType::Zombie),
+            "skeleton" => Some(MobType::Skeleton),
+            "spider" => Some(MobType::Spider),
+            "creeper" => Some(MobType::Creeper),
+            _ => None,
+        }
+    }
+
     /// Get mob types that can spawn in a given biome.
     ///
     /// Returns a list of mob types with their relative spawn weights.
@@ -585,12 +618,30 @@ impl Mob {
 /// Generates spawn positions for passive mobs in a chunk.
 pub struct MobSpawner {
     world_seed: u64,
+    spawn_table: BTreeMap<BiomeId, Vec<(MobType, f32)>>,
 }
 
 impl MobSpawner {
     /// Create a new mob spawner with the given world seed.
     pub fn new(world_seed: u64) -> Self {
-        Self { world_seed }
+        let spawn_table = default_spawn_table();
+        Self {
+            world_seed,
+            spawn_table,
+        }
+    }
+
+    /// Create a mob spawner with explicit biome spawn weights.
+    ///
+    /// Biomes omitted from the table produce no spawns.
+    pub fn new_with_spawn_table(
+        world_seed: u64,
+        spawn_table: BTreeMap<BiomeId, Vec<(MobType, f32)>>,
+    ) -> Self {
+        Self {
+            world_seed,
+            spawn_table,
+        }
     }
 
     /// Generate mob spawn positions for a chunk at the given coordinates.
@@ -613,7 +664,18 @@ impl MobSpawner {
         biome: BiomeId,
         surface_heights: &[[i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z],
     ) -> Vec<Mob> {
-        let mob_types = MobType::for_biome(biome);
+        let mob_types = match self.spawn_table.get(&biome) {
+            Some(mob_types) => mob_types,
+            None => {
+                tracing::debug!(
+                    chunk_x,
+                    chunk_z,
+                    ?biome,
+                    "No mob types for biome, skipping spawn"
+                );
+                return vec![];
+            }
+        };
         if mob_types.is_empty() {
             tracing::debug!(
                 chunk_x,
@@ -655,7 +717,7 @@ impl MobSpawner {
                 let mut accumulated = 0.0;
                 let mut selected_type = mob_types[0].0;
 
-                for (mob_type, weight) in &mob_types {
+                for (mob_type, weight) in mob_types {
                     accumulated += weight;
                     if type_roll <= accumulated {
                         selected_type = *mob_type;
@@ -687,6 +749,20 @@ impl MobSpawner {
     }
 }
 
+/// Default biome → mob spawn weight table.
+///
+/// This is derived from [`MobType::for_biome`] and is deterministic.
+pub fn default_spawn_table() -> BTreeMap<BiomeId, Vec<(MobType, f32)>> {
+    let mut table = BTreeMap::new();
+    for biome in BiomeId::all() {
+        let mobs = MobType::for_biome(*biome);
+        if !mobs.is_empty() {
+            table.insert(*biome, mobs);
+        }
+    }
+    table
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,6 +780,29 @@ mod tests {
 
         let ocean = MobType::for_biome(BiomeId::Ocean);
         assert_eq!(ocean.len(), 0);
+    }
+
+    #[test]
+    fn mob_type_parse_roundtrips_canonical_keys() {
+        let all = [
+            MobType::Pig,
+            MobType::Cow,
+            MobType::Sheep,
+            MobType::Chicken,
+            MobType::Villager,
+            MobType::Zombie,
+            MobType::Skeleton,
+            MobType::Spider,
+            MobType::Creeper,
+        ];
+
+        for mob in all {
+            let parsed = MobType::parse(mob.as_str()).expect("parse should succeed");
+            assert_eq!(mob, parsed);
+        }
+
+        assert_eq!(MobType::parse("ZOMBIE"), Some(MobType::Zombie));
+        assert_eq!(MobType::parse("unknown"), None);
     }
 
     #[test]

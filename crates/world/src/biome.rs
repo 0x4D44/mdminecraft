@@ -6,7 +6,7 @@ use crate::noise::{NoiseConfig, NoiseGenerator};
 use serde::{Deserialize, Serialize};
 
 /// Biome identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BiomeId {
     // Cold biomes (low temperature)
     IcePlains,
@@ -34,6 +34,50 @@ pub enum BiomeId {
 }
 
 impl BiomeId {
+    /// Canonical lowercase string key for configs/logging.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            BiomeId::IcePlains => "ice_plains",
+            BiomeId::IceMountains => "ice_mountains",
+            BiomeId::Tundra => "tundra",
+            BiomeId::Plains => "plains",
+            BiomeId::Forest => "forest",
+            BiomeId::BirchForest => "birch_forest",
+            BiomeId::Mountains => "mountains",
+            BiomeId::Hills => "hills",
+            BiomeId::Desert => "desert",
+            BiomeId::Savanna => "savanna",
+            BiomeId::Swamp => "swamp",
+            BiomeId::RainForest => "rain_forest",
+            BiomeId::Ocean => "ocean",
+            BiomeId::DeepOcean => "deep_ocean",
+        }
+    }
+
+    /// Parse a biome id from a string key (case-insensitive).
+    ///
+    /// This accepts common separators like `-` and spaces (treated as `_`).
+    pub fn parse(input: &str) -> Option<Self> {
+        let key = input.trim().to_lowercase().replace(['-', ' '], "_");
+        match key.as_str() {
+            "ice_plains" => Some(BiomeId::IcePlains),
+            "ice_mountains" => Some(BiomeId::IceMountains),
+            "tundra" => Some(BiomeId::Tundra),
+            "plains" => Some(BiomeId::Plains),
+            "forest" => Some(BiomeId::Forest),
+            "birch_forest" => Some(BiomeId::BirchForest),
+            "mountains" => Some(BiomeId::Mountains),
+            "hills" => Some(BiomeId::Hills),
+            "desert" => Some(BiomeId::Desert),
+            "savanna" => Some(BiomeId::Savanna),
+            "swamp" => Some(BiomeId::Swamp),
+            "rain_forest" => Some(BiomeId::RainForest),
+            "ocean" => Some(BiomeId::Ocean),
+            "deep_ocean" => Some(BiomeId::DeepOcean),
+            _ => None,
+        }
+    }
+
     /// Get all biome IDs (for iteration).
     pub fn all() -> &'static [BiomeId] {
         &[
@@ -736,5 +780,17 @@ mod tests {
         // Different biomes should have different grass colors
         assert_ne!(plains.grass_color, desert.grass_color);
         assert_ne!(plains.grass_color, swamp.grass_color);
+    }
+
+    #[test]
+    fn biome_id_parse_roundtrips_canonical_keys() {
+        for biome in BiomeId::all() {
+            let parsed = BiomeId::parse(biome.as_str()).expect("parse should succeed");
+            assert_eq!(*biome, parsed);
+        }
+
+        assert_eq!(BiomeId::parse("Rain-Forest"), Some(BiomeId::RainForest));
+        assert_eq!(BiomeId::parse("deep ocean"), Some(BiomeId::DeepOcean));
+        assert_eq!(BiomeId::parse("unknown"), None);
     }
 }

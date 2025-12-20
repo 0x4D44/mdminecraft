@@ -2,8 +2,12 @@
 //!
 //! Main executable with graphical menu system
 
+mod command_script;
 mod commands;
 mod config;
+mod content_pack_loot;
+mod content_pack_spawns;
+mod content_packs;
 mod game;
 mod input;
 mod menu;
@@ -47,7 +51,12 @@ fn main() -> Result<()> {
 
     // Start with menu unless auto-play is requested
     let mut app_state = if cli.auto_play {
-        match GameWorld::new(&event_loop, controls.clone(), cli.scripted_input.clone()) {
+        match GameWorld::new(
+            &event_loop,
+            controls.clone(),
+            cli.scripted_input.clone(),
+            cli.command_script.clone(),
+        ) {
             Ok(game) => AppState::InGame(Box::new(game)),
             Err(err) => {
                 tracing::error!(%err, "Failed to start auto-play mode, falling back to menu");
@@ -71,7 +80,12 @@ fn main() -> Result<()> {
                         // Transition to game
                         // Reload controls so menu changes take effect immediately.
                         let controls = Arc::new(ControlsConfig::load());
-                        match GameWorld::new(elwt, controls, cli.scripted_input.clone()) {
+                        match GameWorld::new(
+                            elwt,
+                            controls,
+                            cli.scripted_input.clone(),
+                            cli.command_script.clone(),
+                        ) {
                             Ok(game) => {
                                 app_state = AppState::InGame(Box::new(game));
                             }
@@ -126,6 +140,7 @@ fn main() -> Result<()> {
 struct CliOptions {
     auto_play: bool,
     scripted_input: Option<PathBuf>,
+    command_script: Option<PathBuf>,
 }
 
 impl CliOptions {
@@ -133,6 +148,7 @@ impl CliOptions {
         let mut opts = CliOptions {
             auto_play: false,
             scripted_input: None,
+            command_script: None,
         };
 
         while let Some(arg) = args.next() {
@@ -144,6 +160,13 @@ impl CliOptions {
                         opts.scripted_input = Some(PathBuf::from(path));
                     } else {
                         tracing::error!("--scripted-input requires a file path");
+                    }
+                }
+                "--command-script" => {
+                    if let Some(path) = args.next() {
+                        opts.command_script = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--command-script requires a file path");
                     }
                 }
                 _ => {}

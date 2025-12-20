@@ -1,0 +1,10 @@
+[
+  {
+    "name": "polished_stone",
+    "key": "example:polished_stone",
+    "opaque": true,
+    "texture": "blocks/stone",
+    "tags": ["example:decorative"]
+  }
+]
+

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "example:polished_stone",
+    "pattern": ["##", "##"],
+    "key": { "#": "block:stone" },
+    "output": { "item": "block:example:polished_stone", "count": 1 }
+  }
+]
