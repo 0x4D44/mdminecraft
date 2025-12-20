@@ -5577,9 +5577,13 @@ impl GameWorld {
             return false;
         };
 
-        let Some((new_bucket_id, changed_positions)) =
-            try_bucket_interaction(bucket_id, hit, &mut self.chunks, &mut self.fluid_sim)
-        else {
+        let Some((new_bucket_id, changed_positions)) = try_bucket_interaction(
+            self.active_dimension,
+            bucket_id,
+            hit,
+            &mut self.chunks,
+            &mut self.fluid_sim,
+        ) else {
             return false;
         };
 
@@ -5664,6 +5668,14 @@ impl GameWorld {
             return;
         }
 
+        if matches!(
+            self.active_dimension,
+            DimensionId::Nether | DimensionId::End
+        ) {
+            self.trigger_bed_explosion(bed_pos);
+            return;
+        }
+
         // Time: 0.0-0.25 Night→Dawn, 0.75-1.0 Dusk→Night
         let time = self.sim_time.time_of_day() as f32;
         let is_night = !(0.25..=0.75).contains(&time);
@@ -5715,6 +5727,40 @@ impl GameWorld {
             bed_pos,
             advance
         );
+    }
+
+    fn trigger_bed_explosion(&mut self, bed_pos: IVec3) {
+        let ex = bed_pos.x as f64 + 0.5;
+        let ey = bed_pos.y as f64 + 0.5;
+        let ez = bed_pos.z as f64 + 0.5;
+        let radius = 5.0_f32;
+
+        self.audio.play_sfx(SoundId::Explosion);
+        self.destroy_blocks_in_radius(ex, ey, ez, radius);
+
+        if self.player_state != PlayerState::Alive {
+            return;
+        }
+
+        let player_pos = self.renderer.camera().position;
+        let dx = player_pos.x as f64 - ex;
+        let dy = player_pos.y as f64 - ey;
+        let dz = player_pos.z as f64 - ez;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt() as f32;
+
+        let damage = if dist >= radius {
+            0.0
+        } else {
+            (1.0 - dist / radius).clamp(0.0, 1.0) * 18.0
+        };
+
+        if damage > 0.0 {
+            let actual_damage = self.player_armor.take_damage(damage);
+            self.player_health.damage(actual_damage);
+            if self.player_health.is_dead() {
+                self.handle_death("Intentional Game Design");
+            }
+        }
     }
 
     fn try_fill_glass_bottle_from_water(&mut self) -> bool {
@@ -10974,7 +11020,7 @@ impl GameWorld {
                         };
 
                         if let Some((new_bucket_id, mut changed)) =
-                            try_bucket_interaction(bucket_id, hit, chunks, fluid_sim)
+                            try_bucket_interaction(key.dimension, bucket_id, hit, chunks, fluid_sim)
                         {
                             restore_one_into_core_slot(
                                 &mut dispenser.slots,
@@ -11616,6 +11662,7 @@ impl GameWorld {
 }
 
 fn try_bucket_interaction(
+    dimension: DimensionId,
     held_bucket_id: u16,
     hit: RaycastHit,
     chunks: &mut HashMap<ChunkPos, Chunk>,
@@ -11675,6 +11722,11 @@ fn try_bucket_interaction(
             let current_id = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z).id;
             if current_id != BLOCK_AIR && get_fluid_type(current_id).is_none() {
                 return None;
+            }
+
+            if dimension == DimensionId::Nether && fluid_type == FluidType::Water {
+                // Vanilla-ish: water evaporates immediately in the Nether.
+                return Some((CORE_ITEM_BUCKET, Vec::new()));
             }
 
             {
@@ -22235,15 +22287,15 @@ mod tests {
         BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
         BLOCK_FURNACE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
         BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_BUCKET,
-        CORE_ITEM_FLINT_AND_STEEL, CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_GHAST_TEAR,
-        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
-        CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET,
-        CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ, CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER,
-        CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH, CORE_ITEM_RABBIT_FOOT,
-        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
-        CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
+        CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_FLINT_AND_STEEL, CORE_ITEM_GHAST_TEAR,
+        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON, CORE_ITEM_GLOWSTONE_DUST,
+        CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ,
+        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH,
+        CORE_ITEM_RABBIT_FOOT, CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR,
+        CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
     use crate::content_pack_loot;
+    use mdminecraft_core::DimensionId;
     use mdminecraft_world::StatusEffect;
 
     #[test]
@@ -25735,8 +25787,13 @@ mod tests {
             hit_pos: glam::Vec3::ZERO,
         };
 
-        let result =
-            super::try_bucket_interaction(CORE_ITEM_BUCKET, hit, &mut chunks, &mut fluid_sim);
+        let result = super::try_bucket_interaction(
+            DimensionId::Overworld,
+            CORE_ITEM_BUCKET,
+            hit,
+            &mut chunks,
+            &mut fluid_sim,
+        );
         assert_eq!(
             result,
             Some((CORE_ITEM_WATER_BUCKET, vec![glam::IVec3::new(1, 64, 1)]))
@@ -25770,8 +25827,13 @@ mod tests {
             hit_pos: glam::Vec3::ZERO,
         };
 
-        let result =
-            super::try_bucket_interaction(CORE_ITEM_WATER_BUCKET, hit, &mut chunks, &mut fluid_sim);
+        let result = super::try_bucket_interaction(
+            DimensionId::Overworld,
+            CORE_ITEM_WATER_BUCKET,
+            hit,
+            &mut chunks,
+            &mut fluid_sim,
+        );
         assert_eq!(
             result,
             Some((CORE_ITEM_BUCKET, vec![glam::IVec3::new(2, 64, 1)]))
@@ -25780,6 +25842,44 @@ mod tests {
         let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(2, 64, 1);
         assert_eq!(voxel.id, FluidType::Water.source_block_id());
         assert_eq!(fluid_sim.pending_count(), 1);
+    }
+
+    #[test]
+    fn water_bucket_evaporates_in_nether() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            64,
+            1,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut fluid_sim = FluidSimulator::new();
+
+        let hit = super::RaycastHit {
+            block_pos: glam::IVec3::new(1, 64, 1),
+            face_normal: glam::IVec3::new(1, 0, 0),
+            distance: 0.0,
+            hit_pos: glam::Vec3::ZERO,
+        };
+
+        let result = super::try_bucket_interaction(
+            DimensionId::Nether,
+            CORE_ITEM_WATER_BUCKET,
+            hit,
+            &mut chunks,
+            &mut fluid_sim,
+        );
+        assert_eq!(result, Some((CORE_ITEM_BUCKET, Vec::new())));
+
+        let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(2, 64, 1);
+        assert_eq!(voxel.id, BLOCK_AIR);
+        assert_eq!(fluid_sim.pending_count(), 0);
     }
 
     #[test]

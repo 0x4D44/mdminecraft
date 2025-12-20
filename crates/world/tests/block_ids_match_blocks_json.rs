@@ -265,6 +265,11 @@ fn block_ids_match_blocks_json() {
         mdminecraft_world::BLOCK_NETHER_QUARTZ_ORE,
         id_of(&map, "nether_quartz_ore")
     );
+    assert_eq!(
+        mdminecraft_world::BLOCK_NETHER_PORTAL,
+        id_of(&map, "nether_portal")
+    );
+    assert_eq!(mdminecraft_world::BLOCK_END_STONE, id_of(&map, "end_stone"));
 
     let wheat = [
         mdminecraft_world::farming_blocks::WHEAT_0,
