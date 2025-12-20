@@ -30,6 +30,7 @@ mod projectile;
 mod redstone;
 mod ruin;
 mod storage;
+mod structure_template;
 mod structures;
 mod sugar_cane;
 mod terrain;

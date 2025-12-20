@@ -217,6 +217,11 @@ impl MobType {
 /// A mob instance in the world.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mob {
+    /// Stable mob identifier (assigned by the game layer).
+    ///
+    /// `0` indicates an uninitialized ID (legacy saves or pre-assignment).
+    #[serde(default)]
+    pub id: u64,
     /// World X position (floating point for smooth movement)
     pub x: f64,
     /// World Y position
@@ -270,6 +275,7 @@ impl Mob {
     /// Create a new mob at the given position.
     pub fn new(x: f64, y: f64, z: f64, mob_type: MobType) -> Self {
         Self {
+            id: 0,
             x,
             y,
             z,

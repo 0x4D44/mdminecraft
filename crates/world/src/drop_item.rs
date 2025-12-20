@@ -333,6 +333,9 @@ pub enum ItemType {
     Dispenser,
     Dropper,
     Hopper,
+
+    // Trading currency (appended to preserve stable IDs)
+    Emerald,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -567,6 +570,7 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::Dispenser,
     ItemType::Dropper,
     ItemType::Hopper,
+    ItemType::Emerald,
 ];
 
 impl ItemType {
@@ -690,7 +694,8 @@ impl ItemType {
             | ItemType::RedstoneDust
             | ItemType::GlowstoneDust
             | ItemType::Pufferfish
-            | ItemType::NetherQuartz => 64,
+            | ItemType::NetherQuartz
+            | ItemType::Emerald => 64,
 
             // Food and resources stack to 16
             ItemType::RawPork
@@ -1727,7 +1732,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::Hopper as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::Emerald as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
