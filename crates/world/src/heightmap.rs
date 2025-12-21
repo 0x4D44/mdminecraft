@@ -2,14 +2,14 @@
 //!
 //! Converts noise layers into block heights for chunk generation.
 
-use crate::chunk::{CHUNK_SIZE_X, CHUNK_SIZE_Z};
+use crate::chunk::{CHUNK_SIZE_X, CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y};
 use crate::noise::LayeredNoise;
 
 /// Minimum height for terrain generation.
-pub const MIN_HEIGHT: i32 = 0;
+pub const MIN_HEIGHT: i32 = WORLD_MIN_Y;
 
 /// Maximum height for terrain generation.
-pub const MAX_HEIGHT: i32 = 255;
+pub const MAX_HEIGHT: i32 = WORLD_MAX_Y;
 
 /// Sea level height.
 pub const SEA_LEVEL: i32 = 64;

@@ -1,0 +1,977 @@
+{
+  "frames": [
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 200,
+        "boss_state": "Idle",
+        "fireballs_in_flight": 0,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 0
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 200,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 1
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 200,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 2
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 200,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 200,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 200,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 150,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 20
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 21
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 22
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 23
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 24
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 25
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 26
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 27
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 28
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 29
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 30
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 31
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 32
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 33
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 34
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 35
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 36
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 37
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 38
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 39
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 40
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 2,
+        "player_health": 100,
+        "portal_blocks": 0
+      },
+      "tick": 41
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 42
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 43
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 44
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 45
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 46
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 47
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 48
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 49
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 50
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 51
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 52
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 53
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 54
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 55
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 56
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 57
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 58
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 59
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 60
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 1,
+        "player_health": 94,
+        "portal_blocks": 0
+      },
+      "tick": 61
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 0
+      },
+      "tick": 62
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 0
+      },
+      "tick": 63
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 0
+      },
+      "tick": 64
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 80,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 0
+      },
+      "tick": 65
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 66
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 67
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 68
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 69
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 70
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 71
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 72
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 73
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 74
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 75
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 76
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 77
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 78
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 79
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -70,
+        "boss_state": "Chasing",
+        "fireballs_in_flight": 0,
+        "player_health": 88,
+        "portal_blocks": 9
+      },
+      "tick": 80
+    }
+  ],
+  "name": "micro_end_boss_replay_script"
+}

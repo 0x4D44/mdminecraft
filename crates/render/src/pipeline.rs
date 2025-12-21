@@ -120,7 +120,7 @@ impl ChunkUniform {
     /// Create chunk uniform from chunk position.
     pub fn from_chunk_pos(chunk_pos: mdminecraft_world::ChunkPos) -> Self {
         // Convert chunk coordinates to world coordinates
-        // Each chunk is 16×256×16 voxels
+        // Each chunk is 16×CHUNK_SIZE_Y×16 voxels
         let x = (chunk_pos.x * 16) as f32;
         let z = (chunk_pos.z * 16) as f32;
 

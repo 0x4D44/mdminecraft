@@ -190,6 +190,8 @@ pub mod client_item_ids {
     pub const WATER_BUCKET: u16 = 2021;
     pub const LAVA_BUCKET: u16 = 2022;
     pub const FLINT_AND_STEEL: u16 = 2024;
+    pub const ENDER_PEARL: u16 = 2025;
+    pub const EYE_OF_ENDER: u16 = 2026;
 }
 
 impl ToolMaterial {
@@ -348,6 +350,7 @@ impl ItemStack {
             ItemType::Food(_) => 64,
             ItemType::Potion(_) => 1,       // Potions don't stack
             ItemType::SplashPotion(_) => 1, // Splash potions don't stack
+            ItemType::Item(client_item_ids::ENDER_PEARL) => 16,
             ItemType::Item(
                 client_item_ids::BUCKET
                 | client_item_ids::WATER_BUCKET
@@ -573,6 +576,18 @@ mod tests {
         assert_eq!(
             ItemStack::new(ItemType::Item(client_item_ids::LAVA_BUCKET), 1).max_stack_size(),
             1
+        );
+    }
+
+    #[test]
+    fn test_ender_items_stack_size() {
+        assert_eq!(
+            ItemStack::new(ItemType::Item(client_item_ids::ENDER_PEARL), 1).max_stack_size(),
+            16
+        );
+        assert_eq!(
+            ItemStack::new(ItemType::Item(client_item_ids::EYE_OF_ENDER), 1).max_stack_size(),
+            64
         );
     }
 

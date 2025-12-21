@@ -10,7 +10,7 @@ use mdminecraft_testkit::{
 };
 use mdminecraft_world::{
     BiomeAssigner, ChunkPos, DroppedItem, ItemType, Mob, MobType, TerrainGenerator, CHUNK_SIZE_X,
-    CHUNK_SIZE_Z,
+    CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -51,7 +51,7 @@ fn stage4_metrics_worldtest() {
     }
 
     let chunks_generated = chunks.len();
-    let blocks_generated = chunks_generated * CHUNK_SIZE_X * 256 * CHUNK_SIZE_Z;
+    let blocks_generated = chunks_generated * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
     let min_gen_time_us = *generation_times.iter().min().unwrap();
     let max_gen_time_us = *generation_times.iter().max().unwrap();

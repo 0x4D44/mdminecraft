@@ -3,7 +3,7 @@
 //! Implements cellular automata-based fluid flow mechanics with deterministic updates.
 
 use crate::chunk::{
-    BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    world_y_to_local_y, BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z,
 };
 use crate::terrain::blocks;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -172,7 +172,7 @@ impl FluidPos {
         let chunk_x = self.x.div_euclid(CHUNK_SIZE_X as i32);
         let chunk_z = self.z.div_euclid(CHUNK_SIZE_Z as i32);
         let local_x = self.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = self.y as usize;
+        let local_y = world_y_to_local_y(self.y).expect("y in world bounds");
         let local_z = self.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         (ChunkPos::new(chunk_x, chunk_z), local_x, local_y, local_z)
     }
@@ -239,7 +239,7 @@ impl FluidSimulator {
     /// Process a single fluid update
     fn process_update(&mut self, pos: FluidPos, chunks: &mut HashMap<ChunkPos, Chunk>) {
         // Skip if position is out of world bounds
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+        if world_y_to_local_y(pos.y).is_none() {
             return;
         }
 
@@ -418,11 +418,13 @@ impl FluidSimulator {
 
     /// Get voxel at a world position
     fn get_voxel(&self, pos: FluidPos, chunks: &HashMap<ChunkPos, Chunk>) -> Option<Voxel> {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
-
-        let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
+        let local_y = world_y_to_local_y(pos.y)?;
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         chunks
             .get(&chunk_pos)
             .map(|chunk| chunk.voxel(local_x, local_y, local_z))
@@ -430,11 +432,17 @@ impl FluidSimulator {
 
     /// Set voxel at a world position
     fn set_voxel(&mut self, pos: FluidPos, voxel: Voxel, chunks: &mut HashMap<ChunkPos, Chunk>) {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return;
-        }
+        let local_y = match world_y_to_local_y(pos.y) {
+            Some(y) => y,
+            None => return,
+        };
 
-        let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         if let Some(chunk) = chunks.get_mut(&chunk_pos) {
             let old = chunk.voxel(local_x, local_y, local_z);
             let old_emissive = matches!(old.id, BLOCK_LAVA | BLOCK_LAVA_FLOWING);
@@ -562,6 +570,10 @@ impl SwimmingState {
 mod tests {
     use super::*;
 
+    fn local_y(world_y: i32) -> usize {
+        crate::chunk::world_y_to_local_y(world_y).expect("world y in bounds")
+    }
+
     #[test]
     fn test_fluid_level_encoding() {
         let state = set_fluid_level(0, 5);
@@ -600,7 +612,7 @@ mod tests {
         let (chunk_pos, lx, ly, lz) = pos.to_chunk_local();
         assert_eq!(chunk_pos, ChunkPos::new(1, -1));
         assert_eq!(lx, 1);
-        assert_eq!(ly, 64);
+        assert_eq!(ly, local_y(64));
         assert_eq!(lz, 11);
     }
 
@@ -773,7 +785,7 @@ mod tests {
         // Place water around a position
         chunk.set_voxel(
             4,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::WATER,
@@ -784,7 +796,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::WATER,
@@ -811,7 +823,7 @@ mod tests {
         // Place one water source
         chunk.set_voxel(
             4,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::WATER,
@@ -831,7 +843,7 @@ mod tests {
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
             chunk.set_voxel(
                 6,
-                64,
+                local_y(64),
                 5,
                 Voxel {
                     id: blocks::WATER,
@@ -855,7 +867,7 @@ mod tests {
         // Place water source
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::WATER,
@@ -887,7 +899,7 @@ mod tests {
         // Place water source with air below
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::WATER,
@@ -898,7 +910,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::AIR,
@@ -913,7 +925,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let below = chunk.voxel(5, 63, 5);
+        let below = chunk.voxel(5, local_y(63), 5);
 
         // Water should have flowed down
         assert_eq!(below.id, BLOCK_WATER_FLOWING);
@@ -929,7 +941,7 @@ mod tests {
         // Place water source on solid ground
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::WATER,
@@ -940,7 +952,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -951,7 +963,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::AIR,
@@ -962,7 +974,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -977,7 +989,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let adjacent = chunk.voxel(6, 64, 5);
+        let adjacent = chunk.voxel(6, local_y(64), 5);
 
         // Water should have spread horizontally
         assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
@@ -993,7 +1005,7 @@ mod tests {
         // Place lava source on solid ground
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: BLOCK_LAVA,
@@ -1004,7 +1016,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1015,7 +1027,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::AIR,
@@ -1026,7 +1038,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1041,7 +1053,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let adjacent = chunk.voxel(6, 64, 5);
+        let adjacent = chunk.voxel(6, local_y(64), 5);
 
         // Lava should have spread with shorter flow distance
         assert_eq!(adjacent.id, BLOCK_LAVA_FLOWING);
@@ -1055,8 +1067,8 @@ mod tests {
         chunks.insert(ChunkPos::new(0, 0), create_test_chunk());
 
         // Schedule updates at invalid Y coordinates
-        sim.schedule_update(FluidPos::new(5, -1, 5), 0);
-        sim.schedule_update(FluidPos::new(5, 256, 5), 0);
+        sim.schedule_update(FluidPos::new(5, crate::chunk::WORLD_MIN_Y - 1, 5), 0);
+        sim.schedule_update(FluidPos::new(5, crate::chunk::WORLD_MAX_Y + 1, 5), 0);
 
         // Should not crash
         sim.tick(&mut chunks);
@@ -1135,7 +1147,7 @@ mod tests {
         // Place stone (not a fluid)
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1151,7 +1163,7 @@ mod tests {
 
         // Stone should remain unchanged
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        assert_eq!(chunk.voxel(5, 64, 5).id, blocks::STONE);
+        assert_eq!(chunk.voxel(5, local_y(64), 5).id, blocks::STONE);
     }
 
     #[test]
@@ -1163,7 +1175,7 @@ mod tests {
         // Place flowing water with level 5 on solid ground
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: BLOCK_WATER_FLOWING,
@@ -1174,7 +1186,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1185,7 +1197,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: blocks::AIR,
@@ -1196,7 +1208,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1211,7 +1223,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let adjacent = chunk.voxel(6, 64, 5);
+        let adjacent = chunk.voxel(6, local_y(64), 5);
 
         // Should spread with reduced level (5 - 1 = 4)
         assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
@@ -1227,7 +1239,7 @@ mod tests {
         // Place lava next to wood
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: BLOCK_LAVA,
@@ -1238,7 +1250,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1249,7 +1261,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: 11, // oak_log (flammable)
@@ -1260,7 +1272,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -1275,7 +1287,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let adjacent = chunk.voxel(6, 64, 5);
+        let adjacent = chunk.voxel(6, local_y(64), 5);
 
         // Wood should be replaced (with air for now)
         assert_eq!(adjacent.id, blocks::AIR);
@@ -1288,7 +1300,7 @@ mod tests {
 
         assert_eq!(chunk_pos, ChunkPos::new(-1, -1));
         assert_eq!(lx, 11);
-        assert_eq!(ly, 64);
+        assert_eq!(ly, local_y(64));
         assert_eq!(lz, 6);
     }
 }

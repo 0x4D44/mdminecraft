@@ -3,17 +3,17 @@
 use crate::{
     farming_blocks, interactive_blocks, redstone_blocks, BLOCK_AIR, BLOCK_BEDROCK, BLOCK_BOOKSHELF,
     BLOCK_BROWN_MUSHROOM, BLOCK_CAVE_VINES, BLOCK_CLAY, BLOCK_COAL_ORE, BLOCK_COBBLESTONE,
-    BLOCK_COBBLESTONE_WALL, BLOCK_CRAFTING_TABLE, BLOCK_DIAMOND_ORE, BLOCK_DIRT,
-    BLOCK_DOUBLE_OAK_SLAB, BLOCK_DOUBLE_STONE_BRICK_SLAB, BLOCK_DOUBLE_STONE_SLAB, BLOCK_END_STONE,
-    BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_GHAST_TEAR_ORE, BLOCK_GLASS,
-    BLOCK_GLISTERING_MELON_ORE, BLOCK_GLOWSTONE_DUST_ORE, BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE,
-    BLOCK_GRASS, BLOCK_GRAVEL, BLOCK_HANGING_ROOTS, BLOCK_ICE, BLOCK_IRON_ORE, BLOCK_LAVA,
-    BLOCK_LAVA_FLOWING, BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET, BLOCK_NETHER_PORTAL,
-    BLOCK_NETHER_QUARTZ_ORE, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
-    BLOCK_PHANTOM_MEMBRANE_ORE, BLOCK_POINTED_DRIPSTONE, BLOCK_PUFFERFISH_ORE,
-    BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE, BLOCK_SAND, BLOCK_SCULK_VEIN, BLOCK_SNOW,
-    BLOCK_SPORE_BLOSSOM, BLOCK_STONE, BLOCK_STONE_BRICKS, BLOCK_SUGAR_CANE, BLOCK_WATER,
-    BLOCK_WATER_FLOWING,
+    BLOCK_COBBLESTONE_WALL, BLOCK_CRAFTING_TABLE, BLOCK_CRYING_OBSIDIAN, BLOCK_DIAMOND_ORE,
+    BLOCK_DIRT, BLOCK_DOUBLE_OAK_SLAB, BLOCK_DOUBLE_STONE_BRICK_SLAB, BLOCK_DOUBLE_STONE_SLAB,
+    BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME, BLOCK_END_STONE, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
+    BLOCK_GHAST_TEAR_ORE, BLOCK_GLASS, BLOCK_GLISTERING_MELON_ORE, BLOCK_GLOWSTONE,
+    BLOCK_GLOWSTONE_DUST_ORE, BLOCK_GLOW_LICHEN, BLOCK_GOLD_ORE, BLOCK_GRASS, BLOCK_GRAVEL,
+    BLOCK_HANGING_ROOTS, BLOCK_ICE, BLOCK_IRON_ORE, BLOCK_LAVA, BLOCK_LAVA_FLOWING,
+    BLOCK_MAGMA_CREAM_ORE, BLOCK_MOSS_CARPET, BLOCK_NETHER_PORTAL, BLOCK_NETHER_QUARTZ_ORE,
+    BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_PHANTOM_MEMBRANE_ORE,
+    BLOCK_POINTED_DRIPSTONE, BLOCK_PUFFERFISH_ORE, BLOCK_RABBIT_FOOT_ORE, BLOCK_REDSTONE_DUST_ORE,
+    BLOCK_RESPAWN_ANCHOR, BLOCK_SAND, BLOCK_SCULK_VEIN, BLOCK_SNOW, BLOCK_SPORE_BLOSSOM,
+    BLOCK_STONE, BLOCK_STONE_BRICKS, BLOCK_SUGAR_CANE, BLOCK_WATER, BLOCK_WATER_FLOWING,
 };
 use mdminecraft_core::{ToolMaterial, ToolType};
 
@@ -295,6 +295,7 @@ impl BlockPropertiesRegistry {
             is_solid: true,
         };
         properties[BLOCK_BEDROCK as usize] = BlockProperties::bedrock();
+        properties[BLOCK_END_PORTAL_FRAME as usize] = BlockProperties::bedrock();
 
         properties[BLOCK_OAK_LOG as usize] = BlockProperties::wood();
         properties[BLOCK_OAK_PLANKS as usize] = BlockProperties::wood();
@@ -327,13 +328,23 @@ impl BlockPropertiesRegistry {
         properties[BLOCK_FURNACE as usize] = BlockProperties::stone();
         properties[BLOCK_FURNACE_LIT as usize] = BlockProperties::stone();
         properties[BLOCK_OBSIDIAN as usize] = BlockProperties::obsidian();
+        properties[BLOCK_CRYING_OBSIDIAN as usize] = BlockProperties::obsidian();
+        properties[BLOCK_RESPAWN_ANCHOR as usize] = BlockProperties::obsidian();
         properties[BLOCK_GLASS as usize] = BlockProperties::glass();
         properties[BLOCK_END_STONE as usize] = BlockProperties::stone();
+        properties[BLOCK_GLOWSTONE as usize] = BlockProperties {
+            hardness: 0.3,
+            best_tool: Some(ToolType::Pickaxe),
+            required_tier: None,
+            instant_break: false,
+            is_solid: true,
+        };
 
         // Non-solid interaction blocks (collision should ignore these; shapes handled elsewhere).
         properties[interactive_blocks::TORCH as usize] = BlockProperties::air();
         properties[interactive_blocks::LADDER as usize] = BlockProperties::air();
         properties[BLOCK_NETHER_PORTAL as usize] = BlockProperties::air();
+        properties[BLOCK_END_PORTAL as usize] = BlockProperties::air();
 
         // Redstone components that should not block movement.
         properties[redstone_blocks::LEVER as usize] = BlockProperties::air();

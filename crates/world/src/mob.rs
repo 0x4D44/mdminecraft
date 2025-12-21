@@ -36,6 +36,12 @@ pub enum MobType {
     Spider,
     /// Creeper - spawns at night, explodes near players, drops Gunpowder
     Creeper,
+    /// Ender Dragon - End boss (spawned explicitly; not part of biome spawn table).
+    EnderDragon,
+    /// Blaze - Nether hostile (spawned explicitly / by Nether rules).
+    Blaze,
+    /// Ghast - Nether hostile (spawned explicitly / by Nether rules).
+    Ghast,
 }
 
 impl MobType {
@@ -51,6 +57,9 @@ impl MobType {
             MobType::Skeleton => "skeleton",
             MobType::Spider => "spider",
             MobType::Creeper => "creeper",
+            MobType::EnderDragon => "ender_dragon",
+            MobType::Blaze => "blaze",
+            MobType::Ghast => "ghast",
         }
     }
 
@@ -67,6 +76,9 @@ impl MobType {
             "skeleton" => Some(MobType::Skeleton),
             "spider" => Some(MobType::Spider),
             "creeper" => Some(MobType::Creeper),
+            "ender_dragon" | "enderdragon" | "dragon" => Some(MobType::EnderDragon),
+            "blaze" => Some(MobType::Blaze),
+            "ghast" => Some(MobType::Ghast),
             _ => None,
         }
     }
@@ -110,6 +122,9 @@ impl MobType {
             MobType::Skeleton => 0.25,
             MobType::Spider => 0.35, // Spiders are fast
             MobType::Creeper => 0.2, // Creepers are slow but sneaky
+            MobType::EnderDragon => 0.28,
+            MobType::Blaze => 0.26,
+            MobType::Ghast => 0.18,
         }
     }
 
@@ -123,8 +138,11 @@ impl MobType {
             MobType::Villager => 0.6, // Human-sized
             MobType::Zombie => 0.6,
             MobType::Skeleton => 0.6,
-            MobType::Spider => 0.7,  // Spiders are wide
-            MobType::Creeper => 0.5, // Creepers are medium sized
+            MobType::Spider => 0.7,      // Spiders are wide
+            MobType::Creeper => 0.5,     // Creepers are medium sized
+            MobType::EnderDragon => 3.0, // Large boss hitbox (simplified)
+            MobType::Blaze => 0.6,
+            MobType::Ghast => 2.0,
         }
     }
 
@@ -132,7 +150,13 @@ impl MobType {
     pub fn is_hostile(&self) -> bool {
         matches!(
             self,
-            MobType::Zombie | MobType::Skeleton | MobType::Spider | MobType::Creeper
+            MobType::Zombie
+                | MobType::Skeleton
+                | MobType::Spider
+                | MobType::Creeper
+                | MobType::EnderDragon
+                | MobType::Blaze
+                | MobType::Ghast
         )
     }
 
@@ -148,6 +172,9 @@ impl MobType {
             MobType::Skeleton => 20.0,
             MobType::Spider => 16.0,
             MobType::Creeper => 20.0,
+            MobType::EnderDragon => 200.0,
+            MobType::Blaze => 20.0,
+            MobType::Ghast => 10.0,
         }
     }
 
@@ -158,7 +185,10 @@ impl MobType {
             MobType::Skeleton => 2.0,
             MobType::Spider => 2.0,
             MobType::Creeper => 0.0, // Creepers explode instead of attacking
-            _ => 0.0,                // Passive mobs don't attack
+            MobType::EnderDragon => 10.0,
+            MobType::Blaze => 6.0,
+            MobType::Ghast => 6.0,
+            _ => 0.0, // Passive mobs don't attack
         }
     }
 
@@ -168,7 +198,10 @@ impl MobType {
             MobType::Zombie | MobType::Skeleton => 16.0,
             MobType::Spider => 16.0,
             MobType::Creeper => 12.0, // Creepers detect at shorter range
-            _ => 0.0,                 // Passive mobs don't detect players
+            MobType::EnderDragon => 64.0,
+            MobType::Blaze => 24.0,
+            MobType::Ghast => 48.0,
+            _ => 0.0, // Passive mobs don't detect players
         }
     }
 
@@ -482,6 +515,18 @@ impl Mob {
             return false;
         }
 
+        if self.mob_type == MobType::EnderDragon {
+            return self.update_ender_dragon(tick, target_x, target_y, target_z, visibility);
+        }
+
+        if self.mob_type == MobType::Blaze {
+            return self.update_blaze(tick, target_x, target_y, target_z, visibility);
+        }
+
+        if self.mob_type == MobType::Ghast {
+            return self.update_ghast(tick, target_x, target_y, target_z, visibility);
+        }
+
         let distance = self.distance_to(target_x, target_y, target_z);
         let detection_range = (self.mob_type.detection_range() as f64) * visibility;
         let attack_range = self.mob_type.size() as f64 + 1.5; // Attack when close
@@ -580,6 +625,416 @@ impl Mob {
         }
 
         dealt_damage
+    }
+
+    fn update_blaze(
+        &mut self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> bool {
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+        let attack_range = self.mob_type.size() as f64 + 1.5;
+        let speed = self.mob_type.movement_speed() as f64;
+
+        if distance <= attack_range && self.attack_cooldown <= 0.0 {
+            self.state = MobState::Attacking;
+            self.attack_cooldown = 1.0;
+            self.vel_x = 0.0;
+            self.vel_y = 0.0;
+            self.vel_z = 0.0;
+            return true;
+        }
+
+        if distance <= detection_range {
+            self.state = MobState::Chasing;
+            self.ai_timer = 0;
+
+            let dx = target_x - self.x;
+            let dz = target_z - self.z;
+            let dist_h = (dx * dx + dz * dz).sqrt();
+
+            const DESIRED_DISTANCE: f64 = 8.0;
+            const BAND: f64 = 2.0;
+
+            if dist_h > 0.1 {
+                if dist_h > DESIRED_DISTANCE + BAND {
+                    self.vel_x = (dx / dist_h) * speed;
+                    self.vel_z = (dz / dist_h) * speed;
+                } else if dist_h < DESIRED_DISTANCE - BAND {
+                    self.vel_x = -(dx / dist_h) * speed;
+                    self.vel_z = -(dz / dist_h) * speed;
+                } else {
+                    let t = tick
+                        .wrapping_add(self.id)
+                        .wrapping_add(0x424C_415A_4553_5452_u64); // "BLAZESTR"
+                    let phase = (t / 40) % 4;
+                    let strafe = speed * 0.6;
+                    match phase {
+                        0 => {
+                            self.vel_x = strafe;
+                            self.vel_z = 0.0;
+                        }
+                        1 => {
+                            self.vel_x = 0.0;
+                            self.vel_z = strafe;
+                        }
+                        2 => {
+                            self.vel_x = -strafe;
+                            self.vel_z = 0.0;
+                        }
+                        _ => {
+                            self.vel_x = 0.0;
+                            self.vel_z = -strafe;
+                        }
+                    }
+                }
+            } else {
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
+
+            let hover_y = target_y + 1.5;
+            let dy = hover_y - self.y;
+            self.vel_y = if dy.abs() > 0.25 {
+                let climb = (speed * 0.75).min(0.25);
+                dy.signum() * climb
+            } else {
+                0.0
+            };
+        } else {
+            self.state = MobState::Idle;
+            self.vel_x = 0.0;
+            self.vel_y = 0.0;
+            self.vel_z = 0.0;
+        }
+
+        self.x += self.vel_x;
+        self.y += self.vel_y;
+        self.z += self.vel_z;
+
+        self.vel_y *= 0.6;
+
+        false
+    }
+
+    fn update_ghast(
+        &mut self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> bool {
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+        let attack_range = self.mob_type.size() as f64 + 2.0;
+        let speed = self.mob_type.movement_speed() as f64;
+
+        if distance <= attack_range && self.attack_cooldown <= 0.0 {
+            self.state = MobState::Attacking;
+            self.attack_cooldown = 1.2;
+            self.vel_x = 0.0;
+            self.vel_y = 0.0;
+            self.vel_z = 0.0;
+            return true;
+        }
+
+        if distance <= detection_range {
+            self.state = MobState::Chasing;
+            self.ai_timer = 0;
+
+            let dx = target_x - self.x;
+            let dz = target_z - self.z;
+            let dist_h = (dx * dx + dz * dz).sqrt();
+
+            const DESIRED_DISTANCE: f64 = 20.0;
+            const BAND: f64 = 4.0;
+
+            if dist_h > 0.1 {
+                if dist_h > DESIRED_DISTANCE + BAND {
+                    let approach = speed * 0.55;
+                    self.vel_x = (dx / dist_h) * approach;
+                    self.vel_z = (dz / dist_h) * approach;
+                } else if dist_h < DESIRED_DISTANCE - BAND {
+                    let retreat = speed * 0.9;
+                    self.vel_x = -(dx / dist_h) * retreat;
+                    self.vel_z = -(dz / dist_h) * retreat;
+                } else {
+                    let t = tick
+                        .wrapping_add(self.id)
+                        .wrapping_add(0x4748_4153_5453_5452_u64); // "GHASTSTR"
+                    let phase = (t / 60) % 4;
+                    let strafe = speed * 0.45;
+                    match phase {
+                        0 => {
+                            self.vel_x = strafe;
+                            self.vel_z = 0.0;
+                        }
+                        1 => {
+                            self.vel_x = 0.0;
+                            self.vel_z = strafe;
+                        }
+                        2 => {
+                            self.vel_x = -strafe;
+                            self.vel_z = 0.0;
+                        }
+                        _ => {
+                            self.vel_x = 0.0;
+                            self.vel_z = -strafe;
+                        }
+                    }
+                }
+            } else {
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
+
+            let bob = ((tick.wrapping_add(self.id) / 80) % 5) as i32 - 2;
+            let hover_y = target_y + 6.0 + bob as f64;
+            let dy = hover_y - self.y;
+            self.vel_y = if dy.abs() > 0.35 {
+                dy.signum() * 0.18
+            } else {
+                0.0
+            };
+        } else {
+            self.state = MobState::Idle;
+            self.vel_x = 0.0;
+            self.vel_y = 0.0;
+            self.vel_z = 0.0;
+        }
+
+        self.x += self.vel_x;
+        self.y += self.vel_y;
+        self.z += self.vel_z;
+
+        self.vel_y *= 0.6;
+
+        false
+    }
+
+    fn update_ender_dragon(
+        &mut self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> bool {
+        // Boss-lite deterministic behavior:
+        // - patrols a square loop around origin when player is out of range
+        // - chases the player when detected
+        // - attacks in melee with a health-based "rage" phase that shortens cooldown + speeds up
+
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+        let attack_range = self.mob_type.size() as f64 + 3.0;
+
+        let enraged = (self.health as f64) <= (self.mob_type.max_health() as f64) * 0.5;
+        let speed_mul = if enraged { 1.35 } else { 1.0 };
+        let speed = (self.mob_type.movement_speed() as f64) * speed_mul;
+        let attack_cooldown = if enraged { 0.6 } else { 1.0 };
+
+        if distance <= attack_range && self.attack_cooldown <= 0.0 {
+            self.state = MobState::Attacking;
+            self.attack_cooldown = attack_cooldown;
+            self.vel_x = 0.0;
+            self.vel_y = 0.0;
+            self.vel_z = 0.0;
+            return true;
+        }
+
+        if distance <= detection_range {
+            self.state = MobState::Chasing;
+            self.ai_timer = 0;
+
+            let dx = target_x - self.x;
+            let dz = target_z - self.z;
+            let dist_h = (dx * dx + dz * dz).sqrt();
+            if dist_h > 0.1 {
+                self.vel_x = (dx / dist_h) * speed;
+                self.vel_z = (dz / dist_h) * speed;
+            } else {
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
+
+            // Fly toward the target altitude (no gravity for the dragon).
+            let dy = target_y - self.y;
+            self.vel_y = if dy.abs() > 0.25 {
+                let climb = (speed * 0.75).min(0.35);
+                dy.signum() * climb
+            } else {
+                0.0
+            };
+        } else {
+            // Patrol around the origin on a deterministic square path (no trig).
+            self.state = MobState::Wandering;
+            self.ai_timer = self.ai_timer.wrapping_add(1);
+
+            let patrol_y = 80.0;
+            let dy = patrol_y - self.y;
+            self.vel_y = if dy.abs() > 0.25 {
+                dy.signum() * 0.2
+            } else {
+                0.0
+            };
+
+            let r = 32.0;
+            let segment_ticks = 64_u64;
+            let t = tick
+                .wrapping_add(self.id)
+                .wrapping_add(0xD1B5_4A32_D192_ED03);
+            let phase = (t / segment_ticks) % 4;
+            let frac = (t % segment_ticks) as f64 / (segment_ticks as f64);
+
+            let (patrol_x, patrol_z) = match phase {
+                0 => (r, -r + 2.0 * r * frac),
+                1 => (r - 2.0 * r * frac, r),
+                2 => (-r, r - 2.0 * r * frac),
+                _ => (-r + 2.0 * r * frac, -r),
+            };
+
+            let dx = patrol_x - self.x;
+            let dz = patrol_z - self.z;
+            let dist_h = (dx * dx + dz * dz).sqrt();
+            if dist_h > 0.1 {
+                let patrol_speed = speed * 0.6;
+                self.vel_x = (dx / dist_h) * patrol_speed;
+                self.vel_z = (dz / dist_h) * patrol_speed;
+            } else {
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
+        }
+
+        self.x += self.vel_x;
+        self.y += self.vel_y;
+        self.z += self.vel_z;
+
+        // Light damping so vertical adjustments settle deterministically.
+        self.vel_y *= 0.6;
+
+        false
+    }
+
+    /// Deterministically decide whether the Ender Dragon should fire a projectile this tick.
+    ///
+    /// The game layer is responsible for enforcing any global in-flight limits and for applying
+    /// collision/damage effects when the projectile hits.
+    pub fn try_spawn_dragon_fireball(
+        &self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> Option<crate::Projectile> {
+        if self.dead || self.mob_type != MobType::EnderDragon {
+            return None;
+        }
+
+        let visibility = visibility.max(0.0);
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+        let melee_range = self.mob_type.size() as f64 + 3.0;
+
+        // Fireballs are ranged pressure: only when the target is in detection range but not close
+        // enough for the dragon's melee attack.
+        if distance > detection_range || distance <= melee_range + 2.0 {
+            return None;
+        }
+
+        let enraged = (self.health as f64) <= (self.mob_type.max_health() as f64) * 0.5;
+        let period = if enraged { 40_u64 } else { 60_u64 };
+        let phase = tick.wrapping_add(self.id) % period;
+        if phase != 0 {
+            return None;
+        }
+
+        let spawn_y = self.y + self.mob_type.size() as f64;
+        Some(crate::Projectile::shoot_dragon_fireball(
+            self.x, spawn_y, self.z, target_x, target_y, target_z,
+        ))
+    }
+
+    /// Deterministically decide whether a Blaze should fire a projectile this tick.
+    pub fn try_spawn_blaze_fireball(
+        &self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> Option<crate::Projectile> {
+        if self.dead || self.mob_type != MobType::Blaze {
+            return None;
+        }
+
+        let visibility = visibility.max(0.0);
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+        let melee_range = self.mob_type.size() as f64 + 3.0;
+
+        if distance > detection_range || distance <= melee_range + 1.0 {
+            return None;
+        }
+
+        // Vanilla-ish: blazes fire short bursts. Keep this deterministic without randomness.
+        let period = 50_u64;
+        let burst = 3_u64;
+        let phase = tick
+            .wrapping_add(self.id)
+            .wrapping_add(0x424C_5A45_4649_5245_u64) // "BLZEFIRE"
+            % period;
+        if phase >= burst {
+            return None;
+        }
+
+        let spawn_y = self.y + self.mob_type.size() as f64 * 0.8;
+        Some(crate::Projectile::shoot_blaze_fireball(
+            self.x, spawn_y, self.z, target_x, target_y, target_z,
+        ))
+    }
+
+    /// Deterministically decide whether a Ghast should fire a projectile this tick.
+    pub fn try_spawn_ghast_fireball(
+        &self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> Option<crate::Projectile> {
+        if self.dead || self.mob_type != MobType::Ghast {
+            return None;
+        }
+
+        let visibility = visibility.max(0.0);
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+
+        if distance > detection_range || distance <= 10.0 {
+            return None;
+        }
+
+        let period = 80_u64;
+        let phase = tick
+            .wrapping_add(self.id)
+            .wrapping_add(0x4748_4153_5446_4952_u64) // "GHASTFIR"
+            % period;
+        if phase != 0 {
+            return None;
+        }
+
+        let spawn_y = self.y + self.mob_type.size() as f64 * 0.6;
+        Some(crate::Projectile::shoot_ghast_fireball(
+            self.x, spawn_y, self.z, target_x, target_y, target_z,
+        ))
     }
 
     /// Helper for wandering behavior
@@ -805,6 +1260,9 @@ mod tests {
             MobType::Skeleton,
             MobType::Spider,
             MobType::Creeper,
+            MobType::EnderDragon,
+            MobType::Blaze,
+            MobType::Ghast,
         ];
 
         for mob in all {
@@ -1091,6 +1549,7 @@ mod tests {
         assert!(MobType::Skeleton.is_hostile());
         assert!(MobType::Spider.is_hostile());
         assert!(MobType::Creeper.is_hostile());
+        assert!(MobType::EnderDragon.is_hostile());
         assert!(!MobType::Pig.is_hostile());
         assert!(!MobType::Cow.is_hostile());
         assert!(!MobType::Villager.is_hostile());
@@ -1102,6 +1561,7 @@ mod tests {
         assert_eq!(MobType::Skeleton.attack_damage(), 2.0);
         assert_eq!(MobType::Spider.attack_damage(), 2.0);
         assert_eq!(MobType::Creeper.attack_damage(), 0.0); // Explodes instead
+        assert_eq!(MobType::EnderDragon.attack_damage(), 10.0);
         assert_eq!(MobType::Pig.attack_damage(), 0.0);
     }
 
@@ -1111,6 +1571,7 @@ mod tests {
         assert_eq!(MobType::Skeleton.detection_range(), 16.0);
         assert_eq!(MobType::Spider.detection_range(), 16.0);
         assert_eq!(MobType::Creeper.detection_range(), 12.0);
+        assert_eq!(MobType::EnderDragon.detection_range(), 64.0);
         assert_eq!(MobType::Pig.detection_range(), 0.0);
     }
 
@@ -1140,6 +1601,104 @@ mod tests {
         // Other hostile mobs are always hostile
         assert!(MobType::Zombie.is_hostile_at_time(false));
         assert!(MobType::Zombie.is_hostile_at_time(true));
+        assert!(MobType::EnderDragon.is_hostile_at_time(false));
+        assert!(MobType::EnderDragon.is_hostile_at_time(true));
+    }
+
+    #[test]
+    fn blaze_fireball_schedule_is_deterministic_and_respects_range() {
+        let mut blaze_a = Mob::new(0.0, 64.0, 0.0, MobType::Blaze);
+        blaze_a.id = 7;
+        let blaze_b = blaze_a.clone();
+
+        let mut fired_a = Vec::new();
+        let mut fired_b = Vec::new();
+
+        for tick in 0..250_u64 {
+            if blaze_a
+                .try_spawn_blaze_fireball(tick, 15.0, 64.0, 0.0, 1.0)
+                .is_some()
+            {
+                fired_a.push(tick);
+            }
+            if blaze_b
+                .try_spawn_blaze_fireball(tick, 15.0, 64.0, 0.0, 1.0)
+                .is_some()
+            {
+                fired_b.push(tick);
+            }
+        }
+
+        assert_eq!(fired_a, fired_b);
+        assert!(!fired_a.is_empty(), "expected blaze to fire periodically");
+
+        // Too close: should not fire (melee range gate).
+        for tick in 0..200_u64 {
+            assert!(
+                blaze_a
+                    .try_spawn_blaze_fireball(tick, 2.0, 64.0, 0.0, 1.0)
+                    .is_none(),
+                "expected blaze not to fire at melee distance"
+            );
+        }
+
+        // Too far: should not fire (detection range gate).
+        for tick in 0..200_u64 {
+            assert!(
+                blaze_a
+                    .try_spawn_blaze_fireball(tick, 64.0, 64.0, 0.0, 1.0)
+                    .is_none(),
+                "expected blaze not to fire outside detection range"
+            );
+        }
+    }
+
+    #[test]
+    fn ghast_fireball_schedule_is_deterministic_and_respects_range() {
+        let mut ghast_a = Mob::new(0.0, 96.0, 0.0, MobType::Ghast);
+        ghast_a.id = 1337;
+        let ghast_b = ghast_a.clone();
+
+        let mut fired_a = Vec::new();
+        let mut fired_b = Vec::new();
+
+        for tick in 0..320_u64 {
+            if ghast_a
+                .try_spawn_ghast_fireball(tick, 30.0, 96.0, 0.0, 1.0)
+                .is_some()
+            {
+                fired_a.push(tick);
+            }
+            if ghast_b
+                .try_spawn_ghast_fireball(tick, 30.0, 96.0, 0.0, 1.0)
+                .is_some()
+            {
+                fired_b.push(tick);
+            }
+        }
+
+        assert_eq!(fired_a, fired_b);
+        assert!(!fired_a.is_empty(), "expected ghast to fire periodically");
+
+        // Too close: should not fire.
+        for tick in 0..200_u64 {
+            assert!(
+                ghast_a
+                    .try_spawn_ghast_fireball(tick, 6.0, 96.0, 0.0, 1.0)
+                    .is_none(),
+                "expected ghast not to fire at short range"
+            );
+        }
+
+        // Too far: should not fire.
+        for tick in 0..200_u64 {
+            assert!(
+                ghast_a
+                    .try_spawn_ghast_fireball(tick, 200.0, 96.0, 0.0, 1.0)
+                    .is_none(),
+                "expected ghast not to fire outside detection range"
+            );
+        }
     }
 
     #[test]
@@ -1315,6 +1874,7 @@ mod tests {
         assert_eq!(MobType::Skeleton.max_health(), 20.0);
         assert_eq!(MobType::Spider.max_health(), 16.0);
         assert_eq!(MobType::Creeper.max_health(), 20.0);
+        assert_eq!(MobType::EnderDragon.max_health(), 200.0);
     }
 
     #[test]
@@ -1526,6 +2086,7 @@ mod tests {
         assert_eq!(MobType::Skeleton.attack_damage(), 2.0);
         assert_eq!(MobType::Zombie.attack_damage(), 3.0);
         assert_eq!(MobType::Creeper.attack_damage(), 0.0); // Creepers don't attack
+        assert_eq!(MobType::EnderDragon.attack_damage(), 10.0);
         assert_eq!(MobType::Pig.attack_damage(), 0.0); // Passive mobs don't attack
     }
 
@@ -1535,6 +2096,7 @@ mod tests {
         assert_eq!(MobType::Skeleton.detection_range(), 16.0);
         assert_eq!(MobType::Spider.detection_range(), 16.0);
         assert_eq!(MobType::Creeper.detection_range(), 12.0);
+        assert_eq!(MobType::EnderDragon.detection_range(), 64.0);
         assert_eq!(MobType::Pig.detection_range(), 0.0); // Passive mobs
         assert_eq!(MobType::Cow.detection_range(), 0.0);
     }

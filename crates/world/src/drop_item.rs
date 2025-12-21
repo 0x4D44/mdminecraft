@@ -343,6 +343,15 @@ pub enum ItemType {
 
     // End blocks (appended to preserve stable IDs)
     EndStone,
+
+    // End progression items (appended to preserve stable IDs)
+    EnderPearl,
+    EyeOfEnder,
+
+    // Nether utility blocks (appended to preserve stable IDs)
+    Glowstone,
+    CryingObsidian,
+    RespawnAnchor,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -580,6 +589,11 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::Emerald,
     ItemType::FlintAndSteel,
     ItemType::EndStone,
+    ItemType::EnderPearl,
+    ItemType::EyeOfEnder,
+    ItemType::Glowstone,
+    ItemType::CryingObsidian,
+    ItemType::RespawnAnchor,
 ];
 
 impl ItemType {
@@ -695,6 +709,10 @@ impl ItemType {
             | ItemType::Book
             | ItemType::BrownMushroom
             | ItemType::EndStone
+            | ItemType::EyeOfEnder
+            | ItemType::Glowstone
+            | ItemType::CryingObsidian
+            | ItemType::RespawnAnchor
             | ItemType::FermentedSpiderEye => 64,
             ItemType::MagmaCream
             | ItemType::GhastTear
@@ -714,7 +732,8 @@ impl ItemType {
             | ItemType::CookedBeef
             | ItemType::Leather
             | ItemType::Egg
-            | ItemType::Apple => 16,
+            | ItemType::Apple
+            | ItemType::EnderPearl => 16,
 
             // Non-stackable items (weapons, armor, potions)
             ItemType::Bow
@@ -984,6 +1003,10 @@ impl ItemType {
             130 => Some((ItemType::Dropper, 1)),
             131 => Some((ItemType::Hopper, 1)),
             133 => Some((ItemType::EndStone, 1)),
+            // Glowstone drops dust unless mined with silk touch (handled separately).
+            136 => Some((ItemType::GlowstoneDust, 4)),
+            137 => Some((ItemType::CryingObsidian, 1)),
+            138 => Some((ItemType::RespawnAnchor, 1)),
 
             // No drops: Air (0), Water (6), Ice (7; needs Silk Touch), Bedrock (10), Glass (25; needs Silk Touch)
             _ => None,
@@ -1045,6 +1068,7 @@ impl ItemType {
             17 => Some((ItemType::DiamondOre, 1)), // Diamond ore drops ore block
             7 => Some((ItemType::Ice, 1)),
             25 => Some((ItemType::Glass, 1)),
+            136 => Some((ItemType::Glowstone, 1)),
             70 => Some((ItemType::OakLeaves, 1)),
             72 => Some((ItemType::BirchLeaves, 1)),
             74 => Some((ItemType::PineLeaves, 1)),
@@ -1163,6 +1187,9 @@ impl ItemType {
             ItemType::BrownMushroom => Some(105),
             ItemType::Bed => Some(66),
             ItemType::EndStone => Some(133),
+            ItemType::Glowstone => Some(136),
+            ItemType::CryingObsidian => Some(137),
+            ItemType::RespawnAnchor => Some(138),
             // Non-placeable items (mob drops, food, crafted items)
             _ => None,
         }
@@ -1241,6 +1268,9 @@ impl ItemType {
             105 => Some(ItemType::BrownMushroom),
             65 | 66 => Some(ItemType::Bed),
             133 => Some(ItemType::EndStone),
+            136 => Some(ItemType::Glowstone),
+            137 => Some(ItemType::CryingObsidian),
+            138 => Some(ItemType::RespawnAnchor),
             _ => None,
         }
     }
@@ -1793,7 +1823,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::EndStone as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::RespawnAnchor as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1830,6 +1860,9 @@ mod tests {
         assert_eq!(ItemType::Dispenser.max_stack_size(), 64);
         assert_eq!(ItemType::Dropper.max_stack_size(), 64);
         assert_eq!(ItemType::Hopper.max_stack_size(), 64);
+        assert_eq!(ItemType::Glowstone.max_stack_size(), 64);
+        assert_eq!(ItemType::CryingObsidian.max_stack_size(), 64);
+        assert_eq!(ItemType::RespawnAnchor.max_stack_size(), 64);
         assert_eq!(ItemType::Carrot.max_stack_size(), 64);
         assert_eq!(ItemType::Potato.max_stack_size(), 64);
         assert_eq!(ItemType::BakedPotato.max_stack_size(), 64);
@@ -1846,6 +1879,8 @@ mod tests {
         assert_eq!(ItemType::LavaBucket.max_stack_size(), 1);
         assert_eq!(ItemType::FlintAndSteel.max_stack_size(), 1);
         assert_eq!(ItemType::EndStone.max_stack_size(), 64);
+        assert_eq!(ItemType::EnderPearl.max_stack_size(), 16);
+        assert_eq!(ItemType::EyeOfEnder.max_stack_size(), 64);
     }
 
     #[test]
@@ -1874,6 +1909,22 @@ mod tests {
 
         // Obsidian
         assert_eq!(ItemType::from_block(23), Some((ItemType::Obsidian, 1)));
+        assert_eq!(
+            ItemType::from_block(136),
+            Some((ItemType::GlowstoneDust, 4))
+        );
+        assert_eq!(
+            ItemType::silk_touch_drop(136),
+            Some((ItemType::Glowstone, 1))
+        );
+        assert_eq!(
+            ItemType::from_block(137),
+            Some((ItemType::CryingObsidian, 1))
+        );
+        assert_eq!(
+            ItemType::from_block(138),
+            Some((ItemType::RespawnAnchor, 1))
+        );
 
         // Magma blocks drop blaze powder (Overworld proxy).
         assert_eq!(ItemType::from_block(80), Some((ItemType::BlazePowder, 1)));
@@ -1996,6 +2047,9 @@ mod tests {
         assert_eq!(ItemType::Dispenser.to_block(), Some(129));
         assert_eq!(ItemType::Dropper.to_block(), Some(130));
         assert_eq!(ItemType::Hopper.to_block(), Some(131));
+        assert_eq!(ItemType::Glowstone.to_block(), Some(136));
+        assert_eq!(ItemType::CryingObsidian.to_block(), Some(137));
+        assert_eq!(ItemType::RespawnAnchor.to_block(), Some(138));
 
         // Non-placeable items
         assert_eq!(ItemType::RawPork.to_block(), None);
@@ -2054,6 +2108,18 @@ mod tests {
         );
         assert_eq!(ItemType::from_placeable_block(130), Some(ItemType::Dropper));
         assert_eq!(ItemType::from_placeable_block(131), Some(ItemType::Hopper));
+        assert_eq!(
+            ItemType::from_placeable_block(136),
+            Some(ItemType::Glowstone)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(137),
+            Some(ItemType::CryingObsidian)
+        );
+        assert_eq!(
+            ItemType::from_placeable_block(138),
+            Some(ItemType::RespawnAnchor)
+        );
     }
 
     #[test]

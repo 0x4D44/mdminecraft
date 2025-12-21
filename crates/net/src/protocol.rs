@@ -6,7 +6,7 @@ use mdminecraft_core::DimensionId;
 use serde::{Deserialize, Serialize};
 
 /// Protocol version for compatibility checking.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Protocol magic bytes to identify mdminecraft protocol.
 pub const PROTOCOL_MAGIC: &[u8; 10] = b"MDMC\x00\x01\x00\x00\x00\x00";
@@ -19,6 +19,15 @@ pub type EntityId = u64;
 
 /// Block identifier.
 pub type BlockId = u16;
+
+/// Chunk width (X axis) in voxels (current protocol).
+pub const CHUNK_SIZE_X: usize = 16;
+/// Chunk height (Y axis) in voxels (current protocol).
+pub const CHUNK_SIZE_Y: usize = 384;
+/// Chunk depth (Z axis) in voxels (current protocol).
+pub const CHUNK_SIZE_Z: usize = 16;
+/// Total voxel count per chunk (current protocol).
+pub const CHUNK_VOLUME: usize = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
 
 /// Item identifier.
 /// Maximum length of a chat message (characters).

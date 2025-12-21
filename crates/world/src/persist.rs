@@ -3,7 +3,7 @@
 //! Implements .rg region files that group 32x32 chunks for efficient storage.
 //! Each region file uses zstd compression and CRC32 validation.
 
-use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_VOLUME};
+use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z, CHUNK_VOLUME};
 use crate::{
     BrewingStandState, EnchantingTableState, FurnaceState, Inventory, ItemManager, Mob,
     PlayerArmor, ProjectileManager, SimTime, StatusEffects, WeatherToggle,
@@ -102,6 +102,9 @@ impl RegionHeader {
 pub struct WorldMeta {
     /// World seed used for deterministic world generation.
     pub world_seed: u64,
+    /// Whether the End boss has been defeated in this world.
+    #[serde(default)]
+    pub end_boss_defeated: bool,
 }
 
 /// Global world state that must survive save/load cycles.
@@ -724,11 +727,7 @@ impl RegionStore {
 
 /// Serialize a chunk to bytes (bincode format).
 fn serialize_chunk(chunk: &Chunk) -> Result<Vec<u8>> {
-    // Extract voxel data from chunk.
-    let voxels = chunk.voxels();
-
-    // Serialize as raw voxel array.
-    bincode::serialize(voxels).context("Failed to serialize chunk data")
+    bincode::serialize(&chunk.linear_voxels()).context("Failed to serialize chunk data")
 }
 
 /// Deserialize a chunk from bytes.
@@ -736,21 +735,35 @@ fn deserialize_chunk(pos: ChunkPos, data: &[u8]) -> Result<Chunk> {
     let voxels: Vec<Voxel> =
         bincode::deserialize(data).context("Failed to deserialize chunk data")?;
 
-    if voxels.len() != CHUNK_VOLUME {
-        anyhow::bail!(
-            "Invalid chunk data: expected {} voxels, got {}",
-            CHUNK_VOLUME,
-            voxels.len()
-        );
+    const LEGACY_CHUNK_SIZE_Y_256: usize = 256;
+    const LEGACY_CHUNK_VOLUME_256: usize = CHUNK_SIZE_X * LEGACY_CHUNK_SIZE_Y_256 * CHUNK_SIZE_Z;
+
+    let voxel_count = voxels.len();
+    if voxel_count != CHUNK_VOLUME {
+        if voxel_count == LEGACY_CHUNK_VOLUME_256 && CHUNK_VOLUME > LEGACY_CHUNK_VOLUME_256 {
+            // Height expansion migration: older saves stored 16×256×16 voxel vectors.
+            // Load into the lower portion of the new chunk and leave the added space as air.
+            debug!(
+                voxel_count,
+                expected_voxel_count = CHUNK_VOLUME,
+                "Upgrading legacy chunk voxel payload"
+            );
+        } else {
+            anyhow::bail!(
+                "Invalid chunk data: expected {} voxels (or legacy {}), got {}",
+                CHUNK_VOLUME,
+                LEGACY_CHUNK_VOLUME_256,
+                voxel_count
+            );
+        }
     }
 
     // Create chunk and populate with voxel data.
-    // Voxel index formula: (y * CHUNK_SIZE_Z + z) * CHUNK_SIZE_X + x
     let mut chunk = Chunk::new(pos);
     for (idx, &voxel) in voxels.iter().enumerate() {
-        let x = idx % 16;
-        let z = (idx / 16) % 16;
-        let y = idx / (16 * 16);
+        let x = idx % CHUNK_SIZE_X;
+        let z = (idx / CHUNK_SIZE_X) % CHUNK_SIZE_Z;
+        let y = idx / (CHUNK_SIZE_X * CHUNK_SIZE_Z);
         chunk.set_voxel(x, y, z, voxel);
     }
 
@@ -828,6 +841,34 @@ mod tests {
 
         // Cleanup.
         fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn deserialize_chunk_upgrades_legacy_256_height_payload() {
+        const LEGACY_CHUNK_SIZE_Y_256: usize = 256;
+        const LEGACY_CHUNK_VOLUME_256: usize =
+            CHUNK_SIZE_X * LEGACY_CHUNK_SIZE_Y_256 * CHUNK_SIZE_Z;
+
+        let mut voxels = vec![Voxel::default(); LEGACY_CHUNK_VOLUME_256];
+        let test_voxel = Voxel {
+            id: 42,
+            state: 1,
+            light_sky: 15,
+            light_block: 0,
+        };
+
+        let x = 8;
+        let y = 64;
+        let z = 8;
+        let idx = x + z * CHUNK_SIZE_X + y * (CHUNK_SIZE_X * CHUNK_SIZE_Z);
+        voxels[idx] = test_voxel;
+
+        let encoded = bincode::serialize(&voxels).expect("serialize legacy voxels");
+        let chunk =
+            deserialize_chunk(ChunkPos::new(0, 0), &encoded).expect("deserialize legacy chunk");
+
+        assert_eq!(chunk.voxel(x, y, z), test_voxel);
+        assert_eq!(chunk.voxel(x, crate::CHUNK_SIZE_Y - 1, z).id, BLOCK_AIR);
     }
 
     #[test]
@@ -1152,7 +1193,10 @@ mod tests {
         let temp_dir = env::temp_dir().join(format!("mdminecraft_test_meta_{}", timestamp));
         let store = RegionStore::new(&temp_dir).unwrap();
 
-        let meta = WorldMeta { world_seed: 12345 };
+        let meta = WorldMeta {
+            world_seed: 12345,
+            end_boss_defeated: false,
+        };
         store.save_world_meta(&meta).unwrap();
         assert!(store.world_meta_exists());
 

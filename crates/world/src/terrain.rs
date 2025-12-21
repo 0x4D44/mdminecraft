@@ -4,8 +4,12 @@
 
 use crate::aquifer::AquiferGenerator;
 use crate::biome::{BiomeAssigner, BiomeData, BiomeId};
-use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{
+    local_y_to_world_y, world_y_to_local_y, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y,
+};
 use crate::dungeon::DungeonGenerator;
+use crate::fortress::FortressGenerator;
 use crate::geode::GeodeGenerator;
 use crate::heightmap::Heightmap;
 use crate::mineshaft::MineshaftGenerator;
@@ -78,6 +82,7 @@ pub struct TerrainGenerator {
     ruin_gen: RuinGenerator,
     mineshaft_gen: MineshaftGenerator,
     village_gen: VillageGenerator,
+    fortress_gen: FortressGenerator,
 }
 
 impl TerrainGenerator {
@@ -110,6 +115,7 @@ impl TerrainGenerator {
             ruin_gen: RuinGenerator::new(world_seed),
             mineshaft_gen: MineshaftGenerator::new(world_seed),
             village_gen: VillageGenerator::new(world_seed),
+            fortress_gen: FortressGenerator::new(world_seed),
         }
     }
 
@@ -139,12 +145,14 @@ impl TerrainGenerator {
                 // Adjust base height by biome
                 let target_height = (base_height as f32 + biome_data.height_modifier * 20.0) as i32;
 
-                for y in 0..CHUNK_SIZE_Y {
-                    // Always place bedrock at y=0
-                    if y == 0 {
+                for local_y in 0..CHUNK_SIZE_Y {
+                    let world_y = local_y_to_world_y(local_y);
+
+                    // Always place bedrock at the minimum world height.
+                    if local_y == 0 {
                         chunk.set_voxel(
                             local_x,
-                            y,
+                            local_y,
                             local_z,
                             Voxel {
                                 id: blocks::BEDROCK,
@@ -155,10 +163,10 @@ impl TerrainGenerator {
                     }
 
                     // Always place stone at y=1-4 to prevent holes in the world floor
-                    if y <= 4 {
+                    if local_y <= 4 {
                         chunk.set_voxel(
                             local_x,
-                            y,
+                            local_y,
                             local_z,
                             Voxel {
                                 id: blocks::STONE,
@@ -171,23 +179,23 @@ impl TerrainGenerator {
                     // Density calculation
                     // 1. Vertical Gradient: Positive below target_height, negative above.
                     // Scale factor controls slope steepness.
-                    let vertical_gradient = (target_height - y as i32) as f64 / 20.0;
+                    let vertical_gradient = (target_height - world_y) as f64 / 20.0;
 
                     // 2. 3D Noise: Adds variation/overhangs
                     let noise_val = self.density_noise.sample_3d(
                         world_x as f64 * 0.02,
-                        y as f64 * 0.02,
+                        world_y as f64 * 0.02,
                         world_z as f64 * 0.02,
                     );
 
                     // 3. Cave Noise: Subtracts density (but not below y=5 to preserve bedrock area)
                     let cave_val = self.cave_noise.sample_3d(
                         world_x as f64 * 0.04,
-                        y as f64 * 0.04,
+                        world_y as f64 * 0.04,
                         world_z as f64 * 0.04,
                     );
                     // Use absolute value for cave tunnels (worm-like), but don't carve below y=5
-                    let cave_modifier = if y >= 5 && cave_val.abs() < 0.15 {
+                    let cave_modifier = if local_y >= 5 && cave_val.abs() < 0.15 {
                         -10.0
                     } else {
                         0.0
@@ -197,32 +205,31 @@ impl TerrainGenerator {
 
                     if density > 0.0 {
                         // Solid block
-                        let block_id =
-                            if (y as i32) > target_height - 4 && (y as i32) <= target_height {
-                                if (y as i32) == target_height {
-                                    self.get_surface_block(biome)
-                                } else {
-                                    self.get_subsurface_block(biome)
-                                }
+                        let block_id = if world_y > target_height - 4 && world_y <= target_height {
+                            if world_y == target_height {
+                                self.get_surface_block(biome)
                             } else {
-                                blocks::STONE
-                            };
+                                self.get_subsurface_block(biome)
+                            }
+                        } else {
+                            blocks::STONE
+                        };
 
                         chunk.set_voxel(
                             local_x,
-                            y,
+                            local_y,
                             local_z,
                             Voxel {
                                 id: block_id,
                                 ..Default::default()
                             },
                         );
-                    } else if y < 64 {
+                    } else if world_y < 64 {
                         // Water level
                         if matches!(biome, BiomeId::Ocean | BiomeId::DeepOcean) {
                             chunk.set_voxel(
                                 local_x,
-                                y,
+                                local_y,
                                 local_z,
                                 Voxel {
                                     id: blocks::WATER,
@@ -306,7 +313,7 @@ impl TerrainGenerator {
             // Calculate world position
             let world_x = chunk_origin_x + local_x as i32;
             let world_z = chunk_origin_z + local_z as i32;
-            let world_y = (surface_height + 1) as i32; // Place on top of surface
+            let world_y = local_y_to_world_y(surface_height + 1); // Place on top of surface
 
             // Check if surface is suitable for trees (grass or dirt)
             let surface_block = chunk.voxel(local_x, surface_height, local_z);
@@ -391,7 +398,7 @@ impl TerrainGenerator {
             let base_y = ground_y + 1;
             let world_x = chunk_origin_x + local_x as i32;
             let world_z = chunk_origin_z + local_z as i32;
-            let world_y = base_y as i32;
+            let world_y = local_y_to_world_y(base_y);
 
             // Don't spawn sugar cane inside surface structures.
             if crate::structures::worldgen_structure_kind_at_with_biome_assigner(
@@ -544,9 +551,10 @@ impl TerrainGenerator {
                 let world_x = chunk_origin_x + local_x as i32;
                 let world_z = chunk_origin_z + local_z as i32;
 
-                for y in 0..CHUNK_SIZE_Y {
+                for local_y in 0..CHUNK_SIZE_Y {
+                    let world_y = local_y_to_world_y(local_y);
                     let mut voxel = Voxel {
-                        id: if y == 0 || y == CHUNK_SIZE_Y - 1 {
+                        id: if local_y == 0 || local_y == CHUNK_SIZE_Y - 1 {
                             blocks::BEDROCK
                         } else {
                             blocks::NETHER_WART_BLOCK
@@ -555,25 +563,29 @@ impl TerrainGenerator {
                     };
 
                     if voxel.id == blocks::NETHER_WART_BLOCK {
-                        let y_f = y as f64;
+                        let y_f = world_y as f64;
                         let carve_noise = self.cave_noise.sample_3d(
                             world_x as f64 + 10_000.0,
                             y_f * 0.8,
                             world_z as f64 + 10_000.0,
                         );
 
-                        let threshold = if (40..=120).contains(&y) { 0.05 } else { 0.35 };
+                        let threshold = if (40..=120).contains(&world_y) {
+                            0.05
+                        } else {
+                            0.35
+                        };
                         if carve_noise > threshold {
                             voxel.id = blocks::AIR;
                         }
 
                         // Simple lava ocean/pockets in open space.
-                        if voxel.id == blocks::AIR && y <= 28 {
+                        if voxel.id == blocks::AIR && world_y <= 28 {
                             voxel.id = BLOCK_LAVA;
                         }
                     }
 
-                    chunk.set_voxel(local_x, y, local_z, voxel);
+                    chunk.set_voxel(local_x, local_y, local_z, voxel);
                 }
             }
         }
@@ -589,7 +601,8 @@ impl TerrainGenerator {
         let mut rng = StdRng::seed_from_u64(ore_seed);
 
         for local_y in 1..(CHUNK_SIZE_Y - 1) {
-            if !(10..=120).contains(&local_y) {
+            let world_y = local_y_to_world_y(local_y);
+            if !(10..=120).contains(&world_y) {
                 continue;
             }
 
@@ -611,7 +624,7 @@ impl TerrainGenerator {
                                 ..Default::default()
                             },
                         );
-                    } else if roll < 0.0032 && (30..=70).contains(&local_y) {
+                    } else if roll < 0.0032 && (30..=70).contains(&world_y) {
                         chunk.set_voxel(
                             local_x,
                             local_y,
@@ -625,6 +638,8 @@ impl TerrainGenerator {
                 }
             }
         }
+
+        let _ = self.fortress_gen.try_generate_fortress(&mut chunk);
 
         chunk
     }
@@ -678,13 +693,16 @@ impl TerrainGenerator {
                 let thickness = (25.0 + thickness_noise.abs() * 8.0).clamp(8.0, 40.0);
                 let bottom_y_f = top_y_f - thickness;
 
-                let top_y = (top_y_f.round() as i32).clamp(1, (CHUNK_SIZE_Y - 2) as i32);
-                let bottom_y = (bottom_y_f.round() as i32).clamp(1, top_y);
+                let top_y = (top_y_f.round() as i32).clamp(WORLD_MIN_Y + 1, WORLD_MAX_Y - 1);
+                let bottom_y = (bottom_y_f.round() as i32).clamp(WORLD_MIN_Y + 1, top_y);
 
-                for y in bottom_y..=top_y {
+                for world_y in bottom_y..=top_y {
+                    let Some(local_y) = world_y_to_local_y(world_y) else {
+                        continue;
+                    };
                     chunk.set_voxel(
                         local_x,
-                        y as usize,
+                        local_y,
                         local_z,
                         Voxel {
                             id: blocks::END_STONE,
@@ -725,6 +743,7 @@ impl TerrainGenerator {
         let mut rng = StdRng::seed_from_u64(ore_seed);
 
         for local_y in 0..CHUNK_SIZE_Y {
+            let world_y = local_y_to_world_y(local_y);
             for local_z in 0..CHUNK_SIZE_Z {
                 for local_x in 0..CHUNK_SIZE_X {
                     let voxel = chunk.voxel(local_x, local_y, local_z);
@@ -736,8 +755,8 @@ impl TerrainGenerator {
 
                     let roll: f32 = rng.gen();
 
-                    // Diamond: y 0-16, 0.1% chance
-                    if local_y <= 16 && roll < 0.001 {
+                    // Diamond: y <= 16, 0.1% chance
+                    if world_y <= 16 && roll < 0.001 {
                         chunk.set_voxel(
                             local_x,
                             local_y,
@@ -748,8 +767,8 @@ impl TerrainGenerator {
                             },
                         );
                     }
-                    // Gold: y 0-32, 0.3% chance
-                    else if local_y <= 32 && roll < 0.003 {
+                    // Gold: y <= 32, 0.3% chance
+                    else if world_y <= 32 && roll < 0.003 {
                         chunk.set_voxel(
                             local_x,
                             local_y,
@@ -760,8 +779,8 @@ impl TerrainGenerator {
                             },
                         );
                     }
-                    // Lapis: y 0-32, 0.1% chance (cumulative threshold)
-                    else if local_y <= 32 && roll < 0.004 {
+                    // Lapis: y <= 32, 0.1% chance (cumulative threshold)
+                    else if world_y <= 32 && roll < 0.004 {
                         chunk.set_voxel(
                             local_x,
                             local_y,
@@ -772,8 +791,8 @@ impl TerrainGenerator {
                             },
                         );
                     }
-                    // Iron: y 0-64, 0.7% chance
-                    else if local_y <= 64 && roll < 0.007 {
+                    // Iron: y <= 64, 0.7% chance
+                    else if world_y <= 64 && roll < 0.007 {
                         chunk.set_voxel(
                             local_x,
                             local_y,
@@ -784,8 +803,8 @@ impl TerrainGenerator {
                             },
                         );
                     }
-                    // Coal: y 0-128, 1% chance
-                    else if local_y <= 128 && roll < 0.01 {
+                    // Coal: y <= 128, 1% chance
+                    else if world_y <= 128 && roll < 0.01 {
                         chunk.set_voxel(
                             local_x,
                             local_y,
@@ -805,7 +824,11 @@ impl TerrainGenerator {
         // These provide access to brewing ingredients before Nether/structures exist.
         let nether_seed = ore_seed ^ 0x4E45_5448; // "NETH"
         let mut nether_rng = StdRng::seed_from_u64(nether_seed);
-        for local_y in 0..=32 {
+        for local_y in 0..CHUNK_SIZE_Y {
+            let world_y = local_y_to_world_y(local_y);
+            if !(0..=32).contains(&world_y) {
+                continue;
+            }
             for local_z in 0..CHUNK_SIZE_Z {
                 for local_x in 0..CHUNK_SIZE_X {
                     let voxel = chunk.voxel(local_x, local_y, local_z);
@@ -1001,15 +1024,18 @@ mod tests {
     fn end_generation_has_end_stone_near_origin() {
         let gen = TerrainGenerator::new(42);
         let chunk = gen.generate_chunk_in_dimension(DimensionId::End, ChunkPos::new(0, 0));
-        assert_eq!(chunk.voxel(0, 64, 0).id, blocks::END_STONE);
-        assert_eq!(chunk.voxel(0, 200, 0).id, blocks::AIR);
+        let y64 = world_y_to_local_y(64).expect("world y=64 in bounds");
+        let y200 = world_y_to_local_y(200).expect("world y=200 in bounds");
+        assert_eq!(chunk.voxel(0, y64, 0).id, blocks::END_STONE);
+        assert_eq!(chunk.voxel(0, y200, 0).id, blocks::AIR);
     }
 
     #[test]
     fn end_generation_far_from_origin_is_void() {
         let gen = TerrainGenerator::new(42);
         let chunk = gen.generate_chunk_in_dimension(DimensionId::End, ChunkPos::new(100, 100));
-        assert_eq!(chunk.voxel(0, 64, 0).id, blocks::AIR);
+        let y64 = world_y_to_local_y(64).expect("world y=64 in bounds");
+        assert_eq!(chunk.voxel(0, y64, 0).id, blocks::AIR);
     }
 
     #[test]
@@ -1019,11 +1045,14 @@ mod tests {
         let overworld = gen.generate_chunk_in_dimension(DimensionId::Overworld, pos);
         let nether = gen.generate_chunk_in_dimension(DimensionId::Nether, pos);
 
-        assert_eq!(overworld.voxel(0, 1, 0).id, blocks::STONE);
-        let nether_id = nether.voxel(0, 1, 0).id;
+        let comparison_world_y = WORLD_MIN_Y + 1;
+        let y1 = world_y_to_local_y(comparison_world_y).expect("comparison world y in bounds");
+        assert_eq!(overworld.voxel(0, y1, 0).id, blocks::STONE);
+        let nether_id = nether.voxel(0, y1, 0).id;
         assert!(
             nether_id == blocks::NETHER_WART_BLOCK || nether_id == crate::BLOCK_LAVA,
-            "expected nether block at y=1 to be netherrack-like or lava, got {nether_id}"
+            "expected nether block at y={} to be netherrack-like or lava, got {nether_id}",
+            comparison_world_y
         );
     }
 
@@ -1046,8 +1075,11 @@ mod tests {
         let mut found_stone = false;
         'outer: for x in 0..16 {
             for z in 0..16 {
-                for y in 1..60 {
-                    let voxel = chunk.voxel(x, y, z);
+                for world_y in (WORLD_MIN_Y + 1)..60 {
+                    let Some(local_y) = world_y_to_local_y(world_y) else {
+                        continue;
+                    };
+                    let voxel = chunk.voxel(x, local_y, z);
                     if voxel.id == blocks::STONE {
                         found_stone = true;
                         break 'outer;
@@ -1068,8 +1100,11 @@ mod tests {
         let mut surface_count = 0;
         for x in 0..16 {
             for z in 0..16 {
-                for y in 50..100 {
-                    let voxel = chunk.voxel(x, y, z);
+                for world_y in 50..100 {
+                    let Some(local_y) = world_y_to_local_y(world_y) else {
+                        continue;
+                    };
+                    let voxel = chunk.voxel(x, local_y, z);
                     if voxel.id == blocks::GRASS
                         || voxel.id == blocks::DIRT
                         || voxel.id == blocks::SAND
@@ -1169,7 +1204,7 @@ mod tests {
         let chunk = gen.generate_chunk(chunk_pos);
 
         let mut found_oak_planks = false;
-        'outer: for y in 0..64 {
+        'outer: for y in 0..CHUNK_SIZE_Y {
             for z in 0..CHUNK_SIZE_Z {
                 for x in 0..CHUNK_SIZE_X {
                     if chunk.voxel(x, y, z).id == crate::BLOCK_OAK_PLANKS {
@@ -1344,8 +1379,11 @@ mod tests {
 
                 for x in 0..CHUNK_SIZE_X {
                     for z in 0..CHUNK_SIZE_Z {
-                        for y in 0..=32 {
-                            match chunk.voxel(x, y, z).id {
+                        for world_y in 0..=32 {
+                            let Some(local_y) = world_y_to_local_y(world_y) else {
+                                continue;
+                            };
+                            match chunk.voxel(x, local_y, z).id {
                                 blocks::LAPIS_ORE => found_lapis = true,
                                 blocks::NETHER_WART_BLOCK => found_wart_block = true,
                                 blocks::SOUL_SAND => found_soul_sand = true,
@@ -1419,8 +1457,11 @@ mod tests {
                 let chunk = gen.generate_chunk(ChunkPos::new(chunk_x, chunk_z));
 
                 // Check center column
-                for y in (50..100).rev() {
-                    let voxel = chunk.voxel(8, y, 8);
+                for world_y in (50..100).rev() {
+                    let Some(local_y) = world_y_to_local_y(world_y) else {
+                        continue;
+                    };
+                    let voxel = chunk.voxel(8, local_y, 8);
                     if voxel.id != blocks::AIR
                         && voxel.id != blocks::WATER
                         && voxel.id != blocks::ICE

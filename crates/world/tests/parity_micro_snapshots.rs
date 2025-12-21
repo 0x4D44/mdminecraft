@@ -10,7 +10,8 @@ use mdminecraft_world::{
     set_comparator_subtract_mode, set_hopper_facing, set_hopper_outputs_down, set_observer_facing,
     tick_hoppers, update_container_signal, BlockEntityKey, BlockProperties, BrewingStandState,
     ChestState, Chunk, ChunkPos, DispenserState, Facing, FurnaceState, HopperState, ItemManager,
-    ItemType, PotionType, RedstonePos, RedstoneSimulator, Voxel,
+    ItemType, Mob, MobState, MobType, PotionType, RedstonePos, RedstoneSimulator, Voxel,
+    BLOCK_END_PORTAL,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -20,6 +21,115 @@ fn snapshot_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots")
         .join(name)
+}
+
+#[test]
+fn micro_end_boss_loop_snapshot() {
+    struct State {
+        chunks: HashMap<ChunkPos, Chunk>,
+        boss: Mob,
+        portal_placed: bool,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    struct Snap {
+        boss_dead: bool,
+        boss_enraged: bool,
+        boss_health: i32,
+        boss_state: MobState,
+        portal_blocks: u32,
+    }
+
+    let mut chunks = HashMap::new();
+    chunks.insert(ChunkPos::new(0, 0), Chunk::new(ChunkPos::new(0, 0)));
+    let mut boss = Mob::new(8.5, 80.0, 8.5, MobType::EnderDragon);
+    boss.id = 1;
+    let state = State {
+        chunks,
+        boss,
+        portal_placed: false,
+    };
+
+    const PLAYER_X: f64 = 12.0;
+    const PLAYER_Y: f64 = 80.0;
+    const PLAYER_Z: f64 = 8.5;
+    const PORTAL_Y: i32 = 80;
+    const PORTAL_X: i32 = 8;
+    const PORTAL_Z: i32 = 8;
+
+    run_micro_worldtest(
+        MicroWorldtestConfig {
+            name: "micro_end_boss_loop".to_string(),
+            ticks: 6,
+            snapshot_path: snapshot_path("micro_end_boss_loop.json"),
+        },
+        state,
+        |tick, state| {
+            let _ = state
+                .boss
+                .update_with_target_visibility(tick.0, PLAYER_X, PLAYER_Y, PLAYER_Z, 1.0);
+
+            // Deterministic "player attacks" to exercise:
+            // - normal phase
+            // - enraged phase (<= 50% HP)
+            // - defeat and exit portal placement
+            match tick.0 {
+                0 => {
+                    state.boss.damage(30.0);
+                }
+                1 => {
+                    state.boss.damage(50.0);
+                }
+                2 => {
+                    state.boss.damage(30.0);
+                }
+                3 => {
+                    state.boss.damage(200.0);
+                }
+                _ => {}
+            }
+
+            if state.boss.dead && !state.portal_placed {
+                state.portal_placed = mdminecraft_world::place_end_exit_portal(
+                    &mut state.chunks,
+                    PORTAL_X,
+                    PORTAL_Y,
+                    PORTAL_Z,
+                )
+                .is_some();
+            }
+        },
+        |_tick, state| {
+            let boss_enraged =
+                (state.boss.health as f64) <= (state.boss.mob_type.max_health() as f64) * 0.5;
+
+            let portal_blocks = (-1..=1)
+                .flat_map(|dx| (-1..=1).map(move |dz| (dx, dz)))
+                .filter(|(dx, dz)| {
+                    let x = PORTAL_X + *dx;
+                    let z = PORTAL_Z + *dz;
+                    let local_x = x.rem_euclid(16) as usize;
+                    let local_z = z.rem_euclid(16) as usize;
+                    state
+                        .chunks
+                        .get(&ChunkPos::new(0, 0))
+                        .expect("chunk exists")
+                        .voxel(local_x, PORTAL_Y as usize, local_z)
+                        .id
+                        == BLOCK_END_PORTAL
+                })
+                .count() as u32;
+
+            Snap {
+                boss_dead: state.boss.dead,
+                boss_enraged,
+                boss_health: state.boss.health.round() as i32,
+                boss_state: state.boss.state,
+                portal_blocks,
+            }
+        },
+    )
+    .expect("snapshot verified");
 }
 
 #[test]

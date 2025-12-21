@@ -10,7 +10,9 @@
 //! - CRC validation catches corruption
 //! - No buffer overflows or memory corruption
 
-use mdminecraft_world::{Chunk, ChunkPos, RegionStore, Voxel, CHUNK_VOLUME};
+use mdminecraft_world::{
+    Chunk, ChunkPos, RegionStore, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, CHUNK_VOLUME,
+};
 use proptest::prelude::*;
 use std::env;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,7 +22,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod fuzz_chunk_deserializer {
     use super::*;
 
+    fn proptest_config() -> ProptestConfig {
+        let default_cases = if cfg!(debug_assertions) { 32 } else { 256 };
+        let cases = env::var("MDM_PROPTEST_PERSIST_CASES")
+            .ok()
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .unwrap_or(default_cases);
+        ProptestConfig {
+            cases,
+            ..ProptestConfig::default()
+        }
+    }
+
     proptest! {
+        #![proptest_config(proptest_config())]
+
         /// Property: Arbitrary bytes don't crash the deserializer
         ///
         /// For any random byte sequence, deserialize_chunk should either:
@@ -68,10 +84,11 @@ mod fuzz_chunk_deserializer {
             let mut chunk = Chunk::new(pos);
 
             // Fill chunk with deterministic semi-random data
-            for i in 0..256 {  // Sample 256 voxels across the chunk
-                let x = (i * 7) % 16;
-                let y = (i * 13) % 256;
-                let z = (i * 11) % 16;
+            const SAMPLE_COUNT: usize = 256;
+            for i in 0..SAMPLE_COUNT {  // Sample 256 voxels across the chunk
+                let x = (i * 7) % CHUNK_SIZE_X;
+                let y = (i * 13) % CHUNK_SIZE_Y;
+                let z = (i * 11) % CHUNK_SIZE_Z;
 
                 let voxel_data = voxel_seed.wrapping_add(i as u64);
                 let voxel = Voxel {
@@ -90,10 +107,10 @@ mod fuzz_chunk_deserializer {
             let loaded = store.load_chunk(pos).expect("Load should succeed");
 
             // Verify sampled voxels match
-            for i in 0..256 {
-                let x = (i * 7) % 16;
-                let y = (i * 13) % 256;
-                let z = (i * 11) % 16;
+            for i in 0..SAMPLE_COUNT {
+                let x = (i * 7) % CHUNK_SIZE_X;
+                let y = (i * 13) % CHUNK_SIZE_Y;
+                let z = (i * 11) % CHUNK_SIZE_Z;
 
                 let original = chunk.voxel(x, y, z);
                 let recovered = loaded.voxel(x, y, z);

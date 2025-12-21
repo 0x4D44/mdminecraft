@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::mesh::{MeshBuffers, MeshVertex};
-use mdminecraft_world::ChunkPos;
+use mdminecraft_world::{ChunkPos, CHUNK_SIZE_Y, WORLD_MIN_Y};
 
 /// GPU buffer for a chunk mesh with position.
 pub struct ChunkRenderData {
@@ -222,15 +222,19 @@ impl Frustum {
     /// Returns true if the chunk's bounding box intersects or is inside the frustum.
     pub fn is_chunk_visible(&self, chunk_pos: ChunkPos) -> bool {
         // Define chunk AABB (axis-aligned bounding box)
-        // Chunks are 16x256x16 blocks in world coordinates
+        // Chunks are 16×CHUNK_SIZE_Y×16 blocks in world coordinates
         const CHUNK_SIZE_XZ: f32 = 16.0;
-        const CHUNK_SIZE_Y: f32 = 256.0;
+        const CHUNK_SIZE_Y_F32: f32 = CHUNK_SIZE_Y as f32;
 
-        let min = glam::Vec3::new((chunk_pos.x * 16) as f32, 0.0, (chunk_pos.z * 16) as f32);
+        let min = glam::Vec3::new(
+            (chunk_pos.x * 16) as f32,
+            WORLD_MIN_Y as f32,
+            (chunk_pos.z * 16) as f32,
+        );
 
         let max = glam::Vec3::new(
             min.x + CHUNK_SIZE_XZ,
-            min.y + CHUNK_SIZE_Y,
+            min.y + CHUNK_SIZE_Y_F32,
             min.z + CHUNK_SIZE_XZ,
         );
 

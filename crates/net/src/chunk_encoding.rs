@@ -2,7 +2,7 @@
 //!
 //! Provides efficient compression for chunk data transmission over the network.
 
-use crate::protocol::{BlockId, ChunkDataMessage};
+use crate::protocol::{BlockId, ChunkDataMessage, CHUNK_VOLUME};
 use anyhow::{Context, Result};
 use mdminecraft_core::DimensionId;
 use std::collections::HashMap;
@@ -22,9 +22,10 @@ pub fn encode_chunk_data(
     chunk_z: i32,
     block_data: &[BlockId],
 ) -> Result<ChunkDataMessage> {
-    if block_data.len() != 65536 {
+    if block_data.len() != CHUNK_VOLUME {
         return Err(anyhow::anyhow!(
-            "Invalid chunk data size: expected 65536, got {}",
+            "Invalid chunk data size: expected {}, got {}",
+            CHUNK_VOLUME,
             block_data.len()
         ));
     }
@@ -63,15 +64,16 @@ pub fn decode_chunk_data(msg: &ChunkDataMessage) -> Result<Vec<BlockId>> {
     // Decompress RLE data
     let indices = rle_decompress(&msg.compressed_data).context("Failed to decompress RLE data")?;
 
-    if indices.len() != 65536 {
+    if indices.len() != CHUNK_VOLUME {
         return Err(anyhow::anyhow!(
-            "Invalid decompressed size: expected 65536, got {}",
+            "Invalid decompressed size: expected {}, got {}",
+            CHUNK_VOLUME,
             indices.len()
         ));
     }
 
     // Map indices back to block IDs using palette
-    let mut block_data = Vec::with_capacity(65536);
+    let mut block_data = Vec::with_capacity(CHUNK_VOLUME);
     for &index in &indices {
         if (index as usize) >= msg.palette.len() {
             return Err(anyhow::anyhow!(
@@ -159,9 +161,9 @@ fn rle_compress(data: &[u8]) -> Vec<u8> {
     compressed
 }
 
-/// Maximum decompressed size for RLE data (chunk size = 16 * 256 * 16 = 65536).
+/// Maximum decompressed size for RLE data (chunk size = 16 * 384 * 16).
 /// Prevents decompression bombs from exhausting memory.
-const MAX_DECOMPRESSED_SIZE: usize = 65536;
+const MAX_DECOMPRESSED_SIZE: usize = CHUNK_VOLUME;
 
 /// Run-length decode a compressed sequence with output size limit.
 ///
@@ -251,18 +253,18 @@ mod tests {
 
     #[test]
     fn test_palette_single_block() {
-        let data = vec![1u16; 65536];
+        let data = vec![1u16; CHUNK_VOLUME];
         let (palette, indices) = build_palette(&data);
 
         assert_eq!(palette.len(), 1);
         assert_eq!(palette[0], 1);
-        assert_eq!(indices.len(), 65536);
+        assert_eq!(indices.len(), CHUNK_VOLUME);
         assert!(indices.iter().all(|&x| x == 0));
     }
 
     #[test]
     fn test_palette_multiple_blocks() {
-        let mut data = vec![0u16; 65536];
+        let mut data = vec![0u16; CHUNK_VOLUME];
         data[0] = 1;
         data[1] = 2;
         data[2] = 1;
@@ -310,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_uniform_chunk() {
-        let block_data = vec![1u16; 65536];
+        let block_data = vec![1u16; CHUNK_VOLUME];
         let encoded =
             encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data).expect("Failed to encode");
         assert_eq!(encoded.dimension, DimensionId::DEFAULT);
@@ -319,7 +321,7 @@ mod tests {
         assert_eq!(encoded.palette[0], 1);
 
         // Should have high compression ratio for uniform data
-        let original_size = 65536 * 2; // 2 bytes per BlockId
+        let original_size = CHUNK_VOLUME * 2; // 2 bytes per BlockId
         let compressed_size = encoded.compressed_data.len() + encoded.palette.len() * 2;
         assert!(compressed_size < original_size / 10); // >90% compression
 
@@ -329,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_varied_chunk() {
-        let mut block_data = vec![0u16; 65536];
+        let mut block_data = vec![0u16; CHUNK_VOLUME];
         // Create some variation
         for (i, value) in block_data.iter_mut().take(1000).enumerate() {
             *value = (i % 10) as u16;
@@ -349,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_crc32_validation() {
-        let block_data = vec![1u16; 65536];
+        let block_data = vec![1u16; CHUNK_VOLUME];
         let mut encoded =
             encode_chunk_data(DimensionId::DEFAULT, 0, 0, &block_data).expect("Failed to encode");
 
@@ -384,11 +386,9 @@ mod tests {
     fn test_rle_decompression_bomb_prevention_run() {
         // Create malicious RLE data that tries to decompress to more than MAX_DECOMPRESSED_SIZE
         // Each run control byte can specify up to 127 bytes
-        // We need > 65536 bytes output to trigger the limit
-
-        // Create data that would decompress to 127 * 600 = 76200 bytes (> 65536)
         let mut malicious_data = Vec::new();
-        for _ in 0..600 {
+        let runs_needed = (MAX_DECOMPRESSED_SIZE / 127) + 2;
+        for _ in 0..runs_needed {
             malicious_data.push(255); // 128 + 127 = run of 127
             malicious_data.push(0); // value to repeat
         }
@@ -406,7 +406,8 @@ mod tests {
 
         // Fill with literal sequences to exceed MAX_DECOMPRESSED_SIZE
         // We'll use max literal length (127) repeatedly
-        for _ in 0..600 {
+        let literals_needed = (MAX_DECOMPRESSED_SIZE / 127) + 2;
+        for _ in 0..literals_needed {
             malicious_data.push(127); // literal length
             malicious_data.extend(vec![0u8; 127]); // literal data
         }
@@ -419,34 +420,40 @@ mod tests {
 
     #[test]
     fn test_rle_decompression_exactly_max_size() {
-        // Create data that decompresses to exactly MAX_DECOMPRESSED_SIZE (65536)
-        // Using runs of 127 bytes: 65536 / 127 = 516.0...
-        // 516 * 127 = 65532, need 4 more
-
         let mut valid_data = Vec::new();
-        for _ in 0..516 {
+        let full_runs = MAX_DECOMPRESSED_SIZE / 127;
+        let remainder = MAX_DECOMPRESSED_SIZE % 127;
+
+        for _ in 0..full_runs {
             valid_data.push(255); // 128 + 127 = run of 127
             valid_data.push(0); // value to repeat
         }
-        // Add remaining 4 bytes as a short run
-        valid_data.push(128 + 4); // run of 4
-        valid_data.push(0);
+        if remainder > 0 {
+            valid_data.push(128 + remainder as u8); // short run for remainder
+            valid_data.push(0);
+        }
 
         let result = rle_decompress(&valid_data);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 65536);
+        assert_eq!(result.unwrap().len(), MAX_DECOMPRESSED_SIZE);
     }
 
     #[test]
     fn test_rle_decompression_one_over_max() {
-        // Create data that would decompress to MAX_DECOMPRESSED_SIZE + 1
         let mut malicious_data = Vec::new();
-        for _ in 0..516 {
+        let full_runs = MAX_DECOMPRESSED_SIZE / 127;
+        let remainder = MAX_DECOMPRESSED_SIZE % 127;
+        for _ in 0..full_runs {
             malicious_data.push(255); // run of 127
             malicious_data.push(0);
         }
-        // 516 * 127 = 65532, add 5 more to exceed limit
-        malicious_data.push(128 + 5); // run of 5
+        if remainder > 0 {
+            malicious_data.push(128 + remainder as u8); // short run for remainder
+            malicious_data.push(0);
+        }
+
+        // One more byte beyond the limit.
+        malicious_data.push(128 + 1);
         malicious_data.push(0);
 
         let result = rle_decompress(&malicious_data);
@@ -458,7 +465,7 @@ mod tests {
     #[test]
     fn test_max_decompressed_size_constant() {
         // Verify the constant matches the expected chunk size
-        assert_eq!(MAX_DECOMPRESSED_SIZE, 65536);
-        assert_eq!(MAX_DECOMPRESSED_SIZE, 16 * 256 * 16);
+        assert_eq!(MAX_DECOMPRESSED_SIZE, CHUNK_VOLUME);
+        assert_eq!(MAX_DECOMPRESSED_SIZE, crate::protocol::CHUNK_VOLUME);
     }
 }

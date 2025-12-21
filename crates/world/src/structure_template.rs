@@ -116,6 +116,10 @@ mod tests {
     use crate::chunk::ChunkPos;
     use crate::structures::world_to_chunk_local;
 
+    fn local_y(world_y: i32) -> usize {
+        crate::chunk::world_y_to_local_y(world_y).expect("world y in bounds")
+    }
+
     const LAYER0: [&str; 2] = ["ab", "cd"];
     const VOLUME: [&[&str]; 1] = [&LAYER0];
 
@@ -166,7 +170,7 @@ mod tests {
                 panic!("expected ({wx},{wz}) to be in chunk");
             };
             assert_eq!(
-                chunk.voxel(lx, wy as usize, lz).id,
+                chunk.voxel(lx, local_y(wy), lz).id,
                 id,
                 "mismatch at ({wx},{wy},{wz})"
             );

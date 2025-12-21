@@ -4,7 +4,7 @@
 //! and configurable bandwidth limits.
 
 use crate::chunk_encoding::encode_chunk_data;
-use crate::protocol::{BlockId, ChunkDataMessage};
+use crate::protocol::{BlockId, ChunkDataMessage, CHUNK_VOLUME};
 use anyhow::Result;
 use mdminecraft_core::DimensionId;
 use std::cmp::Ordering;
@@ -226,7 +226,7 @@ impl ChunkStreamer {
         let encoded = encode_chunk_data(dimension, chunk_x, chunk_z, &block_data)?;
 
         // Calculate compressed size
-        let uncompressed_size = 65536 * 2; // 2 bytes per BlockId
+        let uncompressed_size = CHUNK_VOLUME as u64 * 2; // 2 bytes per BlockId
         let compressed_size = encoded.compressed_data.len() + encoded.palette.len() * 2;
 
         // Check bandwidth limit (use compressed size)
@@ -332,7 +332,7 @@ mod tests {
     use super::*;
 
     fn make_uniform_chunk(block_id: BlockId) -> Vec<BlockId> {
-        vec![block_id; 65536]
+        vec![block_id; CHUNK_VOLUME]
     }
 
     #[test]
@@ -394,9 +394,14 @@ mod tests {
 
     #[test]
     fn test_bandwidth_limiting() {
-        // Set limit to allow one uniform chunk but not two
-        // Uniform chunk compresses to ~1050 bytes (516 RLE runs of 2 bytes each + palette)
-        let mut streamer = ChunkStreamer::with_bandwidth_limit(1500);
+        // Set limit to allow one uniform chunk but not two.
+        let sample_chunk = make_uniform_chunk(1);
+        let sample_encoded =
+            encode_chunk_data(DimensionId::DEFAULT, 0, 0, &sample_chunk).expect("Encode failed");
+        let sample_compressed_size =
+            sample_encoded.compressed_data.len() as u64 + (sample_encoded.palette.len() as u64 * 2);
+
+        let mut streamer = ChunkStreamer::with_bandwidth_limit(sample_compressed_size + 1);
 
         // Enqueue multiple chunks
         for i in 0..10 {

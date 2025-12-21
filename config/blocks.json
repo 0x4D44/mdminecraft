@@ -156,5 +156,10 @@
   { "name": "dropper", "opaque": true, "texture": "blocks/stone" },
   { "name": "hopper", "opaque": true, "texture": "blocks/stone" },
   { "name": "nether_portal", "opaque": false, "texture": "blocks/amethyst_block" },
-  { "name": "end_stone", "opaque": true, "texture": "blocks/sand" }
+  { "name": "end_stone", "opaque": true, "texture": "blocks/sand" },
+  { "name": "end_portal_frame", "opaque": true, "texture": "blocks/obsidian" },
+  { "name": "end_portal", "opaque": false, "texture": "blocks/amethyst_block", "emissive": true },
+  { "name": "glowstone", "opaque": true, "texture": "blocks/glow_lichen", "emissive": true },
+  { "name": "crying_obsidian", "opaque": true, "texture": "blocks/bedrock", "emissive": true, "harvest_level": "diamond" },
+  { "name": "respawn_anchor", "opaque": true, "texture": "blocks/bedrock", "emissive": true, "harvest_level": "diamond" }
 ]

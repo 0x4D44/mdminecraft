@@ -270,6 +270,23 @@ fn block_ids_match_blocks_json() {
         id_of(&map, "nether_portal")
     );
     assert_eq!(mdminecraft_world::BLOCK_END_STONE, id_of(&map, "end_stone"));
+    assert_eq!(
+        mdminecraft_world::BLOCK_END_PORTAL_FRAME,
+        id_of(&map, "end_portal_frame")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_END_PORTAL,
+        id_of(&map, "end_portal")
+    );
+    assert_eq!(mdminecraft_world::BLOCK_GLOWSTONE, id_of(&map, "glowstone"));
+    assert_eq!(
+        mdminecraft_world::BLOCK_CRYING_OBSIDIAN,
+        id_of(&map, "crying_obsidian")
+    );
+    assert_eq!(
+        mdminecraft_world::BLOCK_RESPAWN_ANCHOR,
+        id_of(&map, "respawn_anchor")
+    );
 
     let wheat = [
         mdminecraft_world::farming_blocks::WHEAT_0,

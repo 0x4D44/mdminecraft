@@ -210,6 +210,7 @@ fn world_state_roundtrip_worldtest() {
     store
         .save_world_meta(&WorldMeta {
             world_seed: WORLD_SEED,
+            end_boss_defeated: false,
         })
         .expect("failed to save world meta");
 

@@ -1075,6 +1075,8 @@ fn parse_vanilla_item(token: &str) -> Option<ItemType> {
         "nether_wart" => Some(crate::game::CORE_ITEM_NETHER_WART),
         "blaze_powder" => Some(crate::game::CORE_ITEM_BLAZE_POWDER),
         "gunpowder" => Some(crate::game::CORE_ITEM_GUNPOWDER),
+        "ender_pearl" | "enderpearl" => Some(crate::game::CORE_ITEM_ENDER_PEARL),
+        "eye_of_ender" | "eyeofender" => Some(crate::game::CORE_ITEM_EYE_OF_ENDER),
         "wheat_seeds" => Some(crate::game::CORE_ITEM_WHEAT_SEEDS),
         "wheat" => Some(crate::game::CORE_ITEM_WHEAT),
         "spider_eye" => Some(crate::game::CORE_ITEM_SPIDER_EYE),
@@ -1758,6 +1760,9 @@ fn parse_mob(token: &str) -> Result<MobType, CommandError> {
         "skeleton" => MobType::Skeleton,
         "spider" => MobType::Spider,
         "creeper" => MobType::Creeper,
+        "ender_dragon" | "enderdragon" | "dragon" => MobType::EnderDragon,
+        "blaze" => MobType::Blaze,
+        "ghast" => MobType::Ghast,
         _ => return Err(CommandError::new("Unknown mob type")),
     };
     Ok(mob)
@@ -2282,6 +2287,29 @@ mod tests {
             GameCommand::Give {
                 item: ItemType::Item(crate::game::CORE_ITEM_SUGAR),
                 count: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_give_ender_items_by_minecraft_namespace() {
+        let blocks = test_blocks();
+
+        let cmd = parse_command("/give minecraft:ender_pearl 3", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(crate::game::CORE_ITEM_ENDER_PEARL),
+                count: 3
+            }
+        );
+
+        let cmd = parse_command("/give minecraft:eye_of_ender 2", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Give {
+                item: ItemType::Item(crate::game::CORE_ITEM_EYE_OF_ENDER),
+                count: 2
             }
         );
     }

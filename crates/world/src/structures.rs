@@ -1,5 +1,8 @@
 use crate::biome::BiomeAssigner;
-use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{
+    world_y_to_local_y, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z, WORLD_MAX_Y,
+    WORLD_MIN_Y,
+};
 
 pub(crate) const STRUCTURE_REGION_SIZE_CHUNKS: i32 = 8;
 
@@ -118,7 +121,7 @@ impl StructureBounds {
 
         ranges_intersect(self.min_x, self.max_x, chunk_min_x, chunk_max_x)
             && ranges_intersect(self.min_z, self.max_z, chunk_min_z, chunk_max_z)
-            && ranges_intersect(self.min_y, self.max_y, 0, CHUNK_SIZE_Y as i32 - 1)
+            && ranges_intersect(self.min_y, self.max_y, WORLD_MIN_Y, WORLD_MAX_Y)
     }
 
     pub(crate) fn intersects_bounds(self, other: StructureBounds) -> bool {
@@ -142,16 +145,16 @@ pub(crate) fn set_world_voxel_if_in_chunk(
     world_z: i32,
     voxel: Voxel,
 ) {
-    if world_y < 0 || world_y >= CHUNK_SIZE_Y as i32 {
+    let Some(local_y) = world_y_to_local_y(world_y) else {
         return;
-    }
+    };
 
     let chunk_pos = chunk.position();
     let Some((local_x, local_z)) = world_to_chunk_local(chunk_pos, world_x, world_z) else {
         return;
     };
 
-    chunk.set_voxel(local_x, world_y as usize, local_z, voxel);
+    chunk.set_voxel(local_x, local_y, local_z, voxel);
 }
 
 pub(crate) fn world_to_chunk_local(

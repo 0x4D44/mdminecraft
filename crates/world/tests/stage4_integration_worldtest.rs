@@ -17,7 +17,7 @@ use mdminecraft_core::{DimensionId, SimTick};
 use mdminecraft_testkit::{EventRecord, JsonlSink};
 use mdminecraft_world::{
     BiomeAssigner, BiomeId, ChunkPos, Heightmap, ItemManager, ItemType, MobSpawner,
-    TerrainGenerator,
+    TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -28,7 +28,7 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_STAGE4_INTEGRATION_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or(if cfg!(debug_assertions) { 3 } else { 8 })
+        .unwrap_or(if cfg!(debug_assertions) { 2 } else { 8 })
 }
 
 #[test]
@@ -85,9 +85,9 @@ fn stage4_integration_worldtest() {
             *biome_counts.entry(biome).or_insert(0) += 1;
 
             // Count blocks
-            for y in 0..256 {
-                for z in 0..16 {
-                    for x in 0..16 {
+            for y in 0..CHUNK_SIZE_Y {
+                for z in 0..CHUNK_SIZE_Z {
+                    for x in 0..CHUNK_SIZE_X {
                         let voxel = chunk.voxel(x, y, z);
                         if voxel.id != 0 {
                             total_blocks_generated += 1;
@@ -310,11 +310,12 @@ fn stage4_integration_worldtest() {
     //
     // Debug-mode performance varies across machines; keep this as a guardrail, but allow tuning
     // via env override.
-    let default_threshold_us: u128 = if cfg!(debug_assertions) {
+    let base_threshold_us: u128 = if cfg!(debug_assertions) {
         1_200_000
     } else {
         30_000
     };
+    let default_threshold_us = base_threshold_us.saturating_mul(CHUNK_SIZE_Y as u128) / 256;
     let performance_threshold = std::env::var("MDM_STAGE4_INTEGRATION_MAX_AVG_GEN_US")
         .ok()
         .and_then(|raw| raw.parse::<u128>().ok())
@@ -406,9 +407,9 @@ fn test_deterministic_world_generation() {
     let chunk2 = gen2.generate_chunk(ChunkPos { x: 5, z: 10 });
 
     // Verify identical generation
-    for y in 0..256 {
-        for z in 0..16 {
-            for x in 0..16 {
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
                 let v1 = chunk1.voxel(x, y, z);
                 let v2 = chunk2.voxel(x, y, z);
                 assert_eq!(

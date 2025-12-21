@@ -1,14 +1,42 @@
 use mdminecraft_core::DimensionId;
+use serde::ser::SerializeSeq;
 use std::fmt;
 
 /// Chunk width (X axis) in voxels.
 pub const CHUNK_SIZE_X: usize = 16;
 /// Chunk height (Y axis) in voxels.
-pub const CHUNK_SIZE_Y: usize = 256;
+pub const CHUNK_SIZE_Y: usize = 384;
 /// Chunk depth (Z axis) in voxels.
 pub const CHUNK_SIZE_Z: usize = 16;
 /// Total voxel count per chunk.
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
+
+/// Minimum world Y coordinate (inclusive).
+pub const WORLD_MIN_Y: i32 = -64;
+/// Maximum world Y coordinate (inclusive).
+pub const WORLD_MAX_Y: i32 = WORLD_MIN_Y + CHUNK_SIZE_Y as i32 - 1;
+
+/// Vertical size of a single chunk section.
+pub const CHUNK_SECTION_SIZE_Y: usize = 16;
+/// Total voxel count per chunk section (16×16×16).
+pub const CHUNK_SECTION_VOLUME: usize = CHUNK_SIZE_X * CHUNK_SECTION_SIZE_Y * CHUNK_SIZE_Z;
+/// Number of sections per chunk (for the current fixed-height world).
+pub const CHUNK_SECTION_COUNT: usize = CHUNK_SIZE_Y / CHUNK_SECTION_SIZE_Y;
+
+const _: () = assert!(CHUNK_SIZE_Y.is_multiple_of(CHUNK_SECTION_SIZE_Y));
+
+pub fn world_y_to_local_y(world_y: i32) -> Option<usize> {
+    if !(WORLD_MIN_Y..=WORLD_MAX_Y).contains(&world_y) {
+        return None;
+    }
+
+    Some((world_y - WORLD_MIN_Y) as usize)
+}
+
+pub fn local_y_to_world_y(local_y: usize) -> i32 {
+    debug_assert!(local_y < CHUNK_SIZE_Y);
+    WORLD_MIN_Y + local_y as i32
+}
 
 /// Block identifier referencing the registry.
 pub type BlockId = u16;
@@ -210,6 +238,21 @@ pub const BLOCK_NETHER_PORTAL: BlockId = 132;
 /// ID for end stone (from blocks.json index).
 pub const BLOCK_END_STONE: BlockId = 133;
 
+/// ID for end portal frame (from blocks.json index).
+pub const BLOCK_END_PORTAL_FRAME: BlockId = 134;
+
+/// ID for end portal (from blocks.json index).
+pub const BLOCK_END_PORTAL: BlockId = 135;
+
+/// ID for glowstone (from blocks.json index).
+pub const BLOCK_GLOWSTONE: BlockId = 136;
+
+/// ID for crying obsidian (from blocks.json index).
+pub const BLOCK_CRYING_OBSIDIAN: BlockId = 137;
+
+/// ID for respawn anchor (from blocks.json index).
+pub const BLOCK_RESPAWN_ANCHOR: BlockId = 138;
+
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {
@@ -328,16 +371,52 @@ impl Default for DirtyFlags {
 /// Chunk storing voxel data in SoA form plus dirty flags.
 pub struct Chunk {
     position: ChunkPos,
-    voxels: Vec<Voxel>,
+    sections: Vec<ChunkSection>,
     dirty: DirtyFlags,
+}
+
+#[derive(Clone)]
+struct ChunkSection {
+    voxels: [Voxel; CHUNK_SECTION_VOLUME],
+}
+
+impl ChunkSection {
+    fn new_air() -> Self {
+        Self {
+            voxels: [Voxel::default(); CHUNK_SECTION_VOLUME],
+        }
+    }
+}
+
+pub(crate) struct ChunkLinearVoxels<'a> {
+    chunk: &'a Chunk,
+}
+
+impl serde::Serialize for ChunkLinearVoxels<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(CHUNK_VOLUME))?;
+        for section in &self.chunk.sections {
+            for voxel in section.voxels.iter() {
+                seq.serialize_element(voxel)?;
+            }
+        }
+        seq.end()
+    }
 }
 
 impl Chunk {
     /// Allocate a fresh chunk filled with air.
     pub fn new(position: ChunkPos) -> Self {
+        let mut sections = Vec::with_capacity(CHUNK_SECTION_COUNT);
+        for _ in 0..CHUNK_SECTION_COUNT {
+            sections.push(ChunkSection::new_air());
+        }
         Self {
             position,
-            voxels: vec![Voxel::default(); CHUNK_VOLUME],
+            sections,
             dirty: DirtyFlags::all(),
         }
     }
@@ -351,25 +430,40 @@ impl Chunk {
         LocalPos { x, y, z }.index()
     }
 
+    fn section_index(y: usize) -> (usize, usize) {
+        debug_assert!(y < CHUNK_SIZE_Y);
+        let section = y / CHUNK_SECTION_SIZE_Y;
+        let local_y = y % CHUNK_SECTION_SIZE_Y;
+        (section, local_y)
+    }
+
+    pub(crate) fn linear_voxels(&self) -> ChunkLinearVoxels<'_> {
+        ChunkLinearVoxels { chunk: self }
+    }
+
     /// Fetch a voxel copy.
     pub fn voxel(&self, x: usize, y: usize, z: usize) -> Voxel {
-        let idx = Self::index(x, y, z);
-        self.voxels[idx]
+        debug_assert!(x < CHUNK_SIZE_X);
+        debug_assert!(y < CHUNK_SIZE_Y);
+        debug_assert!(z < CHUNK_SIZE_Z);
+
+        let (section, local_y) = Self::section_index(y);
+        let idx = Self::index(x, local_y, z);
+        self.sections[section].voxels[idx]
     }
 
     /// Set a voxel and mark the relevant dirty flags.
     pub fn set_voxel(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
-        let idx = Self::index(x, y, z);
-        if self.voxels[idx] != voxel {
-            self.voxels[idx] = voxel;
+        debug_assert!(x < CHUNK_SIZE_X);
+        debug_assert!(y < CHUNK_SIZE_Y);
+        debug_assert!(z < CHUNK_SIZE_Z);
+
+        let (section, local_y) = Self::section_index(y);
+        let idx = Self::index(x, local_y, z);
+        if self.sections[section].voxels[idx] != voxel {
+            self.sections[section].voxels[idx] = voxel;
             self.dirty.insert(DirtyFlags::MESH | DirtyFlags::LIGHT);
         }
-    }
-
-    /// Borrow raw voxel storage for meshing.
-    #[allow(dead_code)]
-    pub(crate) fn voxels(&self) -> &[Voxel] {
-        &self.voxels
     }
 
     /// Consume and return the current dirty flags.

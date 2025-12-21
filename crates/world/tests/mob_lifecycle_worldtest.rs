@@ -21,7 +21,8 @@ use mdminecraft_testkit::{
     MetricsReportBuilder, MetricsSink, MobMetrics, TerrainMetrics, TestExecutionMetrics, TestResult,
 };
 use mdminecraft_world::{
-    BiomeAssigner, ChunkPos, Mob, MobType, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Z,
+    BiomeAssigner, ChunkPos, Mob, MobType, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z,
 };
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -109,7 +110,7 @@ fn mob_lifecycle_worldtest() {
     }
 
     let chunks_generated = chunks.len();
-    let blocks_generated = chunks_generated * CHUNK_SIZE_X * 256 * CHUNK_SIZE_Z;
+    let blocks_generated = chunks_generated * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
 
     println!(
