@@ -7,7 +7,9 @@ use mdminecraft_render::{
     mesh_chunk, raycast, ChunkManager, DebugHud, Frustum, InputState, Renderer, RendererConfig,
     TimeOfDay, UiRenderContext, WindowConfig, WindowManager,
 };
-use mdminecraft_world::{BlockId, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR};
+use mdminecraft_world::{
+    world_y_to_local_y, BlockId, Chunk, ChunkPos, TerrainGenerator, Voxel, BLOCK_AIR,
+};
 use std::collections::HashMap;
 use std::time::Instant;
 use winit::event::{Event, MouseButton, WindowEvent};
@@ -376,13 +378,10 @@ fn main() -> Result<()> {
                                 let chunk_x = block_pos.x.div_euclid(16);
                                 let chunk_z = block_pos.z.div_euclid(16);
                                 let local_x = block_pos.x.rem_euclid(16) as usize;
-                                let local_y = block_pos.y as usize;
-                                let local_z = block_pos.z.rem_euclid(16) as usize;
-
-                                // Check bounds.
-                                if local_y >= 256 {
+                                let Some(local_y) = world_y_to_local_y(block_pos.y) else {
                                     return false;
-                                }
+                                };
+                                let local_z = block_pos.z.rem_euclid(16) as usize;
 
                                 // Get chunk and check block.
                                 chunks
@@ -405,28 +404,35 @@ fn main() -> Result<()> {
 
                                 if let Some(chunk) = chunks.get_mut(&chunk_pos) {
                                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
-                                    let local_y = hit.block_pos.y as usize;
                                     let local_z = hit.block_pos.z.rem_euclid(16) as usize;
-
-                                    // Set block to air.
-                                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
-
-                                    // Regenerate mesh.
-                                    let mesh =
-                                        mesh_chunk(chunk, &registry, renderer.atlas_metadata());
-                                    if let Some(resources) = renderer.render_resources() {
-                                        let chunk_bind_group = resources
-                                            .pipeline
-                                            .create_chunk_bind_group(resources.device, chunk_pos);
-                                        chunk_manager.add_chunk(
-                                            resources.device,
-                                            resources.queue,
-                                            &mesh,
-                                            chunk_pos,
-                                            chunk_bind_group,
+                                    if let Some(local_y) = world_y_to_local_y(hit.block_pos.y) {
+                                        // Set block to air.
+                                        chunk.set_voxel(
+                                            local_x,
+                                            local_y,
+                                            local_z,
+                                            Voxel::default(),
                                         );
+
+                                        // Regenerate mesh.
+                                        let mesh =
+                                            mesh_chunk(chunk, &registry, renderer.atlas_metadata());
+                                        if let Some(resources) = renderer.render_resources() {
+                                            let chunk_bind_group =
+                                                resources.pipeline.create_chunk_bind_group(
+                                                    resources.device,
+                                                    chunk_pos,
+                                                );
+                                            chunk_manager.add_chunk(
+                                                resources.device,
+                                                resources.queue,
+                                                &mesh,
+                                                chunk_pos,
+                                                chunk_bind_group,
+                                            );
+                                        }
+                                        tracing::info!("Broke block at {:?}", hit.block_pos);
                                     }
-                                    tracing::info!("Broke block at {:?}", hit.block_pos);
                                 }
                             }
 
@@ -445,11 +451,9 @@ fn main() -> Result<()> {
 
                                 if let Some(chunk) = chunks.get_mut(&chunk_pos) {
                                     let local_x = place_pos.x.rem_euclid(16) as usize;
-                                    let local_y = place_pos.y as usize;
                                     let local_z = place_pos.z.rem_euclid(16) as usize;
-
-                                    // Only place if within bounds and target is air.
-                                    if local_y < 256 {
+                                    if let Some(local_y) = world_y_to_local_y(place_pos.y) {
+                                        // Only place if within bounds and target is air.
                                         let current = chunk.voxel(local_x, local_y, local_z);
                                         if current.id == BLOCK_AIR {
                                             // Place selected block from hotbar.
@@ -814,13 +818,10 @@ fn check_collision(player_aabb: &Aabb, chunks: &HashMap<ChunkPos, Chunk>) -> boo
                 let chunk_x = x.div_euclid(16);
                 let chunk_z = z.div_euclid(16);
                 let local_x = x.rem_euclid(16) as usize;
-                let local_y = y as usize;
-                let local_z = z.rem_euclid(16) as usize;
-
-                // Check bounds
-                if local_y >= 256 || y < 0 {
+                let Some(local_y) = world_y_to_local_y(y) else {
                     continue;
-                }
+                };
+                let local_z = z.rem_euclid(16) as usize;
 
                 // Get chunk and check block
                 if let Some(chunk) = chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {

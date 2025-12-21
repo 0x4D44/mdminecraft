@@ -12,6 +12,14 @@ pub enum ProjectileType {
     /// Splash potion - breaks on impact and applies area effect
     /// The u16 is the potion_id (maps to PotionType via potion_ids module)
     SplashPotion(u16),
+    /// Ender pearl - breaks on impact and teleports the thrower (handled by game layer).
+    EnderPearl,
+    /// Dragon fireball - fired by the Ender Dragon (handled by the game layer).
+    DragonFireball,
+    /// Blaze fireball - fired by Blazes (handled by the game layer).
+    BlazeFireball,
+    /// Ghast fireball - fired by Ghasts (handled by the game layer).
+    GhastFireball,
 }
 
 impl ProjectileType {
@@ -20,6 +28,10 @@ impl ProjectileType {
         match self {
             ProjectileType::Arrow => 2.0,
             ProjectileType::SplashPotion(_) => 0.0, // Splash potions don't deal direct damage
+            ProjectileType::EnderPearl => 0.0,
+            ProjectileType::DragonFireball => 6.0,
+            ProjectileType::BlazeFireball => 4.0,
+            ProjectileType::GhastFireball => 8.0,
         }
     }
 
@@ -28,6 +40,10 @@ impl ProjectileType {
         match self {
             ProjectileType::Arrow => 0.05,
             ProjectileType::SplashPotion(_) => 0.06, // Slightly higher gravity for potions
+            ProjectileType::EnderPearl => 0.06,
+            ProjectileType::DragonFireball => 0.0,
+            ProjectileType::BlazeFireball => 0.0,
+            ProjectileType::GhastFireball => 0.0,
         }
     }
 
@@ -36,6 +52,10 @@ impl ProjectileType {
         match self {
             ProjectileType::Arrow => 0.99,
             ProjectileType::SplashPotion(_) => 0.98, // Slightly more drag
+            ProjectileType::EnderPearl => 0.98,
+            ProjectileType::DragonFireball => 0.99,
+            ProjectileType::BlazeFireball => 0.99,
+            ProjectileType::GhastFireball => 0.99,
         }
     }
 
@@ -44,6 +64,10 @@ impl ProjectileType {
         match self {
             ProjectileType::Arrow => 0.3,
             ProjectileType::SplashPotion(_) => 0.25,
+            ProjectileType::EnderPearl => 0.25,
+            ProjectileType::DragonFireball => 0.6,
+            ProjectileType::BlazeFireball => 0.35,
+            ProjectileType::GhastFireball => 0.9,
         }
     }
 
@@ -52,6 +76,10 @@ impl ProjectileType {
         match self {
             ProjectileType::Arrow => 1200,          // 60 seconds
             ProjectileType::SplashPotion(_) => 600, // 30 seconds (should break on impact much sooner)
+            ProjectileType::EnderPearl => 600,
+            ProjectileType::DragonFireball => 200,
+            ProjectileType::BlazeFireball => 160,
+            ProjectileType::GhastFireball => 240,
         }
     }
 
@@ -73,6 +101,10 @@ impl ProjectileType {
         match self {
             ProjectileType::Arrow => 0.0,
             ProjectileType::SplashPotion(_) => 4.0, // 4 block radius for splash effect
+            ProjectileType::EnderPearl => 0.0,
+            ProjectileType::DragonFireball => 2.5,
+            ProjectileType::BlazeFireball => 1.5,
+            ProjectileType::GhastFireball => 3.0,
         }
     }
 }
@@ -225,6 +257,148 @@ impl Projectile {
         )
     }
 
+    /// Create a thrown ender pearl from player position and look direction.
+    pub fn throw_ender_pearl(
+        player_x: f64,
+        player_y: f64,
+        player_z: f64,
+        yaw: f32,
+        pitch: f32,
+    ) -> Self {
+        // Calculate direction from yaw/pitch
+        let pitch_rad = pitch as f64;
+        let yaw_rad = yaw as f64;
+
+        let cos_pitch = pitch_rad.cos();
+        let sin_pitch = pitch_rad.sin();
+        let cos_yaw = yaw_rad.cos();
+        let sin_yaw = yaw_rad.sin();
+
+        // Direction vector (looking direction)
+        let dir_x = cos_pitch * cos_yaw;
+        let dir_y = -sin_pitch;
+        let dir_z = cos_pitch * sin_yaw;
+
+        // Similar feel to splash potions: fixed throw speed with a slight upward arc.
+        let speed = 0.9;
+
+        // Spawn slightly in front of player and at eye level
+        let spawn_x = player_x + dir_x * 0.5;
+        let spawn_y = player_y + 1.5 + dir_y * 0.5; // Eye level
+        let spawn_z = player_z + dir_z * 0.5;
+
+        Self::new(
+            spawn_x,
+            spawn_y,
+            spawn_z,
+            dir_x * speed,
+            dir_y * speed + 0.2,
+            dir_z * speed,
+            ProjectileType::EnderPearl,
+            1.0,
+        )
+    }
+
+    /// Create a dragon fireball from a mob position toward a target point.
+    pub fn shoot_dragon_fireball(
+        from_x: f64,
+        from_y: f64,
+        from_z: f64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+    ) -> Self {
+        let dx = target_x - from_x;
+        let dy = target_y - from_y;
+        let dz = target_z - from_z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        let (dir_x, dir_y, dir_z) = if dist > 1e-6 {
+            (dx / dist, dy / dist, dz / dist)
+        } else {
+            (1.0, 0.0, 0.0)
+        };
+
+        // Fixed speed for deterministic feel parity (no charge mechanic).
+        let speed = 0.9;
+
+        Self::new(
+            from_x + dir_x * 1.5,
+            from_y + dir_y * 1.5,
+            from_z + dir_z * 1.5,
+            dir_x * speed,
+            dir_y * speed,
+            dir_z * speed,
+            ProjectileType::DragonFireball,
+            1.0,
+        )
+    }
+
+    /// Create a blaze fireball from a mob position toward a target point.
+    pub fn shoot_blaze_fireball(
+        from_x: f64,
+        from_y: f64,
+        from_z: f64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+    ) -> Self {
+        let dx = target_x - from_x;
+        let dy = target_y - from_y;
+        let dz = target_z - from_z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        let (dir_x, dir_y, dir_z) = if dist > 1e-6 {
+            (dx / dist, dy / dist, dz / dist)
+        } else {
+            (1.0, 0.0, 0.0)
+        };
+
+        let speed = 1.0;
+
+        Self::new(
+            from_x + dir_x * 1.2,
+            from_y + dir_y * 1.2,
+            from_z + dir_z * 1.2,
+            dir_x * speed,
+            dir_y * speed,
+            dir_z * speed,
+            ProjectileType::BlazeFireball,
+            1.0,
+        )
+    }
+
+    /// Create a ghast fireball from a mob position toward a target point.
+    pub fn shoot_ghast_fireball(
+        from_x: f64,
+        from_y: f64,
+        from_z: f64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+    ) -> Self {
+        let dx = target_x - from_x;
+        let dy = target_y - from_y;
+        let dz = target_z - from_z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        let (dir_x, dir_y, dir_z) = if dist > 1e-6 {
+            (dx / dist, dy / dist, dz / dist)
+        } else {
+            (1.0, 0.0, 0.0)
+        };
+
+        let speed = 0.8;
+
+        Self::new(
+            from_x + dir_x * 1.8,
+            from_y + dir_y * 1.8,
+            from_z + dir_z * 1.8,
+            dir_x * speed,
+            dir_y * speed,
+            dir_z * speed,
+            ProjectileType::GhastFireball,
+            1.0,
+        )
+    }
+
     /// Update projectile physics
     /// Returns true if the projectile should be removed
     pub fn update(&mut self) -> bool {
@@ -264,11 +438,16 @@ impl Projectile {
 
     /// Get the damage this projectile deals
     pub fn damage(&self) -> f32 {
-        // Damage scales with charge level: 1-10 damage based on draw time
-        // charge ranges from 0.1 to 1.0
-        // Min damage at 0.1 charge: 1.0
-        // Max damage at 1.0 charge: 10.0
-        1.0 + self.charge * 9.0
+        match self.projectile_type {
+            ProjectileType::Arrow => {
+                // Damage scales with charge level: 1-10 damage based on draw time
+                // charge ranges from 0.1 to 1.0
+                // Min damage at 0.1 charge: 1.0
+                // Max damage at 1.0 charge: 10.0
+                1.0 + self.charge * 9.0
+            }
+            _ => self.projectile_type.base_damage(),
+        }
     }
 
     /// Check if this projectile hits a point (simple distance check)
@@ -453,6 +632,26 @@ mod tests {
         assert!(splash.is_splash_potion());
         assert_eq!(splash.potion_id(), Some(42));
         assert_eq!(splash.effect_radius(), 4.0);
+
+        // Ender pearl properties
+        assert_eq!(ProjectileType::EnderPearl.base_damage(), 0.0);
+        assert_eq!(ProjectileType::EnderPearl.gravity(), 0.06);
+        assert_eq!(ProjectileType::EnderPearl.drag(), 0.98);
+        assert_eq!(ProjectileType::EnderPearl.hitbox_radius(), 0.25);
+        assert_eq!(ProjectileType::EnderPearl.lifetime_ticks(), 600);
+        assert!(!ProjectileType::EnderPearl.is_splash_potion());
+        assert_eq!(ProjectileType::EnderPearl.potion_id(), None);
+        assert_eq!(ProjectileType::EnderPearl.effect_radius(), 0.0);
+
+        // Dragon fireball properties
+        assert_eq!(ProjectileType::DragonFireball.base_damage(), 6.0);
+        assert_eq!(ProjectileType::DragonFireball.gravity(), 0.0);
+        assert_eq!(ProjectileType::DragonFireball.drag(), 0.99);
+        assert_eq!(ProjectileType::DragonFireball.hitbox_radius(), 0.6);
+        assert_eq!(ProjectileType::DragonFireball.lifetime_ticks(), 200);
+        assert!(!ProjectileType::DragonFireball.is_splash_potion());
+        assert_eq!(ProjectileType::DragonFireball.potion_id(), None);
+        assert_eq!(ProjectileType::DragonFireball.effect_radius(), 2.5);
     }
 
     #[test]
@@ -475,6 +674,24 @@ mod tests {
         assert!(potion.speed() > 0.0);
         assert!(!potion.stuck);
         assert!(!potion.dead);
+    }
+
+    #[test]
+    fn test_ender_pearl_creation() {
+        let pearl = Projectile::throw_ender_pearl(0.0, 0.0, 0.0, 0.0, 0.0);
+        assert_eq!(pearl.projectile_type, ProjectileType::EnderPearl);
+        assert!(pearl.speed() > 0.0);
+        assert!(!pearl.stuck);
+        assert!(!pearl.dead);
+    }
+
+    #[test]
+    fn test_dragon_fireball_creation() {
+        let fireball = Projectile::shoot_dragon_fireball(0.0, 80.0, 0.0, 10.0, 80.0, 0.0);
+        assert_eq!(fireball.projectile_type, ProjectileType::DragonFireball);
+        assert!(fireball.speed() > 0.0);
+        assert!(!fireball.stuck);
+        assert!(!fireball.dead);
     }
 
     #[test]

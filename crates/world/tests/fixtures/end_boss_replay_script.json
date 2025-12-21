@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "tick": 5, "action": { "kind": "damage_boss", "amount": 50.0 } },
+    { "tick": 20, "action": { "kind": "damage_boss", "amount": 70.0 } },
+    { "tick": 65, "action": { "kind": "damage_boss", "amount": 150.0 } }
+  ]
+}

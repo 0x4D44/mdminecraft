@@ -1,7 +1,8 @@
 use blake3::Hasher;
 use mdminecraft_assets::{BlockFace, BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_world::{
-    interactive_blocks, BlockId, Chunk, Voxel, BLOCK_AIR, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    interactive_blocks, local_y_to_world_y, world_y_to_local_y, BlockId, Chunk, Voxel, BLOCK_AIR,
+    CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
@@ -61,9 +62,7 @@ pub fn mesh_chunk(
     let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
 
     mesh_chunk_with_voxel_at(chunk, registry, atlas, |world_x, world_y, world_z| {
-        if world_y < 0 || world_y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let local_y = world_y_to_local_y(world_y)?;
 
         let local_x = world_x - origin_x;
         let local_z = world_z - origin_z;
@@ -73,7 +72,7 @@ pub fn mesh_chunk(
             return None;
         }
 
-        Some(chunk.voxel(local_x as usize, world_y as usize, local_z as usize))
+        Some(chunk.voxel(local_x as usize, local_y, local_z as usize))
     })
 }
 
@@ -473,7 +472,7 @@ fn mesh_glass_panes<F>(
                 };
 
                 let world_x = origin_x + x as i32;
-                let world_y = y as i32;
+                let world_y = local_y_to_world_y(y);
                 let world_z = origin_z + z as i32;
 
                 let connect_west =
@@ -583,7 +582,7 @@ fn mesh_oak_fences<F>(
                 }
 
                 let world_x = origin_x + x as i32;
-                let world_y = y as i32;
+                let world_y = local_y_to_world_y(y);
                 let world_z = origin_z + z as i32;
 
                 let connect_west =
@@ -697,7 +696,7 @@ fn mesh_cobblestone_walls<F>(
                 }
 
                 let world_x = origin_x + x as i32;
-                let world_y = y as i32;
+                let world_y = local_y_to_world_y(y);
                 let world_z = origin_z + z as i32;
 
                 let connect_west =
@@ -857,7 +856,7 @@ where
                 let base_z = z as f32;
 
                 let world_x = origin_x + x as i32;
-                let world_y = y as i32;
+                let world_y = local_y_to_world_y(y);
                 let world_z = origin_z + z as i32;
 
                 let shape = mdminecraft_world::stairs_shape_at(
@@ -1298,7 +1297,7 @@ where
                 }
 
                 let world_x = origin_x + x as i32;
-                let world_y = y as i32;
+                let world_y = local_y_to_world_y(y);
                 let world_z = origin_z + z as i32;
 
                 let connect_west =
@@ -2663,35 +2662,31 @@ mod tests {
 
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                    return None;
-                }
+                let local_y = world_y_to_local_y(wy)?;
 
                 let ax = wx - origin_a_x;
                 let az = wz - origin_a_z;
                 if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
                 {
-                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                    return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
                 }
 
                 None
             });
 
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(wy)?;
 
             let ax = wx - origin_a_x;
             let az = wz - origin_a_z;
             if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
-                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
             }
 
             let bx = wx - origin_b_x;
             let bz = wz - origin_b_z;
             if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
-                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+                return Some(chunk_b.voxel(bx as usize, local_y, bz as usize));
             }
 
             None
@@ -2740,35 +2735,31 @@ mod tests {
 
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                    return None;
-                }
+                let local_y = world_y_to_local_y(wy)?;
 
                 let ax = wx - origin_a_x;
                 let az = wz - origin_a_z;
                 if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
                 {
-                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                    return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
                 }
 
                 None
             });
 
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(wy)?;
 
             let ax = wx - origin_a_x;
             let az = wz - origin_a_z;
             if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
-                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
             }
 
             let bx = wx - origin_b_x;
             let bz = wz - origin_b_z;
             if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
-                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+                return Some(chunk_b.voxel(bx as usize, local_y, bz as usize));
             }
 
             None
@@ -2817,35 +2808,31 @@ mod tests {
 
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                    return None;
-                }
+                let local_y = world_y_to_local_y(wy)?;
 
                 let ax = wx - origin_a_x;
                 let az = wz - origin_a_z;
                 if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
                 {
-                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                    return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
                 }
 
                 None
             });
 
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(wy)?;
 
             let ax = wx - origin_a_x;
             let az = wz - origin_a_z;
             if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
-                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
             }
 
             let bx = wx - origin_b_x;
             let bz = wz - origin_b_z;
             if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
-                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+                return Some(chunk_b.voxel(bx as usize, local_y, bz as usize));
             }
 
             None
@@ -2896,35 +2883,31 @@ mod tests {
 
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                    return None;
-                }
+                let local_y = world_y_to_local_y(wy)?;
 
                 let ax = wx - origin_a_x;
                 let az = wz - origin_a_z;
                 if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az)
                 {
-                    return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                    return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
                 }
 
                 None
             });
 
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(wy)?;
 
             let ax = wx - origin_a_x;
             let az = wz - origin_a_z;
             if (0..CHUNK_SIZE_X as i32).contains(&ax) && (0..CHUNK_SIZE_Z as i32).contains(&az) {
-                return Some(chunk_a.voxel(ax as usize, wy as usize, az as usize));
+                return Some(chunk_a.voxel(ax as usize, local_y, az as usize));
             }
 
             let bx = wx - origin_b_x;
             let bz = wz - origin_b_z;
             if (0..CHUNK_SIZE_X as i32).contains(&bx) && (0..CHUNK_SIZE_Z as i32).contains(&bz) {
-                return Some(chunk_b.voxel(bx as usize, wy as usize, bz as usize));
+                return Some(chunk_b.voxel(bx as usize, local_y, bz as usize));
             }
 
             None

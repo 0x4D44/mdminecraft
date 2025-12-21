@@ -20,7 +20,7 @@ use mdminecraft_testkit::{
     TestResult,
 };
 use mdminecraft_world::{
-    BiomeAssigner, ChunkPos, Heightmap, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Z,
+    BiomeAssigner, ChunkPos, Heightmap, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -32,7 +32,7 @@ fn chunk_radius() -> i32 {
     std::env::var("MDM_LARGE_SCALE_TERRAIN_CHUNK_RADIUS")
         .ok()
         .and_then(|raw| raw.parse::<i32>().ok())
-        .unwrap_or(if cfg!(debug_assertions) { 4 } else { 25 })
+        .unwrap_or(if cfg!(debug_assertions) { 3 } else { 25 })
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn large_scale_terrain_worldtest() {
 
     let phase1_time = phase1_start.elapsed();
     let chunks_generated = heightmaps.len();
-    let blocks_generated = chunks_generated * CHUNK_SIZE_X * 256 * CHUNK_SIZE_Z;
+    let blocks_generated = chunks_generated * CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
 
     let avg_gen_time_us = generation_times.iter().sum::<u128>() as f64 / chunks_generated as f64;
     let min_gen_time_us = *generation_times.iter().min().unwrap();

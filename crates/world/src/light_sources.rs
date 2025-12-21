@@ -1,10 +1,12 @@
 use crate::chunk::{
-    BlockId, BlockState, BLOCK_CAVE_VINES, BLOCK_FURNACE_LIT, BLOCK_GLOW_LICHEN, BLOCK_MAGMA_BLOCK,
+    BlockId, BlockState, BLOCK_CAVE_VINES, BLOCK_CRYING_OBSIDIAN, BLOCK_FURNACE_LIT,
+    BLOCK_GLOWSTONE, BLOCK_GLOW_LICHEN, BLOCK_MAGMA_BLOCK, BLOCK_RESPAWN_ANCHOR,
     BLOCK_SCULK_CATALYST, BLOCK_SCULK_SENSOR,
 };
 use crate::fluid::{BLOCK_LAVA, BLOCK_LAVA_FLOWING};
 use crate::interaction::interactive_blocks;
 use crate::redstone::{is_active, redstone_blocks};
+use crate::{respawn_anchor_charges, respawn_anchor_light_level};
 
 /// Return the block light emission level for a block-state (0-15).
 ///
@@ -32,6 +34,15 @@ pub fn block_light_emission(block_id: BlockId, state: BlockState) -> u8 {
 
         // Lava emits max light (15).
         BLOCK_LAVA | BLOCK_LAVA_FLOWING => 15,
+
+        // Glowstone emits max light (15).
+        BLOCK_GLOWSTONE => 15,
+
+        // Crying obsidian emits some light (10).
+        BLOCK_CRYING_OBSIDIAN => 10,
+
+        // Respawn anchors emit based on their charge level.
+        BLOCK_RESPAWN_ANCHOR => respawn_anchor_light_level(respawn_anchor_charges(state)),
 
         // Cave decorations / sculk family (vanilla-ish).
         BLOCK_GLOW_LICHEN => 7,

@@ -29,18 +29,20 @@ use mdminecraft_ui3d::render::{
 use mdminecraft_world::{
     get_fluid_type, interactive_blocks,
     lighting::{init_skylight, stitch_light_seams, LightType},
-    ArmorPiece, ArmorSlot, BlockEntitiesState, BlockEntityKey, BlockId, BlockPropertiesRegistry,
-    BlockState, BrewingStandState, ChestState, Chunk, ChunkPos, CropGrowthSystem, CropPosition,
-    DispenserState, EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState,
-    HopperState, InteractionManager, Inventory, ItemManager, ItemType as DroppedItemType, Mob,
-    MobSpawner, MobType, PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile,
-    ProjectileManager, RedstonePos, RedstoneSimulator, RegionStore, SimTime, StatusEffectType,
-    StatusEffects, SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState,
-    WeatherToggle, WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR,
-    BLOCK_BOOKSHELF, BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE,
-    BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE, BLOCK_FURNACE, BLOCK_FURNACE_LIT,
-    BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_SUGAR_CANE,
-    CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    local_y_to_world_y, world_y_to_local_y, ArmorPiece, ArmorSlot, BlockEntitiesState,
+    BlockEntityKey, BlockId, BlockPropertiesRegistry, BlockState, BrewingStandState, ChestState,
+    Chunk, ChunkPos, CropGrowthSystem, CropPosition, DispenserState, EnchantingTableState,
+    FluidPos, FluidSimulator, FluidType, FurnaceState, HopperState, InteractionManager, Inventory,
+    ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PlayerSave,
+    PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos, RedstoneSimulator,
+    RegionStore, SimTime, StatusEffectType, StatusEffects, SugarCaneGrowthSystem,
+    SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle, WorldEntitiesState,
+    WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
+    BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_CRYING_OBSIDIAN,
+    BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME, BLOCK_FURNACE,
+    BLOCK_FURNACE_LIT, BLOCK_GLOWSTONE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
+    BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SUGAR_CANE, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
@@ -71,6 +73,7 @@ pub(crate) enum WorldgenChestLootTable {
     Mineshaft,
     Ruin,
     Village,
+    NetherFortress,
 }
 
 impl WorldgenChestLootTable {
@@ -102,6 +105,7 @@ impl WorldgenChestLootTable {
             "mineshaft" => Some(Self::Mineshaft),
             "ruin" => Some(Self::Ruin),
             "village" => Some(Self::Village),
+            "fortress" | "nether_fortress" | "netherfortress" => Some(Self::NetherFortress),
             _ => None,
         }
     }
@@ -113,6 +117,7 @@ impl WorldgenChestLootTable {
             Self::Mineshaft => 0x4D49_4E45_5348_4654_u64, // "MINESHFT"
             Self::Ruin => 0x5255_494E_0000_0000_u64,    // "RUIN"
             Self::Village => 0x5649_4C4C_4147_4500_u64, // "VILLAGE\0"
+            Self::NetherFortress => 0x464F_5254_5245_5353_u64, // "FORTRESS"
         }
     }
 }
@@ -146,6 +151,8 @@ pub(crate) const CORE_ITEM_BUCKET: u16 = client_item_ids::BUCKET;
 pub(crate) const CORE_ITEM_WATER_BUCKET: u16 = client_item_ids::WATER_BUCKET;
 pub(crate) const CORE_ITEM_LAVA_BUCKET: u16 = client_item_ids::LAVA_BUCKET;
 pub(crate) const CORE_ITEM_FLINT_AND_STEEL: u16 = client_item_ids::FLINT_AND_STEEL;
+pub(crate) const CORE_ITEM_ENDER_PEARL: u16 = client_item_ids::ENDER_PEARL;
+pub(crate) const CORE_ITEM_EYE_OF_ENDER: u16 = client_item_ids::EYE_OF_ENDER;
 use winit::event::{Event, MouseButton, WindowEvent};
 use winit::event_loop::EventLoopWindowTarget;
 use winit::keyboard::KeyCode;
@@ -504,6 +511,8 @@ impl Hotbar {
                     CORE_ITEM_WATER_BUCKET => "Water Bucket".to_string(),
                     CORE_ITEM_LAVA_BUCKET => "Lava Bucket".to_string(),
                     CORE_ITEM_FLINT_AND_STEEL => "Flint and Steel".to_string(),
+                    CORE_ITEM_ENDER_PEARL => "Ender Pearl".to_string(),
+                    CORE_ITEM_EYE_OF_ENDER => "Eye of Ender".to_string(),
                     CORE_ITEM_SUGAR => "Sugar".to_string(),
                     CORE_ITEM_PAPER => "Paper".to_string(),
                     CORE_ITEM_BOOK => "Book".to_string(),
@@ -1654,6 +1663,8 @@ pub struct GameWorld {
     region_store: RegionStore,
     /// World seed used for deterministic world generation.
     world_seed: u64,
+    /// Whether the End boss has been defeated in this world.
+    end_boss_defeated: bool,
     /// Terrain generator
     terrain_generator: TerrainGenerator,
     /// Render distance (chunks radius)
@@ -1796,9 +1807,7 @@ impl GameWorld {
             &self.registry,
             self.renderer.atlas_metadata(),
             |wx, wy, wz| {
-                if wy < 0 || wy >= CHUNK_SIZE_Y as i32 {
-                    return None;
-                }
+                let local_y = world_y_to_local_y(wy)?;
 
                 let chunk_x = wx.div_euclid(CHUNK_SIZE_X as i32);
                 let chunk_z = wz.div_euclid(CHUNK_SIZE_Z as i32);
@@ -1812,13 +1821,13 @@ impl GameWorld {
                     {
                         return None;
                     }
-                    return Some(chunk.voxel(local_x as usize, wy as usize, local_z as usize));
+                    return Some(chunk.voxel(local_x as usize, local_y, local_z as usize));
                 }
 
                 let chunk = chunks.get(&chunk_pos)?;
                 let local_x = wx.rem_euclid(CHUNK_SIZE_X as i32) as usize;
                 let local_z = wz.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-                Some(chunk.voxel(local_x, wy as usize, local_z))
+                Some(chunk.voxel(local_x, local_y, local_z))
             },
         )
     }
@@ -1922,7 +1931,7 @@ impl GameWorld {
             RegionStore::new(std::env::temp_dir().join("mdminecraft_save")).unwrap()
         });
 
-        let (world_seed, loaded_state) = {
+        let (world_seed, end_boss_defeated, loaded_state) = {
             let meta = if region_store.world_meta_exists() {
                 match region_store.load_world_meta() {
                     Ok(meta) => meta,
@@ -1930,6 +1939,7 @@ impl GameWorld {
                         tracing::warn!(?err, "Failed to load world meta; generating new seed");
                         WorldMeta {
                             world_seed: rand::random(),
+                            end_boss_defeated: false,
                         }
                     }
                 }
@@ -1939,7 +1949,10 @@ impl GameWorld {
                     .and_then(|raw| raw.parse::<u64>().ok())
                     .unwrap_or_else(rand::random);
 
-                let meta = WorldMeta { world_seed };
+                let meta = WorldMeta {
+                    world_seed,
+                    end_boss_defeated: false,
+                };
                 if let Err(err) = region_store.save_world_meta(&meta) {
                     tracing::warn!(?err, "Failed to save world meta");
                 }
@@ -1958,7 +1971,7 @@ impl GameWorld {
                 None
             };
 
-            (meta.world_seed, state)
+            (meta.world_seed, meta.end_boss_defeated, state)
         };
 
         tracing::info!("World Seed: {}", world_seed);
@@ -2186,6 +2199,7 @@ impl GameWorld {
             // New fields
             region_store,
             world_seed,
+            end_boss_defeated,
             terrain_generator,
             render_distance,
         };
@@ -2353,16 +2367,14 @@ impl GameWorld {
         };
 
         let voxel_at = |x: i32, y: i32, z: i32| -> Option<Voxel> {
-            if y < 0 || y >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(y)?;
             let chunk_x = x.div_euclid(CHUNK_SIZE_X as i32);
             let chunk_z = z.div_euclid(CHUNK_SIZE_Z as i32);
             let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
             let chunk = chunks.get(&chunk_pos)?;
             let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
             let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-            Some(chunk.voxel(local_x, y as usize, local_z))
+            Some(chunk.voxel(local_x, local_y, local_z))
         };
 
         match mdminecraft_world::get_collision_type(voxel.id, voxel.state) {
@@ -2883,19 +2895,20 @@ impl GameWorld {
         block_y: i32,
         block_z: i32,
     ) -> AabbSet<8> {
-        if block_y < 0 {
-            return AabbSet::single(AABB {
-                min: glam::Vec3::new(block_x as f32, block_y as f32, block_z as f32),
-                max: glam::Vec3::new(
-                    block_x as f32 + 1.0,
-                    block_y as f32 + 1.0,
-                    block_z as f32 + 1.0,
-                ),
-            });
-        }
-        if block_y >= CHUNK_SIZE_Y as i32 {
+        let Some(local_y) = world_y_to_local_y(block_y) else {
+            if block_y < WORLD_MIN_Y {
+                return AabbSet::single(AABB {
+                    min: glam::Vec3::new(block_x as f32, block_y as f32, block_z as f32),
+                    max: glam::Vec3::new(
+                        block_x as f32 + 1.0,
+                        block_y as f32 + 1.0,
+                        block_z as f32 + 1.0,
+                    ),
+                });
+            }
+
             return AabbSet::empty();
-        }
+        };
 
         let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
         let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
@@ -2905,7 +2918,7 @@ impl GameWorld {
         };
         let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
         let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-        let voxel = chunk.voxel(local_x, block_y as usize, local_z);
+        let voxel = chunk.voxel(local_x, local_y, local_z);
         Self::collision_aabbs_for_voxel(chunks, block_properties, block_x, block_y, block_z, &voxel)
     }
 
@@ -2949,9 +2962,9 @@ impl GameWorld {
 
         for bx in min_x..max_x {
             for by in min_y..max_y {
-                if by < 0 || by >= CHUNK_SIZE_Y as i32 {
+                let Some(local_y) = world_y_to_local_y(by) else {
                     continue;
-                }
+                };
                 for bz in min_z..max_z {
                     let chunk_x = bx.div_euclid(CHUNK_SIZE_X as i32);
                     let chunk_z = bz.div_euclid(CHUNK_SIZE_Z as i32);
@@ -2961,7 +2974,7 @@ impl GameWorld {
                     };
                     let local_x = bx.rem_euclid(CHUNK_SIZE_X as i32) as usize;
                     let local_z = bz.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-                    let voxel = chunk.voxel(local_x, by as usize, local_z);
+                    let voxel = chunk.voxel(local_x, local_y, local_z);
                     if matches!(
                         mdminecraft_world::get_collision_type(voxel.id, voxel.state),
                         mdminecraft_world::CollisionType::Ladder
@@ -3395,6 +3408,7 @@ impl GameWorld {
 
         let meta = WorldMeta {
             world_seed: self.world_seed,
+            end_boss_defeated: self.end_boss_defeated,
         };
         if let Err(err) = self.region_store.save_world_meta(&meta) {
             tracing::warn!(?err, "Failed to save world meta");
@@ -3930,6 +3944,8 @@ impl GameWorld {
 
             let height = match mob.mob_type {
                 MobType::Chicken | MobType::Spider => 0.5,
+                MobType::Ghast => 4.0,
+                MobType::EnderDragon => 6.0,
                 _ => 1.8,
             };
 
@@ -3945,11 +3961,17 @@ impl GameWorld {
                 MobType::Cow => [0.3, 0.2, 0.1, 1.0],
                 MobType::Sheep => [0.9, 0.9, 0.9, 1.0],
                 MobType::Chicken => [1.0, 1.0, 1.0, 1.0],
+                MobType::Villager => [0.7, 0.6, 0.4, 1.0],
+                MobType::EnderDragon => [0.5, 0.0, 0.7, 1.0],
+                MobType::Blaze => [1.0, 0.6, 0.0, 1.0],
+                MobType::Ghast => [0.9, 0.9, 0.95, 1.0],
             };
 
             let size = match mob.mob_type {
                 MobType::Chicken => [0.5, 0.5],
                 MobType::Spider => [1.0, 0.5],
+                MobType::EnderDragon => [3.0, 2.0],
+                MobType::Ghast => [2.0, 2.0],
                 _ => [0.6, 1.8],
             };
 
@@ -4447,25 +4469,38 @@ impl GameWorld {
 
         self.portal_cooldown_ticks = self.portal_cooldown_ticks.saturating_sub(1);
 
-        let Some((_pos, axis)) = self.player_portal_contact() else {
-            self.portal_charge_ticks = 0;
-            return;
-        };
+        if let Some((_pos, axis)) = self.player_portal_contact() {
+            if self.portal_cooldown_ticks > 0 {
+                self.portal_charge_ticks = 0;
+                return;
+            }
 
-        if self.portal_cooldown_ticks > 0 {
-            self.portal_charge_ticks = 0;
-            return;
-        }
+            self.portal_charge_ticks = self.portal_charge_ticks.saturating_add(1);
+            if self.portal_charge_ticks < NETHER_PORTAL_CHARGE_TICKS {
+                return;
+            }
 
-        self.portal_charge_ticks = self.portal_charge_ticks.saturating_add(1);
-        if self.portal_charge_ticks < NETHER_PORTAL_CHARGE_TICKS {
+            self.portal_charge_ticks = 0;
+            self.portal_cooldown_ticks = NETHER_PORTAL_COOLDOWN_TICKS;
+            if let Err(err) = self.travel_through_nether_portal(axis) {
+                tracing::warn!("Nether portal travel failed: {err:#}");
+            }
             return;
         }
 
         self.portal_charge_ticks = 0;
+
+        let Some(_pos) = self.player_end_portal_contact() else {
+            return;
+        };
+
+        if self.portal_cooldown_ticks > 0 {
+            return;
+        }
+
         self.portal_cooldown_ticks = NETHER_PORTAL_COOLDOWN_TICKS;
-        if let Err(err) = self.travel_through_nether_portal(axis) {
-            tracing::warn!("Nether portal travel failed: {err:#}");
+        if let Err(err) = self.travel_through_end_portal() {
+            tracing::warn!("End portal travel failed: {err:#}");
         }
     }
 
@@ -4492,6 +4527,35 @@ impl GameWorld {
         if let Some(voxel) = self.get_voxel_at(feet_block) {
             if voxel.id == BLOCK_NETHER_PORTAL {
                 return Some((feet_block, portal_axis_from_state(voxel.state)));
+            }
+        }
+
+        None
+    }
+
+    fn player_end_portal_contact(&self) -> Option<IVec3> {
+        let camera_pos = self.renderer.camera().position;
+        let eye_pos = IVec3::new(
+            camera_pos.x.floor() as i32,
+            camera_pos.y.floor() as i32,
+            camera_pos.z.floor() as i32,
+        );
+        if let Some(voxel) = self.get_voxel_at(eye_pos) {
+            if voxel.id == BLOCK_END_PORTAL {
+                return Some(eye_pos);
+            }
+        }
+
+        let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
+        let feet_sample = feet_pos + glam::Vec3::new(0.0, 0.1, 0.0);
+        let feet_block = IVec3::new(
+            feet_sample.x.floor() as i32,
+            feet_sample.y.floor() as i32,
+            feet_sample.z.floor() as i32,
+        );
+        if let Some(voxel) = self.get_voxel_at(feet_block) {
+            if voxel.id == BLOCK_END_PORTAL {
+                return Some(feet_block);
             }
         }
 
@@ -4532,6 +4596,26 @@ impl GameWorld {
             self.player_physics.last_ground_y = feet.y;
         }
 
+        Ok(())
+    }
+
+    fn travel_through_end_portal(&mut self) -> anyhow::Result<()> {
+        let from = self.active_dimension;
+        let target = match from {
+            DimensionId::Overworld => DimensionId::End,
+            DimensionId::End => DimensionId::Overworld,
+            _ => return Ok(()),
+        };
+
+        let eye_height = self.player_physics.eye_height;
+        if target == DimensionId::End {
+            self.renderer.camera_mut().position = glam::Vec3::new(0.0, 80.0 + eye_height, 0.0);
+        } else {
+            self.renderer.camera_mut().position =
+                self.spawn_point + glam::Vec3::new(0.0, eye_height, 0.0);
+        }
+
+        self.switch_dimension(target)?;
         Ok(())
     }
 
@@ -4635,7 +4719,7 @@ impl GameWorld {
 
                     for dy in -16..=16 {
                         let y = center_y + dy;
-                        if y < 0 || y >= CHUNK_SIZE_Y as i32 {
+                        if world_y_to_local_y(y).is_none() {
                             continue;
                         }
 
@@ -4659,7 +4743,7 @@ impl GameWorld {
         origin: IVec3,
         axis: PortalAxis,
     ) -> Option<Vec<IVec3>> {
-        if origin.y < 1 || origin.y + 4 >= CHUNK_SIZE_Y as i32 {
+        if origin.y < WORLD_MIN_Y + 1 || origin.y + 4 > WORLD_MAX_Y {
             return None;
         }
 
@@ -4668,14 +4752,14 @@ impl GameWorld {
 
         let set_voxel =
             |chunks: &mut HashMap<ChunkPos, Chunk>, pos: IVec3, voxel: Voxel| -> Option<()> {
-                let chunk_pos = ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16));
+                let chunk_pos = ChunkPos::new(
+                    pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                    pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
                 let chunk = chunks.get_mut(&chunk_pos)?;
-                let local_y = pos.y as usize;
-                if local_y >= CHUNK_SIZE_Y {
-                    return None;
-                }
-                let local_x = pos.x.rem_euclid(16) as usize;
-                let local_z = pos.z.rem_euclid(16) as usize;
+                let local_y = world_y_to_local_y(pos.y)?;
+                let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
                 chunk.set_voxel(local_x, local_y, local_z, voxel);
                 Some(())
             };
@@ -4925,6 +5009,73 @@ impl GameWorld {
                     self.assign_mob_ids(&mut village_villagers);
                     self.mobs.append(&mut village_villagers);
                 }
+
+                if self.active_dimension == DimensionId::Nether {
+                    let mut fortress_blazes =
+                        mdminecraft_world::fortress_blaze_spawns_for_chunk(self.world_seed, pos);
+                    for mob in &mut fortress_blazes {
+                        mob.dimension = self.active_dimension;
+                    }
+                    self.assign_mob_ids(&mut fortress_blazes);
+                    self.mobs.append(&mut fortress_blazes);
+
+                    if let Some(chunk) = self.chunks.get(&pos) {
+                        // Spawn rare ghasts during chunk generation so the Nether feels alive even
+                        // without additional periodic spawn rules.
+                        let seed = self.world_seed
+                            ^ (pos.x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                            ^ (pos.z as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                            ^ 0x4748_4153_5453_504E_u64; // "GHASTSPN"
+                        let mut rng = StdRng::seed_from_u64(seed);
+
+                        if rng.gen_ratio(1, 12) {
+                            for _attempt in 0..16 {
+                                let local_x = rng.gen_range(2..=13);
+                                let local_z = rng.gen_range(2..=13);
+                                let local_y = rng.gen_range(40..=200);
+
+                                let mut clear = true;
+                                for dy in 0..=3 {
+                                    for dz in -1..=1 {
+                                        for dx in -1..=1 {
+                                            let x = (local_x + dx) as usize;
+                                            let y = (local_y + dy) as usize;
+                                            let z = (local_z + dz) as usize;
+                                            if chunk.voxel(x, y, z).id != BLOCK_AIR {
+                                                clear = false;
+                                                break;
+                                            }
+                                        }
+                                        if !clear {
+                                            break;
+                                        }
+                                    }
+                                    if !clear {
+                                        break;
+                                    }
+                                }
+
+                                if !clear {
+                                    continue;
+                                }
+
+                                let world_x = pos.x * CHUNK_SIZE_X as i32 + local_x;
+                                let world_z = pos.z * CHUNK_SIZE_Z as i32 + local_z;
+
+                                let mut ghast = Mob::new(
+                                    world_x as f64 + 0.5,
+                                    local_y as f64,
+                                    world_z as f64 + 0.5,
+                                    MobType::Ghast,
+                                );
+                                ghast.dimension = self.active_dimension;
+                                self.assign_mob_id(&mut ghast);
+                                self.mobs.push(ghast);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             self.refresh_container_signals_for_loaded_chunk(pos);
             for crop in crops_to_register {
@@ -5168,12 +5319,7 @@ impl GameWorld {
             return;
         }
 
-        let structure_kind = if key.dimension == DimensionId::Overworld {
-            mdminecraft_world::worldgen_structure_kind_at(world_seed, key.x, key.y, key.z)
-        } else {
-            None
-        };
-        let loot_table = WorldgenChestLootTable::from_structure_kind(structure_kind);
+        let loot_table = Self::worldgen_chest_loot_table_for_key(world_seed, key);
 
         let seed = world_seed
             ^ (key.x as u64).wrapping_mul(0xB529_7A4D_8B9D_7B3D)
@@ -5201,6 +5347,27 @@ impl GameWorld {
                 loot_table,
                 override_table,
             ));
+        }
+    }
+
+    fn worldgen_chest_loot_table_for_key(
+        world_seed: u64,
+        key: BlockEntityKey,
+    ) -> WorldgenChestLootTable {
+        match key.dimension {
+            DimensionId::Overworld => {
+                let structure_kind =
+                    mdminecraft_world::worldgen_structure_kind_at(world_seed, key.x, key.y, key.z);
+                WorldgenChestLootTable::from_structure_kind(structure_kind)
+            }
+            DimensionId::Nether => {
+                if mdminecraft_world::nether_fortress_contains(world_seed, key.x, key.y, key.z) {
+                    WorldgenChestLootTable::NetherFortress
+                } else {
+                    WorldgenChestLootTable::Generic
+                }
+            }
+            _ => WorldgenChestLootTable::Generic,
         }
     }
 
@@ -5281,6 +5448,26 @@ impl GameWorld {
                 92..=97 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=2)),
                 _ => ItemStack::new(ItemType::Item(9), 1),
             },
+            WorldgenChestLootTable::NetherFortress => match roll {
+                0..=19 => {
+                    ItemStack::new(ItemType::Item(CORE_ITEM_NETHER_WART), rng.gen_range(2..=6))
+                }
+                20..=39 => ItemStack::new(
+                    ItemType::Item(CORE_ITEM_NETHER_QUARTZ),
+                    rng.gen_range(2..=8),
+                ),
+                40..=57 => ItemStack::new(ItemType::Item(9), rng.gen_range(1..=4)),
+                58..=71 => ItemStack::new(ItemType::Item(7), rng.gen_range(1..=4)),
+                72..=82 => {
+                    ItemStack::new(ItemType::Item(CORE_ITEM_BLAZE_POWDER), rng.gen_range(1..=3))
+                }
+                83..=91 => ItemStack::new(
+                    ItemType::Item(CORE_ITEM_GLOWSTONE_DUST),
+                    rng.gen_range(2..=6),
+                ),
+                92..=96 => ItemStack::new(ItemType::Item(14), 1),
+                _ => ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), rng.gen_range(1..=2)),
+            },
         }
     }
 
@@ -5344,12 +5531,10 @@ impl GameWorld {
                 let chunk_x = block_pos.x.div_euclid(16);
                 let chunk_z = block_pos.z.div_euclid(16);
                 let local_x = block_pos.x.rem_euclid(16) as usize;
-                let local_y = block_pos.y as usize;
-                let local_z = block_pos.z.rem_euclid(16) as usize;
-
-                if local_y >= 256 {
+                let Some(local_y) = world_y_to_local_y(block_pos.y) else {
                     return false;
-                }
+                };
+                let local_z = block_pos.z.rem_euclid(16) as usize;
 
                 if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
                     let voxel = chunk.voxel(local_x, local_y, local_z);
@@ -5558,6 +5743,13 @@ impl GameWorld {
                     self.throw_splash_potion(potion_id);
                     self.hotbar.consume_selected();
                     // Skip other interactions when throwing
+                } else if self
+                    .hotbar
+                    .selected_item()
+                    .is_some_and(|stack| stack.item_type == ItemType::Item(CORE_ITEM_ENDER_PEARL))
+                {
+                    self.throw_ender_pearl();
+                    self.hotbar.consume_selected();
                 } else if self.try_use_bucket(hit) {
                     // Skip other interactions when using buckets
                 } else if self.try_use_flint_and_steel(hit) {
@@ -5616,7 +5808,7 @@ impl GameWorld {
         }
 
         let ignite_pos = hit.block_pos + hit.face_normal;
-        if ignite_pos.y < 0 || ignite_pos.y >= CHUNK_SIZE_Y as i32 {
+        if world_y_to_local_y(ignite_pos.y).is_none() {
             return false;
         }
 
@@ -5627,6 +5819,68 @@ impl GameWorld {
 
         self.refresh_after_voxel_changes(&changed_positions);
         true
+    }
+
+    fn try_use_eye_of_ender_on_end_portal_frame(&mut self, frame_pos: IVec3) -> Option<Vec<IVec3>> {
+        if self.active_dimension != DimensionId::Overworld {
+            return None;
+        }
+
+        let selected = self.hotbar.selected;
+        let stack = self.hotbar.slots[selected].as_ref()?;
+        if stack.item_type != ItemType::Item(CORE_ITEM_EYE_OF_ENDER) || stack.count == 0 {
+            return None;
+        }
+
+        let chunk_pos = ChunkPos::new(
+            frame_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            frame_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = frame_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_y = world_y_to_local_y(frame_pos.y)?;
+        let local_z = frame_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        let frame_voxel = self
+            .chunks
+            .get(&chunk_pos)
+            .map(|chunk| chunk.voxel(local_x, local_y, local_z))?;
+        if frame_voxel.id != BLOCK_END_PORTAL_FRAME {
+            return None;
+        }
+
+        let has_eye = (frame_voxel.state & 0x01) != 0;
+        if has_eye {
+            return Some(Vec::new());
+        }
+
+        {
+            let chunk = self.chunks.get_mut(&chunk_pos)?;
+            chunk.set_voxel(
+                local_x,
+                local_y,
+                local_z,
+                Voxel {
+                    state: frame_voxel.state | 0x01,
+                    ..frame_voxel
+                },
+            );
+        }
+
+        // Consume one eye of ender.
+        if let Some(selected_stack) = self.hotbar.slots[selected].as_mut() {
+            if selected_stack.count > 1 {
+                selected_stack.count -= 1;
+            } else {
+                self.hotbar.slots[selected] = None;
+            }
+        }
+
+        let mut changed = vec![frame_pos];
+        if let Some(mut portal_positions) = try_activate_end_portal(&mut self.chunks, frame_pos) {
+            changed.append(&mut portal_positions);
+        }
+
+        Some(changed)
     }
 
     fn refresh_after_voxel_changes(&mut self, changed_positions: &[IVec3]) {
@@ -5706,6 +5960,7 @@ impl GameWorld {
             bed_pos.y as f32 + 1.0,
             bed_pos.z as f32 + 0.5,
         );
+        self.spawn_point_dimension = DimensionId::Overworld;
         self.player_physics.last_ground_y = self.spawn_point.y;
 
         // Advance simulation time to sunrise (time_of_day = 0.25).
@@ -5729,10 +5984,133 @@ impl GameWorld {
         );
     }
 
+    fn interact_respawn_anchor(&mut self, anchor_pos: IVec3) {
+        if self.player_state != PlayerState::Alive {
+            return;
+        }
+
+        // Vanilla-ish: respawn anchors explode outside the Nether/End.
+        if self.active_dimension == DimensionId::Overworld {
+            self.trigger_respawn_anchor_explosion(anchor_pos);
+            return;
+        }
+
+        let selected = self.hotbar.selected;
+        let holding_charge_item = self.hotbar.slots[selected].as_ref().is_some_and(|stack| {
+            stack.count > 0
+                && matches!(
+                    stack.item_type,
+                    ItemType::Item(CORE_ITEM_GLOWSTONE_DUST) | ItemType::Block(BLOCK_GLOWSTONE)
+                )
+        });
+
+        let Some(local_y) = world_y_to_local_y(anchor_pos.y) else {
+            return;
+        };
+
+        let chunk_pos = ChunkPos::new(anchor_pos.x.div_euclid(16), anchor_pos.z.div_euclid(16));
+        let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+            return;
+        };
+
+        let local_x = anchor_pos.x.rem_euclid(16) as usize;
+        let local_z = anchor_pos.z.rem_euclid(16) as usize;
+        let voxel = chunk.voxel(local_x, local_y, local_z);
+        if voxel.id != BLOCK_RESPAWN_ANCHOR {
+            return;
+        }
+
+        let charges = mdminecraft_world::respawn_anchor_charges(voxel.state);
+        if holding_charge_item {
+            if charges >= mdminecraft_world::RESPAWN_ANCHOR_MAX_CHARGES {
+                return;
+            }
+
+            let next = charges.saturating_add(1);
+            let new_state = mdminecraft_world::set_respawn_anchor_charges(voxel.state, next);
+            chunk.set_voxel(
+                local_x,
+                local_y,
+                local_z,
+                Voxel {
+                    state: new_state,
+                    ..voxel
+                },
+            );
+
+            if let Some(stack) = self.hotbar.slots[selected].as_mut() {
+                stack.count = stack.count.saturating_sub(1);
+                if stack.count == 0 {
+                    self.hotbar.slots[selected] = None;
+                }
+            }
+
+            self.refresh_after_voxel_changes(&[anchor_pos]);
+            tracing::info!("Charged respawn anchor at {:?} to {}", anchor_pos, next);
+            return;
+        }
+
+        if charges == 0 {
+            tracing::info!(
+                "Tried to set respawn anchor at {:?}, but it's uncharged",
+                anchor_pos
+            );
+            return;
+        }
+
+        self.spawn_point = glam::Vec3::new(
+            anchor_pos.x as f32 + 0.5,
+            anchor_pos.y as f32 + 1.0,
+            anchor_pos.z as f32 + 0.5,
+        );
+        self.spawn_point_dimension = self.active_dimension;
+        self.player_physics.last_ground_y = self.spawn_point.y;
+        tracing::info!(
+            "Set respawn point to respawn anchor at {:?} in {:?}",
+            anchor_pos,
+            self.active_dimension
+        );
+    }
+
     fn trigger_bed_explosion(&mut self, bed_pos: IVec3) {
         let ex = bed_pos.x as f64 + 0.5;
         let ey = bed_pos.y as f64 + 0.5;
         let ez = bed_pos.z as f64 + 0.5;
+        let radius = 5.0_f32;
+
+        self.audio.play_sfx(SoundId::Explosion);
+        self.destroy_blocks_in_radius(ex, ey, ez, radius);
+
+        if self.player_state != PlayerState::Alive {
+            return;
+        }
+
+        let player_pos = self.renderer.camera().position;
+        let dx = player_pos.x as f64 - ex;
+        let dy = player_pos.y as f64 - ey;
+        let dz = player_pos.z as f64 - ez;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt() as f32;
+
+        let damage = if dist >= radius {
+            0.0
+        } else {
+            (1.0 - dist / radius).clamp(0.0, 1.0) * 18.0
+        };
+
+        if damage > 0.0 {
+            let actual_damage = self.player_armor.take_damage(damage);
+            self.player_health.damage(actual_damage);
+            if self.player_health.is_dead() {
+                self.handle_death("Intentional Game Design");
+            }
+        }
+    }
+
+    fn trigger_respawn_anchor_explosion(&mut self, anchor_pos: IVec3) {
+        // Match the existing "bed explosion" parameters (vanilla-ish).
+        let ex = anchor_pos.x as f64 + 0.5;
+        let ey = anchor_pos.y as f64 + 0.5;
+        let ez = anchor_pos.z as f64 + 0.5;
         let radius = 5.0_f32;
 
         self.audio.play_sfx(SoundId::Explosion);
@@ -5912,16 +6290,15 @@ impl GameWorld {
         let chunk_z = hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32);
         let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
         let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = hit.block_pos.y as usize;
+        let Some(local_y) = world_y_to_local_y(hit.block_pos.y) else {
+            return false;
+        };
         let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
-        let block_id = self.chunks.get(&chunk_pos).and_then(|chunk| {
-            if local_y < CHUNK_SIZE_Y {
-                Some(chunk.voxel(local_x, local_y, local_z).id)
-            } else {
-                None
-            }
-        });
+        let block_id = self
+            .chunks
+            .get(&chunk_pos)
+            .map(|chunk| chunk.voxel(local_x, local_y, local_z).id);
 
         if let Some(id) = block_id {
             if self.try_till_farmland(id, chunk_pos, local_x, local_y, local_z) {
@@ -5933,6 +6310,15 @@ impl GameWorld {
         }
 
         match block_id {
+            Some(BLOCK_END_PORTAL_FRAME) => {
+                let Some(changed_positions) =
+                    self.try_use_eye_of_ender_on_end_portal_frame(hit.block_pos)
+                else {
+                    return false;
+                };
+                self.refresh_after_voxel_changes(&changed_positions);
+                true
+            }
             Some(BLOCK_CRAFTING_TABLE) => {
                 self.open_crafting();
                 true
@@ -5967,6 +6353,10 @@ impl GameWorld {
             }
             Some(interactive_blocks::BED_HEAD) | Some(interactive_blocks::BED_FOOT) => {
                 self.try_sleep_in_bed(hit.block_pos);
+                true
+            }
+            Some(BLOCK_RESPAWN_ANCHOR) => {
+                self.interact_respawn_anchor(hit.block_pos);
                 true
             }
             Some(mdminecraft_world::BLOCK_WATER) => self.try_fill_glass_bottle_from_water(),
@@ -6086,12 +6476,10 @@ impl GameWorld {
         // Get the block we're trying to mine
         let block_id = if let Some(chunk) = self.chunks.get(&chunk_pos) {
             let local_x = hit.block_pos.x.rem_euclid(16) as usize;
-            let local_y = hit.block_pos.y as usize;
-            let local_z = hit.block_pos.z.rem_euclid(16) as usize;
-
-            if local_y >= 256 {
+            let Some(local_y) = world_y_to_local_y(hit.block_pos.y) else {
                 return;
-            }
+            };
+            let local_z = hit.block_pos.z.rem_euclid(16) as usize;
 
             chunk.voxel(local_x, local_y, local_z).id
         } else {
@@ -6160,7 +6548,9 @@ impl GameWorld {
 
                 if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
-                    let local_y = hit.block_pos.y as usize;
+                    let Some(local_y) = world_y_to_local_y(hit.block_pos.y) else {
+                        return;
+                    };
                     let local_z = hit.block_pos.z.rem_euclid(16) as usize;
 
                     // Check if tool can harvest this block
@@ -6198,7 +6588,11 @@ impl GameWorld {
                         chunk, local_x, local_y, local_z, block_id,
                     )
                     .map(|other_local_y| {
-                        IVec3::new(hit.block_pos.x, other_local_y as i32, hit.block_pos.z)
+                        IVec3::new(
+                            hit.block_pos.x,
+                            local_y_to_world_y(other_local_y),
+                            hit.block_pos.z,
+                        )
                     });
                     spawn_particles_at = Some(glam::Vec3::new(
                         hit.block_pos.x as f32 + 0.5,
@@ -6586,22 +6980,18 @@ impl GameWorld {
                     );
                     if let Some(chunk) = self.chunks.get(&support_chunk_pos) {
                         let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-                        let local_y = hit.block_pos.y as usize;
+                        let Some(local_y) = world_y_to_local_y(hit.block_pos.y) else {
+                            return;
+                        };
                         let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-                        if local_y < CHUNK_SIZE_Y {
-                            let existing = chunk.voxel(local_x, local_y, local_z);
-                            if existing.id == block_id
-                                && Self::should_merge_slab(
-                                    existing.state,
-                                    hit.face_normal,
-                                    hit_local_y,
-                                )
-                            {
-                                place_pos = hit.block_pos;
-                                place_block_id = double_slab_id;
-                                place_state = 0;
-                                allow_replace_existing_slab = true;
-                            }
+                        let existing = chunk.voxel(local_x, local_y, local_z);
+                        if existing.id == block_id
+                            && Self::should_merge_slab(existing.state, hit.face_normal, hit_local_y)
+                        {
+                            place_pos = hit.block_pos;
+                            place_block_id = double_slab_id;
+                            place_state = 0;
+                            allow_replace_existing_slab = true;
                         }
                     }
                 }
@@ -6630,11 +7020,10 @@ impl GameWorld {
                 };
 
                 let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-                let local_y = hit.block_pos.y as usize;
-                let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-                if local_y >= CHUNK_SIZE_Y {
+                let Some(local_y) = world_y_to_local_y(hit.block_pos.y) else {
                     return;
-                }
+                };
+                let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
                 let support_voxel = chunk.voxel(local_x, local_y, local_z);
                 if !self.block_properties.get(support_voxel.id).is_solid {
@@ -6723,66 +7112,66 @@ impl GameWorld {
                 }
             } else if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                 let local_x = place_pos.x.rem_euclid(16) as usize;
-                let local_y = place_pos.y as usize;
+                let Some(local_y) = world_y_to_local_y(place_pos.y) else {
+                    return;
+                };
                 let local_z = place_pos.z.rem_euclid(16) as usize;
 
-                if local_y < 256 {
-                    let current = chunk.voxel(local_x, local_y, local_z);
-                    if current.id == BLOCK_AIR
-                        || (allow_replace_existing_slab
-                            && current.id == block_id
-                            && place_block_id != block_id)
-                    {
-                        if mdminecraft_world::is_door_lower(block_id) {
-                            if Self::try_place_door(
-                                chunk,
-                                local_x,
-                                local_y,
-                                local_z,
-                                block_id,
-                                place_state,
-                            ) {
-                                placed_extra =
-                                    Some(IVec3::new(place_pos.x, place_pos.y + 1, place_pos.z));
-                                spawn_particles_at = Some(glam::Vec3::new(
-                                    place_pos.x as f32 + 0.5,
-                                    place_pos.y as f32 + 0.5,
-                                    place_pos.z as f32 + 0.5,
-                                ));
-                                placed = true;
-                            }
-                        } else {
-                            let new_voxel = Voxel {
-                                id: place_block_id,
-                                state: place_state,
-                                light_sky: 0,
-                                light_block: 0,
-                            };
-                            chunk.set_voxel(local_x, local_y, local_z, new_voxel);
+                let current = chunk.voxel(local_x, local_y, local_z);
+                if current.id == BLOCK_AIR
+                    || (allow_replace_existing_slab
+                        && current.id == block_id
+                        && place_block_id != block_id)
+                {
+                    if mdminecraft_world::is_door_lower(block_id) {
+                        if Self::try_place_door(
+                            chunk,
+                            local_x,
+                            local_y,
+                            local_z,
+                            block_id,
+                            place_state,
+                        ) {
+                            placed_extra =
+                                Some(IVec3::new(place_pos.x, place_pos.y + 1, place_pos.z));
                             spawn_particles_at = Some(glam::Vec3::new(
                                 place_pos.x as f32 + 0.5,
                                 place_pos.y as f32 + 0.5,
                                 place_pos.z as f32 + 0.5,
                             ));
                             placed = true;
+                        }
+                    } else {
+                        let new_voxel = Voxel {
+                            id: place_block_id,
+                            state: place_state,
+                            light_sky: 0,
+                            light_block: 0,
+                        };
+                        chunk.set_voxel(local_x, local_y, local_z, new_voxel);
+                        spawn_particles_at = Some(glam::Vec3::new(
+                            place_pos.x as f32 + 0.5,
+                            place_pos.y as f32 + 0.5,
+                            place_pos.z as f32 + 0.5,
+                        ));
+                        placed = true;
 
-                            if block_id == mdminecraft_world::BLOCK_SUGAR_CANE {
-                                // Register the base of the column so it can grow deterministically.
-                                let mut base_y = local_y;
-                                while base_y > 0
-                                    && chunk.voxel(local_x, base_y - 1, local_z).id
-                                        == mdminecraft_world::BLOCK_SUGAR_CANE
-                                {
-                                    base_y -= 1;
-                                }
-
-                                self.sugar_cane_growth.register_base(SugarCanePosition {
-                                    chunk: chunk_pos,
-                                    x: local_x as u8,
-                                    y: base_y as u8,
-                                    z: local_z as u8,
-                                });
+                        if block_id == mdminecraft_world::BLOCK_SUGAR_CANE {
+                            // Register the base of the column so it can grow deterministically.
+                            let mut base_y = local_y;
+                            while base_y > 0
+                                && chunk.voxel(local_x, base_y - 1, local_z).id
+                                    == mdminecraft_world::BLOCK_SUGAR_CANE
+                            {
+                                base_y -= 1;
                             }
+
+                            self.sugar_cane_growth.register_base(SugarCanePosition {
+                                chunk: chunk_pos,
+                                x: local_x as u8,
+                                y: base_y as u8,
+                                z: local_z as u8,
+                            });
                         }
                     }
                 }
@@ -7281,16 +7670,10 @@ impl GameWorld {
     }
 
     fn try_place_bed(&mut self, foot_pos: IVec3, state: BlockState) -> Option<IVec3> {
-        if foot_pos.y < 0 || foot_pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let foot_local_y = world_y_to_local_y(foot_pos.y)?;
 
         let (head_pos, _) =
             Self::bed_other_half_pos(foot_pos, interactive_blocks::BED_FOOT, state)?;
-
-        if head_pos.y < 0 || head_pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
 
         // Require space for both halves.
         if self.get_block_at(foot_pos) != Some(BLOCK_AIR) {
@@ -7319,11 +7702,10 @@ impl GameWorld {
         );
 
         let foot_local_x = foot_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let foot_local_y = foot_pos.y as usize;
         let foot_local_z = foot_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
         let head_local_x = head_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let head_local_y = head_pos.y as usize;
+        let head_local_y = foot_local_y;
         let head_local_z = head_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
         if foot_chunk_pos == head_chunk_pos {
@@ -7420,10 +7802,7 @@ impl GameWorld {
         bed_state: BlockState,
     ) -> Option<IVec3> {
         let (other_pos, expected_other_id) = Self::bed_other_half_pos(bed_pos, bed_id, bed_state)?;
-
-        if other_pos.y < 0 || other_pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let local_y = world_y_to_local_y(other_pos.y)?;
 
         let other_chunk_pos = ChunkPos::new(
             other_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -7432,12 +7811,7 @@ impl GameWorld {
         let chunk = chunks.get_mut(&other_chunk_pos)?;
 
         let local_x = other_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = other_pos.y as usize;
         let local_z = other_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-
-        if local_y >= CHUNK_SIZE_Y {
-            return None;
-        }
 
         let other_voxel = chunk.voxel(local_x, local_y, local_z);
         if other_voxel.id != expected_other_id {
@@ -7472,9 +7846,7 @@ impl GameWorld {
                 return None;
             };
 
-        if other_pos.y < 0 || other_pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let local_y = world_y_to_local_y(other_pos.y)?;
 
         let other_chunk_pos = ChunkPos::new(
             other_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -7483,12 +7855,7 @@ impl GameWorld {
         let chunk = chunks.get_mut(&other_chunk_pos)?;
 
         let local_x = other_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = other_pos.y as usize;
         let local_z = other_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-
-        if local_y >= CHUNK_SIZE_Y {
-            return None;
-        }
 
         let other_voxel = chunk.voxel(local_x, local_y, local_z);
         if other_voxel.id != expected_other_id {
@@ -7508,9 +7875,7 @@ impl GameWorld {
         let mut removed = Vec::new();
 
         let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> Option<Voxel> {
-            if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(pos.y)?;
 
             let chunk_pos = ChunkPos::new(
                 pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -7519,7 +7884,7 @@ impl GameWorld {
             let chunk = chunks.get(&chunk_pos)?;
             let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
             let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-            Some(chunk.voxel(local_x, pos.y as usize, local_z))
+            Some(chunk.voxel(local_x, local_y, local_z))
         };
 
         let is_solid_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> bool {
@@ -7676,10 +8041,9 @@ impl GameWorld {
                 };
                 let local_x = candidate.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
                 let local_z = candidate.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-                let local_y = candidate.y as usize;
-                if local_y >= CHUNK_SIZE_Y {
+                let Some(local_y) = world_y_to_local_y(candidate.y) else {
                     continue;
-                }
+                };
 
                 chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
                 removed.push((candidate, voxel.id));
@@ -7928,6 +8292,18 @@ impl GameWorld {
                         self.debug_hud.render(ctx);
                         render_hotbar(ctx, &self.hotbar, &self.registry);
                         render_xp_bar(ctx, &self.player_xp);
+                        if let Some(dragon) = self.mobs.iter().find(|mob| {
+                            mob.dimension == self.active_dimension
+                                && mob.mob_type == MobType::EnderDragon
+                                && !mob.dead
+                        }) {
+                            render_boss_bar(
+                                ctx,
+                                "Ender Dragon",
+                                dragon.health,
+                                dragon.mob_type.max_health(),
+                            );
+                        }
                         render_health_bar(ctx, &self.player_health);
                         render_hunger_bar(ctx, &self.player_health);
                         render_armor_bar(ctx, &self.player_armor);
@@ -8447,6 +8823,84 @@ impl GameWorld {
         None
     }
 
+    fn find_safe_spawn_near_position(
+        &self,
+        world_x: f32,
+        world_y: f32,
+        world_z: f32,
+    ) -> Option<glam::Vec3> {
+        let base_x = world_x.floor() as i32;
+        let base_z = world_z.floor() as i32;
+        let base_y = world_y.floor() as i32;
+
+        let start_y = base_y.clamp(1, (CHUNK_SIZE_Y.saturating_sub(2)) as i32);
+        let min_y = (start_y - 16).max(1);
+        let max_y = (start_y + 8).min((CHUNK_SIZE_Y.saturating_sub(2)) as i32);
+
+        for dz in -2i32..=2 {
+            for dx in -2i32..=2 {
+                let x = base_x + dx;
+                let z = base_z + dz;
+                let chunk_pos = ChunkPos::new(
+                    x.div_euclid(CHUNK_SIZE_X as i32),
+                    z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                let Some(chunk) = self.chunks.get(&chunk_pos) else {
+                    continue;
+                };
+
+                let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                let check_candidate = |y: i32| -> Option<glam::Vec3> {
+                    if y <= 0 {
+                        return None;
+                    }
+                    let y_usize = y as usize;
+                    if y_usize + 1 >= CHUNK_SIZE_Y {
+                        return None;
+                    }
+
+                    let below = chunk.voxel(local_x, (y - 1) as usize, local_z).id;
+                    let feet = chunk.voxel(local_x, y_usize, local_z).id;
+                    let head = chunk.voxel(local_x, y_usize + 1, local_z).id;
+
+                    if !self.block_properties.get(below).is_solid {
+                        return None;
+                    }
+
+                    if self.block_properties.get(feet).is_solid || mdminecraft_world::is_fluid(feet)
+                    {
+                        return None;
+                    }
+                    if self.block_properties.get(head).is_solid || mdminecraft_world::is_fluid(head)
+                    {
+                        return None;
+                    }
+
+                    Some(glam::Vec3::new(
+                        x as f32 + 0.5,
+                        y as f32 + PlayerPhysics::GROUND_EPS,
+                        z as f32 + 0.5,
+                    ))
+                };
+
+                for y in (min_y..=start_y).rev() {
+                    if let Some(pos) = check_candidate(y) {
+                        return Some(pos);
+                    }
+                }
+                for y in (start_y + 1)..=max_y {
+                    if let Some(pos) = check_candidate(y) {
+                        return Some(pos);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     fn switch_dimension(&mut self, target: DimensionId) -> anyhow::Result<()> {
         let from = self.active_dimension;
         if target == from {
@@ -8528,29 +8982,262 @@ impl GameWorld {
             self.player_physics.last_ground_y = feet.y;
         }
 
+        if target == DimensionId::End {
+            if self.end_boss_defeated {
+                self.ensure_end_exit_portal_present();
+            } else {
+                self.ensure_end_boss_spawned();
+            }
+        }
+
         Ok(())
+    }
+
+    fn ensure_end_boss_spawned(&mut self) {
+        if self.active_dimension != DimensionId::End {
+            return;
+        }
+        if self.end_boss_defeated {
+            return;
+        }
+
+        let already_alive = self.mobs.iter().any(|mob| {
+            mob.dimension == DimensionId::End && mob.mob_type == MobType::EnderDragon && !mob.dead
+        });
+        if already_alive {
+            return;
+        }
+
+        let candidates = [
+            (16.0_f32, 0.0_f32),
+            (-16.0_f32, 0.0_f32),
+            (0.0_f32, 16.0_f32),
+            (0.0_f32, -16.0_f32),
+            (0.0_f32, 0.0_f32),
+        ];
+
+        let mut spawn_feet = None;
+        for (x, z) in candidates {
+            if let Some(feet) = self.find_safe_spawn_near(x, z) {
+                spawn_feet = Some(feet);
+                break;
+            }
+        }
+        let spawn_feet = spawn_feet.unwrap_or_else(|| glam::Vec3::new(0.5, 80.0, 0.5));
+
+        let mut mob = Mob::new(
+            spawn_feet.x as f64,
+            spawn_feet.y as f64,
+            spawn_feet.z as f64,
+            MobType::EnderDragon,
+        );
+        mob.dimension = DimensionId::End;
+        self.assign_mob_id(&mut mob);
+        self.mobs.push(mob);
+    }
+
+    fn ensure_end_exit_portal_present(&mut self) {
+        if self.active_dimension != DimensionId::End {
+            return;
+        }
+
+        let portal_center = self
+            .find_safe_spawn_near(0.0, 0.0)
+            .unwrap_or_else(|| glam::Vec3::new(0.5, 65.0, 0.5));
+        let center_x = portal_center.x.floor() as i32;
+        let center_y = portal_center.y.floor() as i32;
+        let center_z = portal_center.z.floor() as i32;
+
+        if world_y_to_local_y(center_y).is_none() {
+            return;
+        }
+
+        let has_portal = (-1..=1).all(|dx| {
+            (-1..=1).all(|dz| {
+                self.get_block_at(IVec3::new(center_x + dx, center_y, center_z + dz))
+                    == Some(BLOCK_END_PORTAL)
+            })
+        });
+
+        if has_portal {
+            return;
+        }
+
+        let Some(changed) = mdminecraft_world::place_end_exit_portal(
+            &mut self.chunks,
+            center_x,
+            center_y,
+            center_z,
+        ) else {
+            tracing::warn!("Failed to ensure End exit portal");
+            return;
+        };
+
+        let changed_positions: Vec<IVec3> = changed
+            .into_iter()
+            .map(|(x, y, z)| IVec3::new(x, y, z))
+            .collect();
+        self.refresh_after_voxel_changes(&changed_positions);
     }
 
     /// Respawn the player at spawn point
     fn respawn(&mut self) {
         tracing::info!("Respawning player at spawn point...");
 
-        // Respawn player at spawn point
-        let camera = self.renderer.camera_mut();
-        camera.position =
-            self.spawn_point + glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
-
         // Reset health
         self.player_health.reset();
-
-        // Reset physics
-        self.player_physics.velocity = glam::Vec3::ZERO;
-        self.player_physics.on_ground = false;
-        self.player_physics.last_ground_y = self.spawn_point.y;
 
         // Reset state
         self.player_state = PlayerState::Alive;
         self.death_message.clear();
+
+        let desired_dimension = self.spawn_point_dimension;
+        if self.active_dimension != desired_dimension {
+            if let Err(err) = self.switch_dimension(desired_dimension) {
+                tracing::warn!("Respawn dimension switch failed: {err:#}");
+            }
+        }
+
+        // If we couldn't reach the desired respawn dimension, fall back to the Overworld.
+        if desired_dimension != DimensionId::Overworld && self.active_dimension != desired_dimension
+        {
+            tracing::warn!(
+                "Respawn could not enter {desired_dimension:?}; falling back to Overworld"
+            );
+            if let Err(err) = self.switch_dimension(DimensionId::Overworld) {
+                tracing::warn!("Respawn fallback dimension switch failed: {err:#}");
+            }
+
+            let eye_height = self.player_physics.eye_height;
+            let camera = self.renderer.camera_mut();
+            camera.position = glam::Vec3::new(0.5, 100.0 + eye_height, 0.5);
+            self.player_physics.velocity = glam::Vec3::ZERO;
+            self.player_physics.on_ground = false;
+
+            self.update_chunks(usize::MAX);
+            if let Some(feet) = self.find_safe_spawn_near(0.0, 0.0) {
+                let camera = self.renderer.camera_mut();
+                camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
+                self.player_physics.last_ground_y = feet.y;
+            } else {
+                self.player_physics.last_ground_y = 100.0;
+            }
+
+            // Re-capture cursor for gameplay
+            let _ = self.input.enter_gameplay(&self.window);
+            return;
+        }
+
+        // Respawn player at spawn point and force-load chunks so it isn't a black screen.
+        let eye_height = self.player_physics.eye_height;
+        let camera = self.renderer.camera_mut();
+        camera.position = self.spawn_point + glam::Vec3::new(0.0, eye_height, 0.0);
+        self.player_physics.velocity = glam::Vec3::ZERO;
+        self.player_physics.on_ground = false;
+
+        self.update_chunks(usize::MAX);
+
+        // Vanilla-ish: respawn anchors control respawn in the Nether/End.
+        // If the anchor is missing or uncharged, respawn at the Overworld world spawn (near origin).
+        let mut should_consume_anchor_charge = false;
+        let mut anchor_pos_for_consume: Option<IVec3> = None;
+        if desired_dimension != DimensionId::Overworld && self.active_dimension == desired_dimension
+        {
+            let anchor_pos = IVec3::new(
+                self.spawn_point.x.floor() as i32,
+                self.spawn_point.y.floor() as i32 - 1,
+                self.spawn_point.z.floor() as i32,
+            );
+            let anchor_ok = self.get_voxel_at(anchor_pos).is_some_and(|voxel| {
+                voxel.id == BLOCK_RESPAWN_ANCHOR
+                    && mdminecraft_world::respawn_anchor_charges(voxel.state) > 0
+            });
+
+            if anchor_ok {
+                should_consume_anchor_charge = true;
+                anchor_pos_for_consume = Some(anchor_pos);
+            } else {
+                tracing::info!(
+                    "Respawn anchor missing/uncharged for {:?}; falling back to Overworld spawn",
+                    anchor_pos
+                );
+                if self.active_dimension != DimensionId::Overworld {
+                    if let Err(err) = self.switch_dimension(DimensionId::Overworld) {
+                        tracing::warn!("Respawn fallback dimension switch failed: {err:#}");
+                    }
+                }
+                let camera = self.renderer.camera_mut();
+                camera.position = glam::Vec3::new(0.5, 100.0 + eye_height, 0.5);
+                self.player_physics.velocity = glam::Vec3::ZERO;
+                self.player_physics.on_ground = false;
+
+                self.update_chunks(usize::MAX);
+                if let Some(feet) = self.find_safe_spawn_near(0.0, 0.0) {
+                    let camera = self.renderer.camera_mut();
+                    camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
+                    self.player_physics.last_ground_y = feet.y;
+                } else {
+                    self.player_physics.last_ground_y = 100.0;
+                }
+
+                // Re-capture cursor for gameplay
+                let _ = self.input.enter_gameplay(&self.window);
+                return;
+            }
+        }
+
+        if let Some(feet) = self
+            .find_safe_spawn_near_position(
+                self.spawn_point.x,
+                self.spawn_point.y,
+                self.spawn_point.z,
+            )
+            .or_else(|| self.find_safe_spawn_near(self.spawn_point.x, self.spawn_point.z))
+        {
+            let camera = self.renderer.camera_mut();
+            camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
+            self.player_physics.last_ground_y = feet.y;
+        } else {
+            self.player_physics.last_ground_y = self.spawn_point.y;
+        }
+
+        if should_consume_anchor_charge {
+            let Some(anchor_pos) = anchor_pos_for_consume else {
+                tracing::warn!("Respawn anchor charge consumption expected but missing");
+                // Continue anyway; this is just a parity mechanic.
+                let _ = self.input.enter_gameplay(&self.window);
+                return;
+            };
+            let chunk_pos = ChunkPos::new(anchor_pos.x.div_euclid(16), anchor_pos.z.div_euclid(16));
+            let Some(local_y) = world_y_to_local_y(anchor_pos.y) else {
+                // Continue anyway; the player was already respawned.
+                let _ = self.input.enter_gameplay(&self.window);
+                return;
+            };
+            if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                let local_x = anchor_pos.x.rem_euclid(16) as usize;
+                let local_z = anchor_pos.z.rem_euclid(16) as usize;
+                let voxel = chunk.voxel(local_x, local_y, local_z);
+                if voxel.id == BLOCK_RESPAWN_ANCHOR {
+                    let charges = mdminecraft_world::respawn_anchor_charges(voxel.state);
+                    if charges > 0 {
+                        let next = charges - 1;
+                        let new_state =
+                            mdminecraft_world::set_respawn_anchor_charges(voxel.state, next);
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                state: new_state,
+                                ..voxel
+                            },
+                        );
+                        self.refresh_after_voxel_changes(&[anchor_pos]);
+                    }
+                }
+            }
+        }
 
         // Re-capture cursor for gameplay
         let _ = self.input.enter_gameplay(&self.window);
@@ -8665,6 +9352,27 @@ impl GameWorld {
         let time = self.sim_time.time_of_day() as f32;
         let is_night = !(0.25..=0.75).contains(&time);
 
+        let can_fire_hostile_projectiles =
+            self.player_state == PlayerState::Alive && !self.player_health.is_dead();
+
+        let mut dragon_fireballs_in_flight = 0usize;
+        let mut blaze_fireballs_in_flight = 0usize;
+        let mut ghast_fireballs_in_flight = 0usize;
+        for projectile in &self.projectiles.projectiles {
+            if projectile.dimension != active_dimension || projectile.dead {
+                continue;
+            }
+            match projectile.projectile_type {
+                mdminecraft_world::ProjectileType::DragonFireball => {
+                    dragon_fireballs_in_flight += 1
+                }
+                mdminecraft_world::ProjectileType::BlazeFireball => blaze_fireballs_in_flight += 1,
+                mdminecraft_world::ProjectileType::GhastFireball => ghast_fireballs_in_flight += 1,
+                _ => {}
+            }
+        }
+        let mut hostile_projectiles: Vec<Projectile> = Vec::new();
+
         // Update each mob and track damage to player
         let mut total_damage = 0.0f32;
         let mut exploded_creeper = false;
@@ -8700,10 +9408,41 @@ impl GameWorld {
                         total_damage += mob.mob_type.attack_damage();
                     }
                 }
+
+                if can_fire_hostile_projectiles && dragon_fireballs_in_flight < 4 {
+                    if let Some(projectile) = mob
+                        .try_spawn_dragon_fireball(tick, player_x, player_y, player_z, visibility)
+                    {
+                        hostile_projectiles.push(projectile);
+                        dragon_fireballs_in_flight += 1;
+                    }
+                }
+
+                if can_fire_hostile_projectiles && blaze_fireballs_in_flight < 8 {
+                    if let Some(projectile) =
+                        mob.try_spawn_blaze_fireball(tick, player_x, player_y, player_z, visibility)
+                    {
+                        hostile_projectiles.push(projectile);
+                        blaze_fireballs_in_flight += 1;
+                    }
+                }
+
+                if can_fire_hostile_projectiles && ghast_fireballs_in_flight < 2 {
+                    if let Some(projectile) =
+                        mob.try_spawn_ghast_fireball(tick, player_x, player_y, player_z, visibility)
+                    {
+                        hostile_projectiles.push(projectile);
+                        ghast_fireballs_in_flight += 1;
+                    }
+                }
             } else {
                 // Update passive mob (or spider in daylight)
                 mob.update(tick);
             }
+        }
+
+        for projectile in hostile_projectiles {
+            self.projectiles.spawn(active_dimension, projectile);
         }
 
         // Handle creeper explosion block destruction
@@ -8729,6 +9468,24 @@ impl GameWorld {
             // Determine damage source for potential death message
             let source = if exploded_creeper {
                 "Creeper"
+            } else if self
+                .mobs
+                .iter()
+                .any(|m| m.dimension == active_dimension && m.mob_type == MobType::EnderDragon)
+            {
+                "Ender Dragon"
+            } else if self
+                .mobs
+                .iter()
+                .any(|m| m.dimension == active_dimension && m.mob_type == MobType::Blaze)
+            {
+                "Blaze"
+            } else if self
+                .mobs
+                .iter()
+                .any(|m| m.dimension == active_dimension && m.mob_type == MobType::Ghast)
+            {
+                "Ghast"
             } else if self
                 .mobs
                 .iter()
@@ -8758,6 +9515,7 @@ impl GameWorld {
         // Remove dead mobs and drop loot (and XP)
         let mut loot_drops: Vec<(f64, f64, f64, DroppedItemType, u32)> = Vec::new();
         let mut xp_orb_spawns: Vec<(f64, f64, f64, u32)> = Vec::new();
+        let mut ender_dragon_defeated = false;
         let loot_tables = &self.loot_tables;
         let world_seed = self.world_seed;
         let sim_tick = self.sim_tick;
@@ -8771,9 +9529,15 @@ impl GameWorld {
                     MobType::Zombie | MobType::Skeleton | MobType::Spider => 5,
                     MobType::Creeper => 5,
                     MobType::Pig | MobType::Cow | MobType::Sheep | MobType::Chicken => 1,
+                    MobType::Blaze | MobType::Ghast => 10,
+                    MobType::EnderDragon => 500,
                     MobType::Villager => 0, // Villagers don't drop XP
                 };
                 xp_orb_spawns.push((mob.x, mob.y + 0.5, mob.z, xp_value));
+
+                if mob.mob_type == MobType::EnderDragon {
+                    ender_dragon_defeated = true;
+                }
 
                 if let Some(table) = loot_tables.mob.get(&mob.mob_type) {
                     let mut rng = {
@@ -8928,6 +9692,38 @@ impl GameWorld {
                                 ));
                             }
                         }
+                        MobType::Blaze => {
+                            // Blazes drop 0-2 blaze powder (deterministic).
+                            let count = (tick % 3) as u32;
+                            if count > 0 {
+                                loot_drops.push((
+                                    mob.x,
+                                    mob.y + 0.5,
+                                    mob.z,
+                                    DroppedItemType::BlazePowder,
+                                    count,
+                                ));
+                            }
+                        }
+                        MobType::Ghast => {
+                            // Ghasts drop 0-1 ghast tears (deterministic).
+                            let roll = (tick as u32)
+                                .wrapping_add((mob.x.floor() as u32).wrapping_mul(41))
+                                .wrapping_add((mob.z.floor() as u32).wrapping_mul(71))
+                                % 3;
+                            if roll == 0 {
+                                loot_drops.push((
+                                    mob.x,
+                                    mob.y + 0.5,
+                                    mob.z,
+                                    DroppedItemType::GhastTear,
+                                    1,
+                                ));
+                            }
+                        }
+                        MobType::EnderDragon => {
+                            // Boss-lite: no default item drops (XP + exit portal are handled elsewhere).
+                        }
                         MobType::Villager => {
                             // Villagers don't drop items when killed
                         }
@@ -8938,6 +9734,14 @@ impl GameWorld {
                 true // Keep alive mob
             }
         });
+
+        if ender_dragon_defeated && active_dimension == DimensionId::End {
+            self.end_boss_defeated = true;
+            self.ensure_end_exit_portal_present();
+
+            self.push_command_log_line("The Ender Dragon was defeated.".to_string());
+            self.push_command_log_line("An exit portal has opened.".to_string());
+        }
 
         // Spawn loot drops
         for (x, y, z, item_type, count) in loot_drops {
@@ -8962,7 +9766,7 @@ impl GameWorld {
         //
         // Use integer offsets to avoid platform-dependent trig differences; validity checks gate
         // spawns (solid ground, empty headroom, low light).
-        if is_night && tick.is_multiple_of(100) {
+        if active_dimension == DimensionId::Overworld && is_night && tick.is_multiple_of(100) {
             let hostile_count = self
                 .mobs
                 .iter()
@@ -9073,8 +9877,115 @@ impl GameWorld {
             }
         }
 
+        // Nether: periodic ghast spawns (every ~200 ticks, low cap).
+        //
+        // Ghasts are flying mobs, so we look for a small clear volume rather than a ground spot.
+        if active_dimension == DimensionId::Nether && tick.is_multiple_of(200) {
+            let ghast_count = self
+                .mobs
+                .iter()
+                .filter(|m| {
+                    m.dimension == active_dimension && !m.dead && m.mob_type == MobType::Ghast
+                })
+                .count();
+            if ghast_count < 2 {
+                const MIN_RADIUS: i32 = 16;
+                const MAX_RADIUS: i32 = 48;
+                const LIGHT_THRESHOLD: u8 = 7;
+
+                let seed = self.world_seed
+                    ^ tick.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ 0x4E45_5448_4748_5354_u64; // "NETHGHST"
+                let mut rng = StdRng::seed_from_u64(seed);
+
+                let base_x = player_x.floor() as i32;
+                let base_z = player_z.floor() as i32;
+                let min_sq = MIN_RADIUS * MIN_RADIUS;
+                let max_sq = MAX_RADIUS * MAX_RADIUS;
+
+                let mut spawned = false;
+                for _attempt in 0..32 {
+                    let dx = rng.gen_range(-MAX_RADIUS..=MAX_RADIUS);
+                    let dz = rng.gen_range(-MAX_RADIUS..=MAX_RADIUS);
+                    let dist_sq = dx * dx + dz * dz;
+                    if dist_sq < min_sq || dist_sq > max_sq {
+                        continue;
+                    }
+
+                    let spawn_block_x = base_x + dx;
+                    let spawn_block_z = base_z + dz;
+
+                    let chunk_x = spawn_block_x.div_euclid(CHUNK_SIZE_X as i32);
+                    let chunk_z = spawn_block_z.div_euclid(CHUNK_SIZE_Z as i32);
+                    let local_x = spawn_block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let local_z = spawn_block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                    // Keep the clearance probe within the chunk bounds.
+                    if !(2..=13).contains(&local_x) || !(2..=13).contains(&local_z) {
+                        continue;
+                    }
+
+                    let local_y = rng.gen_range(40..=200) as usize;
+                    if local_y + 3 >= CHUNK_SIZE_Y {
+                        continue;
+                    }
+
+                    let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) else {
+                        continue;
+                    };
+
+                    let mut clear = true;
+                    for dy in 0..=3 {
+                        for oz in -1..=1 {
+                            for ox in -1..=1 {
+                                let x = (local_x as i32 + ox) as usize;
+                                let y = local_y + dy;
+                                let z = (local_z as i32 + oz) as usize;
+                                if chunk.voxel(x, y, z).id != BLOCK_AIR {
+                                    clear = false;
+                                    break;
+                                }
+                            }
+                            if !clear {
+                                break;
+                            }
+                        }
+                        if !clear {
+                            break;
+                        }
+                    }
+
+                    if !clear {
+                        continue;
+                    }
+
+                    let spawn_voxel = chunk.voxel(local_x, local_y, local_z);
+                    let light = Self::effective_spawn_light_level(spawn_voxel, &self.sim_time);
+                    if light > LIGHT_THRESHOLD {
+                        continue;
+                    }
+
+                    let mut mob = Mob::new(
+                        spawn_block_x as f64 + 0.5,
+                        local_y as f64,
+                        spawn_block_z as f64 + 0.5,
+                        MobType::Ghast,
+                    );
+                    mob.dimension = active_dimension;
+                    self.assign_mob_id(&mut mob);
+                    self.mobs.push(mob);
+                    spawned = true;
+                    break;
+                }
+
+                if !spawned {
+                    tracing::debug!("Nether ghast spawn attempt failed to find a valid location");
+                }
+            }
+        }
+
         // Despawn hostile mobs during the day (too far from player or day time)
-        if !is_night {
+        if active_dimension == DimensionId::Overworld && !is_night {
             self.mobs.retain(|mob| {
                 if mob.dimension != active_dimension {
                     return true;
@@ -9099,6 +10010,11 @@ impl GameWorld {
     /// Update all projectiles - physics, collisions, and damage
     fn update_projectiles(&mut self) {
         let active_dimension = self.active_dimension;
+        let player_pos = self.renderer.camera().position;
+        let player_x = player_pos.x as f64;
+        let player_y = player_pos.y as f64;
+        let player_z = player_pos.z as f64;
+        let has_fire_resistance = self.status_effects.has(StatusEffectType::FireResistance);
 
         // Update projectile physics
         self.projectiles.update(active_dimension);
@@ -9114,27 +10030,27 @@ impl GameWorld {
             let block_y = projectile.y.floor() as i32;
             let block_z = projectile.z.floor() as i32;
 
-            if !(0..256).contains(&block_y) {
+            let Some(local_y) = world_y_to_local_y(block_y) else {
                 projectile.stick();
                 continue;
-            }
+            };
 
             let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
             let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
             let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-            let local_y = block_y as usize;
             let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
             if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
                 let voxel = chunk.voxel(local_x, local_y, local_z);
                 if voxel.id != BLOCK_AIR {
                     // Hit a block
-                    if projectile.projectile_type.is_splash_potion() {
-                        // Splash potion breaks and marks for AoE effect
-                        projectile.hit();
-                    } else {
-                        // Arrow sticks
-                        projectile.stick();
+                    match projectile.projectile_type {
+                        mdminecraft_world::ProjectileType::Arrow => projectile.stick(),
+                        mdminecraft_world::ProjectileType::SplashPotion(_)
+                        | mdminecraft_world::ProjectileType::EnderPearl
+                        | mdminecraft_world::ProjectileType::DragonFireball
+                        | mdminecraft_world::ProjectileType::BlazeFireball
+                        | mdminecraft_world::ProjectileType::GhastFireball => projectile.hit(),
                     }
                 }
             }
@@ -9164,32 +10080,151 @@ impl GameWorld {
                 let vertical_dist = dy.abs();
 
                 if horizontal_dist < mob_radius + 0.3 && vertical_dist < mob_height / 2.0 + 0.3 {
-                    if projectile.projectile_type.is_splash_potion() {
-                        // Splash potion breaks on mob hit (AoE handled below)
-                        projectile.hit();
-                        tracing::debug!("Splash potion hit {:?}", mob.mob_type);
-                    } else {
-                        // Arrow deals damage
-                        let damage = projectile.damage();
-                        mob.damage(damage);
-                        projectile.hit();
+                    match projectile.projectile_type {
+                        mdminecraft_world::ProjectileType::Arrow => {
+                            // Arrow deals damage
+                            let damage = projectile.damage();
+                            mob.damage(damage);
+                            projectile.hit();
 
-                        // Apply knockback from arrow direction
-                        let knock_dir_x = projectile.vel_x;
-                        let knock_dir_z = projectile.vel_z;
-                        let knock_len =
-                            (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
-                        if knock_len > 0.001 {
-                            mob.apply_knockback(
-                                knock_dir_x / knock_len,
-                                knock_dir_z / knock_len,
-                                0.3,
+                            // Apply knockback from arrow direction
+                            let knock_dir_x = projectile.vel_x;
+                            let knock_dir_z = projectile.vel_z;
+                            let knock_len =
+                                (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
+                            if knock_len > 0.001 {
+                                mob.apply_knockback(
+                                    knock_dir_x / knock_len,
+                                    knock_dir_z / knock_len,
+                                    0.3,
+                                );
+                            }
+
+                            tracing::debug!(
+                                "Arrow hit {:?} for {:.1} damage",
+                                mob.mob_type,
+                                damage
                             );
                         }
-
-                        tracing::debug!("Arrow hit {:?} for {:.1} damage", mob.mob_type, damage);
+                        mdminecraft_world::ProjectileType::SplashPotion(_)
+                        | mdminecraft_world::ProjectileType::EnderPearl => {
+                            projectile.hit();
+                            tracing::debug!(
+                                "{:?} hit {:?}",
+                                projectile.projectile_type,
+                                mob.mob_type
+                            );
+                        }
+                        mdminecraft_world::ProjectileType::DragonFireball => {
+                            if mob.mob_type != MobType::EnderDragon {
+                                let damage = projectile.damage();
+                                mob.damage(damage);
+                            }
+                            projectile.hit();
+                        }
+                        mdminecraft_world::ProjectileType::BlazeFireball => {
+                            if mob.mob_type != MobType::Blaze {
+                                let damage = projectile.damage();
+                                mob.damage(damage);
+                                mob.set_on_fire(60);
+                            }
+                            projectile.hit();
+                        }
+                        mdminecraft_world::ProjectileType::GhastFireball => {
+                            if mob.mob_type != MobType::Ghast {
+                                let damage = projectile.damage();
+                                mob.damage(damage);
+                                mob.set_on_fire(100);
+                            }
+                            projectile.hit();
+                        }
                     }
                     break; // Only hit one mob per projectile
+                }
+            }
+        }
+
+        // Check for player collisions (hostile mob fireballs).
+        let mut projectile_damage_to_player = 0.0f32;
+        let mut projectile_damage_source: Option<&'static str> = None;
+        for projectile in &mut self.projectiles.projectiles {
+            if projectile.dimension != active_dimension || projectile.stuck || projectile.dead {
+                continue;
+            }
+
+            let source = match projectile.projectile_type {
+                mdminecraft_world::ProjectileType::DragonFireball => "Ender Dragon",
+                mdminecraft_world::ProjectileType::BlazeFireball => "Blaze",
+                mdminecraft_world::ProjectileType::GhastFireball => "Ghast",
+                _ => continue,
+            };
+
+            let dx = projectile.x - player_x;
+            let dy = projectile.y - player_y;
+            let dz = projectile.z - player_z;
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+            let hit_radius = projectile.projectile_type.hitbox_radius() + 0.6;
+
+            if dist_sq <= hit_radius * hit_radius {
+                projectile_damage_to_player += projectile.damage();
+                projectile.hit();
+                projectile_damage_source.get_or_insert(source);
+
+                if !has_fire_resistance {
+                    match projectile.projectile_type {
+                        mdminecraft_world::ProjectileType::BlazeFireball => {
+                            self.player_health.ignite(100);
+                        }
+                        mdminecraft_world::ProjectileType::GhastFireball => {
+                            self.player_health.ignite(160);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if projectile_damage_to_player > 0.0
+            && self.player_state == PlayerState::Alive
+            && !self.player_health.is_dead()
+        {
+            let actual_damage = self.player_armor.take_damage(projectile_damage_to_player);
+            self.player_health.damage(actual_damage);
+            if self.player_health.is_dead() {
+                let source = projectile_damage_source.unwrap_or("a projectile");
+                self.handle_death(&format!("Slain by {}", source));
+            }
+        }
+
+        // Handle ender pearl teleport for projectiles that just broke.
+        let mut ender_pearl_impact: Option<(f64, f64, f64)> = None;
+        for projectile in &self.projectiles.projectiles {
+            if projectile.dimension != active_dimension {
+                continue;
+            }
+            if projectile.dead
+                && projectile.hit_entity
+                && projectile.projectile_type == mdminecraft_world::ProjectileType::EnderPearl
+            {
+                ender_pearl_impact = Some((projectile.x, projectile.y, projectile.z));
+            }
+        }
+
+        if let Some((x, _y, z)) = ender_pearl_impact {
+            if self.player_state == PlayerState::Alive && !self.player_health.is_dead() {
+                if let Some(feet) = self.find_safe_spawn_near(x as f32, z as f32) {
+                    let eye_height = self.player_physics.eye_height;
+                    let camera = self.renderer.camera_mut();
+                    camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
+                    self.player_physics.velocity = glam::Vec3::ZERO;
+                    self.player_physics.on_ground = false;
+                    self.player_physics.last_ground_y = feet.y;
+
+                    // Vanilla-ish: ender pearls deal 5 damage (2.5 hearts).
+                    self.player_health.damage(5.0);
+                    if self.player_health.is_dead() {
+                        self.handle_death("Killed by Ender Pearl");
+                    }
                 }
             }
         }
@@ -9286,8 +10321,30 @@ impl GameWorld {
             );
         }
 
+        // Ghast fireballs explode and can destroy blocks (vanilla-ish; simplified).
+        let ghast_fireball_radius = 2.0_f32;
+        let ghast_fireball_impacts: Vec<(f64, f64, f64)> = self
+            .projectiles
+            .projectiles
+            .iter()
+            .filter_map(|projectile| {
+                if projectile.dimension != active_dimension {
+                    return None;
+                }
+                if !projectile.dead || !projectile.hit_entity {
+                    return None;
+                }
+                if projectile.projectile_type != mdminecraft_world::ProjectileType::GhastFireball {
+                    return None;
+                }
+                Some((projectile.x, projectile.y, projectile.z))
+            })
+            .collect();
+        for (x, y, z) in ghast_fireball_impacts {
+            self.destroy_blocks_in_radius(x, y, z, ghast_fireball_radius);
+        }
+
         // Check for player picking up stuck arrows
-        let player_pos = self.renderer.camera().position;
         let pickup_radius = 1.5_f64;
         let mut arrows_to_pickup = 0u32;
 
@@ -10722,6 +11779,24 @@ impl GameWorld {
         tracing::info!("Threw splash potion (ID: {})", potion_id);
     }
 
+    fn throw_ender_pearl(&mut self) {
+        use mdminecraft_world::Projectile;
+
+        let camera = self.renderer.camera();
+        let player_pos = camera.position;
+
+        let projectile = Projectile::throw_ender_pearl(
+            player_pos.x as f64,
+            player_pos.y as f64,
+            player_pos.z as f64,
+            camera.yaw,
+            camera.pitch,
+        );
+
+        self.projectiles.spawn(self.active_dimension, projectile);
+        tracing::info!("Threw ender pearl");
+    }
+
     /// Apply splash potion effect to the player
     fn apply_splash_potion_to_player(&mut self, potion_id: u16, effectiveness: f64) {
         let Some((potion_type, is_extended, amplifier)) = potion_id_to_potion_state(potion_id)
@@ -10801,32 +11876,29 @@ impl GameWorld {
 
     /// Get block ID at world position
     fn get_block_at(&self, pos: IVec3) -> Option<BlockId> {
-        let chunk_x = pos.x.div_euclid(16);
-        let chunk_z = pos.z.div_euclid(16);
-        let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let chunk = self.chunks.get(&chunk_pos)?;
 
-        if let Some(chunk) = self.chunks.get(&chunk_pos) {
-            let local_x = pos.x.rem_euclid(16) as usize;
-            let local_y = pos.y as usize;
-            let local_z = pos.z.rem_euclid(16) as usize;
+        let local_y = world_y_to_local_y(pos.y)?;
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
-            if local_y < 256 {
-                return Some(chunk.voxel(local_x, local_y, local_z).id);
-            }
-        }
-        None
+        Some(chunk.voxel(local_x, local_y, local_z).id)
     }
 
     fn get_voxel_at(&self, pos: IVec3) -> Option<Voxel> {
-        let chunk_pos = ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16));
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
         let chunk = self.chunks.get(&chunk_pos)?;
-        let local_y = pos.y as usize;
-        if local_y >= CHUNK_SIZE_Y {
-            return None;
-        }
 
-        let local_x = pos.x.rem_euclid(16) as usize;
-        let local_z = pos.z.rem_euclid(16) as usize;
+        let local_y = world_y_to_local_y(pos.y)?;
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         Some(chunk.voxel(local_x, local_y, local_z))
     }
 
@@ -10853,19 +11925,19 @@ impl GameWorld {
 
             if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                 let local_x = pos.x.rem_euclid(16) as usize;
-                let local_y = pos.y as usize;
+                let Some(local_y) = world_y_to_local_y(pos.y) else {
+                    continue;
+                };
                 let local_z = pos.z.rem_euclid(16) as usize;
 
-                if local_y < 256 {
-                    let new_id = if is_lit {
-                        BLOCK_FURNACE_LIT
-                    } else {
-                        BLOCK_FURNACE
-                    };
-                    let mut voxel = chunk.voxel(local_x, local_y, local_z);
-                    voxel.id = new_id;
-                    chunk.set_voxel(local_x, local_y, local_z, voxel);
-                }
+                let new_id = if is_lit {
+                    BLOCK_FURNACE_LIT
+                } else {
+                    BLOCK_FURNACE
+                };
+                let mut voxel = chunk.voxel(local_x, local_y, local_z);
+                voxel.id = new_id;
+                chunk.set_voxel(local_x, local_y, local_z, voxel);
             }
         }
     }
@@ -10932,9 +12004,7 @@ impl GameWorld {
             droppers,
         } = ctx;
         let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> Option<Voxel> {
-            if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-                return None;
-            }
+            let local_y = world_y_to_local_y(pos.y)?;
 
             let chunk_pos = ChunkPos::new(
                 pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -10943,7 +12013,7 @@ impl GameWorld {
             let chunk = chunks.get(&chunk_pos)?;
             let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
             let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-            Some(chunk.voxel(local_x, pos.y as usize, local_z))
+            Some(chunk.voxel(local_x, local_y, local_z))
         };
 
         let mut changed_positions: Vec<IVec3> = Vec::new();
@@ -11206,6 +12276,8 @@ impl GameWorld {
             DroppedItemType::String => Some(ItemType::Item(4)),
             DroppedItemType::Flint => Some(ItemType::Item(5)),
             DroppedItemType::FlintAndSteel => Some(ItemType::Item(CORE_ITEM_FLINT_AND_STEEL)),
+            DroppedItemType::EnderPearl => Some(ItemType::Item(CORE_ITEM_ENDER_PEARL)),
+            DroppedItemType::EyeOfEnder => Some(ItemType::Item(CORE_ITEM_EYE_OF_ENDER)),
             DroppedItemType::Feather => Some(ItemType::Item(6)),
             DroppedItemType::IronIngot => Some(ItemType::Item(7)),
             DroppedItemType::Coal => Some(ItemType::Item(8)),
@@ -11540,6 +12612,8 @@ impl GameWorld {
                 CORE_ITEM_WATER_BUCKET => Some(DroppedItemType::WaterBucket),
                 CORE_ITEM_LAVA_BUCKET => Some(DroppedItemType::LavaBucket),
                 CORE_ITEM_FLINT_AND_STEEL => Some(DroppedItemType::FlintAndSteel),
+                CORE_ITEM_ENDER_PEARL => Some(DroppedItemType::EnderPearl),
+                CORE_ITEM_EYE_OF_ENDER => Some(DroppedItemType::EyeOfEnder),
                 CORE_ITEM_PAPER => Some(DroppedItemType::Paper),
                 CORE_ITEM_BOOK => Some(DroppedItemType::Book),
                 CORE_ITEM_WHEAT_SEEDS => Some(DroppedItemType::WheatSeeds),
@@ -11669,16 +12743,13 @@ fn try_bucket_interaction(
     fluid_sim: &mut FluidSimulator,
 ) -> Option<(u16, Vec<IVec3>)> {
     let chunk_and_local = |pos: IVec3| -> Option<(ChunkPos, usize, usize, usize)> {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let local_y = world_y_to_local_y(pos.y)?;
 
         let chunk_pos = ChunkPos::new(
             pos.x.div_euclid(CHUNK_SIZE_X as i32),
             pos.z.div_euclid(CHUNK_SIZE_Z as i32),
         );
         let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = pos.y as usize;
         let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         Some((chunk_pos, local_x, local_y, local_z))
     };
@@ -11783,16 +12854,13 @@ fn try_activate_nether_portal(
     ignition_pos: IVec3,
 ) -> Option<Vec<IVec3>> {
     let chunk_and_local = |pos: IVec3| -> Option<(ChunkPos, usize, usize, usize)> {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let local_y = world_y_to_local_y(pos.y)?;
 
         let chunk_pos = ChunkPos::new(
             pos.x.div_euclid(CHUNK_SIZE_X as i32),
             pos.z.div_euclid(CHUNK_SIZE_Z as i32),
         );
         let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = pos.y as usize;
         let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         Some((chunk_pos, local_x, local_y, local_z))
     };
@@ -11830,7 +12898,7 @@ fn try_activate_nether_portal(
     }
 
     let frame_matches = |origin: IVec3, axis: PortalAxis| -> bool {
-        if origin.y < 0 || origin.y + 4 >= CHUNK_SIZE_Y as i32 {
+        if origin.y < WORLD_MIN_Y || origin.y + 4 > WORLD_MAX_Y {
             return false;
         }
 
@@ -11895,6 +12963,96 @@ fn try_activate_nether_portal(
 
                 return Some(changed);
             }
+        }
+    }
+
+    None
+}
+
+fn try_activate_end_portal(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    frame_pos: IVec3,
+) -> Option<Vec<IVec3>> {
+    let chunk_and_local = |pos: IVec3| -> Option<(ChunkPos, usize, usize, usize)> {
+        let local_y = world_y_to_local_y(pos.y)?;
+
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+        Some((chunk_pos, local_x, local_y, local_z))
+    };
+
+    let voxel_at = |pos: IVec3| -> Option<Voxel> {
+        let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(pos)?;
+        Some(chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z))
+    };
+
+    let set_voxel =
+        |chunks: &mut HashMap<ChunkPos, Chunk>, pos: IVec3, voxel: Voxel| -> Option<()> {
+            let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(pos)?;
+            let chunk = chunks.get_mut(&chunk_pos)?;
+            chunk.set_voxel(local_x, local_y, local_z, voxel);
+            Some(())
+        };
+
+    let has_eye = |voxel: Voxel| -> bool { (voxel.state & 0x01) != 0 };
+
+    // Look for a 5x5 ring of filled portal frames surrounding a 3x3 interior.
+    for offset_x in 0..=4 {
+        for offset_z in 0..=4 {
+            let origin = IVec3::new(frame_pos.x - offset_x, frame_pos.y, frame_pos.z - offset_z);
+            let mut ok = true;
+
+            for dx in 0..=4 {
+                for dz in 0..=4 {
+                    let pos = IVec3::new(origin.x + dx, origin.y, origin.z + dz);
+                    let Some(voxel) = voxel_at(pos) else {
+                        ok = false;
+                        break;
+                    };
+
+                    let is_border = dx == 0 || dx == 4 || dz == 0 || dz == 4;
+                    if is_border {
+                        if voxel.id != BLOCK_END_PORTAL_FRAME || !has_eye(voxel) {
+                            ok = false;
+                            break;
+                        }
+                    } else if voxel.id != BLOCK_AIR && voxel.id != BLOCK_END_PORTAL {
+                        ok = false;
+                        break;
+                    }
+                }
+                if !ok {
+                    break;
+                }
+            }
+
+            if !ok {
+                continue;
+            }
+
+            let mut changed = Vec::with_capacity(9);
+            for dx in 1..=3 {
+                for dz in 1..=3 {
+                    let pos = IVec3::new(origin.x + dx, origin.y, origin.z + dz);
+                    set_voxel(
+                        chunks,
+                        pos,
+                        Voxel {
+                            id: BLOCK_END_PORTAL,
+                            state: 0,
+                            light_sky: 0,
+                            light_block: 0,
+                        },
+                    )?;
+                    changed.push(pos);
+                }
+            }
+
+            return Some(changed);
         }
     }
 
@@ -12453,6 +13611,51 @@ fn render_xp_bar(ctx: &egui::Context, xp: &PlayerXP) {
                     );
                 });
             }
+        });
+}
+
+fn render_boss_bar(ctx: &egui::Context, name: &str, health: f32, max_health: f32) {
+    let ratio = if max_health > 0.0 {
+        (health / max_health).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    egui::Area::new(egui::Id::new("boss_bar"))
+        .anchor(egui::Align2::CENTER_TOP, [0.0, 10.0])
+        .show(ctx, |ui| {
+            let bar_width = 360.0;
+            let bar_height = 12.0;
+
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new(name)
+                        .size(16.0)
+                        .color(egui::Color32::from_rgb(220, 160, 255))
+                        .strong(),
+                );
+
+                let (response, painter) =
+                    ui.allocate_painter(egui::vec2(bar_width, bar_height), egui::Sense::hover());
+                let rect = response.rect;
+
+                painter.rect_filled(rect, 3.0, egui::Color32::from_rgb(40, 10, 50));
+
+                let fill_width = bar_width * ratio;
+                if fill_width > 0.0 {
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(rect.min, egui::vec2(fill_width, bar_height)),
+                        3.0,
+                        egui::Color32::from_rgb(170, 60, 200),
+                    );
+                }
+
+                painter.rect_stroke(
+                    rect,
+                    3.0,
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 80, 80)),
+                );
+            });
         });
 }
 
@@ -16540,6 +17743,128 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         },
+        // Glowstone (vanilla-ish): 4 glowstone dust → 1 glowstone
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST).into(), 4)],
+            output: ItemType::Block(BLOCK_GLOWSTONE),
+            output_count: 1,
+            pattern: Some(CraftingPattern::from_exact_cells(
+                2,
+                2,
+                [
+                    [
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        None,
+                    ],
+                    [
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        Some(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST)),
+                        None,
+                    ],
+                    [None, None, None],
+                ],
+            )),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Crying obsidian (mdminecraft proxy): 1 obsidian + 1 ghast tear → 1 crying obsidian
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OBSIDIAN).into(), 1),
+                (ItemType::Item(CORE_ITEM_GHAST_TEAR).into(), 1),
+            ],
+            output: ItemType::Block(BLOCK_CRYING_OBSIDIAN),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Respawn anchor (vanilla-ish): 6 crying obsidian + 3 glowstone → 1 respawn anchor
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_CRYING_OBSIDIAN).into(), 6),
+                (ItemType::Block(BLOCK_GLOWSTONE).into(), 3),
+            ],
+            output: ItemType::Block(BLOCK_RESPAWN_ANCHOR),
+            output_count: 1,
+            pattern: Some(CraftingPattern::from_exact_cells(
+                3,
+                3,
+                [
+                    [
+                        Some(ItemType::Block(BLOCK_CRYING_OBSIDIAN)),
+                        Some(ItemType::Block(BLOCK_GLOWSTONE)),
+                        Some(ItemType::Block(BLOCK_CRYING_OBSIDIAN)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_CRYING_OBSIDIAN)),
+                        Some(ItemType::Block(BLOCK_GLOWSTONE)),
+                        Some(ItemType::Block(BLOCK_CRYING_OBSIDIAN)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_CRYING_OBSIDIAN)),
+                        Some(ItemType::Block(BLOCK_GLOWSTONE)),
+                        Some(ItemType::Block(BLOCK_CRYING_OBSIDIAN)),
+                    ],
+                ],
+            )),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
+        // Eye of Ender (vanilla-ish): 1 ender pearl + 1 blaze powder → 1 eye of ender
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Item(CORE_ITEM_ENDER_PEARL).into(), 1),
+                (ItemType::Item(CORE_ITEM_BLAZE_POWDER).into(), 1),
+            ],
+            output: ItemType::Item(CORE_ITEM_EYE_OF_ENDER),
+            output_count: 1,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: false,
+        },
+        // End Portal Frame (mdminecraft alternative): 4 obsidian + 4 stone bricks + 1 nether quartz → 1 frame
+        CraftingRecipe {
+            inputs: vec![
+                (ItemType::Block(BLOCK_OBSIDIAN).into(), 4),
+                (
+                    ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS).into(),
+                    4,
+                ),
+                (ItemType::Item(CORE_ITEM_NETHER_QUARTZ).into(), 1),
+            ],
+            output: ItemType::Block(BLOCK_END_PORTAL_FRAME),
+            output_count: 1,
+            pattern: Some(CraftingPattern::from_exact_cells(
+                3,
+                3,
+                [
+                    [
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                    ],
+                    [
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Item(CORE_ITEM_NETHER_QUARTZ)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                    ],
+                    [
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                        Some(ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS)),
+                        Some(ItemType::Block(BLOCK_OBSIDIAN)),
+                    ],
+                ],
+            )),
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::ThreeByThree,
+            allow_extra_counts_of_required_types: false,
+        },
         // Trapdoor: 6 planks → 2 trapdoors
         CraftingRecipe {
             inputs: vec![(ItemType::Block(BLOCK_OAK_PLANKS).into(), 6)],
@@ -19554,6 +20879,11 @@ fn villager_trade_offers(
                     sell: (ItemType::Item(CORE_ITEM_BOOK), 1),
                 },
                 VillagerTradeOffer {
+                    buy_a: (emerald, 5),
+                    buy_b: None,
+                    sell: (ItemType::Item(CORE_ITEM_ENDER_PEARL), 1),
+                },
+                VillagerTradeOffer {
                     buy_a: (emerald, 3),
                     buy_b: None,
                     sell: (ItemType::Block(BLOCK_BOOKSHELF), 1),
@@ -21635,7 +22965,7 @@ impl commands::CommandContext for GameWorld {
         }
 
         for &(_, y, _) in blocks {
-            if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
+            if world_y_to_local_y(y).is_none() {
                 anyhow::bail!("Y out of bounds: {y}");
             }
         }
@@ -21648,7 +22978,8 @@ impl commands::CommandContext for GameWorld {
             self.ensure_chunk_loaded_for_command(chunk_pos);
 
             let local_x = x.rem_euclid(16) as usize;
-            let local_y = y as usize;
+            let local_y =
+                world_y_to_local_y(y).ok_or_else(|| anyhow::anyhow!("Y out of bounds: {y}"))?;
             let local_z = z.rem_euclid(16) as usize;
 
             let (old_id, old_state) = {
@@ -21683,7 +23014,7 @@ impl commands::CommandContext for GameWorld {
                     if let Some(other_local_y) =
                         Self::try_remove_other_door_half(chunk, local_x, local_y, local_z, old_id)
                     {
-                        removed_extra = Some(IVec3::new(x, other_local_y as i32, z));
+                        removed_extra = Some(IVec3::new(x, local_y_to_world_y(other_local_y), z));
                     }
                 }
             }
@@ -21763,12 +23094,14 @@ impl commands::CommandContext for GameWorld {
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
                     removed_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
                 );
-                self.crop_growth.unregister_crop(CropPosition {
-                    chunk: removed_chunk,
-                    x: removed_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
-                    y: removed_pos.y as u8,
-                    z: removed_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
-                });
+                if let Some(local_y) = world_y_to_local_y(removed_pos.y) {
+                    self.crop_growth.unregister_crop(CropPosition {
+                        chunk: removed_chunk,
+                        x: removed_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
+                        y: local_y as u8,
+                        z: removed_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
+                    });
+                }
             }
 
             self.on_block_entity_removed(removed_pos, removed_block_id);
@@ -21850,9 +23183,8 @@ impl commands::CommandContext for GameWorld {
     }
 
     fn get_block(&mut self, x: i32, y: i32, z: i32) -> anyhow::Result<(u16, u16)> {
-        if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
-            anyhow::bail!("Y out of bounds: {y}");
-        }
+        let local_y =
+            world_y_to_local_y(y).ok_or_else(|| anyhow::anyhow!("Y out of bounds: {y}"))?;
 
         let chunk_pos = ChunkPos::new(x.div_euclid(16), z.div_euclid(16));
         self.ensure_chunk_loaded_for_command(chunk_pos);
@@ -21861,7 +23193,6 @@ impl commands::CommandContext for GameWorld {
         };
 
         let local_x = x.rem_euclid(16) as usize;
-        let local_y = y as usize;
         let local_z = z.rem_euclid(16) as usize;
         let voxel = chunk.voxel(local_x, local_y, local_z);
         Ok((voxel.id, voxel.state))
@@ -21874,7 +23205,7 @@ impl commands::CommandContext for GameWorld {
         z: i32,
         block_id: u16,
     ) -> anyhow::Result<Option<commands::BlockEntityData>> {
-        if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
+        if world_y_to_local_y(y).is_none() {
             anyhow::bail!("Y out of bounds: {y}");
         }
 
@@ -21919,7 +23250,7 @@ impl commands::CommandContext for GameWorld {
         z: i32,
         data: commands::BlockEntityData,
     ) -> anyhow::Result<()> {
-        if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
+        if world_y_to_local_y(y).is_none() {
             anyhow::bail!("Y out of bounds: {y}");
         }
 
@@ -21986,9 +23317,8 @@ impl commands::CommandContext for GameWorld {
         block_id: u16,
         state: u16,
     ) -> anyhow::Result<()> {
-        if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
-            anyhow::bail!("Y out of bounds: {y}");
-        }
+        let local_y =
+            world_y_to_local_y(y).ok_or_else(|| anyhow::anyhow!("Y out of bounds: {y}"))?;
 
         let pos = IVec3::new(x, y, z);
         let chunk_pos = ChunkPos::new(x.div_euclid(16), z.div_euclid(16));
@@ -21997,7 +23327,6 @@ impl commands::CommandContext for GameWorld {
             anyhow::bail!("Chunk missing at {chunk_pos:?}");
         };
         let local_x = x.rem_euclid(16) as usize;
-        let local_y = y as usize;
         let local_z = z.rem_euclid(16) as usize;
 
         let old_id = chunk.voxel(local_x, local_y, local_z).id;
@@ -22090,12 +23419,14 @@ impl commands::CommandContext for GameWorld {
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
                     removed_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
                 );
-                self.crop_growth.unregister_crop(CropPosition {
-                    chunk: removed_chunk,
-                    x: removed_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
-                    y: removed_pos.y as u8,
-                    z: removed_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
-                });
+                if let Some(local_y) = world_y_to_local_y(removed_pos.y) {
+                    self.crop_growth.unregister_crop(CropPosition {
+                        chunk: removed_chunk,
+                        x: removed_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
+                        y: local_y as u8,
+                        z: removed_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
+                    });
+                }
             }
 
             self.on_block_entity_removed(removed_pos, removed_block_id);
@@ -22118,7 +23449,7 @@ impl commands::CommandContext for GameWorld {
         }
 
         for &(_, y, _, _, _) in blocks {
-            if !(0..CHUNK_SIZE_Y as i32).contains(&y) {
+            if world_y_to_local_y(y).is_none() {
                 anyhow::bail!("Y out of bounds: {y}");
             }
         }
@@ -22131,7 +23462,8 @@ impl commands::CommandContext for GameWorld {
             self.ensure_chunk_loaded_for_command(chunk_pos);
 
             let local_x = x.rem_euclid(16) as usize;
-            let local_y = y as usize;
+            let local_y =
+                world_y_to_local_y(y).ok_or_else(|| anyhow::anyhow!("Y out of bounds: {y}"))?;
             let local_z = z.rem_euclid(16) as usize;
 
             let old_id = self
@@ -22233,12 +23565,14 @@ impl commands::CommandContext for GameWorld {
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
                     removed_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
                 );
-                self.crop_growth.unregister_crop(CropPosition {
-                    chunk: removed_chunk,
-                    x: removed_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
-                    y: removed_pos.y as u8,
-                    z: removed_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
-                });
+                if let Some(local_y) = world_y_to_local_y(removed_pos.y) {
+                    self.crop_growth.unregister_crop(CropPosition {
+                        chunk: removed_chunk,
+                        x: removed_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as u8,
+                        y: local_y as u8,
+                        z: removed_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as u8,
+                    });
+                }
             }
 
             self.on_block_entity_removed(removed_pos, removed_block_id);
@@ -22275,18 +23609,20 @@ mod tests {
         core_item_to_enchanting_id, crafting_max_crafts_2x2, crafting_max_crafts_3x3,
         cursor_can_accept_full_stack, frames_to_complete, furnace_try_insert, get_crafting_recipes,
         interactive_blocks, item_ids, match_crafting_recipe, potion_ids,
-        tick_health_over_time_status_effects, try_add_stack_to_cursor, try_autofill_crafting_grid,
-        try_shift_move_core_stack_into_brewing_stand, try_shift_move_core_stack_into_chest,
-        try_shift_move_core_stack_into_enchanting_table, try_shift_move_core_stack_into_furnace,
-        ArmorPiece, ArmorSlot, BlockPropertiesRegistry, BrewingStandState, ChestState, Chunk,
-        ChunkPos, CraftingGridSize, DispenserState, DroppedItemType, EnchantingTableState,
-        Enchantment, EnchantmentType, FluidSimulator, FluidType, FurnaceSlotKind, FurnaceState,
-        GameWorld, HopperState, Hotbar, ItemStack, ItemType, MainInventory, PlayerHealth,
-        PlayerPhysics, StatusEffectType, StatusEffects, ToolMaterial, ToolType, UiCoreSlotId,
-        UiSlotClick, Voxel, AABB, BLOCK_AIR, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
-        BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_ENCHANTING_TABLE,
-        BLOCK_FURNACE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN,
-        BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_BUCKET,
+        tick_health_over_time_status_effects, try_activate_end_portal, try_add_stack_to_cursor,
+        try_autofill_crafting_grid, try_shift_move_core_stack_into_brewing_stand,
+        try_shift_move_core_stack_into_chest, try_shift_move_core_stack_into_enchanting_table,
+        try_shift_move_core_stack_into_furnace, ArmorPiece, ArmorSlot, BlockPropertiesRegistry,
+        BrewingStandState, ChestState, Chunk, ChunkPos, CraftingGridSize, DispenserState,
+        DroppedItemType, EnchantingTableState, Enchantment, EnchantmentType, FluidSimulator,
+        FluidType, FurnaceSlotKind, FurnaceState, GameWorld, HopperState, Hotbar, ItemStack,
+        ItemType, MainInventory, PlayerHealth, PlayerPhysics, StatusEffectType, StatusEffects,
+        ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_AIR, BLOCK_BOOKSHELF,
+        BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
+        BLOCK_CRYING_OBSIDIAN, BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME,
+        BLOCK_FURNACE, BLOCK_GLOWSTONE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
+        BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER,
+        CORE_ITEM_BOOK, CORE_ITEM_BUCKET, CORE_ITEM_ENDER_PEARL, CORE_ITEM_EYE_OF_ENDER,
         CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_FLINT_AND_STEEL, CORE_ITEM_GHAST_TEAR,
         CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON, CORE_ITEM_GLOWSTONE_DUST,
         CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ,
@@ -22298,12 +23634,69 @@ mod tests {
     use mdminecraft_core::DimensionId;
     use mdminecraft_world::StatusEffect;
 
+    fn local_y(world_y: i32) -> usize {
+        mdminecraft_world::chunk::world_y_to_local_y(world_y).expect("world y in bounds")
+    }
+
+    fn find_nether_fortress_chest_key(world_seed: u64) -> mdminecraft_world::BlockEntityKey {
+        let generator = mdminecraft_world::FortressGenerator::new(world_seed);
+        let chest_id = mdminecraft_world::interactive_blocks::CHEST;
+
+        for chunk_x in -64..=64 {
+            for chunk_z in -64..=64 {
+                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                let spawns =
+                    mdminecraft_world::fortress_blaze_spawns_for_chunk(world_seed, chunk_pos);
+                if spawns.is_empty() {
+                    continue;
+                }
+
+                let mut chunk = Chunk::new(chunk_pos);
+                if !generator.try_generate_fortress(&mut chunk) {
+                    continue;
+                }
+
+                let chunk_min_x = chunk_pos.x * mdminecraft_world::CHUNK_SIZE_X as i32;
+                let chunk_min_z = chunk_pos.z * mdminecraft_world::CHUNK_SIZE_Z as i32;
+
+                for spawn in spawns {
+                    let world_x = spawn.x.floor() as i32;
+                    let world_y = spawn.y.floor() as i32;
+                    let world_z = spawn.z.floor() as i32;
+
+                    let local_x = world_x - chunk_min_x;
+                    let local_z = world_z - chunk_min_z;
+                    if local_x < 0
+                        || local_x >= mdminecraft_world::CHUNK_SIZE_X as i32
+                        || local_z < 0
+                        || local_z >= mdminecraft_world::CHUNK_SIZE_Z as i32
+                    {
+                        continue;
+                    }
+
+                    let voxel =
+                        chunk.voxel(local_x as usize, local_y(world_y), local_z as usize);
+                    if voxel.id == chest_id {
+                        return mdminecraft_world::BlockEntityKey {
+                            dimension: DimensionId::Nether,
+                            x: world_x,
+                            y: world_y,
+                            z: world_z,
+                        };
+                    }
+                }
+            }
+        }
+
+        panic!("expected to locate a Nether fortress chest for seed {world_seed}");
+    }
+
     #[test]
     fn collisions_use_block_solidity_not_opacity() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_GLASS,
@@ -22312,7 +23705,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_WATER,
@@ -22321,7 +23714,7 @@ mod tests {
         );
         chunk.set_voxel(
             2,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::TORCH,
@@ -22399,7 +23792,7 @@ mod tests {
         let key = mdminecraft_world::BlockEntityKey {
             dimension: mdminecraft_core::DimensionId::Nether,
             x: 10,
-            y: 30,
+            y: 5,
             z: -5,
         };
 
@@ -22418,6 +23811,48 @@ mod tests {
 
         let mut chest = ChestState::new();
         GameWorld::populate_worldgen_chest_loot(&mut chest, 12345, key, &loot_tables);
+
+        let expected = ItemStack::new(ItemType::Item(14), 1);
+        assert!(
+            chest.slots.iter().any(|slot| slot.is_some()),
+            "expected overridden loot table to populate at least one slot"
+        );
+        for slot in chest.slots.iter().flatten() {
+            assert_eq!(slot, &expected);
+        }
+    }
+
+    #[test]
+    fn nether_fortress_chest_selects_nether_fortress_loot_table() {
+        let world_seed = 0x46_4F_52_54_52_45_53_53_u64; // "FORTRESS"
+        let key = find_nether_fortress_chest_key(world_seed);
+        assert_eq!(
+            GameWorld::worldgen_chest_loot_table_for_key(world_seed, key),
+            super::WorldgenChestLootTable::NetherFortress
+        );
+    }
+
+    #[test]
+    fn nether_fortress_chest_loot_respects_content_pack_table_overrides() {
+        let world_seed = 0x46_4F_52_54_52_45_53_53_u64; // "FORTRESS"
+        let key = find_nether_fortress_chest_key(world_seed);
+
+        let mut loot_tables = content_pack_loot::LootTables::default();
+        let override_table =
+            content_pack_loot::WorldgenChestLootTableDefinition::from_weighted_entries(vec![(
+                ItemType::Item(14),
+                1,
+                1,
+                1,
+            )])
+            .expect("override table should build");
+        loot_tables.worldgen_chests.insert(
+            super::WorldgenChestLootTable::NetherFortress,
+            override_table,
+        );
+
+        let mut chest = ChestState::new();
+        GameWorld::populate_worldgen_chest_loot(&mut chest, world_seed, key, &loot_tables);
 
         let expected = ItemStack::new(ItemType::Item(14), 1);
         assert!(
@@ -22472,7 +23907,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22481,7 +23916,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::TORCH,
@@ -22494,7 +23929,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22513,7 +23948,7 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(0, 65, 0).id,
+            chunk.voxel(0, local_y(65), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Torch should be cleared when its support is removed"
         );
@@ -22524,7 +23959,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22533,7 +23968,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::TORCH,
@@ -22547,7 +23982,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22566,7 +24001,7 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(1, 64, 0).id,
+            chunk.voxel(1, local_y(64), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Wall torch should be cleared when its support is removed"
         );
@@ -22577,7 +24012,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22586,7 +24021,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::redstone_blocks::STONE_BUTTON,
@@ -22600,7 +24035,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22619,7 +24054,7 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(1, 64, 0).id,
+            chunk.voxel(1, local_y(64), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Wall button should be cleared when its support is removed"
         );
@@ -22630,7 +24065,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22639,7 +24074,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            63,
+            local_y(63),
             0,
             Voxel {
                 id: mdminecraft_world::redstone_blocks::LEVER,
@@ -22653,7 +24088,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22672,7 +24107,7 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(0, 63, 0).id,
+            chunk.voxel(0, local_y(63), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Ceiling lever should be cleared when its support is removed"
         );
@@ -22683,7 +24118,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22692,7 +24127,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::LADDER,
@@ -22706,7 +24141,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22725,7 +24160,7 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(1, 64, 0).id,
+            chunk.voxel(1, local_y(64), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Ladder should be cleared when its support is removed"
         );
@@ -22736,7 +24171,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22745,7 +24180,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: mdminecraft_world::redstone_blocks::REDSTONE_WIRE,
@@ -22759,7 +24194,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22778,7 +24213,7 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(0, 65, 0).id,
+            chunk.voxel(0, local_y(65), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Redstone wire should be cleared when its support is removed"
         );
@@ -22789,7 +24224,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_DIRT,
@@ -22798,7 +24233,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: BLOCK_SUGAR_CANE,
@@ -22807,7 +24242,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            66,
+            local_y(66),
             0,
             Voxel {
                 id: BLOCK_SUGAR_CANE,
@@ -22820,7 +24255,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22841,8 +24276,14 @@ mod tests {
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        assert_eq!(chunk.voxel(0, 65, 0).id, mdminecraft_world::BLOCK_AIR);
-        assert_eq!(chunk.voxel(0, 66, 0).id, mdminecraft_world::BLOCK_AIR);
+        assert_eq!(
+            chunk.voxel(0, local_y(65), 0).id,
+            mdminecraft_world::BLOCK_AIR
+        );
+        assert_eq!(
+            chunk.voxel(0, local_y(66), 0).id,
+            mdminecraft_world::BLOCK_AIR
+        );
     }
 
     #[test]
@@ -22850,7 +24291,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22861,7 +24302,7 @@ mod tests {
         let door_state = mdminecraft_world::Facing::North.to_state();
         chunk.set_voxel(
             0,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
@@ -22871,7 +24312,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            66,
+            local_y(66),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER,
@@ -22885,7 +24326,7 @@ mod tests {
         let block_properties = BlockPropertiesRegistry::new();
 
         if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
-            chunk.set_voxel(0, 64, 0, Voxel::default());
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
         let removed = GameWorld::remove_unsupported_blocks(
@@ -22912,12 +24353,12 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(0, 65, 0).id,
+            chunk.voxel(0, local_y(65), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Door lower should be cleared when its support is removed"
         );
         assert_eq!(
-            chunk.voxel(0, 66, 0).id,
+            chunk.voxel(0, local_y(66), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Door upper should be cleared when its support is removed"
         );
@@ -22978,7 +24419,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22987,7 +24428,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -22998,7 +24439,7 @@ mod tests {
         let bed_state = mdminecraft_world::Facing::East.to_state();
         chunk.set_voxel(
             0,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::BED_FOOT,
@@ -23008,7 +24449,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::BED_HEAD,
@@ -23025,7 +24466,7 @@ mod tests {
         chunks
             .get_mut(&ChunkPos::new(0, 0))
             .expect("chunk exists")
-            .set_voxel(1, 64, 0, Voxel::default());
+            .set_voxel(1, local_y(64), 0, Voxel::default());
 
         let removed = GameWorld::remove_unsupported_blocks(
             &mut chunks,
@@ -23051,12 +24492,12 @@ mod tests {
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         assert_eq!(
-            chunk.voxel(0, 65, 0).id,
+            chunk.voxel(0, local_y(65), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Bed foot should be cleared when its support is removed"
         );
         assert_eq!(
-            chunk.voxel(1, 65, 0).id,
+            chunk.voxel(1, local_y(65), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Bed head should be cleared when its support is removed"
         );
@@ -23073,7 +24514,7 @@ mod tests {
 
             left.set_voxel(
                 15,
-                65,
+                local_y(65),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::BED_FOOT,
@@ -23083,7 +24524,7 @@ mod tests {
             );
             right.set_voxel(
                 0,
-                65,
+                local_y(65),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::BED_HEAD,
@@ -23105,7 +24546,10 @@ mod tests {
             assert_eq!(removed, Some(glam::IVec3::new(16, 65, 0)));
 
             let right = chunks.get(&ChunkPos::new(1, 0)).unwrap();
-            assert_eq!(right.voxel(0, 65, 0).id, mdminecraft_world::BLOCK_AIR);
+            assert_eq!(
+                right.voxel(0, local_y(65), 0).id,
+                mdminecraft_world::BLOCK_AIR
+            );
         }
 
         // Case 2: removing from the head clears the foot in the neighboring -X chunk.
@@ -23115,7 +24559,7 @@ mod tests {
 
             left.set_voxel(
                 15,
-                65,
+                local_y(65),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::BED_FOOT,
@@ -23125,7 +24569,7 @@ mod tests {
             );
             right.set_voxel(
                 0,
-                65,
+                local_y(65),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::BED_HEAD,
@@ -23147,7 +24591,10 @@ mod tests {
             assert_eq!(removed, Some(glam::IVec3::new(15, 65, 0)));
 
             let left = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert_eq!(left.voxel(15, 65, 0).id, mdminecraft_world::BLOCK_AIR);
+            assert_eq!(
+                left.voxel(15, local_y(65), 0).id,
+                mdminecraft_world::BLOCK_AIR
+            );
         }
     }
 
@@ -24130,7 +25577,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            1,
+            local_y(1),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::LADDER,
@@ -24385,7 +25832,7 @@ mod tests {
 
         chunk.set_voxel(
             pos.x as usize,
-            pos.y as usize,
+            local_y(pos.y),
             pos.z as usize,
             Voxel {
                 id: mdminecraft_world::mechanical_blocks::DISPENSER,
@@ -24454,7 +25901,7 @@ mod tests {
 
         chunk.set_voxel(
             pos.x as usize,
-            pos.y as usize,
+            local_y(pos.y),
             pos.z as usize,
             Voxel {
                 id: mdminecraft_world::mechanical_blocks::DISPENSER,
@@ -24525,7 +25972,7 @@ mod tests {
 
         chunk.set_voxel(
             pos.x as usize,
-            pos.y as usize,
+            local_y(pos.y),
             pos.z as usize,
             Voxel {
                 id: mdminecraft_world::mechanical_blocks::DROPPER,
@@ -25964,6 +27411,175 @@ mod tests {
                 assert_eq!(voxel.state, 1);
             }
         }
+    }
+
+    #[test]
+    fn end_portal_activation_fills_3x3_interior() {
+        let origin = glam::IVec3::new(1, 10, 1);
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        for dx in 0..=4 {
+            for dz in 0..=4 {
+                let is_border = dx == 0 || dx == 4 || dz == 0 || dz == 4;
+                let pos = glam::IVec3::new(origin.x + dx, origin.y, origin.z + dz);
+                if is_border {
+                    chunk.set_voxel(
+                        pos.x as usize,
+                        pos.y as usize,
+                        pos.z as usize,
+                        Voxel {
+                            id: BLOCK_END_PORTAL_FRAME,
+                            state: 0x01,
+                            ..Default::default()
+                        },
+                    );
+                } else {
+                    chunk.set_voxel(
+                        pos.x as usize,
+                        pos.y as usize,
+                        pos.z as usize,
+                        Voxel {
+                            id: BLOCK_AIR,
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+        }
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let frame_pos = glam::IVec3::new(origin.x, origin.y, origin.z);
+        let changed = try_activate_end_portal(&mut chunks, frame_pos).expect("portal activates");
+        assert_eq!(changed.len(), 9);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        for x in (origin.x + 1)..=(origin.x + 3) {
+            for z in (origin.z + 1)..=(origin.z + 3) {
+                let voxel = chunk.voxel(x as usize, origin.y as usize, z as usize);
+                assert_eq!(voxel.id, BLOCK_END_PORTAL);
+            }
+        }
+    }
+
+    #[test]
+    fn end_portal_activation_requires_all_eyes() {
+        let origin = glam::IVec3::new(1, 10, 1);
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        for dx in 0..=4 {
+            for dz in 0..=4 {
+                let is_border = dx == 0 || dx == 4 || dz == 0 || dz == 4;
+                if !is_border {
+                    continue;
+                }
+
+                let state = if dx == 0 && dz == 0 { 0x00 } else { 0x01 };
+                chunk.set_voxel(
+                    (origin.x + dx) as usize,
+                    origin.y as usize,
+                    (origin.z + dz) as usize,
+                    Voxel {
+                        id: BLOCK_END_PORTAL_FRAME,
+                        state,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let frame_pos = glam::IVec3::new(origin.x, origin.y, origin.z);
+        assert!(try_activate_end_portal(&mut chunks, frame_pos).is_none());
+    }
+
+    #[test]
+    fn crafting_ender_pearl_and_blaze_powder_to_eye_of_ender() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_ENDER_PEARL), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_BLAZE_POWDER), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Item(CORE_ITEM_EYE_OF_ENDER), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_glowstone_dust_to_glowstone() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[0][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[1][0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLOWSTONE_DUST), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_GLOWSTONE), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_obsidian_and_ghast_tear_to_crying_obsidian() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), 1));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GHAST_TEAR), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_CRYING_OBSIDIAN), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_respawn_anchor_vanillaish_recipe() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+
+        for row in &mut grid {
+            row[0] = Some(ItemStack::new(ItemType::Block(BLOCK_CRYING_OBSIDIAN), 1));
+            row[1] = Some(ItemStack::new(ItemType::Block(BLOCK_GLOWSTONE), 1));
+            row[2] = Some(ItemStack::new(ItemType::Block(BLOCK_CRYING_OBSIDIAN), 1));
+        }
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_RESPAWN_ANCHOR), 1))
+        );
+    }
+
+    #[test]
+    fn crafting_obsidian_stone_bricks_and_quartz_to_end_portal_frame() {
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+
+        grid[0][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), 1));
+        grid[0][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[0][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), 1));
+        grid[1][0] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[1][1] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_NETHER_QUARTZ), 1));
+        grid[1][2] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[2][0] = Some(ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), 1));
+        grid[2][1] = Some(ItemStack::new(
+            ItemType::Block(mdminecraft_world::BLOCK_STONE_BRICKS),
+            1,
+        ));
+        grid[2][2] = Some(ItemStack::new(ItemType::Block(BLOCK_OBSIDIAN), 1));
+
+        assert_eq!(
+            check_crafting_recipe(&grid),
+            Some((ItemType::Block(BLOCK_END_PORTAL_FRAME), 1))
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! Implements levers, buttons, pressure plates, redstone wire, and powered devices.
 
 use crate::chunk::{
-    BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    world_y_to_local_y, BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z,
 };
 use crate::Facing;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -328,7 +328,7 @@ impl RedstonePos {
         let chunk_x = self.x.div_euclid(CHUNK_SIZE_X as i32);
         let chunk_z = self.z.div_euclid(CHUNK_SIZE_Z as i32);
         let local_x = self.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = self.y as usize;
+        let local_y = world_y_to_local_y(self.y).expect("y in world bounds");
         let local_z = self.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         (ChunkPos::new(chunk_x, chunk_z), local_x, local_y, local_z)
     }
@@ -672,7 +672,7 @@ impl RedstoneSimulator {
 
     /// Process a single redstone update, returns true if power changed
     fn process_update(&mut self, pos: RedstonePos, chunks: &mut HashMap<ChunkPos, Chunk>) -> bool {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+        if world_y_to_local_y(pos.y).is_none() {
             return false;
         }
 
@@ -1330,11 +1330,17 @@ impl RedstoneSimulator {
         voxel: Voxel,
         chunks: &mut HashMap<ChunkPos, Chunk>,
     ) {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return;
-        }
+        let local_y = match world_y_to_local_y(pos.y) {
+            Some(y) => y,
+            None => return,
+        };
 
-        let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         let Some(chunk) = chunks.get_mut(&chunk_pos) else {
             return;
         };
@@ -1663,11 +1669,13 @@ impl RedstoneSimulator {
 
     /// Get voxel at a world position
     fn get_voxel(&self, pos: RedstonePos, chunks: &HashMap<ChunkPos, Chunk>) -> Option<Voxel> {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
-
-        let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
+        let local_y = world_y_to_local_y(pos.y)?;
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         chunks
             .get(&chunk_pos)
             .map(|chunk| chunk.voxel(local_x, local_y, local_z))
@@ -1675,11 +1683,17 @@ impl RedstoneSimulator {
 
     /// Set voxel at a world position
     fn set_voxel(&mut self, pos: RedstonePos, voxel: Voxel, chunks: &mut HashMap<ChunkPos, Chunk>) {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return;
-        }
+        let local_y = match world_y_to_local_y(pos.y) {
+            Some(y) => y,
+            None => return,
+        };
 
-        let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         if let Some(chunk) = chunks.get_mut(&chunk_pos) {
             let old = chunk.voxel(local_x, local_y, local_z);
             chunk.set_voxel(local_x, local_y, local_z, voxel);
@@ -1725,6 +1739,10 @@ impl Default for RedstoneSimulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local_y(world_y: i32) -> usize {
+        world_y_to_local_y(world_y).expect("world y in bounds")
+    }
 
     #[test]
     fn test_power_level_encoding() {
@@ -1817,7 +1835,7 @@ mod tests {
         let (chunk_pos, lx, ly, lz) = pos.to_chunk_local();
         assert_eq!(chunk_pos, ChunkPos::new(1, 0));
         assert_eq!(lx, 1);
-        assert_eq!(ly, 64);
+        assert_eq!(ly, local_y(64));
         assert_eq!(lz, 5);
 
         // Negative coordinates
@@ -1825,7 +1843,7 @@ mod tests {
         let (chunk_pos, lx, ly, lz) = pos.to_chunk_local();
         assert_eq!(chunk_pos, ChunkPos::new(-1, -2));
         assert_eq!(lx, 11);
-        assert_eq!(ly, 32);
+        assert_eq!(ly, local_y(32));
         assert_eq!(lz, 12);
     }
 
@@ -1884,7 +1902,7 @@ mod tests {
         // Place a lever
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -1901,7 +1919,7 @@ mod tests {
         sim.toggle_lever(pos, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(is_active(voxel.state));
         assert_eq!(get_power_level(voxel.state), MAX_POWER);
 
@@ -1912,7 +1930,7 @@ mod tests {
         sim.toggle_lever(pos, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(!is_active(voxel.state));
         assert_eq!(get_power_level(voxel.state), 0);
     }
@@ -1926,7 +1944,7 @@ mod tests {
         // Place stone instead of lever
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: 1, // Stone
@@ -1943,7 +1961,7 @@ mod tests {
         sim.toggle_lever(pos, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert_eq!(voxel.id, 1);
         assert_eq!(sim.pending_count(), 0);
     }
@@ -1957,7 +1975,7 @@ mod tests {
         // Place a stone button
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::STONE_BUTTON,
@@ -1974,14 +1992,14 @@ mod tests {
         sim.activate_button(pos, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(is_active(voxel.state));
         assert_eq!(get_power_level(voxel.state), MAX_POWER);
 
         // Activating again should do nothing (already active)
         sim.activate_button(pos, &mut chunks);
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(is_active(voxel.state));
     }
 
@@ -1994,7 +2012,7 @@ mod tests {
         // Place a stone button
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::STONE_BUTTON,
@@ -2014,7 +2032,7 @@ mod tests {
         }
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(!is_active(voxel.state));
         assert_eq!(get_power_level(voxel.state), 0);
     }
@@ -2028,7 +2046,7 @@ mod tests {
         // Place a stone pressure plate
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::STONE_PRESSURE_PLATE,
@@ -2045,7 +2063,7 @@ mod tests {
         sim.update_pressure_plate(pos, true, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(is_active(voxel.state));
         assert_eq!(get_power_level(voxel.state), MAX_POWER);
 
@@ -2053,7 +2071,7 @@ mod tests {
         sim.update_pressure_plate(pos, false, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(!is_active(voxel.state));
         assert_eq!(get_power_level(voxel.state), 0);
     }
@@ -2067,7 +2085,7 @@ mod tests {
         // Place lever and wire next to each other
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2078,7 +2096,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::REDSTONE_WIRE,
@@ -2089,7 +2107,7 @@ mod tests {
         );
         chunk.set_voxel(
             7,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::REDSTONE_WIRE,
@@ -2110,11 +2128,11 @@ mod tests {
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
 
         // First wire should have power 14 (15 - 1)
-        let wire1 = chunk.voxel(6, 64, 5);
+        let wire1 = chunk.voxel(6, local_y(64), 5);
         assert_eq!(get_power_level(wire1.state), 14);
 
         // Second wire should have power 13 (14 - 1)
-        let wire2 = chunk.voxel(7, 64, 5);
+        let wire2 = chunk.voxel(7, local_y(64), 5);
         assert_eq!(get_power_level(wire2.state), 13);
     }
 
@@ -2127,7 +2145,7 @@ mod tests {
         // Place lever and lamp next to each other
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2138,7 +2156,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2154,7 +2172,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let lamp = chunk.voxel(6, 64, 5);
+        let lamp = chunk.voxel(6, local_y(64), 5);
 
         // Lamp should be lit
         assert_eq!(lamp.id, redstone_blocks::REDSTONE_LAMP_LIT);
@@ -2169,7 +2187,7 @@ mod tests {
 
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2180,7 +2198,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: crate::interactive_blocks::IRON_DOOR_LOWER,
@@ -2191,7 +2209,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            65,
+            local_y(65),
             5,
             Voxel {
                 id: crate::interactive_blocks::IRON_DOOR_UPPER,
@@ -2208,8 +2226,8 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let lower = chunk.voxel(6, 64, 5);
-        let upper = chunk.voxel(6, 65, 5);
+        let lower = chunk.voxel(6, local_y(64), 5);
+        let upper = chunk.voxel(6, local_y(65), 5);
         assert!(crate::is_door_open(lower.state));
         assert!(crate::is_door_open(upper.state));
         assert!(crate::is_redstone_powered(lower.state));
@@ -2219,8 +2237,8 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let lower = chunk.voxel(6, 64, 5);
-        let upper = chunk.voxel(6, 65, 5);
+        let lower = chunk.voxel(6, local_y(64), 5);
+        let upper = chunk.voxel(6, local_y(65), 5);
         assert!(!crate::is_door_open(lower.state));
         assert!(!crate::is_door_open(upper.state));
         assert!(!crate::is_redstone_powered(lower.state));
@@ -2237,7 +2255,7 @@ mod tests {
 
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: crate::interactive_blocks::OAK_DOOR_LOWER,
@@ -2248,7 +2266,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            65,
+            local_y(65),
             5,
             Voxel {
                 id: crate::interactive_blocks::OAK_DOOR_UPPER,
@@ -2263,8 +2281,8 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let lower = chunk.voxel(5, 64, 5);
-        let upper = chunk.voxel(5, 65, 5);
+        let lower = chunk.voxel(5, local_y(64), 5);
+        let upper = chunk.voxel(5, local_y(65), 5);
         assert!(crate::is_door_open(lower.state));
         assert!(crate::is_door_open(upper.state));
         assert!(!crate::is_redstone_powered(lower.state));
@@ -2280,7 +2298,7 @@ mod tests {
         // Lever adjacent to both the trapdoor and the gate.
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2291,7 +2309,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: crate::interactive_blocks::TRAPDOOR,
@@ -2302,7 +2320,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             6,
             Voxel {
                 id: crate::interactive_blocks::OAK_FENCE_GATE,
@@ -2319,8 +2337,8 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let trapdoor = chunk.voxel(6, 64, 5);
-        let gate = chunk.voxel(5, 64, 6);
+        let trapdoor = chunk.voxel(6, local_y(64), 5);
+        let gate = chunk.voxel(5, local_y(64), 6);
         assert!(crate::is_trapdoor_open(trapdoor.state));
         assert!(crate::is_fence_gate_open(gate.state));
         assert!(crate::is_redstone_powered(trapdoor.state));
@@ -2330,8 +2348,8 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let trapdoor = chunk.voxel(6, 64, 5);
-        let gate = chunk.voxel(5, 64, 6);
+        let trapdoor = chunk.voxel(6, local_y(64), 5);
+        let gate = chunk.voxel(5, local_y(64), 6);
         assert!(!crate::is_trapdoor_open(trapdoor.state));
         assert!(!crate::is_fence_gate_open(gate.state));
         assert!(!crate::is_redstone_powered(trapdoor.state));
@@ -2347,7 +2365,7 @@ mod tests {
         // Place wire below and torch above
         chunk.set_voxel(
             5,
-            63,
+            local_y(63),
             5,
             Voxel {
                 id: redstone_blocks::REDSTONE_WIRE,
@@ -2358,7 +2376,7 @@ mod tests {
         );
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::REDSTONE_TORCH,
@@ -2374,7 +2392,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let torch = chunk.voxel(5, 64, 5);
+        let torch = chunk.voxel(5, local_y(64), 5);
 
         // Torch should be off (inverted)
         assert!(!is_active(torch.state));
@@ -2390,7 +2408,7 @@ mod tests {
 
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2418,8 +2436,14 @@ mod tests {
         chunks.insert(ChunkPos::new(0, 0), create_test_chunk());
 
         // Try to toggle lever at invalid Y
-        sim.toggle_lever(RedstonePos::new(5, -1, 5), &mut chunks);
-        sim.toggle_lever(RedstonePos::new(5, 256, 5), &mut chunks);
+        sim.toggle_lever(
+            RedstonePos::new(5, crate::chunk::WORLD_MIN_Y - 1, 5),
+            &mut chunks,
+        );
+        sim.toggle_lever(
+            RedstonePos::new(5, crate::chunk::WORLD_MAX_Y + 1, 5),
+            &mut chunks,
+        );
 
         // Should not crash, just do nothing
         assert_eq!(sim.pending_count(), 0);
@@ -2434,7 +2458,7 @@ mod tests {
         // Place an oak button
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::OAK_BUTTON,
@@ -2449,7 +2473,7 @@ mod tests {
         sim.activate_button(pos, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(is_active(voxel.state));
     }
 
@@ -2461,7 +2485,7 @@ mod tests {
 
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::OAK_PRESSURE_PLATE,
@@ -2476,7 +2500,7 @@ mod tests {
         sim.update_pressure_plate(pos, true, &mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let voxel = chunk.voxel(5, 64, 5);
+        let voxel = chunk.voxel(5, local_y(64), 5);
         assert!(is_active(voxel.state));
     }
 
@@ -2631,7 +2655,7 @@ mod tests {
 
         chunk.set_voxel(
             lever_pos.x as usize,
-            lever_pos.y as usize,
+            local_y(lever_pos.y),
             lever_pos.z as usize,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2646,7 +2670,7 @@ mod tests {
         repeater_state = set_repeater_delay_ticks(repeater_state, 2);
         chunk.set_voxel(
             repeater_pos.x as usize,
-            repeater_pos.y as usize,
+            local_y(repeater_pos.y),
             repeater_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_REPEATER,
@@ -2658,7 +2682,7 @@ mod tests {
 
         chunk.set_voxel(
             lamp_front_pos.x as usize,
-            lamp_front_pos.y as usize,
+            local_y(lamp_front_pos.y),
             lamp_front_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2670,7 +2694,7 @@ mod tests {
 
         chunk.set_voxel(
             lamp_side_pos.x as usize,
-            lamp_side_pos.y as usize,
+            local_y(lamp_side_pos.y),
             lamp_side_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2689,27 +2713,45 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(!is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert!(!is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Tick 2: still waiting.
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(!is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert!(!is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Tick 3: output applies and powers only the front lamp.
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert!(is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP_LIT
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
     }
 
@@ -2728,7 +2770,7 @@ mod tests {
 
         chunk.set_voxel(
             rear_lever_pos.x as usize,
-            rear_lever_pos.y as usize,
+            local_y(rear_lever_pos.y),
             rear_lever_pos.z as usize,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2740,7 +2782,7 @@ mod tests {
 
         chunk.set_voxel(
             side_lever_pos.x as usize,
-            side_lever_pos.y as usize,
+            local_y(side_lever_pos.y),
             side_lever_pos.z as usize,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -2752,7 +2794,7 @@ mod tests {
 
         chunk.set_voxel(
             side_wire_pos.x as usize,
-            side_wire_pos.y as usize,
+            local_y(side_wire_pos.y),
             side_wire_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_WIRE,
@@ -2768,7 +2810,7 @@ mod tests {
         comparator_state = set_comparator_output_power(comparator_state, 0);
         chunk.set_voxel(
             comparator_pos.x as usize,
-            comparator_pos.y as usize,
+            local_y(comparator_pos.y),
             comparator_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_COMPARATOR,
@@ -2780,7 +2822,7 @@ mod tests {
 
         chunk.set_voxel(
             front_lamp_pos.x as usize,
-            front_lamp_pos.y as usize,
+            local_y(front_lamp_pos.y),
             front_lamp_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2792,7 +2834,7 @@ mod tests {
 
         chunk.set_voxel(
             side_lamp_pos.x as usize,
-            side_lamp_pos.y as usize,
+            local_y(side_lamp_pos.y),
             side_lamp_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2812,30 +2854,42 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            let comparator = chunk.voxel(6, 64, 5);
+            let comparator = chunk.voxel(6, local_y(64), 5);
             assert_eq!(comparator_output_power(comparator.state), 0);
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Tick 2: compare-mode output applies (rear 15 >= side 14) => 15, and only powers front.
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            let comparator = chunk.voxel(6, 64, 5);
+            let comparator = chunk.voxel(6, local_y(64), 5);
             assert_eq!(comparator_output_power(comparator.state), MAX_POWER);
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP_LIT
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Toggle to subtract mode.
         {
             let chunk = chunks.get_mut(&ChunkPos::new(0, 0)).unwrap();
-            let voxel = chunk.voxel(6, 64, 5);
+            let voxel = chunk.voxel(6, local_y(64), 5);
             let new_state = set_comparator_subtract_mode(voxel.state, true);
             chunk.set_voxel(
                 6,
-                64,
+                local_y(64),
                 5,
                 Voxel {
                     state: new_state,
@@ -2849,7 +2903,7 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            let comparator = chunk.voxel(6, 64, 5);
+            let comparator = chunk.voxel(6, local_y(64), 5);
             assert_eq!(comparator_output_power(comparator.state), MAX_POWER);
         }
 
@@ -2857,10 +2911,16 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            let comparator = chunk.voxel(6, 64, 5);
+            let comparator = chunk.voxel(6, local_y(64), 5);
             assert_eq!(comparator_output_power(comparator.state), 1);
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP_LIT
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
     }
 
@@ -2877,7 +2937,7 @@ mod tests {
 
         chunk.set_voxel(
             observed_pos.x as usize,
-            observed_pos.y as usize,
+            local_y(observed_pos.y),
             observed_pos.z as usize,
             Voxel {
                 id: 1,
@@ -2891,7 +2951,7 @@ mod tests {
         observer_state = set_observer_facing(observer_state, Facing::East);
         chunk.set_voxel(
             observer_pos.x as usize,
-            observer_pos.y as usize,
+            local_y(observer_pos.y),
             observer_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_OBSERVER,
@@ -2903,7 +2963,7 @@ mod tests {
 
         chunk.set_voxel(
             front_lamp_pos.x as usize,
-            front_lamp_pos.y as usize,
+            local_y(front_lamp_pos.y),
             front_lamp_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2915,7 +2975,7 @@ mod tests {
 
         chunk.set_voxel(
             side_lamp_pos.x as usize,
-            side_lamp_pos.y as usize,
+            local_y(side_lamp_pos.y),
             side_lamp_pos.z as usize,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP,
@@ -2932,12 +2992,18 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            let observer = chunk.voxel(6, 64, 5);
+            let observer = chunk.voxel(6, local_y(64), 5);
             assert_eq!(observer.id, redstone_blocks::REDSTONE_OBSERVER);
             assert!(!is_active(observer.state));
             assert_ne!(observer_observed_hash(observer.state), 0);
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Change the observed block behind the observer.
@@ -2945,7 +3011,7 @@ mod tests {
             let chunk = chunks.get_mut(&ChunkPos::new(0, 0)).unwrap();
             chunk.set_voxel(
                 observed_pos.x as usize,
-                observed_pos.y as usize,
+                local_y(observed_pos.y),
                 observed_pos.z as usize,
                 Voxel {
                     id: 24, // Cobblestone
@@ -2961,34 +3027,52 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(!is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert!(!is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Tick 3: pulse turns on and powers only the front lamp.
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
-            assert_eq!(chunk.voxel(6, 64, 6).id, redstone_blocks::REDSTONE_LAMP);
+            assert!(is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP_LIT
+            );
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 6).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
 
         // Tick 4: still on (2-tick pulse).
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP_LIT);
+            assert!(is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP_LIT
+            );
         }
 
         // Tick 5: pulse turns off.
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(!is_active(chunk.voxel(6, 64, 5).state));
-            assert_eq!(chunk.voxel(7, 64, 5).id, redstone_blocks::REDSTONE_LAMP);
+            assert!(!is_active(chunk.voxel(6, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(7, local_y(64), 5).id,
+                redstone_blocks::REDSTONE_LAMP
+            );
         }
     }
 
@@ -3014,7 +3098,7 @@ mod tests {
         // Place a lit lamp with no power source
         chunk.set_voxel(
             5,
-            64,
+            local_y(64),
             5,
             Voxel {
                 id: redstone_blocks::REDSTONE_LAMP_LIT,
@@ -3029,7 +3113,7 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let lamp = chunk.voxel(5, 64, 5);
+        let lamp = chunk.voxel(5, local_y(64), 5);
 
         // Lamp should turn off
         assert_eq!(lamp.id, redstone_blocks::REDSTONE_LAMP);
@@ -3056,7 +3140,7 @@ mod tests {
         // Lever powering piston from the rear.
         chunk.set_voxel(
             lever_pos.x as usize,
-            lever_pos.y as usize,
+            local_y(lever_pos.y),
             lever_pos.z as usize,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -3071,7 +3155,7 @@ mod tests {
         piston_state = set_active(piston_state, false);
         chunk.set_voxel(
             piston_pos.x as usize,
-            piston_pos.y as usize,
+            local_y(piston_pos.y),
             piston_pos.z as usize,
             Voxel {
                 id: mechanical_blocks::PISTON,
@@ -3084,7 +3168,7 @@ mod tests {
         // Block to push.
         chunk.set_voxel(
             pushed_pos.x as usize,
-            pushed_pos.y as usize,
+            local_y(pushed_pos.y),
             pushed_pos.z as usize,
             Voxel {
                 id: 1, // Stone
@@ -3102,13 +3186,13 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(!is_active(chunk.voxel(5, 64, 5).state));
-            assert_eq!(chunk.voxel(6, 64, 5).id, 1);
+            assert!(!is_active(chunk.voxel(5, local_y(64), 5).state));
+            assert_eq!(chunk.voxel(6, local_y(64), 5).id, 1);
             assert_eq!(
                 chunk
                     .voxel(
                         dest_pos.x as usize,
-                        dest_pos.y as usize,
+                        local_y(dest_pos.y),
                         dest_pos.z as usize
                     )
                     .id,
@@ -3120,13 +3204,16 @@ mod tests {
         sim.tick(&mut chunks);
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert!(is_active(chunk.voxel(5, 64, 5).state));
-            assert_eq!(chunk.voxel(6, 64, 5).id, mechanical_blocks::PISTON_HEAD);
+            assert!(is_active(chunk.voxel(5, local_y(64), 5).state));
+            assert_eq!(
+                chunk.voxel(6, local_y(64), 5).id,
+                mechanical_blocks::PISTON_HEAD
+            );
             assert_eq!(
                 chunk
                     .voxel(
                         dest_pos.x as usize,
-                        dest_pos.y as usize,
+                        local_y(dest_pos.y),
                         dest_pos.z as usize
                     )
                     .id,
@@ -3146,7 +3233,7 @@ mod tests {
 
         chunk.set_voxel(
             lever_pos.x as usize,
-            lever_pos.y as usize,
+            local_y(lever_pos.y),
             lever_pos.z as usize,
             Voxel {
                 id: redstone_blocks::LEVER,
@@ -3155,7 +3242,7 @@ mod tests {
         );
         chunk.set_voxel(
             hopper_pos.x as usize,
-            hopper_pos.y as usize,
+            local_y(hopper_pos.y),
             hopper_pos.z as usize,
             Voxel {
                 id: mechanical_blocks::HOPPER,
@@ -3173,7 +3260,7 @@ mod tests {
                 chunk
                     .voxel(
                         hopper_pos.x as usize,
-                        hopper_pos.y as usize,
+                        local_y(hopper_pos.y),
                         hopper_pos.z as usize
                     )
                     .state
@@ -3188,7 +3275,7 @@ mod tests {
                 chunk
                     .voxel(
                         hopper_pos.x as usize,
-                        hopper_pos.y as usize,
+                        local_y(hopper_pos.y),
                         hopper_pos.z as usize
                     )
                     .state
@@ -3210,7 +3297,7 @@ mod tests {
         for pos in [lever_dropper_pos, lever_dispenser_pos] {
             chunk.set_voxel(
                 pos.x as usize,
-                pos.y as usize,
+                local_y(pos.y),
                 pos.z as usize,
                 Voxel {
                     id: redstone_blocks::LEVER,
@@ -3221,7 +3308,7 @@ mod tests {
 
         chunk.set_voxel(
             dropper_pos.x as usize,
-            dropper_pos.y as usize,
+            local_y(dropper_pos.y),
             dropper_pos.z as usize,
             Voxel {
                 id: mechanical_blocks::DROPPER,
@@ -3231,7 +3318,7 @@ mod tests {
         );
         chunk.set_voxel(
             dispenser_pos.x as usize,
-            dispenser_pos.y as usize,
+            local_y(dispenser_pos.y),
             dispenser_pos.z as usize,
             Voxel {
                 id: mechanical_blocks::DISPENSER,
@@ -3252,7 +3339,7 @@ mod tests {
                 chunk
                     .voxel(
                         dropper_pos.x as usize,
-                        dropper_pos.y as usize,
+                        local_y(dropper_pos.y),
                         dropper_pos.z as usize
                     )
                     .state
@@ -3261,7 +3348,7 @@ mod tests {
                 chunk
                     .voxel(
                         dispenser_pos.x as usize,
-                        dispenser_pos.y as usize,
+                        local_y(dispenser_pos.y),
                         dispenser_pos.z as usize
                     )
                     .state
@@ -3278,7 +3365,7 @@ mod tests {
                 chunk
                     .voxel(
                         dropper_pos.x as usize,
-                        dropper_pos.y as usize,
+                        local_y(dropper_pos.y),
                         dropper_pos.z as usize
                     )
                     .state
@@ -3287,7 +3374,7 @@ mod tests {
                 chunk
                     .voxel(
                         dispenser_pos.x as usize,
-                        dispenser_pos.y as usize,
+                        local_y(dispenser_pos.y),
                         dispenser_pos.z as usize
                     )
                     .state

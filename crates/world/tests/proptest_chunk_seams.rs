@@ -10,7 +10,9 @@
 //! - Biome transitions are smooth
 //! - No gaps or overlaps
 
-use mdminecraft_world::{BiomeAssigner, Heightmap, CHUNK_SIZE_X, CHUNK_SIZE_Z};
+use mdminecraft_world::{
+    BiomeAssigner, Heightmap, CHUNK_SIZE_X, CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y,
+};
 use proptest::prelude::*;
 
 /// Maximum allowed height difference at chunk boundaries (blocks)
@@ -147,9 +149,9 @@ proptest! {
             for x in 0..CHUNK_SIZE_X {
                 let h = hm.get(x, z);
                 prop_assert!(
-                    (0..=255).contains(&h),
-                    "Height {} out of bounds [0, 255] at chunk ({}, {}) pos ({}, {})",
-                    h, chunk_x, chunk_z, x, z
+                    (WORLD_MIN_Y..=WORLD_MAX_Y).contains(&h),
+                    "Height {} out of bounds [{}, {}] at chunk ({}, {}) pos ({}, {})",
+                    h, WORLD_MIN_Y, WORLD_MAX_Y, chunk_x, chunk_z, x, z
                 );
             }
         }

@@ -1,4 +1,4 @@
-use crate::chunk::{Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{world_y_to_local_y, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z};
 use crate::persist::BlockEntityKey;
 use crate::redstone::{mechanical_blocks, RedstonePos, RedstoneSimulator};
 use crate::{interactive_blocks, ChestState, DispenserState, HopperState, ItemManager, ItemType};
@@ -41,16 +41,18 @@ pub fn update_container_signal(
     pos: RedstonePos,
     slots: &[Option<CoreItemStack>],
 ) {
-    if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
+    let Some(local_y) = world_y_to_local_y(pos.y) else {
         return;
-    }
+    };
 
     let desired = comparator_signal_from_core_slots(slots);
 
-    let (chunk_pos, local_x, local_y, local_z) = pos.to_chunk_local();
-    if local_y >= CHUNK_SIZE_Y {
-        return;
-    }
+    let chunk_pos = ChunkPos::new(
+        pos.x.div_euclid(CHUNK_SIZE_X as i32),
+        pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+    );
+    let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+    let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
     let Some(chunk) = chunks.get_mut(&chunk_pos) else {
         return;
@@ -210,9 +212,7 @@ where
     } = ctx;
 
     let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: RedstonePos| -> Option<Voxel> {
-        if pos.y < 0 || pos.y >= CHUNK_SIZE_Y as i32 {
-            return None;
-        }
+        let local_y = world_y_to_local_y(pos.y)?;
 
         let chunk_pos = ChunkPos::new(
             pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -221,7 +221,7 @@ where
         let chunk = chunks.get(&chunk_pos)?;
         let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
         let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-        Some(chunk.voxel(local_x, pos.y as usize, local_z))
+        Some(chunk.voxel(local_x, local_y, local_z))
     };
 
     let hopper_keys: Vec<_> = hoppers.keys().copied().collect();

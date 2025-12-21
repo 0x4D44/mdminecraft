@@ -3,7 +3,7 @@
 //! Generates different tree types based on biome characteristics.
 
 use crate::biome::BiomeId;
-use crate::chunk::{Chunk, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{world_y_to_local_y, Chunk, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z};
 use crate::terrain::blocks;
 
 /// Additional block IDs for tree structures.
@@ -234,19 +234,21 @@ impl Tree {
         let local_x = world_x - chunk_origin_x;
         let local_z = world_z - chunk_origin_z;
 
+        let Some(local_y) = world_y_to_local_y(world_y) else {
+            return;
+        };
+
         if local_x >= 0
             && local_x < CHUNK_SIZE_X as i32
             && local_z >= 0
             && local_z < CHUNK_SIZE_Z as i32
-            && world_y >= 0
-            && world_y < CHUNK_SIZE_Y as i32
         {
             // Only place if current block is air (don't replace existing blocks)
-            let current = chunk.voxel(local_x as usize, world_y as usize, local_z as usize);
+            let current = chunk.voxel(local_x as usize, local_y, local_z as usize);
             if current.id == blocks::AIR {
                 chunk.set_voxel(
                     local_x as usize,
-                    world_y as usize,
+                    local_y,
                     local_z as usize,
                     Voxel {
                         id: block_id,
@@ -310,6 +312,10 @@ mod tests {
     use super::*;
     use crate::chunk::ChunkPos;
 
+    fn local_y(world_y: i32) -> usize {
+        crate::chunk::world_y_to_local_y(world_y).expect("world y in bounds")
+    }
+
     #[test]
     fn test_tree_type_for_biome() {
         assert_eq!(TreeType::for_biome(BiomeId::Forest), Some(TreeType::Oak));
@@ -348,7 +354,7 @@ mod tests {
 
         // Check trunk blocks exist
         for y in 64..69 {
-            let voxel = chunk.voxel(5, y, 5);
+            let voxel = chunk.voxel(5, local_y(y), 5);
             assert_eq!(voxel.id, tree_blocks::LOG, "Expected log at y={}", y);
         }
     }
@@ -365,7 +371,7 @@ mod tests {
         for y in 69..73 {
             for x in 4..=6 {
                 for z in 4..=6 {
-                    let voxel = chunk.voxel(x, y, z);
+                    let voxel = chunk.voxel(x, local_y(y), z);
                     if voxel.id == tree_blocks::LEAVES {
                         leaf_count += 1;
                     }
@@ -385,7 +391,7 @@ mod tests {
         tree.generate_into_chunk(&mut chunk);
 
         // Should not panic, only places blocks within bounds
-        let voxel = chunk.voxel(15, 64, 15);
+        let voxel = chunk.voxel(15, local_y(64), 15);
         assert_eq!(voxel.id, tree_blocks::LOG);
     }
 
@@ -396,7 +402,7 @@ mod tests {
         // Place a stone block where tree would go
         chunk.set_voxel(
             5,
-            65,
+            local_y(65),
             5,
             Voxel {
                 id: blocks::STONE,
@@ -408,7 +414,7 @@ mod tests {
         tree.generate_into_chunk(&mut chunk);
 
         // Stone should still be there (tree doesn't replace)
-        let voxel = chunk.voxel(5, 65, 5);
+        let voxel = chunk.voxel(5, local_y(65), 5);
         assert_eq!(voxel.id, blocks::STONE);
     }
 
