@@ -23635,7 +23635,7 @@ mod tests {
     use mdminecraft_world::StatusEffect;
 
     fn local_y(world_y: i32) -> usize {
-        mdminecraft_world::chunk::world_y_to_local_y(world_y).expect("world y in bounds")
+        mdminecraft_world::world_y_to_local_y(world_y).expect("world y in bounds")
     }
 
     fn find_nether_fortress_chest_key(world_seed: u64) -> mdminecraft_world::BlockEntityKey {
@@ -24603,7 +24603,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::STONE_SLAB,
@@ -24613,7 +24613,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::STONE_SLAB,
@@ -24623,7 +24623,7 @@ mod tests {
         );
         chunk.set_voxel(
             2,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::TRAPDOOR,
@@ -24633,7 +24633,7 @@ mod tests {
         );
         chunk.set_voxel(
             3,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::TRAPDOOR,
@@ -24726,7 +24726,7 @@ mod tests {
         let base = mdminecraft_world::Facing::North.to_state();
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
@@ -24765,7 +24765,7 @@ mod tests {
             .expect("chunk exists")
             .set_voxel(
                 0,
-                64,
+                local_y(64),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
@@ -24799,7 +24799,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_FENCE,
@@ -24835,7 +24835,7 @@ mod tests {
             .expect("chunk exists")
             .set_voxel(
                 1,
-                64,
+                local_y(64),
                 0,
                 Voxel {
                     id: mdminecraft_world::BLOCK_STONE,
@@ -24858,7 +24858,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::COBBLESTONE_WALL,
@@ -24890,7 +24890,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::STONE_BRICK_WALL,
@@ -24922,7 +24922,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_FENCE,
@@ -24933,7 +24933,7 @@ mod tests {
         // Connect fence to east and south.
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -24942,7 +24942,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -24993,7 +24993,7 @@ mod tests {
         let base = mdminecraft_world::Facing::North.to_state();
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_FENCE_GATE,
@@ -25024,7 +25024,7 @@ mod tests {
             .expect("chunk exists")
             .set_voxel(
                 0,
-                64,
+                local_y(64),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::OAK_FENCE_GATE,
@@ -25054,7 +25054,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::GLASS_PANE,
@@ -25092,7 +25092,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::IRON_BARS,
@@ -25130,7 +25130,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::GLASS_PANE,
@@ -25141,7 +25141,7 @@ mod tests {
         // Connect to east and south.
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -25150,7 +25150,7 @@ mod tests {
         );
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: mdminecraft_world::BLOCK_STONE,
@@ -25199,7 +25199,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::GLASS_PANE,
@@ -25208,7 +25208,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::IRON_BARS,
@@ -25236,7 +25236,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::GLASS_PANE,
@@ -25245,7 +25245,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
@@ -25255,7 +25255,7 @@ mod tests {
         );
         chunk.set_voxel(
             1,
-            65,
+            local_y(65),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER,
@@ -25287,7 +25287,7 @@ mod tests {
         for x in 0..3 {
             chunk.set_voxel(
                 x,
-                0,
+                local_y(0),
                 0,
                 Voxel {
                     id: mdminecraft_world::BLOCK_STONE,
@@ -25299,7 +25299,7 @@ mod tests {
         // A bottom slab one block ahead (requires a 0.5-block step).
         chunk.set_voxel(
             1,
-            1,
+            local_y(1),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::STONE_SLAB,
@@ -25358,7 +25358,7 @@ mod tests {
         for x in 0..3 {
             chunk.set_voxel(
                 x,
-                0,
+                local_y(0),
                 0,
                 Voxel {
                     id: mdminecraft_world::BLOCK_STONE,
@@ -25370,7 +25370,7 @@ mod tests {
         // Stairs one block ahead. Collision is simplified to a 0.5-block step.
         chunk.set_voxel(
             1,
-            1,
+            local_y(1),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
@@ -25414,7 +25414,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             0,
-            64,
+            local_y(64),
             0,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
@@ -25466,7 +25466,7 @@ mod tests {
 
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
@@ -25498,7 +25498,7 @@ mod tests {
             .expect("chunk exists")
             .set_voxel(
                 1,
-                64,
+                local_y(64),
                 0,
                 Voxel {
                     id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
@@ -25523,7 +25523,7 @@ mod tests {
 
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
@@ -25535,7 +25535,7 @@ mod tests {
         // Front stair facing east creates an outer-left corner on the south-facing stair.
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             2,
             Voxel {
                 id: mdminecraft_world::interactive_blocks::OAK_STAIRS,
@@ -27215,7 +27215,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: FluidType::Water.source_block_id(),
@@ -27246,7 +27246,10 @@ mod tests {
             Some((CORE_ITEM_WATER_BUCKET, vec![glam::IVec3::new(1, 64, 1)]))
         );
 
-        let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(1, 64, 1);
+        let voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .unwrap()
+            .voxel(1, local_y(64), 1);
         assert_eq!(voxel.id, BLOCK_AIR);
     }
 
@@ -27255,7 +27258,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: BLOCK_COBBLESTONE,
@@ -27286,7 +27289,10 @@ mod tests {
             Some((CORE_ITEM_BUCKET, vec![glam::IVec3::new(2, 64, 1)]))
         );
 
-        let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(2, 64, 1);
+        let voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .unwrap()
+            .voxel(2, local_y(64), 1);
         assert_eq!(voxel.id, FluidType::Water.source_block_id());
         assert_eq!(fluid_sim.pending_count(), 1);
     }
@@ -27296,7 +27302,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: BLOCK_COBBLESTONE,
@@ -27324,7 +27330,10 @@ mod tests {
         );
         assert_eq!(result, Some((CORE_ITEM_BUCKET, Vec::new())));
 
-        let voxel = chunks.get(&ChunkPos::new(0, 0)).unwrap().voxel(2, 64, 1);
+        let voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .unwrap()
+            .voxel(2, local_y(64), 1);
         assert_eq!(voxel.id, BLOCK_AIR);
         assert_eq!(fluid_sim.pending_count(), 0);
     }
@@ -27343,7 +27352,7 @@ mod tests {
 
                 chunk.set_voxel(
                     (origin.x + w) as usize,
-                    (origin.y + h) as usize,
+                    local_y(origin.y + h),
                     origin.z as usize,
                     Voxel {
                         id: BLOCK_OBSIDIAN,
@@ -27364,7 +27373,7 @@ mod tests {
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         for x in 2..=3 {
             for y in 11..=13 {
-                let voxel = chunk.voxel(x as usize, y as usize, 1);
+                let voxel = chunk.voxel(x as usize, local_y(y), 1);
                 assert_eq!(voxel.id, BLOCK_NETHER_PORTAL);
                 assert_eq!(voxel.state, 0);
             }
@@ -27385,7 +27394,7 @@ mod tests {
 
                 chunk.set_voxel(
                     origin.x as usize,
-                    (origin.y + h) as usize,
+                    local_y(origin.y + h),
                     (origin.z + w) as usize,
                     Voxel {
                         id: BLOCK_OBSIDIAN,
@@ -27406,7 +27415,7 @@ mod tests {
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         for z in 2..=3 {
             for y in 11..=13 {
-                let voxel = chunk.voxel(1, y as usize, z as usize);
+                let voxel = chunk.voxel(1, local_y(y), z as usize);
                 assert_eq!(voxel.id, BLOCK_NETHER_PORTAL);
                 assert_eq!(voxel.state, 1);
             }
@@ -27425,7 +27434,7 @@ mod tests {
                 if is_border {
                     chunk.set_voxel(
                         pos.x as usize,
-                        pos.y as usize,
+                        local_y(pos.y),
                         pos.z as usize,
                         Voxel {
                             id: BLOCK_END_PORTAL_FRAME,
@@ -27436,7 +27445,7 @@ mod tests {
                 } else {
                     chunk.set_voxel(
                         pos.x as usize,
-                        pos.y as usize,
+                        local_y(pos.y),
                         pos.z as usize,
                         Voxel {
                             id: BLOCK_AIR,
@@ -27457,7 +27466,7 @@ mod tests {
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
         for x in (origin.x + 1)..=(origin.x + 3) {
             for z in (origin.z + 1)..=(origin.z + 3) {
-                let voxel = chunk.voxel(x as usize, origin.y as usize, z as usize);
+                let voxel = chunk.voxel(x as usize, local_y(origin.y), z as usize);
                 assert_eq!(voxel.id, BLOCK_END_PORTAL);
             }
         }
@@ -27478,7 +27487,7 @@ mod tests {
                 let state = if dx == 0 && dz == 0 { 0x00 } else { 0x01 };
                 chunk.set_voxel(
                     (origin.x + dx) as usize,
-                    origin.y as usize,
+                    local_y(origin.y),
                     (origin.z + dz) as usize,
                     Voxel {
                         id: BLOCK_END_PORTAL_FRAME,
@@ -29488,7 +29497,7 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
             1,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: BLOCK_COBBLESTONE,
@@ -29498,7 +29507,7 @@ mod tests {
         );
         chunk.set_voxel(
             2,
-            64,
+            local_y(64),
             1,
             Voxel {
                 id: interactive_blocks::CHEST,
@@ -29523,7 +29532,7 @@ mod tests {
         );
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            assert_eq!(chunk.voxel(1, 64, 1).state, 0x1234);
+            assert_eq!(chunk.voxel(1, local_y(64), 1).state, 0x1234);
         }
 
         mdminecraft_world::update_container_signal(
@@ -29534,7 +29543,7 @@ mod tests {
         );
         {
             let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-            let chest = chunk.voxel(2, 64, 1);
+            let chest = chunk.voxel(2, local_y(64), 1);
             assert_eq!(mdminecraft_world::get_power_level(chest.state), desired);
         }
     }
