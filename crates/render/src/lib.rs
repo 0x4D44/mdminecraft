@@ -24,8 +24,8 @@ use mdminecraft_assets::TextureAtlasMetadata;
 pub use mesh::{mesh_chunk, mesh_chunk_with_voxel_at, MeshBuffers, MeshHash, MeshVertex};
 pub use particles::{ParticleEmitter, ParticleSystem, ParticleVertex};
 pub use pipeline::{
-    ChunkMeshBuffer, HighlightUniform, ParticlePipeline, RenderContext, SkyboxPipeline,
-    VoxelPipeline, WireframePipeline,
+    ChunkMeshBuffer, ChunkUniform, HighlightUniform, ParticlePipeline, RenderContext,
+    SkyboxPipeline, VoxelPipeline, WireframePipeline,
 };
 pub use raycast::{raycast, RaycastHit};
 pub use texture_atlas::{atlas_exists, warn_missing_atlas};

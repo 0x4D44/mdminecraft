@@ -186,7 +186,7 @@ fn main() -> Result<()> {
                 let mesh = mesh_chunk(&chunk, &registry, renderer.atlas_metadata());
 
                 total_vertices += mesh.vertices.len();
-                total_indices += mesh.indices.len();
+                total_indices += mesh.indices_opaque.len() + mesh.indices_alpha.len();
 
                 // Create chunk bind group
                 let chunk_bind_group = resources
@@ -555,6 +555,12 @@ fn main() -> Result<()> {
 
                                     chunks_visible += 1;
 
+                                    let Some(index_buffer) =
+                                        chunk_data.opaque_index_buffer.as_ref()
+                                    else {
+                                        continue;
+                                    };
+
                                     render_pass.set_bind_group(
                                         1,
                                         &chunk_data.chunk_bind_group,
@@ -563,10 +569,14 @@ fn main() -> Result<()> {
                                     render_pass
                                         .set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
                                     render_pass.set_index_buffer(
-                                        chunk_data.index_buffer.slice(..),
+                                        index_buffer.slice(..),
                                         wgpu::IndexFormat::Uint32,
                                     );
-                                    render_pass.draw_indexed(0..chunk_data.index_count, 0, 0..1);
+                                    render_pass.draw_indexed(
+                                        0..chunk_data.opaque_index_count,
+                                        0,
+                                        0..1,
+                                    );
                                 }
                             }
 
@@ -592,7 +602,7 @@ fn main() -> Result<()> {
                                 let mut fluid_chunks: Vec<_> = chunk_manager
                                     .chunks()
                                     .filter(|chunk_data| {
-                                        chunk_data.has_fluid
+                                        chunk_data.alpha_index_count != 0
                                             && frustum.is_chunk_visible(chunk_data.chunk_pos)
                                     })
                                     .collect();
@@ -614,6 +624,10 @@ fn main() -> Result<()> {
                                 });
 
                                 for chunk_data in fluid_chunks {
+                                    let index_buffer = chunk_data
+                                        .alpha_index_buffer
+                                        .as_ref()
+                                        .expect("alpha_index_buffer present");
                                     render_pass.set_bind_group(
                                         1,
                                         &chunk_data.chunk_bind_group,
@@ -622,10 +636,14 @@ fn main() -> Result<()> {
                                     render_pass
                                         .set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
                                     render_pass.set_index_buffer(
-                                        chunk_data.index_buffer.slice(..),
+                                        index_buffer.slice(..),
                                         wgpu::IndexFormat::Uint32,
                                     );
-                                    render_pass.draw_indexed(0..chunk_data.index_count, 0, 0..1);
+                                    render_pass.draw_indexed(
+                                        0..chunk_data.alpha_index_count,
+                                        0,
+                                        0..1,
+                                    );
                                 }
                             }
 

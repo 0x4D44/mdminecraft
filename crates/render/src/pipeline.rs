@@ -112,13 +112,44 @@ impl RenderContext {
 pub struct ChunkUniform {
     /// Chunk offset in world coordinates
     pub chunk_offset: [f32; 3],
-    /// Padding for alignment
-    pub _padding: f32,
+    /// Padding for std140 alignment.
+    pub _padding0: f32,
+    /// Grass biome tint in linear space.
+    pub grass_tint: [f32; 3],
+    /// Padding for std140 alignment.
+    pub _padding1: f32,
+    /// Foliage biome tint in linear space.
+    pub foliage_tint: [f32; 3],
+    /// Padding for std140 alignment.
+    pub _padding2: f32,
+    /// Water biome tint in linear space.
+    pub water_tint: [f32; 3],
+    /// Padding for std140 alignment.
+    pub _padding3: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct AtlasParamsUniform {
+    atlas_width: f32,
+    atlas_height: f32,
+    tile_size: f32,
+    padding: f32,
 }
 
 impl ChunkUniform {
     /// Create chunk uniform from chunk position.
     pub fn from_chunk_pos(chunk_pos: mdminecraft_world::ChunkPos) -> Self {
+        Self::from_chunk_pos_with_tints(chunk_pos, [1.0; 3], [1.0; 3], [0.2, 0.5, 0.9])
+    }
+
+    /// Create chunk uniform from chunk position and explicit biome tints (in linear space).
+    pub fn from_chunk_pos_with_tints(
+        chunk_pos: mdminecraft_world::ChunkPos,
+        grass_tint: [f32; 3],
+        foliage_tint: [f32; 3],
+        water_tint: [f32; 3],
+    ) -> Self {
         // Convert chunk coordinates to world coordinates
         // Each chunk is 16×CHUNK_SIZE_Y×16 voxels
         let x = (chunk_pos.x * 16) as f32;
@@ -126,7 +157,13 @@ impl ChunkUniform {
 
         Self {
             chunk_offset: [x, 0.0, z],
-            _padding: 0.0,
+            _padding0: 0.0,
+            grass_tint,
+            _padding1: 0.0,
+            foliage_tint,
+            _padding2: 0.0,
+            water_tint,
+            _padding3: 0.0,
         }
     }
 }
@@ -168,10 +205,131 @@ fn upload_rgba_texture(
     queue: &wgpu::Queue,
     width: u32,
     height: u32,
-    pixels: &[u8],
+    mut pixels: Vec<u8>,
     label: &str,
+    generate_mipmaps: bool,
 ) -> wgpu::Texture {
+    fn mip_level_count(width: u32, height: u32) -> u32 {
+        let max_dim = width.max(height);
+        32u32.saturating_sub(max_dim.leading_zeros()).max(1)
+    }
+
+    fn downsample_rgba_2x(src: &[u8], src_width: u32, src_height: u32) -> Vec<u8> {
+        let dst_width = (src_width / 2).max(1);
+        let dst_height = (src_height / 2).max(1);
+        let mut dst = vec![0u8; (dst_width * dst_height * 4) as usize];
+
+        for y in 0..dst_height {
+            let sy0 = (y * 2).min(src_height - 1);
+            let sy1 = (sy0 + 1).min(src_height - 1);
+            for x in 0..dst_width {
+                let sx0 = (x * 2).min(src_width - 1);
+                let sx1 = (sx0 + 1).min(src_width - 1);
+
+                let mut rs = 0u32;
+                let mut gs = 0u32;
+                let mut bs = 0u32;
+                let mut alpha_sum = 0u32;
+                let mut alpha_max = 0u32;
+
+                for (sx, sy) in [(sx0, sy0), (sx1, sy0), (sx0, sy1), (sx1, sy1)] {
+                    let idx = ((sy * src_width + sx) * 4) as usize;
+                    let a = src[idx + 3] as u32;
+                    alpha_sum += a;
+                    alpha_max = alpha_max.max(a);
+                    rs += src[idx] as u32 * a;
+                    gs += src[idx + 1] as u32 * a;
+                    bs += src[idx + 2] as u32 * a;
+                }
+
+                let dst_idx = ((y * dst_width + x) * 4) as usize;
+                if alpha_sum == 0 {
+                    dst[dst_idx] = 0;
+                    dst[dst_idx + 1] = 0;
+                    dst[dst_idx + 2] = 0;
+                    dst[dst_idx + 3] = 0;
+                } else {
+                    dst[dst_idx] = ((rs + alpha_sum / 2) / alpha_sum).min(255) as u8;
+                    dst[dst_idx + 1] = ((gs + alpha_sum / 2) / alpha_sum).min(255) as u8;
+                    dst[dst_idx + 2] = ((bs + alpha_sum / 2) / alpha_sum).min(255) as u8;
+                    dst[dst_idx + 3] = alpha_max.min(255) as u8;
+                }
+            }
+        }
+
+        dst
+    }
+
+    fn write_texture_level(
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+        mip_level: u32,
+    ) {
+        let bytes_per_pixel = 4usize;
+        let row_bytes = width as usize * bytes_per_pixel;
+        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded_row_bytes = row_bytes.div_ceil(alignment) * alignment;
+
+        if padded_row_bytes == row_bytes {
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture,
+                    mip_level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                pixels,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row_bytes as u32),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        } else {
+            let mut padded = vec![0u8; padded_row_bytes * height as usize];
+            for row in 0..height as usize {
+                let src_start = row * row_bytes;
+                let dst_start = row * padded_row_bytes;
+                padded[dst_start..dst_start + row_bytes]
+                    .copy_from_slice(&pixels[src_start..src_start + row_bytes]);
+            }
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture,
+                    mip_level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &padded,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row_bytes as u32),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+    }
+
     assert_eq!(pixels.len(), (width * height * 4) as usize);
+    let mip_level_count = if generate_mipmaps {
+        mip_level_count(width, height)
+    } else {
+        1
+    };
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -179,7 +337,7 @@ fn upload_rgba_texture(
             height,
             depth_or_array_layers: 1,
         },
-        mip_level_count: 1,
+        mip_level_count,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -187,58 +345,16 @@ fn upload_rgba_texture(
         view_formats: &[],
     });
 
-    let bytes_per_pixel = 4usize;
-    let row_bytes = width as usize * bytes_per_pixel;
-    let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-    let padded_row_bytes = row_bytes.div_ceil(alignment) * alignment;
+    let mut level_width = width;
+    let mut level_height = height;
+    for mip in 0..mip_level_count {
+        write_texture_level(queue, &texture, level_width, level_height, &pixels, mip);
 
-    if padded_row_bytes == row_bytes {
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            pixels,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(row_bytes as u32),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-    } else {
-        let mut padded = vec![0u8; padded_row_bytes * height as usize];
-        for row in 0..height as usize {
-            let src_start = row * row_bytes;
-            let dst_start = row * padded_row_bytes;
-            padded[dst_start..dst_start + row_bytes]
-                .copy_from_slice(&pixels[src_start..src_start + row_bytes]);
+        if mip + 1 < mip_level_count {
+            pixels = downsample_rgba_2x(&pixels, level_width, level_height);
+            level_width = (level_width / 2).max(1);
+            level_height = (level_height / 2).max(1);
         }
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &padded,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_row_bytes as u32),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
     }
 
     texture
@@ -254,6 +370,7 @@ pub struct VoxelPipeline {
     camera_bind_group_layout: wgpu::BindGroupLayout,
     chunk_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group: wgpu::BindGroup,
+    _atlas_params_buffer: wgpu::Buffer,
     atlas_view: wgpu::TextureView,
     atlas_sampler: wgpu::Sampler,
     depth_texture: wgpu::Texture,
@@ -331,7 +448,7 @@ impl VoxelPipeline {
                 label: Some("Chunk Bind Group Layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -341,18 +458,26 @@ impl VoxelPipeline {
                 }],
             });
 
-        // Load runtime texture atlas if available, otherwise fall back to debug atlas
-        let (atlas_texture, atlas_metadata) = match RuntimeAtlas::load_from_disk() {
+        // Load runtime texture atlas if available, otherwise fall back to debug atlas.
+        let (atlas_texture, atlas_metadata, atlas_params) = match RuntimeAtlas::load_from_disk() {
             Ok(runtime_atlas) => {
+                let RuntimeAtlas { metadata, pixels } = runtime_atlas;
                 let texture = upload_rgba_texture(
                     device,
                     &ctx.queue,
-                    runtime_atlas.metadata.atlas_width,
-                    runtime_atlas.metadata.atlas_height,
-                    &runtime_atlas.pixels,
+                    metadata.atlas_width,
+                    metadata.atlas_height,
+                    pixels,
                     "Texture Atlas",
+                    true,
                 );
-                (texture, Some(runtime_atlas.metadata))
+                let atlas_params = AtlasParamsUniform {
+                    atlas_width: metadata.atlas_width as f32,
+                    atlas_height: metadata.atlas_height as f32,
+                    tile_size: metadata.tile_size as f32,
+                    padding: metadata.padding as f32,
+                };
+                (texture, Some(metadata), atlas_params)
             }
             Err(err) => {
                 warn_missing_atlas(&err);
@@ -362,10 +487,17 @@ impl VoxelPipeline {
                     &ctx.queue,
                     size,
                     size,
-                    &atlas_data,
+                    atlas_data,
                     "Debug Texture Atlas",
+                    false,
                 );
-                (texture, None)
+                let atlas_params = AtlasParamsUniform {
+                    atlas_width: size as f32,
+                    atlas_height: size as f32,
+                    tile_size: 16.0,
+                    padding: 0.0,
+                };
+                (texture, None, atlas_params)
             }
         };
 
@@ -380,6 +512,12 @@ impl VoxelPipeline {
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
+        });
+
+        let atlas_params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Atlas Params Buffer"),
+            contents: bytemuck::cast_slice(&[atlas_params]),
+            usage: wgpu::BufferUsages::UNIFORM,
         });
 
         // Create texture bind group layout
@@ -403,6 +541,16 @@ impl VoxelPipeline {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -417,6 +565,10 @@ impl VoxelPipeline {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: atlas_params_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -606,6 +758,7 @@ impl VoxelPipeline {
             camera_bind_group_layout,
             chunk_bind_group_layout,
             texture_bind_group,
+            _atlas_params_buffer: atlas_params_buffer,
             atlas_view,
             atlas_sampler,
             depth_texture,
@@ -650,6 +803,11 @@ impl VoxelPipeline {
     ) {
         let uniform =
             crate::time::TimeUniform::from_time_of_day(time, weather_intensity, night_vision);
+        self.update_time_with_uniform(queue, uniform);
+    }
+
+    /// Update time uniform buffer with a fully-specified [`crate::time::TimeUniform`].
+    pub fn update_time_with_uniform(&self, queue: &wgpu::Queue, uniform: crate::time::TimeUniform) {
         queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
@@ -660,6 +818,15 @@ impl VoxelPipeline {
         chunk_pos: mdminecraft_world::ChunkPos,
     ) -> wgpu::BindGroup {
         let chunk_uniform = ChunkUniform::from_chunk_pos(chunk_pos);
+        self.create_chunk_bind_group_with_uniform(device, chunk_uniform)
+    }
+
+    /// Create a chunk bind group from a fully-specified [`ChunkUniform`].
+    pub fn create_chunk_bind_group_with_uniform(
+        &self,
+        device: &wgpu::Device,
+        chunk_uniform: ChunkUniform,
+    ) -> wgpu::BindGroup {
         let chunk_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Chunk Uniform Buffer"),
             contents: bytemuck::cast_slice(&[chunk_uniform]),
@@ -892,6 +1059,11 @@ impl SkyboxPipeline {
     ) {
         let uniform =
             crate::time::TimeUniform::from_time_of_day(time, weather_intensity, night_vision);
+        self.update_time_with_uniform(queue, uniform);
+    }
+
+    /// Update time uniform buffer with a fully-specified [`crate::time::TimeUniform`].
+    pub fn update_time_with_uniform(&self, queue: &wgpu::Queue, uniform: crate::time::TimeUniform) {
         queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 

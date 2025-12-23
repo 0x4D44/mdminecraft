@@ -54,7 +54,7 @@ impl<'a> ChunkMeshDriver<'a> {
                         .update_chunk(chunk, dirty, self.registry, self.atlas);
                     stats.push(ChunkMeshStat {
                         position: pos,
-                        triangles: mesh.indices.len() / 3,
+                        triangles: (mesh.indices_opaque.len() + mesh.indices_alpha.len()) / 3,
                         hash: mesh.hash,
                     });
                 }
