@@ -2486,8 +2486,9 @@ mod tests {
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |_wx, _wy, _wz| None);
 
+        let pane_world_y = local_y_to_world_y(1);
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wx == 16 && wy == 1 && wz == 1 {
+            if wx == 16 && wy == pane_world_y && wz == 1 {
                 Some(chunk_b.voxel(0, 1, 1))
             } else {
                 None
@@ -2546,8 +2547,9 @@ mod tests {
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |_wx, _wy, _wz| None);
 
+        let bars_world_y = local_y_to_world_y(1);
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wx == 16 && wy == 1 && wz == 1 {
+            if wx == 16 && wy == bars_world_y && wz == 1 {
                 Some(chunk_b.voxel(0, 1, 1))
             } else {
                 None
@@ -2611,8 +2613,9 @@ mod tests {
         let mesh_disconnected =
             mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |_wx, _wy, _wz| None);
 
+        let pane_world_y = local_y_to_world_y(1);
         let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
-            if wx == 16 && wy == 1 && wz == 1 {
+            if wx == 16 && wy == pane_world_y && wz == 1 {
                 Some(chunk_b.voxel(0, 1, 1))
             } else {
                 None

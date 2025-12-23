@@ -1,7 +1,7 @@
 use mdminecraft_core::DimensionId;
 use mdminecraft_world::{
     fortress_blaze_spawns_for_chunk, ChunkPos, MobType, TerrainGenerator, BLOCK_AIR,
-    BLOCK_STONE_BRICKS, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    world_y_to_local_y, BLOCK_STONE_BRICKS, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 
 #[test]
@@ -59,7 +59,7 @@ fn nether_fortress_blaze_spawns_align_with_generated_corridor() {
         let world_z = blaze.z.floor() as i32;
 
         let local_x = world_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-        let local_y = world_y as usize;
+        let local_y = world_y_to_local_y(world_y).expect("blaze spawn y within chunk bounds");
         let local_z = world_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
         let voxel = chunk.voxel(local_x, local_y, local_z);
