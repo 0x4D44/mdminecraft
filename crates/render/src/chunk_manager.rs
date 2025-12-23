@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 
 use crate::mesh::{MeshBuffers, MeshVertex};
-use mdminecraft_world::{ChunkPos, CHUNK_SIZE_Y, WORLD_MIN_Y};
+use mdminecraft_world::{
+    interactive_blocks, ChunkPos, BLOCK_GLASS, BLOCK_ICE, BLOCK_LAVA, BLOCK_LAVA_FLOWING,
+    BLOCK_WATER, BLOCK_WATER_FLOWING, CHUNK_SIZE_Y, WORLD_MIN_Y,
+};
 
 /// GPU buffer for a chunk mesh with position.
 pub struct ChunkRenderData {
@@ -15,6 +18,8 @@ pub struct ChunkRenderData {
     pub index_count: u32,
     /// Chunk position in world
     pub chunk_pos: ChunkPos,
+    /// Whether this mesh contains any alpha-blended vertices (fluids + select translucent blocks).
+    pub has_fluid: bool,
     /// Bind group for chunk uniforms
     pub chunk_bind_group: wgpu::BindGroup,
 }
@@ -105,6 +110,16 @@ impl ChunkManager {
             return; // Don't add empty meshes
         }
 
+        let has_fluid = mesh_buffers.vertices.iter().any(|v| {
+            v.block_id == BLOCK_WATER
+                || v.block_id == BLOCK_WATER_FLOWING
+                || v.block_id == BLOCK_LAVA
+                || v.block_id == BLOCK_LAVA_FLOWING
+                || v.block_id == BLOCK_ICE
+                || v.block_id == BLOCK_GLASS
+                || v.block_id == interactive_blocks::GLASS_PANE
+        });
+
         let vertex_buffer = self.pool.acquire(
             device,
             vertex_size,
@@ -134,6 +149,7 @@ impl ChunkManager {
             index_buffer,
             index_count: mesh_buffers.indices.len() as u32,
             chunk_pos,
+            has_fluid,
             chunk_bind_group,
         };
 

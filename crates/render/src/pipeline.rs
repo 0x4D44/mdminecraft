@@ -246,7 +246,8 @@ fn upload_rgba_texture(
 
 /// Voxel rendering pipeline.
 pub struct VoxelPipeline {
-    render_pipeline: wgpu::RenderPipeline,
+    opaque_pipeline: wgpu::RenderPipeline,
+    fluid_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     time_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -456,8 +457,8 @@ impl VoxelPipeline {
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Create render pipeline
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Voxel Render Pipeline"),
+        let opaque_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Voxel Opaque Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -495,7 +496,7 @@ impl VoxelPipeline {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: "fs_main_opaque",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: ctx.config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -526,8 +527,79 @@ impl VoxelPipeline {
             multiview: None,
         });
 
+        let fluid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Voxel Fluid Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        // position
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        // normal
+                        wgpu::VertexAttribute {
+                            offset: 12,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        // uv
+                        wgpu::VertexAttribute {
+                            offset: 24,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        // block_id (u16) and light (u8) packed as u32
+                        wgpu::VertexAttribute {
+                            offset: 32,
+                            shader_location: 3,
+                            format: wgpu::VertexFormat::Uint32,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main_fluid",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: ctx.config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
+
         Ok(Self {
-            render_pipeline,
+            opaque_pipeline,
+            fluid_pipeline,
             camera_buffer,
             time_buffer,
             camera_bind_group,
@@ -657,7 +729,40 @@ impl VoxelPipeline {
 
     /// Get the render pipeline.
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
-        &self.render_pipeline
+        &self.opaque_pipeline
+    }
+
+    /// Get the fluid render pipeline.
+    pub fn fluid_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.fluid_pipeline
+    }
+
+    /// Begin the fluid render pass (loads existing depth/color).
+    pub fn begin_fluid_render_pass<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Voxel Fluid Render Pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        })
     }
 
     /// Get the camera bind group.
