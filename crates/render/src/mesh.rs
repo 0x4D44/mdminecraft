@@ -1,8 +1,10 @@
 use blake3::Hasher;
 use mdminecraft_assets::{BlockFace, BlockRegistry, TextureAtlasMetadata};
 use mdminecraft_world::{
-    interactive_blocks, local_y_to_world_y, world_y_to_local_y, BlockId, Chunk, Voxel, BLOCK_AIR,
-    CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    block_supports_waterlogging, get_fluid_level, get_fluid_type, interactive_blocks, is_falling,
+    is_fluid, is_waterlogged, local_y_to_world_y, world_y_to_local_y, BlockId, Chunk, FluidType,
+    Voxel, BLOCK_AIR, BLOCK_WATER, BLOCK_WATER_FLOWING, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    FLUID_LEVEL_SOURCE,
 };
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
@@ -25,8 +27,8 @@ pub struct MeshVertex {
     pub block_id: u16,
     /// Combined light level (max of skylight and blocklight), range 0-15.
     pub light: u8,
-    /// Padding to align to 4 bytes
-    _padding: u8,
+    /// Extra per-vertex metadata (packed into the high 8 bits of the `packed_data` attribute).
+    pub extra: u8,
 }
 
 /// Output mesh buffers per chunk.
@@ -88,6 +90,8 @@ where
 {
     let mut builder = MeshBuilder::new(registry, atlas);
     GreedyMesher::mesh(chunk, &mut builder);
+    mesh_fluids(chunk, &mut builder, registry, &voxel_at_world);
+    mesh_waterlogged_fluids(chunk, &mut builder, registry, &voxel_at_world);
     mesh_glass_panes(chunk, &mut builder, registry, &voxel_at_world);
     mesh_oak_fences(chunk, &mut builder, registry, &voxel_at_world);
     mesh_cobblestone_walls(chunk, &mut builder, registry, &voxel_at_world);
@@ -112,6 +116,636 @@ where
     mesh_brewing_stands(chunk, &mut builder);
     mesh_farmland(chunk, &mut builder);
     builder.finish()
+}
+
+fn mesh_fluids<F>(
+    chunk: &Chunk,
+    builder: &mut MeshBuilder,
+    registry: &BlockRegistry,
+    voxel_at_world: &F,
+) where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    const HEIGHT_EPS: f32 = 0.001;
+
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    let cache_layer_size = (CHUNK_SIZE_X + 2) * (CHUNK_SIZE_Z + 2);
+    let mut cached_water_heights = vec![f32::NAN; cache_layer_size * CHUNK_SIZE_Y];
+    let mut cached_lava_heights = vec![f32::NAN; cache_layer_size * CHUNK_SIZE_Y];
+
+    let cache_index = |world_x: i32, local_y: usize, world_z: i32| -> Option<usize> {
+        let local_x = world_x - origin_x + 1;
+        let local_z = world_z - origin_z + 1;
+
+        if !(0..(CHUNK_SIZE_X as i32 + 2)).contains(&local_x) {
+            return None;
+        }
+        if !(0..(CHUNK_SIZE_Z as i32 + 2)).contains(&local_z) {
+            return None;
+        }
+
+        let local_x = local_x as usize;
+        let local_z = local_z as usize;
+        Some(local_y * cache_layer_size + local_z * (CHUNK_SIZE_X + 2) + local_x)
+    };
+
+    let voxel_contains_fluid = |voxel: Voxel, fluid_type: FluidType| -> bool {
+        get_fluid_type(voxel.id) == Some(fluid_type)
+            || (fluid_type == FluidType::Water
+                && block_supports_waterlogging(voxel.id)
+                && is_waterlogged(voxel.state))
+    };
+
+    let mut base_fluid_height_at =
+        |world_x: i32, local_y: usize, world_z: i32, fluid_type: FluidType| -> f32 {
+            let cache = match fluid_type {
+                FluidType::Water => &mut cached_water_heights,
+                FluidType::Lava => &mut cached_lava_heights,
+            };
+
+            if let Some(idx) = cache_index(world_x, local_y, world_z) {
+                if !cache[idx].is_nan() {
+                    return cache[idx];
+                }
+
+                let world_y = local_y_to_world_y(local_y);
+                let Some(voxel) = voxel_at_world(world_x, world_y, world_z) else {
+                    cache[idx] = 0.0;
+                    return 0.0;
+                };
+
+                let is_waterlogged_cell = fluid_type == FluidType::Water
+                    && block_supports_waterlogging(voxel.id)
+                    && is_waterlogged(voxel.state);
+                if !is_waterlogged_cell && get_fluid_type(voxel.id) != Some(fluid_type) {
+                    cache[idx] = 0.0;
+                    return 0.0;
+                }
+
+                let above = voxel_at_world(world_x, world_y + 1, world_z);
+                if above.is_some_and(|v| voxel_contains_fluid(v, fluid_type)) {
+                    cache[idx] = 1.0;
+                    return 1.0;
+                }
+
+                if is_waterlogged_cell || mdminecraft_world::is_source_fluid(voxel.id) {
+                    cache[idx] = 1.0;
+                    return 1.0;
+                }
+
+                if is_falling(voxel.state) {
+                    cache[idx] = 1.0;
+                    return 1.0;
+                }
+
+                let level = get_fluid_level(voxel.state) as f32;
+                let shift =
+                    FLUID_LEVEL_SOURCE.saturating_sub(fluid_type.max_flow_distance() + 1) as f32;
+                let height = ((level + shift) / (FLUID_LEVEL_SOURCE as f32)).clamp(0.0, 1.0);
+
+                cache[idx] = height;
+                return height;
+            }
+
+            let world_y = local_y_to_world_y(local_y);
+            let Some(voxel) = voxel_at_world(world_x, world_y, world_z) else {
+                return 0.0;
+            };
+
+            let is_waterlogged_cell = fluid_type == FluidType::Water
+                && block_supports_waterlogging(voxel.id)
+                && is_waterlogged(voxel.state);
+            if !is_waterlogged_cell && get_fluid_type(voxel.id) != Some(fluid_type) {
+                return 0.0;
+            }
+
+            let above = voxel_at_world(world_x, world_y + 1, world_z);
+            if above.is_some_and(|v| voxel_contains_fluid(v, fluid_type)) {
+                return 1.0;
+            }
+
+            if is_waterlogged_cell || mdminecraft_world::is_source_fluid(voxel.id) {
+                return 1.0;
+            }
+
+            if is_falling(voxel.state) {
+                return 1.0;
+            }
+
+            let level = get_fluid_level(voxel.state) as f32;
+            let shift =
+                FLUID_LEVEL_SOURCE.saturating_sub(fluid_type.max_flow_distance() + 1) as f32;
+            ((level + shift) / (FLUID_LEVEL_SOURCE as f32)).clamp(0.0, 1.0)
+        };
+
+    let encode_flow_dir = |dx: i8, dz: i8| -> u8 {
+        match (dx, dz) {
+            (0, 0) => 0,
+            (0, -1) => 1,
+            (0, 1) => 2,
+            (-1, 0) => 3,
+            (1, 0) => 4,
+            (-1, -1) => 5,
+            (1, -1) => 6,
+            (-1, 1) => 7,
+            (1, 1) => 8,
+            _ => 0,
+        }
+    };
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                let Some(fluid_type) = get_fluid_type(voxel.id) else {
+                    continue;
+                };
+
+                let world_x = origin_x + x as i32;
+                let world_y = local_y_to_world_y(y);
+                let world_z = origin_z + z as i32;
+
+                let light = voxel.light_sky.max(voxel.light_block);
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                let above_is_fluid = voxel_at_world(world_x, world_y + 1, world_z)
+                    .is_some_and(|v| voxel_contains_fluid(v, fluid_type));
+                let below = voxel_at_world(world_x, world_y - 1, world_z);
+                let below_is_fluid = below.is_some_and(|v| voxel_contains_fluid(v, fluid_type));
+
+                let corner_nw = fluid_corner_height(
+                    &mut base_fluid_height_at,
+                    world_x,
+                    y,
+                    world_z,
+                    -1,
+                    -1,
+                    fluid_type,
+                );
+                let corner_sw = fluid_corner_height(
+                    &mut base_fluid_height_at,
+                    world_x,
+                    y,
+                    world_z,
+                    -1,
+                    1,
+                    fluid_type,
+                );
+                let corner_se = fluid_corner_height(
+                    &mut base_fluid_height_at,
+                    world_x,
+                    y,
+                    world_z,
+                    1,
+                    1,
+                    fluid_type,
+                );
+                let corner_ne = fluid_corner_height(
+                    &mut base_fluid_height_at,
+                    world_x,
+                    y,
+                    world_z,
+                    1,
+                    -1,
+                    fluid_type,
+                );
+
+                let max_height = corner_nw.max(corner_sw).max(corner_se).max(corner_ne);
+                if max_height <= HEIGHT_EPS {
+                    continue;
+                }
+
+                let current_base = base_fluid_height_at(world_x, y, world_z, fluid_type);
+                let neighbor_w = base_fluid_height_at(world_x - 1, y, world_z, fluid_type);
+                let neighbor_e = base_fluid_height_at(world_x + 1, y, world_z, fluid_type);
+                let neighbor_n = base_fluid_height_at(world_x, y, world_z - 1, fluid_type);
+                let neighbor_s = base_fluid_height_at(world_x, y, world_z + 1, fluid_type);
+
+                let mut flow_x = 0.0f32;
+                let mut flow_z = 0.0f32;
+
+                if neighbor_w + HEIGHT_EPS < current_base {
+                    flow_x -= current_base - neighbor_w;
+                }
+                if neighbor_e + HEIGHT_EPS < current_base {
+                    flow_x += current_base - neighbor_e;
+                }
+                if neighbor_n + HEIGHT_EPS < current_base {
+                    flow_z -= current_base - neighbor_n;
+                }
+                if neighbor_s + HEIGHT_EPS < current_base {
+                    flow_z += current_base - neighbor_s;
+                }
+
+                let abs_x = flow_x.abs();
+                let abs_z = flow_z.abs();
+                let mut dir_x = 0i8;
+                let mut dir_z = 0i8;
+
+                if abs_x > HEIGHT_EPS || abs_z > HEIGHT_EPS {
+                    dir_x = if flow_x > 0.0 { 1 } else { -1 };
+                    dir_z = if flow_z > 0.0 { 1 } else { -1 };
+
+                    let dominant_ratio = 2.0;
+                    if abs_x > abs_z * dominant_ratio {
+                        dir_z = 0;
+                    } else if abs_z > abs_x * dominant_ratio {
+                        dir_x = 0;
+                    }
+                }
+
+                let flow_code = encode_flow_dir(dir_x, dir_z);
+
+                if !above_is_fluid {
+                    builder.push_quad_with_extra(
+                        voxel.id,
+                        BlockFace::Up,
+                        [0.0, 1.0, 0.0],
+                        [
+                            [base_x, base_y + corner_nw, base_z],
+                            [base_x, base_y + corner_sw, base_z + 1.0],
+                            [base_x + 1.0, base_y + corner_se, base_z + 1.0],
+                            [base_x + 1.0, base_y + corner_ne, base_z],
+                        ],
+                        true,
+                        light,
+                        flow_code,
+                    );
+                }
+
+                if !below_is_fluid {
+                    let show_bottom = match below {
+                        Some(v) => !is_solid(v) || !is_opaque(v, registry),
+                        None => true,
+                    };
+                    if show_bottom {
+                        builder.push_quad_with_extra(
+                            voxel.id,
+                            BlockFace::Down,
+                            [0.0, -1.0, 0.0],
+                            [
+                                [base_x, base_y, base_z],
+                                [base_x, base_y, base_z + 1.0],
+                                [base_x + 1.0, base_y, base_z + 1.0],
+                                [base_x + 1.0, base_y, base_z],
+                            ],
+                            false,
+                            light,
+                            flow_code,
+                        );
+                    }
+                }
+
+                let mut maybe_emit_side =
+                    |dx: i32,
+                     dz: i32,
+                     neighbor_corner_a: f32,
+                     neighbor_corner_b: f32,
+                     face: BlockFace,
+                     normal: [f32; 3],
+                     corners: [[f32; 3]; 4],
+                     normal_positive: bool| {
+                        let neighbor = voxel_at_world(world_x + dx, world_y, world_z + dz);
+                        if neighbor.is_some_and(|v| voxel_contains_fluid(v, fluid_type)) {
+                            return;
+                        }
+                        if neighbor.is_some_and(|v| is_solid(v) && is_opaque(v, registry)) {
+                            return;
+                        }
+
+                        let top_a = neighbor_corner_a;
+                        let top_b = neighbor_corner_b;
+                        if top_a <= HEIGHT_EPS && top_b <= HEIGHT_EPS {
+                            return;
+                        }
+
+                        builder.push_quad_with_extra(
+                            voxel.id,
+                            face,
+                            normal,
+                            corners,
+                            normal_positive,
+                            light,
+                            flow_code,
+                        );
+                    };
+
+                // North (-Z).
+                maybe_emit_side(
+                    0,
+                    -1,
+                    corner_nw,
+                    corner_ne,
+                    BlockFace::North,
+                    [0.0, 0.0, -1.0],
+                    [
+                        [base_x, base_y, base_z],
+                        [base_x + 1.0, base_y, base_z],
+                        [base_x + 1.0, base_y + corner_ne, base_z],
+                        [base_x, base_y + corner_nw, base_z],
+                    ],
+                    false,
+                );
+
+                // South (+Z).
+                maybe_emit_side(
+                    0,
+                    1,
+                    corner_sw,
+                    corner_se,
+                    BlockFace::South,
+                    [0.0, 0.0, 1.0],
+                    [
+                        [base_x, base_y, base_z + 1.0],
+                        [base_x + 1.0, base_y, base_z + 1.0],
+                        [base_x + 1.0, base_y + corner_se, base_z + 1.0],
+                        [base_x, base_y + corner_sw, base_z + 1.0],
+                    ],
+                    true,
+                );
+
+                // West (-X).
+                maybe_emit_side(
+                    -1,
+                    0,
+                    corner_nw,
+                    corner_sw,
+                    BlockFace::West,
+                    [-1.0, 0.0, 0.0],
+                    [
+                        [base_x, base_y, base_z],
+                        [base_x, base_y + corner_nw, base_z],
+                        [base_x, base_y + corner_sw, base_z + 1.0],
+                        [base_x, base_y, base_z + 1.0],
+                    ],
+                    false,
+                );
+
+                // East (+X).
+                maybe_emit_side(
+                    1,
+                    0,
+                    corner_ne,
+                    corner_se,
+                    BlockFace::East,
+                    [1.0, 0.0, 0.0],
+                    [
+                        [base_x + 1.0, base_y, base_z],
+                        [base_x + 1.0, base_y + corner_ne, base_z],
+                        [base_x + 1.0, base_y + corner_se, base_z + 1.0],
+                        [base_x + 1.0, base_y, base_z + 1.0],
+                    ],
+                    true,
+                );
+            }
+        }
+    }
+}
+
+fn fluid_corner_height<F>(
+    base_fluid_height_at: &mut F,
+    world_x: i32,
+    local_y: usize,
+    world_z: i32,
+    dx: i32,
+    dz: i32,
+    fluid_type: FluidType,
+) -> f32
+where
+    F: FnMut(i32, usize, i32, FluidType) -> f32,
+{
+    let h00 = base_fluid_height_at(world_x, local_y, world_z, fluid_type);
+    let h10 = base_fluid_height_at(world_x + dx, local_y, world_z, fluid_type);
+    let h01 = base_fluid_height_at(world_x, local_y, world_z + dz, fluid_type);
+    let h11 = base_fluid_height_at(world_x + dx, local_y, world_z + dz, fluid_type);
+    h00.max(h10).max(h01).max(h11)
+}
+
+fn mesh_waterlogged_fluids<F>(
+    chunk: &Chunk,
+    builder: &mut MeshBuilder,
+    registry: &BlockRegistry,
+    voxel_at_world: &F,
+) where
+    F: Fn(i32, i32, i32) -> Option<Voxel>,
+{
+    let chunk_pos = chunk.position();
+    let origin_x = chunk_pos.x * CHUNK_SIZE_X as i32;
+    let origin_z = chunk_pos.z * CHUNK_SIZE_Z as i32;
+
+    let voxel_has_water = |voxel: Voxel| -> bool {
+        voxel.id == BLOCK_WATER
+            || voxel.id == BLOCK_WATER_FLOWING
+            || (block_supports_waterlogging(voxel.id) && is_waterlogged(voxel.state))
+    };
+
+    let water_face_visible = |neighbor: Option<Voxel>| -> bool {
+        let Some(neighbor) = neighbor else {
+            return true;
+        };
+        if voxel_has_water(neighbor) {
+            return false;
+        }
+
+        let neighbor_solid = is_solid(neighbor);
+        if !neighbor_solid {
+            return true;
+        }
+
+        let neighbor_opaque = is_opaque(neighbor, registry);
+        !neighbor_opaque && neighbor.id != BLOCK_WATER && neighbor.id != BLOCK_WATER_FLOWING
+    };
+
+    let mut emit_water_box = |world_x: i32,
+                              world_y: i32,
+                              world_z: i32,
+                              base_x: f32,
+                              base_y: f32,
+                              base_z: f32,
+                              min: [f32; 3],
+                              max: [f32; 3],
+                              light: u8| {
+        let mut faces = 0u8;
+
+        if min[0] == base_x && water_face_visible(voxel_at_world(world_x - 1, world_y, world_z)) {
+            faces |= FACE_WEST;
+        }
+        if max[0] == base_x + 1.0
+            && water_face_visible(voxel_at_world(world_x + 1, world_y, world_z))
+        {
+            faces |= FACE_EAST;
+        }
+
+        if min[2] == base_z && water_face_visible(voxel_at_world(world_x, world_y, world_z - 1)) {
+            faces |= FACE_NORTH;
+        }
+        if max[2] == base_z + 1.0
+            && water_face_visible(voxel_at_world(world_x, world_y, world_z + 1))
+        {
+            faces |= FACE_SOUTH;
+        }
+
+        if min[1] == base_y && water_face_visible(voxel_at_world(world_x, world_y - 1, world_z)) {
+            faces |= FACE_DOWN;
+        }
+        if max[1] == base_y + 1.0
+            && water_face_visible(voxel_at_world(world_x, world_y + 1, world_z))
+        {
+            faces |= FACE_UP;
+        }
+
+        if faces != 0 {
+            emit_box_masked(builder, BLOCK_WATER, min, max, light, faces);
+        }
+    };
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if !block_supports_waterlogging(voxel.id) || !is_waterlogged(voxel.state) {
+                    continue;
+                }
+
+                let world_x = origin_x + x as i32;
+                let world_y = local_y_to_world_y(y);
+                let world_z = origin_z + z as i32;
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                if mdminecraft_world::is_slab(voxel.id) {
+                    let top = matches!(
+                        mdminecraft_world::SlabPosition::from_state(voxel.state),
+                        mdminecraft_world::SlabPosition::Top
+                    );
+                    let (min_y, max_y) = if top { (0.0, 0.5) } else { (0.5, 1.0) };
+                    emit_water_box(
+                        world_x,
+                        world_y,
+                        world_z,
+                        base_x,
+                        base_y,
+                        base_z,
+                        [base_x, base_y + min_y, base_z],
+                        [base_x + 1.0, base_y + max_y, base_z + 1.0],
+                        light,
+                    );
+                } else if mdminecraft_world::is_stairs(voxel.id) {
+                    let half = 0.5;
+                    let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                    let top = (voxel.state & 0x04) != 0;
+                    let shape = mdminecraft_world::stairs_shape_at(
+                        world_x,
+                        world_y,
+                        world_z,
+                        voxel,
+                        voxel_at_world,
+                    );
+                    let (footprints, footprint_count) =
+                        mdminecraft_world::stairs_step_footprints(facing, shape);
+
+                    let (min_y, max_y) = if top { (0.0, half) } else { (half, 1.0) };
+
+                    let quadrants = [
+                        (0.0, half, 0.0, half),
+                        (half, 1.0, 0.0, half),
+                        (0.0, half, half, 1.0),
+                        (half, 1.0, half, 1.0),
+                    ];
+
+                    for (q_min_x, q_max_x, q_min_z, q_max_z) in quadrants {
+                        let mut occupied = false;
+                        for footprint in footprints.iter().take(footprint_count) {
+                            if footprint.min_x <= q_min_x
+                                && footprint.max_x >= q_max_x
+                                && footprint.min_z <= q_min_z
+                                && footprint.max_z >= q_max_z
+                            {
+                                occupied = true;
+                                break;
+                            }
+                        }
+
+                        if occupied {
+                            continue;
+                        }
+
+                        emit_water_box(
+                            world_x,
+                            world_y,
+                            world_z,
+                            base_x,
+                            base_y,
+                            base_z,
+                            [base_x + q_min_x, base_y + min_y, base_z + q_min_z],
+                            [base_x + q_max_x, base_y + max_y, base_z + q_max_z],
+                            light,
+                        );
+                    }
+                } else if mdminecraft_world::is_trapdoor(voxel.id) {
+                    let thickness = 3.0 / 16.0;
+                    let facing = mdminecraft_world::Facing::from_state(voxel.state);
+                    let open = mdminecraft_world::is_trapdoor_open(voxel.state);
+                    let top = mdminecraft_world::is_trapdoor_top(voxel.state);
+
+                    let (min, max) = if open {
+                        match facing {
+                            mdminecraft_world::Facing::North => (
+                                [base_x, base_y, base_z + thickness],
+                                [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                            ),
+                            mdminecraft_world::Facing::South => (
+                                [base_x, base_y, base_z],
+                                [base_x + 1.0, base_y + 1.0, base_z + 1.0 - thickness],
+                            ),
+                            mdminecraft_world::Facing::East => (
+                                [base_x, base_y, base_z],
+                                [base_x + 1.0 - thickness, base_y + 1.0, base_z + 1.0],
+                            ),
+                            mdminecraft_world::Facing::West => (
+                                [base_x + thickness, base_y, base_z],
+                                [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                            ),
+                        }
+                    } else if top {
+                        (
+                            [base_x, base_y, base_z],
+                            [base_x + 1.0, base_y + 1.0 - thickness, base_z + 1.0],
+                        )
+                    } else {
+                        (
+                            [base_x, base_y + thickness, base_z],
+                            [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        )
+                    };
+
+                    emit_water_box(
+                        world_x, world_y, world_z, base_x, base_y, base_z, min, max, light,
+                    );
+                } else {
+                    emit_water_box(
+                        world_x,
+                        world_y,
+                        world_z,
+                        base_x,
+                        base_y,
+                        base_z,
+                        [base_x, base_y, base_z],
+                        [base_x + 1.0, base_y + 1.0, base_z + 1.0],
+                        light,
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Internal helper for building mesh data.
@@ -141,6 +775,20 @@ impl<'a> MeshBuilder<'a> {
         normal_positive: bool,
         light: u8,
     ) {
+        self.push_quad_with_extra(block_id, face, normal, corners, normal_positive, light, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_quad_with_extra(
+        &mut self,
+        block_id: BlockId,
+        face: BlockFace,
+        normal: [f32; 3],
+        corners: [[f32; 3]; 4],
+        normal_positive: bool,
+        light: u8,
+        extra: u8,
+    ) {
         let base = self.vertices.len() as u32;
 
         let uvs = self.resolve_uvs(block_id, face);
@@ -152,7 +800,7 @@ impl<'a> MeshBuilder<'a> {
                 uv: uvs[i],
                 block_id,
                 light,
-                _padding: 0,
+                extra,
             });
         }
         let indices = if normal_positive {
@@ -2276,6 +2924,7 @@ fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
     if mdminecraft_world::is_stairs(voxel.id)
         || mdminecraft_world::is_slab(voxel.id)
         || mdminecraft_world::is_farmland(voxel.id)
+        || voxel.id == mdminecraft_world::BLOCK_ICE
         || matches!(
             voxel.id,
             mdminecraft_world::BLOCK_ENCHANTING_TABLE | mdminecraft_world::BLOCK_BREWING_STAND
@@ -2292,6 +2941,7 @@ fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
 /// Check if a voxel is a solid (non-air) block that should be rendered
 fn is_solid(voxel: Voxel) -> bool {
     voxel.id != BLOCK_AIR
+        && !is_fluid(voxel.id)
         && !mdminecraft_world::is_stairs(voxel.id)
         && !mdminecraft_world::is_slab(voxel.id)
         && !mdminecraft_world::is_trapdoor(voxel.id)
@@ -2331,7 +2981,9 @@ fn is_solid(voxel: Voxel) -> bool {
 #[cfg(test)]
 mod tests {
     use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
-    use mdminecraft_world::{interactive_blocks, Chunk, ChunkPos, Voxel};
+    use mdminecraft_world::{
+        interactive_blocks, set_fluid_level, set_waterlogged, Chunk, ChunkPos, Voxel,
+    };
 
     use super::*;
 
@@ -2341,6 +2993,35 @@ mod tests {
             BlockDescriptor::simple("stone", true),
             BlockDescriptor::simple("leaves", false), // transparent block
         ])
+    }
+
+    fn registry_with_fluids() -> BlockRegistry {
+        let max_id = mdminecraft_world::BLOCK_LAVA_FLOWING as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+
+        for id in 0..=max_id {
+            let id_u16 = id as u16;
+            let opaque = !matches!(
+                id_u16,
+                BLOCK_AIR
+                    | BLOCK_WATER
+                    | BLOCK_WATER_FLOWING
+                    | mdminecraft_world::BLOCK_LAVA
+                    | mdminecraft_world::BLOCK_LAVA_FLOWING
+            );
+            let name = match id_u16 {
+                BLOCK_AIR => "air".to_string(),
+                BLOCK_WATER => "water".to_string(),
+                BLOCK_WATER_FLOWING => "water_flowing".to_string(),
+                mdminecraft_world::BLOCK_LAVA => "lava".to_string(),
+                mdminecraft_world::BLOCK_LAVA_FLOWING => "lava_flowing".to_string(),
+                _ => format!("block_{id}"),
+            };
+
+            descriptors.push(BlockDescriptor::simple(&name, opaque));
+        }
+
+        BlockRegistry::new(descriptors)
     }
 
     #[test]
@@ -2443,6 +3124,209 @@ mod tests {
             !mesh.indices.is_empty() && mesh.indices.len() < 72,
             "Greedy meshing should reduce face count for adjacent blocks, got {} indices",
             mesh.indices.len()
+        );
+    }
+
+    #[test]
+    fn flowing_water_renders_with_partial_height() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_fluids();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: BLOCK_WATER_FLOWING,
+                state: set_fluid_level(0, 7),
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        let top_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == BLOCK_WATER_FLOWING && v.normal == [0.0, 1.0, 0.0])
+            .collect();
+
+        assert_eq!(top_vertices.len(), 4);
+        let expected_y = 1.0 + 7.0 / 8.0;
+        for vertex in top_vertices {
+            assert!(
+                (vertex.position[1] - expected_y).abs() < 0.0001,
+                "Expected flowing water top Y to be {expected_y}, got {}",
+                vertex.position[1]
+            );
+        }
+    }
+
+    #[test]
+    fn adjacent_same_level_water_has_no_internal_face() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_fluids();
+
+        let state = set_fluid_level(0, 7);
+        let voxel = Voxel {
+            id: BLOCK_WATER_FLOWING,
+            state,
+            light_sky: 15,
+            light_block: 0,
+        };
+
+        chunk.set_voxel(1, 1, 1, voxel);
+        chunk.set_voxel(2, 1, 1, voxel);
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        let internal_face_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|v| {
+                v.block_id == BLOCK_WATER_FLOWING
+                    && (v.normal == [1.0, 0.0, 0.0] || v.normal == [-1.0, 0.0, 0.0])
+                    && (v.position[0] - 2.0).abs() < 0.0001
+            })
+            .count();
+
+        assert_eq!(
+            internal_face_vertices, 0,
+            "Expected no internal side faces between same-height adjacent water blocks"
+        );
+    }
+
+    #[test]
+    fn flowing_water_slopes_toward_higher_neighbor() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_fluids();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: BLOCK_WATER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            2,
+            1,
+            1,
+            Voxel {
+                id: BLOCK_WATER_FLOWING,
+                state: set_fluid_level(0, 7),
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        let top_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == BLOCK_WATER_FLOWING && v.normal == [0.0, 1.0, 0.0])
+            .collect();
+
+        assert_eq!(top_vertices.len(), 4);
+
+        let expected_high_y = 2.0;
+        let expected_low_y = 1.0 + 7.0 / 8.0;
+
+        let mut saw_high = false;
+        let mut saw_low = false;
+
+        for vertex in top_vertices {
+            if (vertex.position[0] - 2.0).abs() < 0.0001 {
+                saw_high |= (vertex.position[1] - expected_high_y).abs() < 0.0001;
+            } else if (vertex.position[0] - 3.0).abs() < 0.0001 {
+                saw_low |= (vertex.position[1] - expected_low_y).abs() < 0.0001;
+            }
+        }
+
+        assert!(
+            saw_high && saw_low,
+            "Expected sloped top face with heights {expected_high_y} (near source) and {expected_low_y} (far side)"
+        );
+    }
+
+    #[test]
+    fn ice_is_treated_as_translucent_for_face_culling() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_fluids();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_ICE,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            1,
+            1,
+            2,
+            Voxel {
+                id: 1, // stone
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        let north_face_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|v| {
+                v.block_id == 1
+                    && v.normal == [0.0, 0.0, -1.0]
+                    && (v.position[2] - 2.0).abs() < 0.0001
+            })
+            .count();
+        assert_eq!(
+            north_face_vertices, 4,
+            "Expected the stone face adjacent to ice to be rendered"
+        );
+    }
+
+    #[test]
+    fn waterlogged_slab_emits_water_faces() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: interactive_blocks::STONE_SLAB,
+                state: set_waterlogged(0, true),
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        let water_vertices = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == BLOCK_WATER)
+            .count();
+        assert_eq!(
+            water_vertices, 20,
+            "Expected 5 water faces (20 vertices) for a waterlogged slab"
         );
     }
 

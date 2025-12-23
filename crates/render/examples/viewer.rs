@@ -570,6 +570,65 @@ fn main() -> Result<()> {
                                 }
                             }
 
+                            // Render fluids (alpha-blended) after opaque voxels.
+                            {
+                                let mut render_pass = resources
+                                    .pipeline
+                                    .begin_fluid_render_pass(&mut encoder, &frame.view);
+
+                                render_pass.set_pipeline(resources.pipeline.fluid_pipeline());
+                                render_pass.set_bind_group(
+                                    0,
+                                    resources.pipeline.camera_bind_group(),
+                                    &[],
+                                );
+                                render_pass.set_bind_group(
+                                    2,
+                                    resources.pipeline.texture_bind_group(),
+                                    &[],
+                                );
+
+                                let cam_pos = camera.position;
+                                let mut fluid_chunks: Vec<_> = chunk_manager
+                                    .chunks()
+                                    .filter(|chunk_data| {
+                                        chunk_data.has_fluid
+                                            && frustum.is_chunk_visible(chunk_data.chunk_pos)
+                                    })
+                                    .collect();
+
+                                fluid_chunks.sort_by(|a, b| {
+                                    let ax = (a.chunk_pos.x * 16) as f32 + 8.0 - cam_pos.x;
+                                    let az = (a.chunk_pos.z * 16) as f32 + 8.0 - cam_pos.z;
+                                    let bx = (b.chunk_pos.x * 16) as f32 + 8.0 - cam_pos.x;
+                                    let bz = (b.chunk_pos.z * 16) as f32 + 8.0 - cam_pos.z;
+                                    let dist_a = ax * ax + az * az;
+                                    let dist_b = bx * bx + bz * bz;
+                                    let dist_order = dist_b.total_cmp(&dist_a);
+                                    if dist_order != std::cmp::Ordering::Equal {
+                                        dist_order
+                                    } else {
+                                        (b.chunk_pos.x, b.chunk_pos.z)
+                                            .cmp(&(a.chunk_pos.x, a.chunk_pos.z))
+                                    }
+                                });
+
+                                for chunk_data in fluid_chunks {
+                                    render_pass.set_bind_group(
+                                        1,
+                                        &chunk_data.chunk_bind_group,
+                                        &[],
+                                    );
+                                    render_pass
+                                        .set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
+                                    render_pass.set_index_buffer(
+                                        chunk_data.index_buffer.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    render_pass.draw_indexed(0..chunk_data.index_count, 0, 0..1);
+                                }
+                            }
+
                             // Render wireframe highlight (if block selected)
                             if let Some(hit) = selected_block {
                                 // Update wireframe position and color
