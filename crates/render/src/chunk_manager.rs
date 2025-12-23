@@ -3,23 +3,22 @@
 use std::collections::HashMap;
 
 use crate::mesh::{MeshBuffers, MeshVertex};
-use mdminecraft_world::{
-    interactive_blocks, ChunkPos, BLOCK_GLASS, BLOCK_ICE, BLOCK_LAVA, BLOCK_LAVA_FLOWING,
-    BLOCK_WATER, BLOCK_WATER_FLOWING, CHUNK_SIZE_Y, WORLD_MIN_Y,
-};
+use mdminecraft_world::{ChunkPos, CHUNK_SIZE_Y, WORLD_MIN_Y};
 
 /// GPU buffer for a chunk mesh with position.
 pub struct ChunkRenderData {
     /// Vertex buffer
     pub vertex_buffer: wgpu::Buffer,
-    /// Index buffer
-    pub index_buffer: wgpu::Buffer,
-    /// Number of indices to draw
-    pub index_count: u32,
+    /// Opaque+cutout index buffer (triangle list).
+    pub opaque_index_buffer: Option<wgpu::Buffer>,
+    /// Number of opaque indices to draw.
+    pub opaque_index_count: u32,
+    /// Alpha-blended index buffer (triangle list).
+    pub alpha_index_buffer: Option<wgpu::Buffer>,
+    /// Number of alpha indices to draw.
+    pub alpha_index_count: u32,
     /// Chunk position in world
     pub chunk_pos: ChunkPos,
-    /// Whether this mesh contains any alpha-blended vertices (fluids + select translucent blocks).
-    pub has_fluid: bool,
     /// Bind group for chunk uniforms
     pub chunk_bind_group: wgpu::BindGroup,
 }
@@ -100,25 +99,23 @@ impl ChunkManager {
         // Reuse old buffers if replacing
         if let Some(old) = self.chunks.remove(&chunk_pos) {
             self.pool.release(old.vertex_buffer);
-            self.pool.release(old.index_buffer);
+            if let Some(buffer) = old.opaque_index_buffer {
+                self.pool.release(buffer);
+            }
+            if let Some(buffer) = old.alpha_index_buffer {
+                self.pool.release(buffer);
+            }
         }
 
         let vertex_size = (mesh_buffers.vertices.len() * std::mem::size_of::<MeshVertex>()) as u64;
-        let index_size = (mesh_buffers.indices.len() * std::mem::size_of::<u32>()) as u64;
+        let opaque_index_size =
+            (mesh_buffers.indices_opaque.len() * std::mem::size_of::<u32>()) as u64;
+        let alpha_index_size =
+            (mesh_buffers.indices_alpha.len() * std::mem::size_of::<u32>()) as u64;
 
-        if vertex_size == 0 || index_size == 0 {
+        if vertex_size == 0 || (opaque_index_size == 0 && alpha_index_size == 0) {
             return; // Don't add empty meshes
         }
-
-        let has_fluid = mesh_buffers.vertices.iter().any(|v| {
-            v.block_id == BLOCK_WATER
-                || v.block_id == BLOCK_WATER_FLOWING
-                || v.block_id == BLOCK_LAVA
-                || v.block_id == BLOCK_LAVA_FLOWING
-                || v.block_id == BLOCK_ICE
-                || v.block_id == BLOCK_GLASS
-                || v.block_id == interactive_blocks::GLASS_PANE
-        });
 
         let vertex_buffer = self.pool.acquire(
             device,
@@ -132,24 +129,47 @@ impl ChunkManager {
             bytemuck::cast_slice(&mesh_buffers.vertices),
         );
 
-        let index_buffer = self.pool.acquire(
-            device,
-            index_size,
-            wgpu::BufferUsages::INDEX,
-            "Chunk Index Buffer",
-        );
-        queue.write_buffer(
-            &index_buffer,
-            0,
-            bytemuck::cast_slice(&mesh_buffers.indices),
-        );
+        let opaque_index_buffer = if opaque_index_size != 0 {
+            let buffer = self.pool.acquire(
+                device,
+                opaque_index_size,
+                wgpu::BufferUsages::INDEX,
+                "Chunk Opaque Index Buffer",
+            );
+            queue.write_buffer(
+                &buffer,
+                0,
+                bytemuck::cast_slice(&mesh_buffers.indices_opaque),
+            );
+            Some(buffer)
+        } else {
+            None
+        };
+
+        let alpha_index_buffer = if alpha_index_size != 0 {
+            let buffer = self.pool.acquire(
+                device,
+                alpha_index_size,
+                wgpu::BufferUsages::INDEX,
+                "Chunk Alpha Index Buffer",
+            );
+            queue.write_buffer(
+                &buffer,
+                0,
+                bytemuck::cast_slice(&mesh_buffers.indices_alpha),
+            );
+            Some(buffer)
+        } else {
+            None
+        };
 
         let render_data = ChunkRenderData {
             vertex_buffer,
-            index_buffer,
-            index_count: mesh_buffers.indices.len() as u32,
+            opaque_index_buffer,
+            opaque_index_count: mesh_buffers.indices_opaque.len() as u32,
+            alpha_index_buffer,
+            alpha_index_count: mesh_buffers.indices_alpha.len() as u32,
             chunk_pos,
-            has_fluid,
             chunk_bind_group,
         };
 
@@ -160,7 +180,12 @@ impl ChunkManager {
     pub fn remove_chunk(&mut self, chunk_pos: &ChunkPos) -> bool {
         if let Some(data) = self.chunks.remove(chunk_pos) {
             self.pool.release(data.vertex_buffer);
-            self.pool.release(data.index_buffer);
+            if let Some(buffer) = data.opaque_index_buffer {
+                self.pool.release(buffer);
+            }
+            if let Some(buffer) = data.alpha_index_buffer {
+                self.pool.release(buffer);
+            }
             true
         } else {
             false
@@ -181,7 +206,12 @@ impl ChunkManager {
     pub fn clear(&mut self) {
         for (_, data) in self.chunks.drain() {
             self.pool.release(data.vertex_buffer);
-            self.pool.release(data.index_buffer);
+            if let Some(buffer) = data.opaque_index_buffer {
+                self.pool.release(buffer);
+            }
+            if let Some(buffer) = data.alpha_index_buffer {
+                self.pool.release(buffer);
+            }
         }
     }
 }

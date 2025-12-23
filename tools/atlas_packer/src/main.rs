@@ -165,6 +165,7 @@ fn build_atlas(textures: &[Texture], tile_size: u32, args: &Args) -> Result<Pack
         let dest_y = row * stride + padding;
 
         copy_into(&tex.image, &mut atlas, dest_x, dest_y);
+        bleed_padding(&mut atlas, dest_x, dest_y, tile_size, padding);
 
         let u0 = dest_x as f32 / width as f32;
         let v0 = dest_y as f32 / height as f32;
@@ -205,6 +206,69 @@ fn copy_into(src: &RgbaImage, dst: &mut RgbaImage, x: u32, y: u32) {
         for xx in 0..src.width() {
             let pixel = src.get_pixel(xx, yy);
             dst.put_pixel(x + xx, y + yy, *pixel);
+        }
+    }
+}
+
+fn bleed_padding(dst: &mut RgbaImage, x: u32, y: u32, tile_size: u32, padding: u32) {
+    if padding == 0 || tile_size == 0 {
+        return;
+    }
+
+    let x0 = x;
+    let y0 = y;
+    let x1 = x + tile_size - 1;
+    let y1 = y + tile_size - 1;
+
+    for yy in 0..tile_size {
+        let left = *dst.get_pixel(x0, y0 + yy);
+        for dx in 1..=padding {
+            dst.put_pixel(x0 - dx, y0 + yy, left);
+        }
+
+        let right = *dst.get_pixel(x1, y0 + yy);
+        for dx in 1..=padding {
+            dst.put_pixel(x1 + dx, y0 + yy, right);
+        }
+    }
+
+    for xx in 0..tile_size {
+        let top = *dst.get_pixel(x0 + xx, y0);
+        for dy in 1..=padding {
+            dst.put_pixel(x0 + xx, y0 - dy, top);
+        }
+
+        let bottom = *dst.get_pixel(x0 + xx, y1);
+        for dy in 1..=padding {
+            dst.put_pixel(x0 + xx, y1 + dy, bottom);
+        }
+    }
+
+    let top_left = *dst.get_pixel(x0, y0);
+    for dy in 1..=padding {
+        for dx in 1..=padding {
+            dst.put_pixel(x0 - dx, y0 - dy, top_left);
+        }
+    }
+
+    let top_right = *dst.get_pixel(x1, y0);
+    for dy in 1..=padding {
+        for dx in 1..=padding {
+            dst.put_pixel(x1 + dx, y0 - dy, top_right);
+        }
+    }
+
+    let bottom_left = *dst.get_pixel(x0, y1);
+    for dy in 1..=padding {
+        for dx in 1..=padding {
+            dst.put_pixel(x0 - dx, y1 + dy, bottom_left);
+        }
+    }
+
+    let bottom_right = *dst.get_pixel(x1, y1);
+    for dy in 1..=padding {
+        for dx in 1..=padding {
+            dst.put_pixel(x1 + dx, y1 + dy, bottom_right);
         }
     }
 }

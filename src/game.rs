@@ -1799,6 +1799,107 @@ impl GameWorld {
         ]
     }
 
+    fn srgb_u8_to_linear(channel: u8) -> f32 {
+        let c = channel as f32 / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn biome_water_tint_at(&self, world_x: i32, world_z: i32) -> [f32; 3] {
+        let biome = self
+            .terrain_generator
+            .biome_assigner()
+            .get_blended_biome(world_x, world_z, 2);
+        let water = biome.water_color;
+        [
+            Self::srgb_u8_to_linear(water.0),
+            Self::srgb_u8_to_linear(water.1),
+            Self::srgb_u8_to_linear(water.2),
+        ]
+    }
+
+    fn biome_atmosphere_colors_at(
+        &self,
+        world_x: i32,
+        world_z: i32,
+    ) -> ([f32; 3], [f32; 3], [f32; 3]) {
+        let biome = self
+            .terrain_generator
+            .biome_assigner()
+            .get_blended_biome(world_x, world_z, 2);
+        let sky = biome.sky_color;
+        let fog = biome.fog_color;
+        let water_fog = biome.water_fog_color;
+        (
+            [
+                Self::srgb_u8_to_linear(sky.0),
+                Self::srgb_u8_to_linear(sky.1),
+                Self::srgb_u8_to_linear(sky.2),
+            ],
+            [
+                Self::srgb_u8_to_linear(fog.0),
+                Self::srgb_u8_to_linear(fog.1),
+                Self::srgb_u8_to_linear(fog.2),
+            ],
+            [
+                Self::srgb_u8_to_linear(water_fog.0),
+                Self::srgb_u8_to_linear(water_fog.1),
+                Self::srgb_u8_to_linear(water_fog.2),
+            ],
+        )
+    }
+
+    fn is_camera_underwater(&self, camera_pos: glam::Vec3) -> bool {
+        let block_pos = glam::IVec3::new(
+            camera_pos.x.floor() as i32,
+            camera_pos.y.floor() as i32,
+            camera_pos.z.floor() as i32,
+        );
+        let Some(voxel) = self.get_voxel_at(block_pos) else {
+            return false;
+        };
+
+        if mdminecraft_world::get_fluid_type(voxel.id) == Some(mdminecraft_world::FluidType::Water)
+        {
+            return true;
+        }
+
+        mdminecraft_world::block_supports_waterlogging(voxel.id)
+            && mdminecraft_world::is_waterlogged(voxel.state)
+    }
+
+    fn chunk_biome_tints(&self, chunk_pos: ChunkPos) -> ([f32; 3], [f32; 3], [f32; 3]) {
+        let sample_x = chunk_pos.x * CHUNK_SIZE_X as i32 + (CHUNK_SIZE_X as i32 / 2);
+        let sample_z = chunk_pos.z * CHUNK_SIZE_Z as i32 + (CHUNK_SIZE_Z as i32 / 2);
+        let biome = self
+            .terrain_generator
+            .biome_assigner()
+            .get_blended_biome(sample_x, sample_z, 2);
+        let grass = biome.grass_color;
+        let foliage = biome.foliage_color;
+        let water = biome.water_color;
+        (
+            [
+                Self::srgb_u8_to_linear(grass.0),
+                Self::srgb_u8_to_linear(grass.1),
+                Self::srgb_u8_to_linear(grass.2),
+            ],
+            [
+                Self::srgb_u8_to_linear(foliage.0),
+                Self::srgb_u8_to_linear(foliage.1),
+                Self::srgb_u8_to_linear(foliage.2),
+            ],
+            [
+                Self::srgb_u8_to_linear(water.0),
+                Self::srgb_u8_to_linear(water.1),
+                Self::srgb_u8_to_linear(water.2),
+            ],
+        )
+    }
+
     fn mesh_for_chunk(&self, chunk: &Chunk) -> mdminecraft_render::MeshBuffers {
         let chunks = &self.chunks;
         let meshing_pos = chunk.position();
@@ -1844,13 +1945,22 @@ impl GameWorld {
         };
 
         let mesh = self.mesh_for_chunk(chunk);
-        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
+        if mesh.vertices.is_empty()
+            || (mesh.indices_opaque.is_empty() && mesh.indices_alpha.is_empty())
+        {
             return false;
         }
 
+        let (grass_tint, foliage_tint, water_tint) = self.chunk_biome_tints(chunk_pos);
+        let chunk_uniform = mdminecraft_render::ChunkUniform::from_chunk_pos_with_tints(
+            chunk_pos,
+            grass_tint,
+            foliage_tint,
+            water_tint,
+        );
         let chunk_bind_group = resources
             .pipeline
-            .create_chunk_bind_group(resources.device, chunk_pos);
+            .create_chunk_bind_group_with_uniform(resources.device, chunk_uniform);
         self.chunk_manager.add_chunk(
             resources.device,
             resources.queue,
@@ -8383,19 +8493,72 @@ impl GameWorld {
                 ))
             };
 
+            let camera = self.renderer.camera();
+
+            let weather_intensity_visual = if self.active_dimension == DimensionId::Overworld {
+                weather_intensity
+            } else {
+                0.0
+            };
+
+            let mut time_uniform = mdminecraft_render::TimeUniform::from_time_of_day(
+                &self.time_of_day,
+                weather_intensity_visual,
+                night_vision_strength,
+            );
+            time_uniform.time[1] = self.active_dimension.as_u8() as f32;
+
+            let sample_x = camera.position.x.floor() as i32;
+            let sample_z = camera.position.z.floor() as i32;
+            let mut overworld_water_fog_tint: Option<[f32; 3]> = None;
+
+            if self.active_dimension == DimensionId::Overworld {
+                let (sky_tint, _fog_tint, water_fog_tint) =
+                    self.biome_atmosphere_colors_at(sample_x, sample_z);
+                time_uniform.sky_color = [sky_tint[0], sky_tint[1], sky_tint[2], 1.0];
+                overworld_water_fog_tint = Some(water_fog_tint);
+            }
+
+            if self.is_camera_underwater(camera.position) {
+                let water_tint = overworld_water_fog_tint
+                    .unwrap_or_else(|| self.biome_water_tint_at(sample_x, sample_z));
+                time_uniform.fog_color = [
+                    (water_tint[0] * 0.6).min(1.0),
+                    (water_tint[1] * 0.6).min(1.0),
+                    (water_tint[2] * 0.6).min(1.0),
+                    1.0,
+                ];
+                let base_end = 32.0;
+                let max_end = 80.0;
+                let fog_end = base_end + (max_end - base_end) * night_vision_strength;
+                time_uniform.fog_params[0] = 0.0;
+                time_uniform.fog_params[1] = fog_end;
+                time_uniform.fog_params[3] = 0.0;
+            } else {
+                match self.active_dimension {
+                    DimensionId::Nether => {
+                        time_uniform.fog_color = [0.22, 0.05, 0.03, 1.0];
+                        time_uniform.fog_params[0] = 12.0;
+                        time_uniform.fog_params[1] = 64.0;
+                        time_uniform.fog_params[3] = 0.0;
+                    }
+                    DimensionId::End => {
+                        time_uniform.fog_color = [0.05, 0.02, 0.08, 1.0];
+                        time_uniform.fog_params[0] = 24.0;
+                        time_uniform.fog_params[1] = 96.0;
+                        time_uniform.fog_params[3] = 0.0;
+                    }
+                    DimensionId::Overworld => {}
+                }
+            }
+
             // Update time uniforms
-            resources.skybox_pipeline.update_time(
-                resources.queue,
-                &self.time_of_day,
-                weather_intensity,
-                night_vision_strength,
-            );
-            resources.pipeline.update_time(
-                resources.queue,
-                &self.time_of_day,
-                weather_intensity,
-                night_vision_strength,
-            );
+            resources
+                .skybox_pipeline
+                .update_time_with_uniform(resources.queue, time_uniform);
+            resources
+                .pipeline
+                .update_time_with_uniform(resources.queue, time_uniform);
 
             let mut encoder =
                 resources
@@ -8415,7 +8578,6 @@ impl GameWorld {
             }
 
             // Create frustum for culling
-            let camera = self.renderer.camera();
             let view_proj = camera.projection_matrix() * camera.view_matrix();
             let frustum = Frustum::from_matrix(&view_proj);
 
@@ -8437,13 +8599,14 @@ impl GameWorld {
 
                     self.chunks_visible += 1;
 
+                    let Some(index_buffer) = chunk_data.opaque_index_buffer.as_ref() else {
+                        continue;
+                    };
+
                     render_pass.set_bind_group(1, &chunk_data.chunk_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(
-                        chunk_data.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    render_pass.draw_indexed(0..chunk_data.index_count, 0, 0..1);
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..chunk_data.opaque_index_count, 0, 0..1);
                 }
             }
 
@@ -8462,7 +8625,8 @@ impl GameWorld {
                     .chunk_manager
                     .chunks()
                     .filter(|chunk_data| {
-                        chunk_data.has_fluid && frustum.is_chunk_visible(chunk_data.chunk_pos)
+                        chunk_data.alpha_index_count != 0
+                            && frustum.is_chunk_visible(chunk_data.chunk_pos)
                     })
                     .collect();
 
@@ -8482,13 +8646,14 @@ impl GameWorld {
                 });
 
                 for chunk_data in fluid_chunks {
+                    let index_buffer = chunk_data
+                        .alpha_index_buffer
+                        .as_ref()
+                        .expect("alpha_index_buffer present");
                     render_pass.set_bind_group(1, &chunk_data.chunk_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, chunk_data.vertex_buffer.slice(..));
-                    render_pass.set_index_buffer(
-                        chunk_data.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint32,
-                    );
-                    render_pass.draw_indexed(0..chunk_data.index_count, 0, 0..1);
+                    render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass.draw_indexed(0..chunk_data.alpha_index_count, 0, 0..1);
                 }
             }
 

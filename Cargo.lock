@@ -2108,6 +2108,7 @@ dependencies = [
  "glam",
  "image",
  "mdminecraft-assets",
+ "mdminecraft-core",
  "mdminecraft-testkit",
  "mdminecraft-world",
  "pollster",

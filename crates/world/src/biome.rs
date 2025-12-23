@@ -115,12 +115,20 @@ pub struct BiomeData {
     pub grass_color: (u8, u8, u8),
     /// Foliage color tint (R, G, B)
     pub foliage_color: (u8, u8, u8),
+    /// Water color tint (R, G, B)
+    pub water_color: (u8, u8, u8),
+    /// Sky color tint (R, G, B)
+    pub sky_color: (u8, u8, u8),
+    /// Fog color tint (R, G, B)
+    pub fog_color: (u8, u8, u8),
+    /// Underwater fog color tint (R, G, B)
+    pub water_fog_color: (u8, u8, u8),
 }
 
 impl BiomeData {
     /// Get biome data for a specific biome ID.
     pub fn get(id: BiomeId) -> Self {
-        match id {
+        let mut data = match id {
             BiomeId::IcePlains => Self {
                 id,
                 temperature: 0.0,
@@ -129,6 +137,10 @@ impl BiomeData {
                 height_variation: 0.5,
                 grass_color: (200, 220, 255),
                 foliage_color: (200, 220, 255),
+                water_color: (80, 140, 255),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::IceMountains => Self {
                 id,
@@ -138,6 +150,10 @@ impl BiomeData {
                 height_variation: 1.5,
                 grass_color: (220, 230, 255),
                 foliage_color: (220, 230, 255),
+                water_color: (70, 130, 250),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Tundra => Self {
                 id,
@@ -147,6 +163,10 @@ impl BiomeData {
                 height_variation: 0.6,
                 grass_color: (180, 200, 220),
                 foliage_color: (180, 200, 220),
+                water_color: (70, 130, 240),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Plains => Self {
                 id,
@@ -156,6 +176,10 @@ impl BiomeData {
                 height_variation: 0.4,
                 grass_color: (140, 200, 80),
                 foliage_color: (120, 180, 60),
+                water_color: (63, 118, 228),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Forest => Self {
                 id,
@@ -165,6 +189,10 @@ impl BiomeData {
                 height_variation: 0.7,
                 grass_color: (120, 180, 70),
                 foliage_color: (100, 160, 50),
+                water_color: (63, 118, 228),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::BirchForest => Self {
                 id,
@@ -174,6 +202,10 @@ impl BiomeData {
                 height_variation: 0.6,
                 grass_color: (130, 190, 75),
                 foliage_color: (110, 170, 55),
+                water_color: (63, 118, 228),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Mountains => Self {
                 id,
@@ -183,6 +215,10 @@ impl BiomeData {
                 height_variation: 1.8,
                 grass_color: (160, 190, 100),
                 foliage_color: (140, 170, 80),
+                water_color: (60, 110, 220),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Hills => Self {
                 id,
@@ -192,6 +228,10 @@ impl BiomeData {
                 height_variation: 1.2,
                 grass_color: (150, 190, 90),
                 foliage_color: (130, 170, 70),
+                water_color: (63, 118, 228),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Desert => Self {
                 id,
@@ -201,6 +241,10 @@ impl BiomeData {
                 height_variation: 0.5,
                 grass_color: (230, 200, 120),
                 foliage_color: (200, 170, 100),
+                water_color: (70, 125, 220),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Savanna => Self {
                 id,
@@ -210,6 +254,10 @@ impl BiomeData {
                 height_variation: 0.6,
                 grass_color: (200, 180, 90),
                 foliage_color: (180, 160, 70),
+                water_color: (68, 123, 220),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Swamp => Self {
                 id,
@@ -219,6 +267,10 @@ impl BiomeData {
                 height_variation: 0.3,
                 grass_color: (100, 150, 80),
                 foliage_color: (80, 130, 60),
+                water_color: (97, 123, 100),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::RainForest => Self {
                 id,
@@ -228,6 +280,10 @@ impl BiomeData {
                 height_variation: 0.8,
                 grass_color: (100, 180, 70),
                 foliage_color: (80, 160, 50),
+                water_color: (55, 120, 210),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::Ocean => Self {
                 id,
@@ -237,6 +293,10 @@ impl BiomeData {
                 height_variation: 0.2,
                 grass_color: (120, 160, 140),
                 foliage_color: (100, 140, 120),
+                water_color: (50, 90, 220),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
             BiomeId::DeepOcean => Self {
                 id,
@@ -246,8 +306,17 @@ impl BiomeData {
                 height_variation: 0.3,
                 grass_color: (100, 140, 120),
                 foliage_color: (80, 120, 100),
+                water_color: (30, 60, 180),
+                sky_color: (0, 0, 0),
+                fog_color: (0, 0, 0),
+                water_fog_color: (0, 0, 0),
             },
-        }
+        };
+
+        data.sky_color = sky_color_from_temperature(data.temperature);
+        data.fog_color = fog_color_for_biome(data.id);
+        data.water_fog_color = water_fog_color_for_biome(data.id, data.water_color);
+        data
     }
 }
 
@@ -382,6 +451,8 @@ impl BiomeAssigner {
             return BiomeData::get(self.get_biome(world_x, world_z));
         }
 
+        let center_biome = self.get_biome(world_x, world_z);
+
         // Sample biomes in a grid around the position
         let mut temp_sum = 0.0;
         let mut humidity_sum = 0.0;
@@ -393,6 +464,9 @@ impl BiomeAssigner {
         let mut foliage_r = 0.0;
         let mut foliage_g = 0.0;
         let mut foliage_b = 0.0;
+        let mut water_r = 0.0;
+        let mut water_g = 0.0;
+        let mut water_b = 0.0;
         let mut total_weight = 0.0;
 
         for dx in -blend_radius..=blend_radius {
@@ -418,12 +492,15 @@ impl BiomeAssigner {
                 foliage_r += biome_data.foliage_color.0 as f32 * weight;
                 foliage_g += biome_data.foliage_color.1 as f32 * weight;
                 foliage_b += biome_data.foliage_color.2 as f32 * weight;
+                water_r += biome_data.water_color.0 as f32 * weight;
+                water_g += biome_data.water_color.1 as f32 * weight;
+                water_b += biome_data.water_color.2 as f32 * weight;
                 total_weight += weight;
             }
         }
 
         BiomeData {
-            id: self.get_biome(world_x, world_z), // Use center biome ID
+            id: center_biome, // Use center biome ID
             temperature: temp_sum / total_weight,
             humidity: humidity_sum / total_weight,
             height_modifier: height_mod_sum / total_weight,
@@ -438,6 +515,21 @@ impl BiomeAssigner {
                 (foliage_g / total_weight) as u8,
                 (foliage_b / total_weight) as u8,
             ),
+            water_color: (
+                (water_r / total_weight) as u8,
+                (water_g / total_weight) as u8,
+                (water_b / total_weight) as u8,
+            ),
+            sky_color: sky_color_from_temperature(temp_sum / total_weight),
+            fog_color: fog_color_for_biome(center_biome),
+            water_fog_color: water_fog_color_for_biome(
+                center_biome,
+                (
+                    (water_r / total_weight) as u8,
+                    (water_g / total_weight) as u8,
+                    (water_b / total_weight) as u8,
+                ),
+            ),
         }
     }
 
@@ -450,6 +542,52 @@ impl BiomeAssigner {
     pub fn humidity_noise(&self) -> &NoiseGenerator {
         &self.humidity_noise
     }
+}
+
+fn fog_color_for_biome(_id: BiomeId) -> (u8, u8, u8) {
+    // Vanilla uses a largely fixed Overworld fog color. Keep it constant for now.
+    (192, 216, 255) // 0xC0D8FF
+}
+
+fn water_fog_color_for_biome(_id: BiomeId, water_color: (u8, u8, u8)) -> (u8, u8, u8) {
+    // Vanilla uses biome-configurable underwater fog; keep it aligned to water color for now.
+    water_color
+}
+
+fn sky_color_from_temperature(temperature: f32) -> (u8, u8, u8) {
+    let temp = (temperature / 3.0).clamp(-1.0, 1.0);
+    let hue = 0.622_222_24 - temp * 0.05;
+    let saturation = 0.5 + temp * 0.1;
+    hsv_to_rgb(hue, saturation, 1.0)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let h = h.rem_euclid(1.0);
+    let s = s.clamp(0.0, 1.0);
+    let v = v.clamp(0.0, 1.0);
+
+    let h6 = h * 6.0;
+    let i = h6.floor() as i32;
+    let f = h6 - i as f32;
+
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+
+    let (r, g, b) = match i.rem_euclid(6) {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+
+    (
+        (r * 255.0).round().clamp(0.0, 255.0) as u8,
+        (g * 255.0).round().clamp(0.0, 255.0) as u8,
+        (b * 255.0).round().clamp(0.0, 255.0) as u8,
+    )
 }
 
 #[cfg(test)]

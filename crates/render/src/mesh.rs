@@ -1,5 +1,6 @@
 use blake3::Hasher;
 use mdminecraft_assets::{BlockFace, BlockRegistry, TextureAtlasMetadata};
+use mdminecraft_core::RegistryKey;
 use mdminecraft_world::{
     block_supports_waterlogging, get_fluid_level, get_fluid_type, interactive_blocks, is_falling,
     is_fluid, is_waterlogged, local_y_to_world_y, world_y_to_local_y, BlockId, Chunk, FluidType,
@@ -8,6 +9,13 @@ use mdminecraft_world::{
 };
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
+const EXTRA_ALPHA_BIT: u8 = 0x80;
+const EXTRA_TINT_SHIFT: u8 = 4;
+const EXTRA_TINT_GRASS: u8 = 1 << EXTRA_TINT_SHIFT;
+const EXTRA_TINT_FOLIAGE: u8 = 2 << EXTRA_TINT_SHIFT;
+const EXTRA_TINT_GRASS_SIDE: u8 = 3 << EXTRA_TINT_SHIFT;
+const EXTRA_TINT_FOLIAGE_BIRCH: u8 = 4 << EXTRA_TINT_SHIFT;
+const EXTRA_TINT_FOLIAGE_SPRUCE: u8 = 5 << EXTRA_TINT_SHIFT;
 
 /// Hash of the combined vertex/index buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +33,10 @@ pub struct MeshVertex {
     pub uv: [f32; 2],
     /// Block identifier baked into the face for material lookup.
     pub block_id: u16,
-    /// Combined light level (max of skylight and blocklight), range 0-15.
+    /// Packed light + ambient occlusion.
+    ///
+    /// - Low 4 bits: combined light level (max of skylight and blocklight), range 0-15.
+    /// - High 4 bits: ambient occlusion level, range 0-3 (3 = fully lit).
     pub light: u8,
     /// Extra per-vertex metadata (packed into the high 8 bits of the `packed_data` attribute).
     pub extra: u8,
@@ -36,8 +47,10 @@ pub struct MeshVertex {
 pub struct MeshBuffers {
     /// Vertex buffer used for draw submission.
     pub vertices: Vec<MeshVertex>,
-    /// Index buffer (triangle list) referencing the vertex buffer.
-    pub indices: Vec<u32>,
+    /// Index buffer (triangle list) for the opaque + cutout pass.
+    pub indices_opaque: Vec<u32>,
+    /// Index buffer (triangle list) for the alpha-blended pass.
+    pub indices_alpha: Vec<u32>,
     /// Stable hash of the vertex + index buffers for cache comparisons.
     pub hash: MeshHash,
 }
@@ -47,7 +60,8 @@ impl MeshBuffers {
     pub fn empty() -> Self {
         Self {
             vertices: Vec::new(),
-            indices: Vec::new(),
+            indices_opaque: Vec::new(),
+            indices_alpha: Vec::new(),
             hash: MeshHash([0; 32]),
         }
     }
@@ -115,6 +129,8 @@ where
     mesh_enchanting_tables(chunk, &mut builder);
     mesh_brewing_stands(chunk, &mut builder);
     mesh_farmland(chunk, &mut builder);
+    mesh_nether_portals(chunk, &mut builder);
+    mesh_end_portals(chunk, &mut builder);
     builder.finish()
 }
 
@@ -748,19 +764,78 @@ fn mesh_waterlogged_fluids<F>(
     }
 }
 
+fn render_translucent_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/translucent").expect("valid render translucent tag")
+    })
+}
+
+fn render_tint_grass_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/tint/grass").expect("valid render grass tint tag")
+    })
+}
+
+fn render_tint_foliage_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/tint/foliage").expect("valid render foliage tint tag")
+    })
+}
+
+fn render_tint_foliage_birch_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/tint/foliage/birch")
+            .expect("valid render birch foliage tint tag")
+    })
+}
+
+fn render_tint_foliage_spruce_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/tint/foliage/spruce")
+            .expect("valid render spruce foliage tint tag")
+    })
+}
+
+fn is_alpha_blended(block_id: BlockId, registry: &BlockRegistry) -> bool {
+    is_fluid(block_id) || registry.has_tag(block_id, render_translucent_tag())
+}
+
 /// Internal helper for building mesh data.
 struct MeshBuilder<'a> {
     vertices: Vec<MeshVertex>,
-    indices: Vec<u32>,
+    indices_opaque: Vec<u32>,
+    indices_alpha: Vec<u32>,
     registry: &'a BlockRegistry,
     atlas: Option<&'a TextureAtlasMetadata>,
 }
 
 impl<'a> MeshBuilder<'a> {
+    fn pack_light_and_ao(light: u8, ao: u8) -> u8 {
+        let light = light.min(15) & 0x0F;
+        let ao = ao.min(15) & 0x0F;
+        (ao << 4) | light
+    }
+
     fn new(registry: &'a BlockRegistry, atlas: Option<&'a TextureAtlasMetadata>) -> Self {
         Self {
             vertices: Vec::with_capacity(1024), // Pre-allocate to reduce reallocations
-            indices: Vec::with_capacity(1024 * 6 / 4), // Indices are 1.5x vertices for quads
+            indices_opaque: Vec::with_capacity(1024 * 6 / 4), // Indices are 1.5x vertices for quads
+            indices_alpha: Vec::with_capacity(256),
             registry,
             atlas,
         }
@@ -789,9 +864,61 @@ impl<'a> MeshBuilder<'a> {
         light: u8,
         extra: u8,
     ) {
+        self.push_quad_with_ao_and_extra(
+            block_id,
+            face,
+            normal,
+            corners,
+            normal_positive,
+            [light; 4],
+            [3; 4],
+            extra,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_quad_with_ao_and_extra(
+        &mut self,
+        block_id: BlockId,
+        face: BlockFace,
+        normal: [f32; 3],
+        corners: [[f32; 3]; 4],
+        normal_positive: bool,
+        light: [u8; 4],
+        ao: [u8; 4],
+        extra: u8,
+    ) {
         let base = self.vertices.len() as u32;
 
         let uvs = self.resolve_uvs(block_id, face);
+        let alpha_blended = is_alpha_blended(block_id, self.registry);
+        let tint_extra = if self.registry.has_tag(block_id, render_tint_grass_tag()) {
+            match face {
+                BlockFace::Up => EXTRA_TINT_GRASS,
+                BlockFace::Down => 0,
+                _ => EXTRA_TINT_GRASS_SIDE,
+            }
+        } else if self
+            .registry
+            .has_tag(block_id, render_tint_foliage_birch_tag())
+        {
+            EXTRA_TINT_FOLIAGE_BIRCH
+        } else if self
+            .registry
+            .has_tag(block_id, render_tint_foliage_spruce_tag())
+        {
+            EXTRA_TINT_FOLIAGE_SPRUCE
+        } else if self.registry.has_tag(block_id, render_tint_foliage_tag()) {
+            EXTRA_TINT_FOLIAGE
+        } else {
+            0
+        };
+        let extra = extra | tint_extra;
+        let extra = if alpha_blended {
+            extra | EXTRA_ALPHA_BIT
+        } else {
+            extra & !EXTRA_ALPHA_BIT
+        };
 
         for (i, &corner) in corners.iter().enumerate() {
             self.vertices.push(MeshVertex {
@@ -799,7 +926,7 @@ impl<'a> MeshBuilder<'a> {
                 normal,
                 uv: uvs[i],
                 block_id,
-                light,
+                light: Self::pack_light_and_ao(light[i], ao[i]),
                 extra,
             });
         }
@@ -808,26 +935,31 @@ impl<'a> MeshBuilder<'a> {
         } else {
             [0, 2, 1, 0, 3, 2]
         };
+        let indices_out = if alpha_blended {
+            &mut self.indices_alpha
+        } else {
+            &mut self.indices_opaque
+        };
         for idx in indices {
-            self.indices.push(base + idx);
+            indices_out.push(base + idx);
         }
     }
 
     fn finish(self) -> MeshBuffers {
         let MeshBuilder {
-            vertices, indices, ..
+            vertices,
+            indices_opaque,
+            indices_alpha,
+            ..
         } = self;
         let mut hasher = Hasher::new();
-        for vertex in &vertices {
-            hasher.update(bytemuck::cast_slice(&vertex.position));
-            hasher.update(bytemuck::cast_slice(&vertex.normal));
-            hasher.update(&vertex.block_id.to_le_bytes());
-            hasher.update(&[vertex.light]);
-        }
-        hasher.update(bytemuck::cast_slice(&indices));
+        hasher.update(bytemuck::cast_slice(&vertices));
+        hasher.update(bytemuck::cast_slice(&indices_opaque));
+        hasher.update(bytemuck::cast_slice(&indices_alpha));
         MeshBuffers {
             vertices,
-            indices,
+            indices_opaque,
+            indices_alpha,
             hash: MeshHash(*hasher.finalize().as_bytes()),
         }
     }
@@ -906,6 +1038,7 @@ impl GreedyMesher {
                         }
 
                         Self::emit_quad(
+                            chunk,
                             builder,
                             axis,
                             slice,
@@ -1010,6 +1143,7 @@ impl GreedyMesher {
     }
 
     fn emit_quad(
+        chunk: &Chunk,
         builder: &mut MeshBuilder,
         axis: usize,
         slice: usize,
@@ -1017,6 +1151,64 @@ impl GreedyMesher {
         quad_size: (usize, usize),
         cell: FaceDesc,
     ) {
+        fn voxel_at(chunk: &Chunk, x: i32, y: i32, z: i32) -> Option<Voxel> {
+            if x < 0
+                || y < 0
+                || z < 0
+                || x >= CHUNK_SIZE_X as i32
+                || y >= CHUNK_SIZE_Y as i32
+                || z >= CHUNK_SIZE_Z as i32
+            {
+                return None;
+            }
+            Some(chunk.voxel(x as usize, y as usize, z as usize))
+        }
+
+        fn is_ao_occluder(chunk: &Chunk, registry: &BlockRegistry, x: i32, y: i32, z: i32) -> bool {
+            voxel_at(chunk, x, y, z).is_some_and(|v| is_solid(v) && is_opaque(v, registry))
+        }
+
+        fn sample_light(chunk: &Chunk, x: i32, y: i32, z: i32, fallback: u8) -> u8 {
+            voxel_at(chunk, x, y, z)
+                .map(|v| v.light_sky.max(v.light_block))
+                .unwrap_or(fallback)
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn ao_corner(
+            chunk: &Chunk,
+            registry: &BlockRegistry,
+            pos: [i32; 3],
+            axis: usize,
+            normal: i32,
+            u_axis: usize,
+            u_sign: i32,
+            v_axis: usize,
+            v_sign: i32,
+        ) -> u8 {
+            let mut side_u = pos;
+            side_u[axis] += normal;
+            side_u[u_axis] += u_sign;
+            let mut side_v = pos;
+            side_v[axis] += normal;
+            side_v[v_axis] += v_sign;
+            let mut corner = pos;
+            corner[axis] += normal;
+            corner[u_axis] += u_sign;
+            corner[v_axis] += v_sign;
+
+            let side_u_occ = is_ao_occluder(chunk, registry, side_u[0], side_u[1], side_u[2]);
+            let side_v_occ = is_ao_occluder(chunk, registry, side_v[0], side_v[1], side_v[2]);
+            let corner_occ = is_ao_occluder(chunk, registry, corner[0], corner[1], corner[2]);
+
+            if side_u_occ && side_v_occ {
+                return 0;
+            }
+
+            let occ = side_u_occ as u8 + side_v_occ as u8 + corner_occ as u8;
+            3u8.saturating_sub(occ)
+        }
+
         let u_axis = (axis + 1) % 3;
         let v_axis = (axis + 2) % 3;
         let (u, v) = origin_uv;
@@ -1042,13 +1234,83 @@ impl GreedyMesher {
             cell.normal[1] as f32,
             cell.normal[2] as f32,
         ];
-        builder.push_quad(
+
+        let apply_ao = builder
+            .registry
+            .descriptor(cell.block_id)
+            .is_some_and(|d| d.opaque)
+            && !is_alpha_blended(cell.block_id, builder.registry);
+        let (ao, light) = if apply_ao {
+            let face_positive = cell.normal[axis] > 0;
+            let normal_dir = if face_positive { 1 } else { -1 };
+            let axis_pos = if face_positive {
+                slice.saturating_sub(1) as i32
+            } else {
+                slice as i32
+            };
+
+            let corner_block_uv = [
+                (u as i32, v as i32),
+                ((u + quad_width - 1) as i32, v as i32),
+                ((u + quad_width - 1) as i32, (v + quad_height - 1) as i32),
+                (u as i32, (v + quad_height - 1) as i32),
+            ];
+            let corner_signs = [(-1, -1), (1, -1), (1, 1), (-1, 1)];
+
+            let mut ao_out = [3u8; 4];
+            let mut light_out = [cell.light; 4];
+            for (idx, ((cu, cv), (su, sv))) in
+                corner_block_uv.into_iter().zip(corner_signs).enumerate()
+            {
+                let mut pos = [0i32; 3];
+                pos[axis] = axis_pos;
+                pos[u_axis] = cu;
+                pos[v_axis] = cv;
+
+                let mut adjacent = pos;
+                adjacent[axis] += normal_dir;
+                let mut side_u = adjacent;
+                side_u[u_axis] += su;
+                let mut side_v = adjacent;
+                side_v[v_axis] += sv;
+                let mut corner = adjacent;
+                corner[u_axis] += su;
+                corner[v_axis] += sv;
+
+                ao_out[idx] = ao_corner(
+                    chunk,
+                    builder.registry,
+                    pos,
+                    axis,
+                    normal_dir,
+                    u_axis,
+                    su,
+                    v_axis,
+                    sv,
+                );
+
+                let fallback = cell.light;
+                let l0 = sample_light(chunk, adjacent[0], adjacent[1], adjacent[2], fallback);
+                let l1 = sample_light(chunk, side_u[0], side_u[1], side_u[2], fallback);
+                let l2 = sample_light(chunk, side_v[0], side_v[1], side_v[2], fallback);
+                let l3 = sample_light(chunk, corner[0], corner[1], corner[2], fallback);
+                let sum = l0 as u16 + l1 as u16 + l2 as u16 + l3 as u16;
+                light_out[idx] = ((sum + 2) / 4) as u8;
+            }
+            (ao_out, light_out)
+        } else {
+            ([3u8; 4], [cell.light; 4])
+        };
+
+        builder.push_quad_with_ao_and_extra(
             cell.block_id,
             cell.face(),
             normal,
             [v0, v1, v2, v3],
             cell.normal[axis] > 0,
-            cell.light,
+            light,
+            ao,
+            0,
         );
     }
 }
@@ -2831,6 +3093,128 @@ fn mesh_farmland(chunk: &Chunk, builder: &mut MeshBuilder) {
     }
 }
 
+fn mesh_nether_portals(chunk: &Chunk, builder: &mut MeshBuilder) {
+    const THICKNESS: f32 = 2.0 / 16.0;
+    let half_thickness = THICKNESS * 0.5;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::BLOCK_NETHER_PORTAL {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+                let align_x = (voxel.state & 0x01) == 0;
+
+                let x0 = x as f32;
+                let y0 = y as f32;
+                let z0 = z as f32;
+                let x1 = x0 + 1.0;
+                let y1 = y0 + 1.0;
+                let z1 = z0 + 1.0;
+
+                if align_x {
+                    let z_center = z0 + 0.5;
+                    let z_north = z_center - half_thickness;
+                    let z_south = z_center + half_thickness;
+
+                    builder.push_quad(
+                        voxel.id,
+                        BlockFace::North,
+                        [0.0, 0.0, -1.0],
+                        [
+                            [x0, y0, z_north],
+                            [x0, y1, z_north],
+                            [x1, y1, z_north],
+                            [x1, y0, z_north],
+                        ],
+                        false,
+                        light,
+                    );
+                    builder.push_quad(
+                        voxel.id,
+                        BlockFace::South,
+                        [0.0, 0.0, 1.0],
+                        [
+                            [x0, y0, z_south],
+                            [x0, y1, z_south],
+                            [x1, y1, z_south],
+                            [x1, y0, z_south],
+                        ],
+                        true,
+                        light,
+                    );
+                } else {
+                    let x_center = x0 + 0.5;
+                    let x_west = x_center - half_thickness;
+                    let x_east = x_center + half_thickness;
+
+                    builder.push_quad(
+                        voxel.id,
+                        BlockFace::West,
+                        [-1.0, 0.0, 0.0],
+                        [
+                            [x_west, y0, z0],
+                            [x_west, y1, z0],
+                            [x_west, y1, z1],
+                            [x_west, y0, z1],
+                        ],
+                        false,
+                        light,
+                    );
+                    builder.push_quad(
+                        voxel.id,
+                        BlockFace::East,
+                        [1.0, 0.0, 0.0],
+                        [
+                            [x_east, y0, z0],
+                            [x_east, y1, z0],
+                            [x_east, y1, z1],
+                            [x_east, y0, z1],
+                        ],
+                        true,
+                        light,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn mesh_end_portals(chunk: &Chunk, builder: &mut MeshBuilder) {
+    const SURFACE_HEIGHT: f32 = 12.0 / 16.0;
+
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != mdminecraft_world::BLOCK_END_PORTAL {
+                    continue;
+                }
+
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let x0 = x as f32;
+                let y0 = y as f32 + SURFACE_HEIGHT;
+                let z0 = z as f32;
+                let x1 = x0 + 1.0;
+                let z1 = z0 + 1.0;
+
+                builder.push_quad(
+                    voxel.id,
+                    BlockFace::Up,
+                    [0.0, 1.0, 0.0],
+                    [[x0, y0, z0], [x0, y0, z1], [x1, y0, z1], [x1, y0, z0]],
+                    true,
+                    light,
+                );
+            }
+        }
+    }
+}
+
 const FACE_UP: u8 = 1 << 0;
 const FACE_DOWN: u8 = 1 << 1;
 const FACE_NORTH: u8 = 1 << 2;
@@ -2921,10 +3305,10 @@ fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 }
 
 fn is_opaque(voxel: Voxel, registry: &BlockRegistry) -> bool {
-    if mdminecraft_world::is_stairs(voxel.id)
+    if is_alpha_blended(voxel.id, registry)
+        || mdminecraft_world::is_stairs(voxel.id)
         || mdminecraft_world::is_slab(voxel.id)
         || mdminecraft_world::is_farmland(voxel.id)
-        || voxel.id == mdminecraft_world::BLOCK_ICE
         || matches!(
             voxel.id,
             mdminecraft_world::BLOCK_ENCHANTING_TABLE | mdminecraft_world::BLOCK_BREWING_STAND
@@ -2953,6 +3337,8 @@ fn is_solid(voxel: Voxel) -> bool {
         && !mdminecraft_world::is_farmland(voxel.id)
         && voxel.id != mdminecraft_world::BLOCK_ENCHANTING_TABLE
         && voxel.id != mdminecraft_world::BLOCK_BREWING_STAND
+        && voxel.id != mdminecraft_world::BLOCK_NETHER_PORTAL
+        && voxel.id != mdminecraft_world::BLOCK_END_PORTAL
         && voxel.id != mdminecraft_world::BLOCK_GLOW_LICHEN
         && voxel.id != mdminecraft_world::BLOCK_POINTED_DRIPSTONE
         && voxel.id != mdminecraft_world::BLOCK_CAVE_VINES
@@ -2980,7 +3366,7 @@ fn is_solid(voxel: Voxel) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
+    use mdminecraft_assets::{BlockDefinition, BlockDescriptor, BlockRegistry};
     use mdminecraft_world::{
         interactive_blocks, set_fluid_level, set_waterlogged, Chunk, ChunkPos, Voxel,
     };
@@ -2992,6 +3378,30 @@ mod tests {
             BlockDescriptor::simple("air", false),
             BlockDescriptor::simple("stone", true),
             BlockDescriptor::simple("leaves", false), // transparent block
+        ])
+    }
+
+    fn registry_with_biome_tints() -> BlockRegistry {
+        BlockRegistry::new(vec![
+            BlockDescriptor::simple("air", false),
+            BlockDescriptor::from_definition(BlockDefinition {
+                name: "grass".to_string(),
+                key: None,
+                tags: vec!["render/tint/grass".to_string()],
+                opaque: true,
+                texture: None,
+                textures: None,
+                harvest_level: None,
+            }),
+            BlockDescriptor::from_definition(BlockDefinition {
+                name: "leaves".to_string(),
+                key: None,
+                tags: vec!["render/tint/foliage".to_string()],
+                opaque: false,
+                texture: None,
+                textures: None,
+                harvest_level: None,
+            }),
         ])
     }
 
@@ -3015,10 +3425,101 @@ mod tests {
                 BLOCK_WATER_FLOWING => "water_flowing".to_string(),
                 mdminecraft_world::BLOCK_LAVA => "lava".to_string(),
                 mdminecraft_world::BLOCK_LAVA_FLOWING => "lava_flowing".to_string(),
+                mdminecraft_world::BLOCK_ICE => "ice".to_string(),
                 _ => format!("block_{id}"),
             };
 
-            descriptors.push(BlockDescriptor::simple(&name, opaque));
+            if id_u16 == mdminecraft_world::BLOCK_ICE {
+                descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+                    name,
+                    key: None,
+                    tags: vec!["render/translucent".to_string()],
+                    opaque,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                }));
+            } else {
+                descriptors.push(BlockDescriptor::simple(&name, opaque));
+            }
+        }
+
+        BlockRegistry::new(descriptors)
+    }
+
+    fn registry_with_glass() -> BlockRegistry {
+        let max_id = mdminecraft_world::BLOCK_GLASS as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+
+        for id in 0..=max_id {
+            let id_u16 = id as u16;
+            let opaque = !matches!(id_u16, BLOCK_AIR | mdminecraft_world::BLOCK_GLASS);
+            let name = match id_u16 {
+                BLOCK_AIR => "air".to_string(),
+                mdminecraft_world::BLOCK_GLASS => "glass".to_string(),
+                _ => format!("block_{id}"),
+            };
+            if id_u16 == mdminecraft_world::BLOCK_GLASS {
+                descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+                    name,
+                    key: None,
+                    tags: vec!["render/translucent".to_string()],
+                    opaque,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                }));
+            } else {
+                descriptors.push(BlockDescriptor::simple(&name, opaque));
+            }
+        }
+
+        BlockRegistry::new(descriptors)
+    }
+
+    fn registry_with_end_portal() -> BlockRegistry {
+        let max_id = mdminecraft_world::BLOCK_END_PORTAL as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+
+        for id in 1..=max_id {
+            if id == mdminecraft_world::BLOCK_END_PORTAL as usize {
+                descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+                    name: "end_portal".to_string(),
+                    key: None,
+                    tags: vec!["render/translucent".to_string()],
+                    opaque: false,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                }));
+            } else {
+                descriptors.push(BlockDescriptor::simple("solid", true));
+            }
+        }
+
+        BlockRegistry::new(descriptors)
+    }
+
+    fn registry_with_nether_portal() -> BlockRegistry {
+        let max_id = mdminecraft_world::BLOCK_NETHER_PORTAL as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+        descriptors.push(BlockDescriptor::simple("air", false));
+
+        for id in 1..=max_id {
+            if id == mdminecraft_world::BLOCK_NETHER_PORTAL as usize {
+                descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+                    name: "nether_portal".to_string(),
+                    key: None,
+                    tags: vec!["render/translucent".to_string()],
+                    opaque: false,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                }));
+            } else {
+                descriptors.push(BlockDescriptor::simple("solid", true));
+            }
         }
 
         BlockRegistry::new(descriptors)
@@ -3038,7 +3539,7 @@ mod tests {
         let registry = registry();
         let mesh = mesh_chunk(&chunk, &registry, None);
         assert!(!mesh.vertices.is_empty());
-        assert_eq!(mesh.indices.len(), 36); // 6 faces * 2 tris * 3 indices
+        assert_eq!(mesh.indices_opaque.len(), 36); // 6 faces * 2 tris * 3 indices
     }
 
     #[test]
@@ -3084,7 +3585,7 @@ mod tests {
             "Transparent block should generate mesh vertices"
         );
         assert_eq!(
-            mesh.indices.len(),
+            mesh.indices_opaque.len(),
             36,
             "Transparent block should have 6 faces (36 indices)"
         );
@@ -3121,9 +3622,9 @@ mod tests {
         // With greedy meshing, the exact count depends on merge opportunities
         // Just verify we have less than 12 faces (would be 72 indices if no merging)
         assert!(
-            !mesh.indices.is_empty() && mesh.indices.len() < 72,
+            !mesh.indices_opaque.is_empty() && mesh.indices_opaque.len() < 72,
             "Greedy meshing should reduce face count for adjacent blocks, got {} indices",
-            mesh.indices.len()
+            mesh.indices_opaque.len()
         );
     }
 
@@ -3159,6 +3660,393 @@ mod tests {
                 (vertex.position[1] - expected_y).abs() < 0.0001,
                 "Expected flowing water top Y to be {expected_y}, got {}",
                 vertex.position[1]
+            );
+        }
+    }
+
+    #[test]
+    fn fluids_emit_only_alpha_indices() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_fluids();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: BLOCK_WATER,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(
+            !mesh.indices_alpha.is_empty(),
+            "Expected water to emit alpha indices"
+        );
+        assert!(
+            mesh.indices_opaque.is_empty(),
+            "Expected no opaque indices for a chunk containing only water"
+        );
+    }
+
+    #[test]
+    fn glass_emits_only_alpha_indices() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_glass();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_GLASS,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(
+            !mesh.indices_alpha.is_empty(),
+            "Expected glass to emit alpha indices"
+        );
+        assert!(
+            mesh.indices_opaque.is_empty(),
+            "Expected no opaque indices for a chunk containing only glass"
+        );
+    }
+
+    #[test]
+    fn end_portal_emits_surface_in_alpha_pass() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_end_portal();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_END_PORTAL,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(
+            mesh.indices_opaque.is_empty(),
+            "Expected no opaque indices for a chunk containing only end portal"
+        );
+        assert_eq!(mesh.indices_alpha.len(), 6);
+
+        let top_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| {
+                v.block_id == mdminecraft_world::BLOCK_END_PORTAL && v.normal == [0.0, 1.0, 0.0]
+            })
+            .collect();
+        assert_eq!(top_vertices.len(), 4);
+
+        let expected_y = 1.0 + 12.0 / 16.0;
+        for vertex in top_vertices {
+            assert!(
+                (vertex.position[1] - expected_y).abs() < 0.0001,
+                "Expected end portal surface Y to be {expected_y}, got {}",
+                vertex.position[1]
+            );
+        }
+    }
+
+    #[test]
+    fn nether_portal_emits_vertical_planes_in_alpha_pass() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_nether_portal();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_NETHER_PORTAL,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(
+            mesh.indices_opaque.is_empty(),
+            "Expected no opaque indices for a chunk containing only nether portal"
+        );
+        assert_eq!(mesh.indices_alpha.len(), 12);
+
+        let half_thickness = (2.0 / 16.0) * 0.5;
+        let expected_center_z = 1.0 + 0.5;
+        let expected_north_z = expected_center_z - half_thickness;
+        let expected_south_z = expected_center_z + half_thickness;
+
+        let north_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| {
+                v.block_id == mdminecraft_world::BLOCK_NETHER_PORTAL && v.normal == [0.0, 0.0, -1.0]
+            })
+            .collect();
+        let south_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| {
+                v.block_id == mdminecraft_world::BLOCK_NETHER_PORTAL && v.normal == [0.0, 0.0, 1.0]
+            })
+            .collect();
+
+        assert_eq!(north_vertices.len(), 4);
+        assert_eq!(south_vertices.len(), 4);
+
+        for v in north_vertices {
+            assert!(
+                (v.position[2] - expected_north_z).abs() < 0.0001,
+                "Expected north portal plane z={expected_north_z}, got {}",
+                v.position[2]
+            );
+        }
+        for v in south_vertices {
+            assert!(
+                (v.position[2] - expected_south_z).abs() < 0.0001,
+                "Expected south portal plane z={expected_south_z}, got {}",
+                v.position[2]
+            );
+        }
+    }
+
+    #[test]
+    fn nether_portal_axis_state_is_respected_across_chunk_seams() {
+        let registry = registry_with_nether_portal();
+
+        let chunk_pos_a = ChunkPos::new(0, 0);
+        let chunk_pos_b = ChunkPos::new(0, 1);
+        let mut chunk_a = Chunk::new(chunk_pos_a);
+        let mut chunk_b = Chunk::new(chunk_pos_b);
+
+        chunk_a.set_voxel(
+            8,
+            1,
+            15,
+            Voxel {
+                id: mdminecraft_world::BLOCK_NETHER_PORTAL,
+                state: 1,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk_b.set_voxel(
+            8,
+            1,
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_NETHER_PORTAL,
+                state: 1,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+
+        let origin_a_x = chunk_pos_a.x * CHUNK_SIZE_X as i32;
+        let origin_a_z = chunk_pos_a.z * CHUNK_SIZE_Z as i32;
+
+        let mesh_disconnected =
+            mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+                let local_y = world_y_to_local_y(wy)?;
+
+                let local_x = wx - origin_a_x;
+                let local_z = wz - origin_a_z;
+                if !(0..CHUNK_SIZE_X as i32).contains(&local_x)
+                    || !(0..CHUNK_SIZE_Z as i32).contains(&local_z)
+                {
+                    return None;
+                }
+
+                Some(chunk_a.voxel(local_x as usize, local_y, local_z as usize))
+            });
+
+        let origin_b_x = chunk_pos_b.x * CHUNK_SIZE_X as i32;
+        let origin_b_z = chunk_pos_b.z * CHUNK_SIZE_Z as i32;
+
+        let mesh_connected = mesh_chunk_with_voxel_at(&chunk_a, &registry, None, |wx, wy, wz| {
+            let local_y = world_y_to_local_y(wy)?;
+
+            let chunk_x = wx.div_euclid(CHUNK_SIZE_X as i32);
+            let chunk_z = wz.div_euclid(CHUNK_SIZE_Z as i32);
+            let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+
+            if chunk_pos == chunk_pos_a {
+                let local_x = wx - origin_a_x;
+                let local_z = wz - origin_a_z;
+                if !(0..CHUNK_SIZE_X as i32).contains(&local_x)
+                    || !(0..CHUNK_SIZE_Z as i32).contains(&local_z)
+                {
+                    return None;
+                }
+                return Some(chunk_a.voxel(local_x as usize, local_y, local_z as usize));
+            }
+
+            if chunk_pos == chunk_pos_b {
+                let local_x = wx - origin_b_x;
+                let local_z = wz - origin_b_z;
+                if !(0..CHUNK_SIZE_X as i32).contains(&local_x)
+                    || !(0..CHUNK_SIZE_Z as i32).contains(&local_z)
+                {
+                    return None;
+                }
+                return Some(chunk_b.voxel(local_x as usize, local_y, local_z as usize));
+            }
+
+            None
+        });
+
+        assert_eq!(mesh_disconnected.indices_alpha.len(), 12);
+        assert_eq!(mesh_connected.indices_alpha.len(), 12);
+
+        let half_thickness = (2.0 / 16.0) * 0.5;
+        let expected_center_x = 8.0 + 0.5;
+        let expected_west_x = expected_center_x - half_thickness;
+        let expected_east_x = expected_center_x + half_thickness;
+
+        let check_west_east = |mesh: &MeshBuffers| {
+            let west_vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| {
+                    v.block_id == mdminecraft_world::BLOCK_NETHER_PORTAL
+                        && v.normal == [-1.0, 0.0, 0.0]
+                })
+                .collect();
+            let east_vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| {
+                    v.block_id == mdminecraft_world::BLOCK_NETHER_PORTAL
+                        && v.normal == [1.0, 0.0, 0.0]
+                })
+                .collect();
+
+            assert_eq!(west_vertices.len(), 4);
+            assert_eq!(east_vertices.len(), 4);
+
+            for v in west_vertices {
+                assert!(
+                    (v.position[0] - expected_west_x).abs() < 0.0001,
+                    "Expected west portal plane x={expected_west_x}, got {}",
+                    v.position[0]
+                );
+            }
+            for v in east_vertices {
+                assert!(
+                    (v.position[0] - expected_east_x).abs() < 0.0001,
+                    "Expected east portal plane x={expected_east_x}, got {}",
+                    v.position[0]
+                );
+            }
+        };
+
+        check_west_east(&mesh_disconnected);
+        check_west_east(&mesh_connected);
+    }
+
+    #[test]
+    fn biome_tint_extra_bits_are_emitted_for_tagged_blocks() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_biome_tints();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            3,
+            1,
+            1,
+            Voxel {
+                id: 2,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        assert!(!mesh.vertices.is_empty());
+
+        let tint_mask = 0x7u8 << EXTRA_TINT_SHIFT;
+
+        let grass_top: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == 1 && v.normal == [0.0, 1.0, 0.0])
+            .collect();
+        assert_eq!(grass_top.len(), 4);
+        for v in grass_top {
+            assert_eq!(
+                (v.extra >> EXTRA_TINT_SHIFT) & 0x7,
+                1,
+                "Expected grass top vertices to be marked with the grass tint"
+            );
+        }
+
+        let grass_bottom: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == 1 && v.normal == [0.0, -1.0, 0.0])
+            .collect();
+        assert_eq!(grass_bottom.len(), 4);
+        for v in grass_bottom {
+            assert_eq!(
+                v.extra & tint_mask,
+                0,
+                "Expected grass bottom vertices to have no biome tint"
+            );
+        }
+
+        let grass_sides: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == 1 && v.normal[1].abs() < f32::EPSILON)
+            .collect();
+        assert_eq!(grass_sides.len(), 16);
+        for v in grass_sides {
+            assert_eq!(
+                (v.extra >> EXTRA_TINT_SHIFT) & 0x7,
+                3,
+                "Expected grass side vertices to be marked with the grass-side tint"
+            );
+        }
+
+        let leaves_vertices: Vec<_> = mesh.vertices.iter().filter(|v| v.block_id == 2).collect();
+        assert_eq!(leaves_vertices.len(), 24);
+        for v in leaves_vertices {
+            assert_eq!(
+                (v.extra >> EXTRA_TINT_SHIFT) & 0x7,
+                2,
+                "Expected leaves vertices to be marked with the foliage tint"
             );
         }
     }
@@ -3338,7 +4226,15 @@ mod tests {
         for _ in 1..pane_id {
             descriptors.push(BlockDescriptor::simple("solid", true));
         }
-        descriptors.push(BlockDescriptor::simple("glass_pane", false));
+        descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+            name: "glass_pane".to_string(),
+            key: None,
+            tags: vec!["render/translucent".to_string()],
+            opaque: false,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        }));
         let registry = BlockRegistry::new(descriptors);
 
         let mut chunk_a = Chunk::new(ChunkPos::new(0, 0));
@@ -3380,12 +4276,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_alpha.len(),
             36,
             "Disconnected pane should render only the center post"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_alpha.len(),
             72,
             "Connected pane should render an extra arm (one more box)"
         );
@@ -3441,12 +4337,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_opaque.len(),
             36,
             "Disconnected bars should render only the center post"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_opaque.len(),
             72,
             "Connected bars should render an extra arm (one more box)"
         );
@@ -3459,7 +4355,15 @@ mod tests {
         descriptors.push(BlockDescriptor::simple("air", false));
         for id in 1..=max_id {
             if id == interactive_blocks::GLASS_PANE as usize {
-                descriptors.push(BlockDescriptor::simple("glass_pane", false));
+                descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+                    name: "glass_pane".to_string(),
+                    key: None,
+                    tags: vec!["render/translucent".to_string()],
+                    opaque: false,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                }));
             } else if id == interactive_blocks::IRON_BARS as usize {
                 descriptors.push(BlockDescriptor::simple("iron_bars", false));
             } else {
@@ -3507,12 +4411,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_alpha.len(),
             36,
             "Disconnected pane should render only the center post"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_alpha.len(),
             72,
             "Pane should connect to adjacent bars and render one extra arm"
         );
@@ -3580,12 +4484,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_opaque.len(),
             36,
             "Disconnected fence should render only the center post"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_opaque.len(),
             108,
             "Connected fence should render a post plus two rail boxes"
         );
@@ -3653,12 +4557,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_opaque.len(),
             36,
             "Disconnected wall should render only the center post"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_opaque.len(),
             72,
             "Connected wall should render a post plus one arm"
         );
@@ -3726,12 +4630,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_opaque.len(),
             36,
             "Disconnected wall should render only the center post"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_opaque.len(),
             72,
             "Connected wall should render a post plus one arm"
         );
@@ -3801,12 +4705,12 @@ mod tests {
         });
 
         assert_eq!(
-            mesh_disconnected.indices.len(),
+            mesh_disconnected.indices_opaque.len(),
             72,
             "Disconnected wires should render two segments (one per voxel)"
         );
         assert_eq!(
-            mesh_connected.indices.len(),
+            mesh_connected.indices_opaque.len(),
             108,
             "Connected seam adds an extra segment on the edge wire"
         );
