@@ -8,10 +8,10 @@ use mdminecraft_world::{
     lighting::{stitch_light_seams, BlockOpacityProvider, LightType},
     mechanical_blocks, redstone_blocks, set_comparator_facing, set_comparator_output_power,
     set_comparator_subtract_mode, set_hopper_facing, set_hopper_outputs_down, set_observer_facing,
-    tick_hoppers, update_container_signal, BlockEntityKey, BlockProperties, BrewingStandState,
-    ChestState, Chunk, ChunkPos, DispenserState, Facing, FurnaceState, HopperState, ItemManager,
-    ItemType, Mob, MobState, MobType, PotionType, RedstonePos, RedstoneSimulator, Voxel,
-    world_y_to_local_y, BLOCK_END_PORTAL,
+    tick_hoppers, update_container_signal, world_y_to_local_y, BlockEntityKey, BlockProperties,
+    BrewingStandState, ChestState, Chunk, ChunkPos, DispenserState, Facing, FurnaceState,
+    HopperState, ItemManager, ItemType, Mob, MobState, MobType, PotionType, RedstonePos,
+    RedstoneSimulator, Voxel, BLOCK_END_PORTAL,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -606,21 +606,14 @@ fn micro_item_sorter_lite_snapshot() {
                 .chunks
                 .get(&ChunkPos::new(0, 0))
                 .expect("chunk exists");
-            let control_voxel = chunk.voxel(
-                control_pos.x as usize,
-                local_y,
-                control_pos.z as usize,
-            );
+            let control_voxel =
+                chunk.voxel(control_pos.x as usize, local_y, control_pos.z as usize);
             let comparator_voxel = chunk.voxel(
                 comparator_pos.x as usize,
                 local_y,
                 comparator_pos.z as usize,
             );
-            let hopper_voxel = chunk.voxel(
-                hopper_pos.x as usize,
-                local_y,
-                hopper_pos.z as usize,
-            );
+            let hopper_voxel = chunk.voxel(hopper_pos.x as usize, local_y, hopper_pos.z as usize);
 
             let hopper_items = state
                 .hoppers

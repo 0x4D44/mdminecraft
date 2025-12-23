@@ -413,7 +413,10 @@ impl CropGrowthSystem {
                     let check_pos = ChunkPos::new(check_chunk_x, check_chunk_z);
                     if let Some(chunk) = chunks.get(&check_pos) {
                         let voxel = chunk.voxel(local_x, check_y as usize, local_z);
-                        if voxel.id == blocks::WATER {
+                        if matches!(voxel.id, blocks::WATER | crate::BLOCK_WATER_FLOWING)
+                            || (crate::block_supports_waterlogging(voxel.id)
+                                && crate::is_waterlogged(voxel.state))
+                        {
                             return true;
                         }
                     }
@@ -974,6 +977,120 @@ mod tests {
         let farmland = chunk.voxel(5, 64, 5);
 
         // Farmland should be wet now (water within 4 blocks)
+        assert_eq!(farmland.id, farming_blocks::FARMLAND_WET);
+    }
+
+    #[test]
+    fn test_farmland_hydration_with_flowing_water() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            7,
+            64,
+            5,
+            Voxel {
+                id: crate::BLOCK_WATER_FLOWING,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        system.register_crop(CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 65,
+            z: 5,
+        });
+
+        for tick in 0..21 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let farmland = chunk.voxel(5, 64, 5);
+        assert_eq!(farmland.id, farming_blocks::FARMLAND_WET);
+    }
+
+    #[test]
+    fn test_farmland_hydration_with_waterlogged_block() {
+        let mut system = CropGrowthSystem::new(12345);
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(
+            5,
+            64,
+            5,
+            Voxel {
+                id: farming_blocks::FARMLAND,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            65,
+            5,
+            Voxel {
+                id: farming_blocks::WHEAT_0,
+                state: 0,
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            7,
+            64,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::STONE_SLAB,
+                state: crate::set_waterlogged(0, true),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        system.register_crop(CropPosition {
+            chunk: ChunkPos::new(0, 0),
+            x: 5,
+            y: 65,
+            z: 5,
+        });
+
+        for tick in 0..21 {
+            system.tick(tick, &mut chunks);
+        }
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let farmland = chunk.voxel(5, 64, 5);
         assert_eq!(farmland.id, farming_blocks::FARMLAND_WET);
     }
 

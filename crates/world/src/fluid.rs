@@ -6,6 +6,7 @@ use crate::chunk::{
     world_y_to_local_y, BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z,
 };
 use crate::terrain::blocks;
+use crate::{block_supports_waterlogging, is_waterlogged};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Fluid type identifier
@@ -125,6 +126,10 @@ pub fn is_flowing_fluid(block_id: BlockId) -> bool {
 /// Check if a block can be replaced by fluid (air, flowers, etc.)
 pub fn can_fluid_replace(block_id: BlockId) -> bool {
     block_id == blocks::AIR || is_fluid(block_id)
+}
+
+fn voxel_is_waterlogged(voxel: Voxel) -> bool {
+    block_supports_waterlogging(voxel.id) && is_waterlogged(voxel.state)
 }
 
 /// Check if a block is flammable (can be set on fire by lava)
@@ -249,56 +254,62 @@ impl FluidSimulator {
             None => return,
         };
 
-        // Skip if not a fluid
-        let fluid_type = match get_fluid_type(voxel.id) {
-            Some(ft) => ft,
+        // Determine fluid type.
+        //
+        // We treat waterlogged blocks as in-place water sources (foundation support).
+        let (fluid_type, is_source, current_level) = match get_fluid_type(voxel.id) {
+            Some(ft) => {
+                let is_source = is_source_fluid(voxel.id);
+                let current_level = if is_source {
+                    FLUID_LEVEL_SOURCE
+                } else {
+                    get_fluid_level(voxel.state)
+                };
+                (ft, is_source, current_level)
+            }
+            None if voxel_is_waterlogged(voxel) => (FluidType::Water, true, FLUID_LEVEL_SOURCE),
             None => return,
-        };
-
-        let is_source = is_source_fluid(voxel.id);
-        let current_level = if is_source {
-            FLUID_LEVEL_SOURCE
-        } else {
-            get_fluid_level(voxel.state)
         };
 
         // Try to flow down first
         let down_pos = FluidPos::new(pos.x, pos.y - 1, pos.z);
-        if pos.y > 0 {
-            if let Some(down_voxel) = self.get_voxel(down_pos, chunks) {
-                if can_fluid_replace(down_voxel.id)
-                    || get_fluid_type(down_voxel.id) == Some(fluid_type)
-                {
-                    // Flow down
-                    let new_level = if is_source {
-                        FLUID_LEVEL_SOURCE
-                    } else {
-                        current_level
-                    };
-                    let flowing_id = match fluid_type {
-                        FluidType::Water => BLOCK_WATER_FLOWING,
-                        FluidType::Lava => BLOCK_LAVA_FLOWING,
-                    };
+        if let Some(down_voxel) = self.get_voxel(down_pos, chunks) {
+            let should_flow_down = if is_fluid(down_voxel.id) {
+                get_fluid_type(down_voxel.id) == Some(fluid_type)
+            } else {
+                can_fluid_replace(down_voxel.id)
+            };
 
-                    // Check for water + lava interaction
-                    if let Some(interaction) =
-                        self.check_fluid_interaction(down_pos, fluid_type, chunks)
-                    {
-                        self.set_voxel(down_pos, interaction, chunks);
-                    } else {
-                        let new_state = set_falling(set_fluid_level(0, new_level), true);
-                        self.set_voxel(
-                            down_pos,
-                            Voxel {
-                                id: flowing_id,
-                                state: new_state,
-                                light_sky: 0,
-                                light_block: fluid_type.light_level(),
-                            },
-                            chunks,
-                        );
-                        self.schedule_update(down_pos, fluid_type.flow_speed());
-                    }
+            if should_flow_down {
+                // Flow down
+                let new_level = if is_source {
+                    FLUID_LEVEL_SOURCE
+                } else {
+                    current_level
+                };
+                let flowing_id = match fluid_type {
+                    FluidType::Water => BLOCK_WATER_FLOWING,
+                    FluidType::Lava => BLOCK_LAVA_FLOWING,
+                };
+
+                // Check for water + lava interaction
+                if let Some(interaction) =
+                    self.check_fluid_interaction(down_pos, fluid_type, chunks)
+                {
+                    self.set_voxel(down_pos, interaction, chunks);
+                } else {
+                    let new_state = set_falling(set_fluid_level(0, new_level), true);
+                    self.set_voxel(
+                        down_pos,
+                        Voxel {
+                            id: flowing_id,
+                            state: new_state,
+                            light_sky: 0,
+                            light_block: fluid_type.light_level(),
+                        },
+                        chunks,
+                    );
+                    self.schedule_update(down_pos, fluid_type.flow_speed());
                 }
             }
         }
@@ -485,6 +496,8 @@ impl FluidSimulator {
             if let Some(voxel) = self.get_voxel(neighbor, chunks) {
                 if let Some(ft) = get_fluid_type(voxel.id) {
                     self.schedule_update(neighbor, ft.flow_speed());
+                } else if voxel_is_waterlogged(voxel) {
+                    self.schedule_update(neighbor, FluidType::Water.flow_speed());
                 }
             }
         }
@@ -497,7 +510,7 @@ impl FluidSimulator {
         let mut source_count = 0;
         for neighbor in pos.horizontal_neighbors() {
             if let Some(voxel) = self.get_voxel(neighbor, chunks) {
-                if voxel.id == blocks::WATER {
+                if voxel.id == blocks::WATER || voxel_is_waterlogged(voxel) {
                     source_count += 1;
                 }
             }
@@ -569,6 +582,8 @@ impl SwimmingState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interaction::interactive_blocks;
+    use crate::set_waterlogged;
 
     fn local_y(world_y: i32) -> usize {
         crate::chunk::world_y_to_local_y(world_y).expect("world y in bounds")
@@ -994,6 +1009,237 @@ mod tests {
         // Water should have spread horizontally
         assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
         assert_eq!(get_fluid_level(adjacent.state), 7); // max_flow_distance for water
+    }
+
+    #[test]
+    fn test_waterlogged_slab_acts_as_source() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: interactive_blocks::STONE_SLAB,
+                state: set_waterlogged(0, true),
+                ..Default::default()
+            },
+        );
+        // Solid below so we spread horizontally deterministically.
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::AIR,
+                light_sky: 15,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let source = chunk.voxel(5, local_y(64), 5);
+        assert_eq!(source.id, interactive_blocks::STONE_SLAB);
+        assert!(is_waterlogged(source.state));
+
+        let adjacent = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
+        assert_eq!(get_fluid_level(adjacent.state), 7);
+    }
+
+    #[test]
+    fn test_flowing_water_does_not_auto_waterlog_slab() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place a water source on solid ground.
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+
+        // Adjacent slab should not change unless explicitly waterlogged via block placement or
+        // a bucket interaction.
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: interactive_blocks::STONE_SLAB,
+                state: 0,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(adjacent.id, interactive_blocks::STONE_SLAB);
+        assert!(!is_waterlogged(adjacent.state));
+    }
+
+    #[test]
+    fn test_flowing_water_does_not_auto_waterlog_stairs() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: interactive_blocks::STONE_STAIRS,
+                state: 0,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(adjacent.id, interactive_blocks::STONE_STAIRS);
+        assert!(!is_waterlogged(adjacent.state));
+    }
+
+    #[test]
+    fn test_flowing_water_does_not_auto_waterlog_trapdoor() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: interactive_blocks::TRAPDOOR,
+                state: 0,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let adjacent = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(adjacent.id, interactive_blocks::TRAPDOOR);
+        assert!(!is_waterlogged(adjacent.state));
     }
 
     #[test]

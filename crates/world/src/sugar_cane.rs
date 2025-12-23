@@ -240,7 +240,9 @@ fn base_can_grow(
             continue;
         }
         let voxel = chunk.voxel(local_x, support_y as usize, local_z);
-        if matches!(voxel.id, BLOCK_WATER | BLOCK_WATER_FLOWING) {
+        if matches!(voxel.id, BLOCK_WATER | BLOCK_WATER_FLOWING)
+            || (crate::block_supports_waterlogging(voxel.id) && crate::is_waterlogged(voxel.state))
+        {
             has_water = true;
             break;
         }
@@ -331,6 +333,69 @@ mod tests {
             .get_mut(&pos)
             .unwrap()
             .set_voxel(6, 60, 5, Voxel::default());
+        let base_voxel = chunks[&pos].voxel(5, 61, 5);
+        assert!(!base_can_grow(base, &chunks, base_voxel, 0.0));
+    }
+
+    #[test]
+    fn base_can_grow_accepts_waterlogged_slab_as_water() {
+        let mut chunks = HashMap::new();
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+
+        // Support: dirt at y=60, sugar cane at y=61, waterlogged slab adjacent at y=60.
+        chunk.set_voxel(
+            5,
+            60,
+            5,
+            Voxel {
+                id: BLOCK_DIRT,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            5,
+            61,
+            5,
+            Voxel {
+                id: BLOCK_SUGAR_CANE,
+                light_sky: 15,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            6,
+            60,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::STONE_SLAB,
+                state: crate::set_waterlogged(0, true),
+                ..Default::default()
+            },
+        );
+        chunks.insert(pos, chunk);
+
+        let base = SugarCanePosition {
+            chunk: pos,
+            x: 5,
+            y: 61,
+            z: 5,
+        };
+
+        let base_voxel = chunks[&pos].voxel(5, 61, 5);
+        assert!(base_can_grow(base, &chunks, base_voxel, 0.0));
+
+        // Clear waterlogging: should no longer grow.
+        chunks.get_mut(&pos).unwrap().set_voxel(
+            6,
+            60,
+            5,
+            Voxel {
+                id: crate::interactive_blocks::STONE_SLAB,
+                state: 0,
+                ..Default::default()
+            },
+        );
         let base_voxel = chunks[&pos].voxel(5, 61, 5);
         assert!(!base_can_grow(base, &chunks, base_voxel, 0.0));
     }
