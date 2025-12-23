@@ -9,7 +9,8 @@
 use mdminecraft_core::SimTick;
 use mdminecraft_testkit::{EventRecord, JsonlSink};
 use mdminecraft_world::{
-    check_seam_continuity, BiomeAssigner, ChunkPos, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Z,
+    check_seam_continuity, BiomeAssigner, ChunkPos, TerrainGenerator, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -205,10 +206,12 @@ fn biome_seams_worldtest() {
     //
     // Override with `MDM_BIOME_SEAMS_MAX_AVG_GEN_US` (microseconds) to tighten budgets on fast
     // machines or relax them on constrained runners.
+    // Scale the default guardrail with vertical world height (chunk generation cost grows roughly
+    // linearly with the number of voxels).
     let default_threshold: u128 = if cfg!(debug_assertions) {
-        1_500_000
+        (1_500_000u128 * CHUNK_SIZE_Y as u128) / 256
     } else {
-        30_000
+        (30_000u128 * CHUNK_SIZE_Y as u128) / 256
     };
     let performance_threshold: u128 = std::env::var("MDM_BIOME_SEAMS_MAX_AVG_GEN_US")
         .ok()

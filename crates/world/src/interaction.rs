@@ -256,6 +256,7 @@ pub fn set_door_open(state: BlockState, open: bool) -> BlockState {
 }
 
 const REDSTONE_POWERED_BIT: BlockState = 0x10;
+const WATERLOGGED_BIT: BlockState = 0x8000;
 
 /// Check whether a block is powered by redstone.
 pub fn is_redstone_powered(state: BlockState) -> bool {
@@ -269,6 +270,38 @@ pub fn set_redstone_powered(state: BlockState, powered: bool) -> BlockState {
     } else {
         state & !REDSTONE_POWERED_BIT
     }
+}
+
+/// Check whether a block state is waterlogged.
+pub fn is_waterlogged(state: BlockState) -> bool {
+    (state & WATERLOGGED_BIT) != 0
+}
+
+/// Set whether a block state is waterlogged.
+pub fn set_waterlogged(state: BlockState, waterlogged: bool) -> BlockState {
+    if waterlogged {
+        state | WATERLOGGED_BIT
+    } else {
+        state & !WATERLOGGED_BIT
+    }
+}
+
+/// Return whether the given block supports waterlogging.
+///
+/// This is intentionally a small set initially (foundation only).
+pub fn block_supports_waterlogging(block_id: BlockId) -> bool {
+    is_slab(block_id)
+        || is_stairs(block_id)
+        || is_trapdoor(block_id)
+        || is_fence(block_id)
+        || is_fence_gate(block_id)
+        || matches!(
+            block_id,
+            interactive_blocks::GLASS_PANE
+                | interactive_blocks::IRON_BARS
+                | interactive_blocks::COBBLESTONE_WALL
+                | interactive_blocks::STONE_BRICK_WALL
+        )
 }
 
 /// Returns `true` when a block should be treated as a full cube for connectivity checks.
@@ -1255,6 +1288,44 @@ mod tests {
         assert!(is_slab(interactive_blocks::OAK_SLAB));
         assert!(!is_slab(blocks::STONE));
         assert!(!is_slab(interactive_blocks::STONE_STAIRS));
+    }
+
+    #[test]
+    fn waterlogged_state_bit_roundtrips() {
+        let state: BlockState = 0x1234;
+        assert!(!is_waterlogged(state));
+
+        let waterlogged = set_waterlogged(state, true);
+        assert!(is_waterlogged(waterlogged));
+
+        let cleared = set_waterlogged(waterlogged, false);
+        assert_eq!(cleared, state);
+        assert!(!is_waterlogged(cleared));
+    }
+
+    #[test]
+    fn block_supports_waterlogging_small_foundation_set() {
+        assert!(block_supports_waterlogging(interactive_blocks::STONE_SLAB));
+        assert!(block_supports_waterlogging(
+            interactive_blocks::STONE_STAIRS
+        ));
+        assert!(block_supports_waterlogging(interactive_blocks::TRAPDOOR));
+        assert!(block_supports_waterlogging(interactive_blocks::OAK_FENCE));
+        assert!(block_supports_waterlogging(
+            interactive_blocks::OAK_FENCE_GATE
+        ));
+        assert!(block_supports_waterlogging(interactive_blocks::GLASS_PANE));
+        assert!(block_supports_waterlogging(interactive_blocks::IRON_BARS));
+        assert!(block_supports_waterlogging(
+            interactive_blocks::COBBLESTONE_WALL
+        ));
+        assert!(block_supports_waterlogging(
+            interactive_blocks::STONE_BRICK_WALL
+        ));
+        assert!(!block_supports_waterlogging(
+            interactive_blocks::OAK_DOOR_LOWER
+        ));
+        assert!(!block_supports_waterlogging(blocks::STONE));
     }
 
     #[test]

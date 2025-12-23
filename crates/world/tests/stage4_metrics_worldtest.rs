@@ -279,10 +279,13 @@ fn stage4_metrics_worldtest() {
     //
     // Debug-mode performance varies across machines; keep this as a guardrail, but allow tuning
     // via env override.
+    // Scale the default guardrail with vertical world height (chunk generation cost grows roughly
+    // linearly with the number of voxels).
+    let height_scalar = CHUNK_SIZE_Y as f64 / 256.0;
     let default_threshold_us = if cfg!(debug_assertions) {
-        1_200_000.0
+        1_200_000.0 * height_scalar
     } else {
-        30_000.0
+        30_000.0 * height_scalar
     };
     let performance_threshold = std::env::var("MDM_STAGE4_METRICS_MAX_AVG_GEN_US")
         .ok()

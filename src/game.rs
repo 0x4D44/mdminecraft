@@ -28,7 +28,10 @@ use mdminecraft_ui3d::render::{
 };
 use mdminecraft_world::{
     get_fluid_type, interactive_blocks,
-    lighting::{init_skylight, recompute_skylight_local as recompute_skylight_local_world, stitch_light_seams, LightType},
+    lighting::{
+        init_skylight, recompute_skylight_local as recompute_skylight_local_world,
+        stitch_light_seams, LightType,
+    },
     local_y_to_world_y, world_y_to_local_y, ArmorPiece, ArmorSlot, BlockEntitiesState,
     BlockEntityKey, BlockId, BlockPropertiesRegistry, BlockState, BrewingStandState, ChestState,
     Chunk, ChunkPos, CropGrowthSystem, CropPosition, DispenserState, EnchantingTableState,
@@ -2952,6 +2955,141 @@ impl GameWorld {
         false
     }
 
+    fn resolve_mob_world_collisions(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        mob: &mut Mob,
+        before_pos: (f64, f64, f64),
+    ) {
+        if matches!(
+            mob.mob_type,
+            MobType::Blaze | MobType::Ghast | MobType::EnderDragon
+        ) {
+            return;
+        }
+
+        let desired_pos = (mob.x, mob.y, mob.z);
+        let dx = desired_pos.0 - before_pos.0;
+        let dy = desired_pos.1 - before_pos.1;
+        let dz = desired_pos.2 - before_pos.2;
+
+        mob.x = before_pos.0;
+        mob.y = before_pos.1;
+        mob.z = before_pos.2;
+
+        let mob_size = mob.mob_type.size();
+        let mob_height = mob_size * 2.0;
+        let make_aabb = |x: f64, y: f64, z: f64| AABB {
+            min: glam::Vec3::new(x as f32 - mob_size, y as f32, z as f32 - mob_size),
+            max: glam::Vec3::new(
+                x as f32 + mob_size,
+                y as f32 + mob_height,
+                z as f32 + mob_size,
+            ),
+        };
+
+        let collides = |x: f64, y: f64, z: f64| {
+            let aabb = make_aabb(x, y, z);
+            Self::aabb_collides_with_world(chunks, block_properties, &aabb)
+        };
+
+        if dy != 0.0 {
+            // Step movement to avoid tunneling through thin geometry when velocities are high
+            // (e.g., knockback/gravity). Uses a power-of-two step for determinism.
+            const MAX_STEP: f64 = 0.25;
+            let steps = (dy.abs() / MAX_STEP).ceil() as i32;
+            let steps = steps.clamp(1, 64);
+            let step = dy / steps as f64;
+            for _ in 0..steps {
+                let candidate_y = mob.y + step;
+                if !collides(mob.x, candidate_y, mob.z) {
+                    mob.y = candidate_y;
+                } else {
+                    mob.vel_y = 0.0;
+                    break;
+                }
+            }
+        }
+
+        if dx != 0.0 {
+            let candidate_x = mob.x + dx;
+            if !collides(candidate_x, mob.y, mob.z) {
+                mob.x = candidate_x;
+            } else {
+                let step_y = mob.y + PlayerPhysics::STEP_HEIGHT as f64;
+                if !collides(candidate_x, step_y, mob.z) && !collides(mob.x, step_y, mob.z) {
+                    mob.y = step_y;
+                    mob.x = candidate_x;
+                } else {
+                    mob.vel_x = 0.0;
+                }
+            }
+        }
+
+        if dz != 0.0 {
+            let candidate_z = mob.z + dz;
+            if !collides(mob.x, mob.y, candidate_z) {
+                mob.z = candidate_z;
+            } else {
+                let step_y = mob.y + PlayerPhysics::STEP_HEIGHT as f64;
+                if !collides(mob.x, step_y, candidate_z) && !collides(mob.x, step_y, mob.z) {
+                    mob.y = step_y;
+                    mob.z = candidate_z;
+                } else {
+                    mob.vel_z = 0.0;
+                }
+            }
+        }
+
+        if mob.vel_y <= 0.0 {
+            let block_x = mob.x.floor() as i32;
+            let block_z = mob.z.floor() as i32;
+            let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+            let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+            let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+            if let Some(chunk) = chunks.get(&chunk_pos) {
+                let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                let start_world_y = mob.y.floor() as i32;
+                let ground_start = start_world_y - 1;
+                const MAX_DROP: i32 = 32;
+                for offset in 0..=MAX_DROP {
+                    let ground_world_y = ground_start - offset;
+                    if ground_world_y < WORLD_MIN_Y {
+                        break;
+                    }
+                    let Some(local_y) = world_y_to_local_y(ground_world_y) else {
+                        continue;
+                    };
+                    let ground_voxel = chunk.voxel(local_x, local_y, local_z);
+                    let Some(top_offset) =
+                        Self::voxel_collision_top_offset(block_properties, &ground_voxel)
+                    else {
+                        continue;
+                    };
+                    let foot_y = ground_world_y as f32 + top_offset + PlayerPhysics::GROUND_EPS;
+                    if foot_y > mob.y as f32 + PlayerPhysics::GROUND_EPS {
+                        continue;
+                    }
+                    if !collides(mob.x, foot_y as f64, mob.z) {
+                        mob.y = foot_y as f64;
+                        mob.vel_y = 0.0;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if collides(mob.x, mob.y, mob.z) {
+            mob.x = before_pos.0;
+            mob.y = before_pos.1;
+            mob.z = before_pos.2;
+            mob.vel_x = 0.0;
+            mob.vel_y = 0.0;
+            mob.vel_z = 0.0;
+        }
+    }
+
     fn aabb_touches_ladder(chunks: &HashMap<ChunkPos, Chunk>, aabb: &AABB) -> bool {
         let min_x = aabb.min.x.floor() as i32;
         let min_y = aabb.min.y.floor() as i32;
@@ -4400,12 +4538,24 @@ impl GameWorld {
         let feet_sample = feet_pos + glam::Vec3::new(0.0, 0.1, 0.0);
 
         let fluid_at = |pos: glam::Vec3| -> Option<FluidType> {
-            self.get_block_at(IVec3::new(
+            let voxel_pos = IVec3::new(
                 pos.x.floor() as i32,
                 pos.y.floor() as i32,
                 pos.z.floor() as i32,
-            ))
-            .and_then(get_fluid_type)
+            );
+
+            let voxel = self.get_voxel_at(voxel_pos)?;
+            if let Some(ft) = get_fluid_type(voxel.id) {
+                return Some(ft);
+            }
+
+            if mdminecraft_world::block_supports_waterlogging(voxel.id)
+                && mdminecraft_world::is_waterlogged(voxel.state)
+            {
+                return Some(FluidType::Water);
+            }
+
+            None
         };
 
         let eye_fluid = fluid_at(camera_pos);
@@ -5098,8 +5248,29 @@ impl GameWorld {
                 let _ = self.upload_chunk_mesh(chunk_pos);
             }
 
-            // Spawn mobs in new chunk
-            if self.active_dimension == DimensionId::Overworld {
+            // Spawn passive mobs only when generating a brand-new chunk.
+            // Loading an existing chunk should not create additional mobs, because mobs persist in
+            // `world.state`.
+            if chunk_was_generated && self.active_dimension == DimensionId::Overworld {
+                const PASSIVE_MOB_CAP: usize = 60;
+                let loaded_passive_count = self
+                    .mobs
+                    .iter()
+                    .filter(|mob| {
+                        if mob.dimension != self.active_dimension || mob.dead || mob.is_hostile() {
+                            return false;
+                        }
+
+                        let block_x = mob.x.floor() as i32;
+                        let block_z = mob.z.floor() as i32;
+                        let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+                        let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+                        self.chunks.contains_key(&ChunkPos::new(chunk_x, chunk_z))
+                    })
+                    .count();
+                if loaded_passive_count >= PASSIVE_MOB_CAP {
+                    continue;
+                }
                 let Some(chunk) = self.chunks.get(&pos) else {
                     continue;
                 };
@@ -5935,6 +6106,7 @@ impl GameWorld {
         // Time: 0.0-0.25 Night→Dawn, 0.75-1.0 Dusk→Night
         let time = self.sim_time.time_of_day() as f32;
         let is_night = !(0.25..=0.75).contains(&time);
+
         if !is_night {
             tracing::info!("Tried to sleep, but it's not night");
             return;
@@ -6311,6 +6483,21 @@ impl GameWorld {
             }
         }
 
+        let is_water_here = self
+            .chunks
+            .get(&chunk_pos)
+            .map(|chunk| {
+                let voxel = chunk.voxel(local_x, local_y, local_z);
+                get_fluid_type(voxel.id) == Some(FluidType::Water)
+                    || (mdminecraft_world::block_supports_waterlogging(voxel.id)
+                        && mdminecraft_world::is_waterlogged(voxel.state))
+            })
+            .unwrap_or(false);
+
+        if is_water_here && self.try_fill_glass_bottle_from_water() {
+            return true;
+        }
+
         match block_id {
             Some(BLOCK_END_PORTAL_FRAME) => {
                 let Some(changed_positions) =
@@ -6361,7 +6548,6 @@ impl GameWorld {
                 self.interact_respawn_anchor(hit.block_pos);
                 true
             }
-            Some(mdminecraft_world::BLOCK_WATER) => self.try_fill_glass_bottle_from_water(),
             Some(id)
                 if mdminecraft_world::is_door(id)
                     || mdminecraft_world::is_trapdoor(id)
@@ -6547,6 +6733,7 @@ impl GameWorld {
                 let mut mined = false;
                 let mut removed_extra: Option<IVec3> = None;
                 let mut mined_block_state: Option<BlockState> = None;
+                let mut left_water = false;
 
                 if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                     let local_x = hit.block_pos.x.rem_euclid(16) as usize;
@@ -6572,10 +6759,29 @@ impl GameWorld {
                         );
                     }
 
-                    mined_block_state = Some(chunk.voxel(local_x, local_y, local_z).state);
+                    let mined_voxel = chunk.voxel(local_x, local_y, local_z);
+                    mined_block_state = Some(mined_voxel.state);
 
-                    // Remove the block
-                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                    left_water = self.active_dimension != DimensionId::Nether
+                        && mdminecraft_world::block_supports_waterlogging(mined_voxel.id)
+                        && mdminecraft_world::is_waterlogged(mined_voxel.state);
+
+                    // Remove the block (leave water behind when waterlogged).
+                    if left_water {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: FluidType::Water.source_block_id(),
+                                state: 0,
+                                light_sky: 0,
+                                light_block: 0,
+                            },
+                        );
+                    } else {
+                        chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                    }
 
                     if mdminecraft_world::CropType::is_crop(block_id) {
                         self.crop_growth.unregister_crop(CropPosition {
@@ -6635,10 +6841,17 @@ impl GameWorld {
 
                 if mined {
                     // Notify fluid sim to update neighbors.
-                    self.fluid_sim.on_fluid_removed(
-                        FluidPos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
-                        &self.chunks,
-                    );
+                    if left_water {
+                        self.fluid_sim.on_fluid_placed(
+                            FluidPos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
+                            FluidType::Water,
+                        );
+                    } else {
+                        self.fluid_sim.on_fluid_removed(
+                            FluidPos::new(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z),
+                            &self.chunks,
+                        );
+                    }
                     if let Some(extra) = removed_extra {
                         self.fluid_sim.on_fluid_removed(
                             FluidPos::new(extra.x, extra.y, extra.z),
@@ -7056,6 +7269,16 @@ impl GameWorld {
                         return;
                     }
 
+                    let is_water_at = |pos: IVec3| -> bool {
+                        let Some(voxel) = self.get_voxel_at(pos) else {
+                            return false;
+                        };
+
+                        get_fluid_type(voxel.id) == Some(FluidType::Water)
+                            || (mdminecraft_world::block_supports_waterlogging(voxel.id)
+                                && mdminecraft_world::is_waterlogged(voxel.state))
+                    };
+
                     let has_adjacent_water = [
                         IVec3::new(1, 0, 0),
                         IVec3::new(-1, 0, 0),
@@ -7063,15 +7286,7 @@ impl GameWorld {
                         IVec3::new(0, 0, -1),
                     ]
                     .into_iter()
-                    .any(|offset| {
-                        matches!(
-                            self.get_block_at(support_pos + offset),
-                            Some(
-                                mdminecraft_world::BLOCK_WATER
-                                    | mdminecraft_world::BLOCK_WATER_FLOWING
-                            )
-                        )
-                    });
+                    .any(|offset| is_water_at(support_pos + offset));
 
                     if !has_adjacent_water {
                         return;
@@ -7100,6 +7315,7 @@ impl GameWorld {
             let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
             let mut spawn_particles_at: Option<glam::Vec3> = None;
             let mut placed = false;
+            let mut placed_waterlogged = false;
             let mut placed_extra: Option<IVec3> = None;
 
             if block_id == interactive_blocks::BED_FOOT {
@@ -7120,11 +7336,21 @@ impl GameWorld {
                 let local_z = place_pos.z.rem_euclid(16) as usize;
 
                 let current = chunk.voxel(local_x, local_y, local_z);
+                let can_place_into_water =
+                    mdminecraft_world::block_supports_waterlogging(place_block_id)
+                        && get_fluid_type(current.id) == Some(FluidType::Water);
+
                 if current.id == BLOCK_AIR
+                    || can_place_into_water
                     || (allow_replace_existing_slab
                         && current.id == block_id
                         && place_block_id != block_id)
                 {
+                    if can_place_into_water && self.active_dimension != DimensionId::Nether {
+                        place_state = mdminecraft_world::set_waterlogged(place_state, true);
+                        placed_waterlogged = true;
+                    }
+
                     if mdminecraft_world::is_door_lower(block_id) {
                         if Self::try_place_door(
                             chunk,
@@ -7194,11 +7420,19 @@ impl GameWorld {
                     self.droppers.entry(key).or_default();
                 }
 
-                // Notify fluid sim (treat as removal to wake neighbors who might be flowing here).
-                self.fluid_sim.on_fluid_removed(
-                    FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
-                    &self.chunks,
-                );
+                // Notify fluid sim.
+                if placed_waterlogged {
+                    self.fluid_sim.on_fluid_placed(
+                        FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
+                        FluidType::Water,
+                    );
+                } else {
+                    // Treat as removal to wake neighbors who might be flowing here.
+                    self.fluid_sim.on_fluid_removed(
+                        FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
+                        &self.chunks,
+                    );
+                }
                 if let Some(extra) = placed_extra {
                     self.fluid_sim
                         .on_fluid_removed(FluidPos::new(extra.x, extra.y, extra.z), &self.chunks);
@@ -8087,7 +8321,10 @@ impl GameWorld {
     ///
     /// This handles both increases and decreases by clearing and reinitializing skylight for a
     /// small neighborhood and then stitching seams to import skylight from nearby chunks.
-    fn recompute_skylight_local(&mut self, center: ChunkPos) -> std::collections::BTreeSet<ChunkPos> {
+    fn recompute_skylight_local(
+        &mut self,
+        center: ChunkPos,
+    ) -> std::collections::BTreeSet<ChunkPos> {
         recompute_skylight_local_world(&mut self.chunks, &self.registry, center)
     }
 
@@ -9352,12 +9589,16 @@ impl GameWorld {
         // TODO: Use proper SimTick for multiplayer sync
         let tick = self.sim_tick.0;
         let active_dimension = self.active_dimension;
+        let chunks = &self.chunks;
+        let block_properties = &self.block_properties;
 
         // Get player position for hostile mob targeting
         let player_pos = self.renderer.camera().position;
         let player_x = player_pos.x as f64;
         let player_y = player_pos.y as f64;
         let player_z = player_pos.z as f64;
+        let player_block_x = player_x.floor() as i32;
+        let player_block_z = player_z.floor() as i32;
         let visibility = if self.status_effects.has(StatusEffectType::Invisibility) {
             0.25
         } else {
@@ -9368,6 +9609,29 @@ impl GameWorld {
         // Time: 0.0-0.25 Night→Dawn, 0.75-1.0 Dusk→Night
         let time = self.sim_time.time_of_day() as f32;
         let is_night = !(0.25..=0.75).contains(&time);
+
+        let mob_chunk_loaded = |mob: &Mob| -> bool {
+            let block_x = mob.x.floor() as i32;
+            let block_z = mob.z.floor() as i32;
+            let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+            let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+            chunks.contains_key(&ChunkPos::new(chunk_x, chunk_z))
+        };
+
+        // Vanilla-ish: hostile mobs are not persisted outside the active chunk set.
+        // Keep the Ender Dragon alive regardless of chunk streaming to preserve the boss loop.
+        self.mobs.retain(|mob| {
+            if mob.dimension != active_dimension {
+                return true;
+            }
+            if mob.dead {
+                return true;
+            }
+            if mob.is_hostile() && mob.mob_type != MobType::EnderDragon {
+                return mob_chunk_loaded(mob);
+            }
+            true
+        });
 
         let can_fire_hostile_projectiles =
             self.player_state == PlayerState::Alive && !self.player_health.is_dead();
@@ -9398,14 +9662,105 @@ impl GameWorld {
             if mob.dimension != active_dimension {
                 continue;
             }
+
+            if mob.mob_type != MobType::EnderDragon && !mob_chunk_loaded(mob) {
+                continue;
+            }
+
+            let before_pos = (mob.x, mob.y, mob.z);
+
             // Update fire damage (from Fire Aspect enchantment)
             mob.update_fire();
 
             // Spiders are only hostile at night, other hostile mobs always attack
             if mob.mob_type.is_hostile_at_time(is_night) {
-                // Update hostile mob with player targeting
+                let (target_x, target_z) = if matches!(
+                    mob.mob_type,
+                    MobType::Zombie | MobType::Skeleton | MobType::Spider
+                ) {
+                    let distance = mob.distance_to(player_x, player_y, player_z);
+                    let detection_range = (mob.mob_type.detection_range() as f64) * visibility;
+                    let attack_range = mob.mob_type.size() as f64 + 1.5;
+
+                    if distance > attack_range && distance <= detection_range {
+                        let start = mdminecraft_world::GridPos::new(
+                            mob.x.floor() as i32,
+                            mob.z.floor() as i32,
+                        );
+                        let goal = mdminecraft_world::GridPos::new(
+                            player_x.floor() as i32,
+                            player_z.floor() as i32,
+                        );
+                        let nav_y = mob.y.floor() as i32;
+                        let radius = mob.mob_type.detection_range().ceil() as i32 + 4;
+
+                        let path = mdminecraft_world::astar_path_4dir(
+                            start,
+                            goal,
+                            |p| {
+                                if (p.x - start.x).abs() > radius || (p.z - start.z).abs() > radius
+                                {
+                                    return false;
+                                }
+
+                                let chunk_x = p.x.div_euclid(CHUNK_SIZE_X as i32);
+                                let chunk_z = p.z.div_euclid(CHUNK_SIZE_Z as i32);
+                                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                                let Some(chunk) = chunks.get(&chunk_pos) else {
+                                    return false;
+                                };
+
+                                let local_x = p.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                                let local_z = p.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                                let Some(local_y) = world_y_to_local_y(nav_y) else {
+                                    return false;
+                                };
+                                let Some(local_above_y) = world_y_to_local_y(nav_y + 1) else {
+                                    return false;
+                                };
+                                let Some(local_floor_y) = world_y_to_local_y(nav_y - 1) else {
+                                    return false;
+                                };
+
+                                let here = chunk.voxel(local_x, local_y, local_z);
+                                if block_properties.get(here.id).is_solid {
+                                    return false;
+                                }
+                                let above = chunk.voxel(local_x, local_above_y, local_z);
+                                if block_properties.get(above.id).is_solid {
+                                    return false;
+                                }
+
+                                let floor = chunk.voxel(local_x, local_floor_y, local_z);
+                                let Some(top_offset) =
+                                    Self::voxel_collision_top_offset(block_properties, &floor)
+                                else {
+                                    return false;
+                                };
+                                top_offset >= 1.0
+                            },
+                            4096,
+                        );
+
+                        if let Some(path) = path {
+                            if let Some(next) = path.get(1).copied() {
+                                (next.x as f64 + 0.5, next.z as f64 + 0.5)
+                            } else {
+                                (player_x, player_z)
+                            }
+                        } else {
+                            (player_x, player_z)
+                        }
+                    } else {
+                        (player_x, player_z)
+                    }
+                } else {
+                    (player_x, player_z)
+                };
+
                 let dealt_damage = mob
-                    .update_with_target_visibility(tick, player_x, player_y, player_z, visibility);
+                    .update_with_target_visibility(tick, target_x, player_y, target_z, visibility);
                 if dealt_damage {
                     // Check if this was a creeper explosion
                     if mob.mob_type.explodes() && mob.dead {
@@ -9456,6 +9811,8 @@ impl GameWorld {
                 // Update passive mob (or spider in daylight)
                 mob.update(tick);
             }
+
+            Self::resolve_mob_world_collisions(chunks, block_properties, mob, before_pos);
         }
 
         for projectile in hostile_projectiles {
@@ -9787,7 +10144,17 @@ impl GameWorld {
             let hostile_count = self
                 .mobs
                 .iter()
-                .filter(|m| m.dimension == active_dimension && m.is_hostile())
+                .filter(|m| {
+                    if m.dimension != active_dimension || m.dead || !m.is_hostile() {
+                        return false;
+                    }
+
+                    let block_x = m.x.floor() as i32;
+                    let block_z = m.z.floor() as i32;
+                    let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
+                    let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
+                    self.chunks.contains_key(&ChunkPos::new(chunk_x, chunk_z))
+                })
                 .count();
             if hostile_count < 10 {
                 const MIN_RADIUS: i32 = 16;
@@ -10011,8 +10378,12 @@ impl GameWorld {
                 }
                 if mob.is_hostile() {
                     // Despawn hostile mobs during the day
-                    let dist = ((mob.x - player_x).powi(2) + (mob.z - player_z).powi(2)).sqrt();
-                    dist < 48.0 // Keep if within 48 blocks during day transition
+                    let mob_block_x = mob.x.floor() as i32;
+                    let mob_block_z = mob.z.floor() as i32;
+                    let dx = mob_block_x - player_block_x;
+                    let dz = mob_block_z - player_block_z;
+                    let dist_sq = (dx as i64) * (dx as i64) + (dz as i64) * (dz as i64);
+                    dist_sq < 48_i64 * 48_i64 // Keep if within 48 blocks during day transition
                 } else {
                     true
                 }
@@ -10422,7 +10793,7 @@ impl GameWorld {
     fn destroy_blocks_in_radius(&mut self, cx: f64, cy: f64, cz: f64, radius: f32) {
         let radius_i = radius.ceil() as i32;
         let mut affected_chunks = std::collections::BTreeSet::new();
-        let mut removed_blocks: Vec<(IVec3, BlockId)> = Vec::new();
+        let mut removed_blocks: Vec<(IVec3, BlockId, bool)> = Vec::new();
 
         // Iterate over all blocks in the explosion radius
         for dx in -radius_i..=radius_i {
@@ -10457,27 +10828,54 @@ impl GameWorld {
                         // Don't destroy bedrock (block 10) or air
                         if voxel.id != BLOCK_AIR && voxel.id != mdminecraft_world::BLOCK_BEDROCK {
                             let removed_id = voxel.id;
-                            chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                            let left_water = self.active_dimension != DimensionId::Nether
+                                && mdminecraft_world::block_supports_waterlogging(voxel.id)
+                                && mdminecraft_world::is_waterlogged(voxel.state);
+
+                            if left_water {
+                                chunk.set_voxel(
+                                    local_x,
+                                    local_y,
+                                    local_z,
+                                    Voxel {
+                                        id: FluidType::Water.source_block_id(),
+                                        state: 0,
+                                        light_sky: 0,
+                                        light_block: 0,
+                                    },
+                                );
+                            } else {
+                                chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                            }
+
                             affected_chunks.insert(chunk_pos);
-                            removed_blocks
-                                .push((IVec3::new(block_x, block_y, block_z), removed_id));
+                            removed_blocks.push((
+                                IVec3::new(block_x, block_y, block_z),
+                                removed_id,
+                                left_water,
+                            ));
                         }
                     }
                 }
             }
         }
 
-        for (pos, removed_id) in &removed_blocks {
+        for (pos, removed_id, left_water) in &removed_blocks {
             self.on_block_entity_removed(*pos, *removed_id);
-            self.fluid_sim
-                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+            if *left_water {
+                self.fluid_sim
+                    .on_fluid_placed(FluidPos::new(pos.x, pos.y, pos.z), FluidType::Water);
+            } else {
+                self.fluid_sim
+                    .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+            }
             self.schedule_redstone_updates_around(*pos);
         }
 
         let removed_support = Self::remove_unsupported_blocks(
             &mut self.chunks,
             &self.block_properties,
-            removed_blocks.iter().map(|(pos, _)| *pos),
+            removed_blocks.iter().map(|(pos, _, _)| *pos),
         );
         for (pos, removed_block_id) in removed_support {
             self.on_block_entity_removed(pos, removed_block_id);
@@ -12779,19 +13177,36 @@ fn try_bucket_interaction(
         CORE_ITEM_BUCKET => {
             let target_pos = hit.block_pos;
             let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(target_pos)?;
-            let current_id = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z).id;
+            let voxel = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z);
 
-            let new_bucket_id = if current_id == FluidType::Water.source_block_id() {
-                CORE_ITEM_WATER_BUCKET
-            } else if current_id == FluidType::Lava.source_block_id() {
-                CORE_ITEM_LAVA_BUCKET
-            } else {
-                return None;
-            };
+            let picking_up_waterlogged = mdminecraft_world::block_supports_waterlogging(voxel.id)
+                && mdminecraft_world::is_waterlogged(voxel.state);
+
+            let new_bucket_id =
+                if voxel.id == FluidType::Water.source_block_id() || picking_up_waterlogged {
+                    CORE_ITEM_WATER_BUCKET
+                } else if voxel.id == FluidType::Lava.source_block_id() {
+                    CORE_ITEM_LAVA_BUCKET
+                } else {
+                    return None;
+                };
 
             {
                 let chunk = chunks.get_mut(&chunk_pos)?;
-                chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                if picking_up_waterlogged {
+                    let new_state = mdminecraft_world::set_waterlogged(voxel.state, false);
+                    chunk.set_voxel(
+                        local_x,
+                        local_y,
+                        local_z,
+                        Voxel {
+                            state: new_state,
+                            ..voxel
+                        },
+                    );
+                } else {
+                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                }
             }
 
             fluid_sim.on_fluid_removed(
@@ -12807,18 +13222,77 @@ fn try_bucket_interaction(
             } else {
                 FluidType::Lava
             };
-            let source_id = fluid_type.source_block_id();
-
-            let place_pos = hit.block_pos + hit.face_normal;
-            let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(place_pos)?;
-            let current_id = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z).id;
-            if current_id != BLOCK_AIR && get_fluid_type(current_id).is_none() {
-                return None;
-            }
 
             if dimension == DimensionId::Nether && fluid_type == FluidType::Water {
                 // Vanilla-ish: water evaporates immediately in the Nether.
                 return Some((CORE_ITEM_BUCKET, Vec::new()));
+            }
+
+            let source_id = fluid_type.source_block_id();
+
+            // Foundation support: allow waterlogging slabs.
+            if fluid_type == FluidType::Water {
+                let target_pos = hit.block_pos;
+                let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(target_pos)?;
+                let voxel = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z);
+                if mdminecraft_world::block_supports_waterlogging(voxel.id)
+                    && !mdminecraft_world::is_waterlogged(voxel.state)
+                {
+                    {
+                        let chunk = chunks.get_mut(&chunk_pos)?;
+                        let new_state = mdminecraft_world::set_waterlogged(voxel.state, true);
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                state: new_state,
+                                ..voxel
+                            },
+                        );
+                    }
+
+                    fluid_sim.on_fluid_placed(
+                        FluidPos::new(target_pos.x, target_pos.y, target_pos.z),
+                        FluidType::Water,
+                    );
+
+                    return Some((CORE_ITEM_BUCKET, vec![target_pos]));
+                }
+            }
+
+            let place_pos = hit.block_pos + hit.face_normal;
+            let (chunk_pos, local_x, local_y, local_z) = chunk_and_local(place_pos)?;
+            let voxel = chunks.get(&chunk_pos)?.voxel(local_x, local_y, local_z);
+
+            if fluid_type == FluidType::Water
+                && mdminecraft_world::block_supports_waterlogging(voxel.id)
+                && !mdminecraft_world::is_waterlogged(voxel.state)
+            {
+                {
+                    let chunk = chunks.get_mut(&chunk_pos)?;
+                    let new_state = mdminecraft_world::set_waterlogged(voxel.state, true);
+                    chunk.set_voxel(
+                        local_x,
+                        local_y,
+                        local_z,
+                        Voxel {
+                            state: new_state,
+                            ..voxel
+                        },
+                    );
+                }
+
+                fluid_sim.on_fluid_placed(
+                    FluidPos::new(place_pos.x, place_pos.y, place_pos.z),
+                    FluidType::Water,
+                );
+
+                return Some((CORE_ITEM_BUCKET, vec![place_pos]));
+            }
+
+            if voxel.id != BLOCK_AIR && get_fluid_type(voxel.id).is_none() {
+                return None;
             }
 
             {
@@ -23025,8 +23499,26 @@ impl commands::CommandContext for GameWorld {
                 });
             }
 
+            let left_water = self.active_dimension != DimensionId::Nether
+                && mdminecraft_world::block_supports_waterlogging(old_id)
+                && mdminecraft_world::is_waterlogged(old_state);
+
             if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
-                chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                if left_water {
+                    chunk.set_voxel(
+                        local_x,
+                        local_y,
+                        local_z,
+                        Voxel {
+                            id: FluidType::Water.source_block_id(),
+                            state: 0,
+                            light_sky: 0,
+                            light_block: 0,
+                        },
+                    );
+                } else {
+                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                }
             }
 
             let mut removed_extra: Option<IVec3> = None;
@@ -23073,8 +23565,13 @@ impl commands::CommandContext for GameWorld {
                     Self::try_remove_other_piston_part(&mut self.chunks, pos, old_id, old_state);
             }
 
-            self.fluid_sim
-                .on_fluid_removed(FluidPos::new(x, y, z), &self.chunks);
+            if left_water {
+                self.fluid_sim
+                    .on_fluid_placed(FluidPos::new(x, y, z), FluidType::Water);
+            } else {
+                self.fluid_sim
+                    .on_fluid_removed(FluidPos::new(x, y, z), &self.chunks);
+            }
             self.schedule_redstone_updates_around(pos);
             changed_positions.push(pos);
 
@@ -23659,6 +24156,106 @@ mod tests {
         mdminecraft_world::world_y_to_local_y(world_y).expect("world y in bounds")
     }
 
+    #[test]
+    fn column_ground_height_returns_world_space_y() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            0,
+            0,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let block_properties = BlockPropertiesRegistry::new();
+        let height = GameWorld::column_ground_height(&chunks, &block_properties, 0.5, 0.5);
+        let expected = mdminecraft_world::local_y_to_world_y(0) as f32 + 1.0;
+        assert_eq!(height, expected);
+    }
+
+    #[test]
+    fn mob_grounding_prevents_falling_through_blocks() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            local_y(0),
+            0,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let before_pos = (0.5, 5.0, 0.5);
+        let mut mob =
+            mdminecraft_world::Mob::new(0.5, -2.0, 0.5, mdminecraft_world::MobType::Zombie);
+        mob.vel_y = -3.0;
+
+        GameWorld::resolve_mob_world_collisions(&chunks, &block_properties, &mut mob, before_pos);
+
+        let expected_y = 0.0 + 1.0 + PlayerPhysics::GROUND_EPS as f64;
+        assert!(
+            (mob.y - expected_y).abs() < 1e-6,
+            "mob.y = {}, expected {}",
+            mob.y,
+            expected_y
+        );
+        assert_eq!(mob.vel_y, 0.0);
+    }
+
+    #[test]
+    fn mob_collision_blocks_horizontal_motion_through_walls() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        // Ground blocks to stand on.
+        for x in 0..=1 {
+            chunk.set_voxel(
+                x,
+                local_y(0),
+                0,
+                Voxel {
+                    id: BLOCK_COBBLESTONE,
+                    ..Default::default()
+                },
+            );
+        }
+        // Two-block-high wall at x=1,z=0.
+        chunk.set_voxel(
+            1,
+            local_y(1),
+            0,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let start_y = 0.0 + 1.0 + PlayerPhysics::GROUND_EPS as f64;
+        let before_pos = (0.5, start_y, 0.5);
+        let mut mob =
+            mdminecraft_world::Mob::new(1.5, start_y, 0.5, mdminecraft_world::MobType::Zombie);
+        mob.vel_x = 1.0;
+
+        GameWorld::resolve_mob_world_collisions(&chunks, &block_properties, &mut mob, before_pos);
+
+        assert_eq!(mob.x, before_pos.0);
+        assert_eq!(mob.vel_x, 0.0);
+    }
+
     fn find_nether_fortress_chest_key(world_seed: u64) -> mdminecraft_world::BlockEntityKey {
         let generator = mdminecraft_world::FortressGenerator::new(world_seed);
         let chest_id = mdminecraft_world::interactive_blocks::CHEST;
@@ -23695,8 +24292,7 @@ mod tests {
                         continue;
                     }
 
-                    let voxel =
-                        chunk.voxel(local_x as usize, local_y(world_y), local_z as usize);
+                    let voxel = chunk.voxel(local_x as usize, local_y(world_y), local_z as usize);
                     if voxel.id == chest_id {
                         return mdminecraft_world::BlockEntityKey {
                             dimension: DimensionId::Nether,
@@ -27272,6 +27868,98 @@ mod tests {
             .unwrap()
             .voxel(1, local_y(64), 1);
         assert_eq!(voxel.id, BLOCK_AIR);
+    }
+
+    #[test]
+    fn bucket_picks_up_water_from_waterlogged_slab() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            1,
+            Voxel {
+                id: interactive_blocks::STONE_SLAB,
+                state: mdminecraft_world::set_waterlogged(0, true),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut fluid_sim = FluidSimulator::new();
+
+        let hit = super::RaycastHit {
+            block_pos: glam::IVec3::new(1, 64, 1),
+            face_normal: glam::IVec3::ZERO,
+            distance: 0.0,
+            hit_pos: glam::Vec3::ZERO,
+        };
+
+        let result = super::try_bucket_interaction(
+            DimensionId::Overworld,
+            CORE_ITEM_BUCKET,
+            hit,
+            &mut chunks,
+            &mut fluid_sim,
+        );
+        assert_eq!(
+            result,
+            Some((CORE_ITEM_WATER_BUCKET, vec![glam::IVec3::new(1, 64, 1)]))
+        );
+
+        let voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .unwrap()
+            .voxel(1, local_y(64), 1);
+        assert_eq!(voxel.id, interactive_blocks::STONE_SLAB);
+        assert!(!mdminecraft_world::is_waterlogged(voxel.state));
+        assert_eq!(fluid_sim.pending_count(), 0);
+    }
+
+    #[test]
+    fn water_bucket_waterlogs_slab() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            1,
+            Voxel {
+                id: interactive_blocks::STONE_SLAB,
+                state: 0,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut fluid_sim = FluidSimulator::new();
+
+        let hit = super::RaycastHit {
+            block_pos: glam::IVec3::new(1, 64, 1),
+            face_normal: glam::IVec3::ZERO,
+            distance: 0.0,
+            hit_pos: glam::Vec3::ZERO,
+        };
+
+        let result = super::try_bucket_interaction(
+            DimensionId::Overworld,
+            CORE_ITEM_WATER_BUCKET,
+            hit,
+            &mut chunks,
+            &mut fluid_sim,
+        );
+        assert_eq!(
+            result,
+            Some((CORE_ITEM_BUCKET, vec![glam::IVec3::new(1, 64, 1)]))
+        );
+
+        let voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .unwrap()
+            .voxel(1, local_y(64), 1);
+        assert_eq!(voxel.id, interactive_blocks::STONE_SLAB);
+        assert!(mdminecraft_world::is_waterlogged(voxel.state));
+        assert_eq!(fluid_sim.pending_count(), 1);
     }
 
     #[test]

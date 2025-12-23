@@ -1,7 +1,7 @@
 use mdminecraft_core::DimensionId;
 use mdminecraft_world::{
-    fortress_blaze_spawns_for_chunk, ChunkPos, MobType, TerrainGenerator, BLOCK_AIR,
-    world_y_to_local_y, BLOCK_STONE_BRICKS, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
+    fortress_blaze_spawns_for_chunk, world_y_to_local_y, ChunkPos, MobType, TerrainGenerator,
+    BLOCK_AIR, BLOCK_STONE_BRICKS, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
 };
 
 #[test]

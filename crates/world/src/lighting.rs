@@ -538,8 +538,8 @@ pub fn recompute_skylight_local(
         }
     }
 
-    for chunk_pos in clear_chunks.iter().copied() {
-        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+    for chunk_pos in clear_chunks.iter() {
+        let Some(chunk) = chunks.get_mut(chunk_pos) else {
             continue;
         };
 
@@ -557,8 +557,8 @@ pub fn recompute_skylight_local(
     }
 
     let mut cross_chunk_updates = Vec::new();
-    for chunk_pos in clear_chunks.iter().copied() {
-        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+    for chunk_pos in clear_chunks.iter() {
+        let Some(chunk) = chunks.get_mut(chunk_pos) else {
             continue;
         };
         let (_update, updates) = init_skylight_with_neighbors(chunk, registry);

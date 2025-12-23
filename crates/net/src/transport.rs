@@ -341,9 +341,7 @@ mod tests {
         let server = match ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()) {
             Ok(server) => server,
             Err(err) if should_skip_socket_tests(&err) => {
-                eprintln!(
-                    "skipping (socket sandbox): unable to bind server endpoint: {err:#}"
-                );
+                eprintln!("skipping (socket sandbox): unable to bind server endpoint: {err:#}");
                 return;
             }
             Err(err) => panic!("Failed to bind server: {err:#}"),
@@ -356,9 +354,7 @@ mod tests {
         let client = match ClientEndpoint::new(TlsMode::InsecureSkipVerify) {
             Ok(client) => client,
             Err(err) if should_skip_socket_tests(&err) => {
-                eprintln!(
-                    "skipping (socket sandbox): unable to create client endpoint: {err:#}"
-                );
+                eprintln!("skipping (socket sandbox): unable to create client endpoint: {err:#}");
                 return;
             }
             Err(err) => panic!("Failed to create client: {err:#}"),
@@ -372,9 +368,7 @@ mod tests {
         let server = match ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()) {
             Ok(server) => server,
             Err(err) if should_skip_socket_tests(&err) => {
-                eprintln!(
-                    "skipping (socket sandbox): unable to bind server endpoint: {err:#}"
-                );
+                eprintln!("skipping (socket sandbox): unable to bind server endpoint: {err:#}");
                 return;
             }
             Err(err) => panic!("Failed to bind server: {err:#}"),
@@ -385,9 +379,7 @@ mod tests {
             Ok(client) => client,
             Err(err) if should_skip_socket_tests(&err) => {
                 server.close();
-                eprintln!(
-                    "skipping (socket sandbox): unable to create client endpoint: {err:#}"
-                );
+                eprintln!("skipping (socket sandbox): unable to create client endpoint: {err:#}");
                 return;
             }
             Err(err) => panic!("Failed to create client: {err:#}"),
