@@ -11,7 +11,7 @@ use mdminecraft_world::{
     tick_hoppers, update_container_signal, BlockEntityKey, BlockProperties, BrewingStandState,
     ChestState, Chunk, ChunkPos, DispenserState, Facing, FurnaceState, HopperState, ItemManager,
     ItemType, Mob, MobState, MobType, PotionType, RedstonePos, RedstoneSimulator, Voxel,
-    BLOCK_END_PORTAL,
+    world_y_to_local_y, BLOCK_END_PORTAL,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
@@ -103,6 +103,7 @@ fn micro_end_boss_loop_snapshot() {
             let boss_enraged =
                 (state.boss.health as f64) <= (state.boss.mob_type.max_health() as f64) * 0.5;
 
+            let portal_local_y = world_y_to_local_y(PORTAL_Y).expect("portal y within bounds");
             let portal_blocks = (-1..=1)
                 .flat_map(|dx| (-1..=1).map(move |dz| (dx, dz)))
                 .filter(|(dx, dz)| {
@@ -114,7 +115,7 @@ fn micro_end_boss_loop_snapshot() {
                         .chunks
                         .get(&ChunkPos::new(0, 0))
                         .expect("chunk exists")
-                        .voxel(local_x, PORTAL_Y as usize, local_z)
+                        .voxel(local_x, portal_local_y, local_z)
                         .id
                         == BLOCK_END_PORTAL
                 })
@@ -150,10 +151,12 @@ fn micro_redstone_wire_propagation_snapshot() {
         lamp_lit: bool,
     }
 
+    const WORLD_Y: i32 = 64;
+    let local_y = world_y_to_local_y(WORLD_Y).expect("world y within chunk bounds");
     let mut chunk = Chunk::new(ChunkPos::new(0, 0));
     chunk.set_voxel(
         5,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::LEVER,
@@ -162,7 +165,7 @@ fn micro_redstone_wire_propagation_snapshot() {
     );
     chunk.set_voxel(
         6,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::REDSTONE_WIRE,
@@ -171,7 +174,7 @@ fn micro_redstone_wire_propagation_snapshot() {
     );
     chunk.set_voxel(
         7,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::REDSTONE_WIRE,
@@ -180,7 +183,7 @@ fn micro_redstone_wire_propagation_snapshot() {
     );
     chunk.set_voxel(
         8,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::REDSTONE_LAMP,
@@ -202,7 +205,7 @@ fn micro_redstone_wire_propagation_snapshot() {
             if tick.0 == 0 && !state.lever_toggled {
                 state
                     .sim
-                    .toggle_lever(RedstonePos::new(5, 64, 5), &mut state.chunks);
+                    .toggle_lever(RedstonePos::new(5, WORLD_Y, 5), &mut state.chunks);
                 state.lever_toggled = true;
             }
             state.sim.tick(&mut state.chunks);
@@ -212,10 +215,10 @@ fn micro_redstone_wire_propagation_snapshot() {
                 .chunks
                 .get(&ChunkPos::new(0, 0))
                 .expect("chunk exists");
-            let lever = chunk.voxel(5, 64, 5);
-            let wire1 = chunk.voxel(6, 64, 5);
-            let wire2 = chunk.voxel(7, 64, 5);
-            let lamp = chunk.voxel(8, 64, 5);
+            let lever = chunk.voxel(5, local_y, 5);
+            let wire1 = chunk.voxel(6, local_y, 5);
+            let wire2 = chunk.voxel(7, local_y, 5);
+            let lamp = chunk.voxel(8, local_y, 5);
 
             Snap {
                 lever_active: is_active(lever.state),
@@ -244,10 +247,12 @@ fn micro_redstone_observer_lamp_clock_snapshot() {
         output_wire_power: u8,
     }
 
+    const WORLD_Y: i32 = 64;
+    let local_y = world_y_to_local_y(WORLD_Y).expect("world y within chunk bounds");
     let mut chunk = Chunk::new(ChunkPos::new(0, 0));
     chunk.set_voxel(
         6,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::REDSTONE_LAMP_LIT,
@@ -259,7 +264,7 @@ fn micro_redstone_observer_lamp_clock_snapshot() {
     observer_state = set_observer_facing(observer_state, Facing::West);
     chunk.set_voxel(
         5,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::REDSTONE_OBSERVER,
@@ -271,7 +276,7 @@ fn micro_redstone_observer_lamp_clock_snapshot() {
     for (x, z) in [(4, 5), (4, 6), (5, 6), (6, 6)] {
         chunk.set_voxel(
             x,
-            64,
+            local_y,
             z,
             Voxel {
                 id: redstone_blocks::REDSTONE_WIRE,
@@ -283,8 +288,8 @@ fn micro_redstone_observer_lamp_clock_snapshot() {
     let mut state = State::default();
     state.chunks.insert(ChunkPos::new(0, 0), chunk);
 
-    let observer_pos = RedstonePos::new(5, 64, 5);
-    let lamp_pos = RedstonePos::new(6, 64, 5);
+    let observer_pos = RedstonePos::new(5, WORLD_Y, 5);
+    let lamp_pos = RedstonePos::new(6, WORLD_Y, 5);
 
     run_micro_worldtest(
         MicroWorldtestConfig {
@@ -309,9 +314,9 @@ fn micro_redstone_observer_lamp_clock_snapshot() {
                 .chunks
                 .get(&ChunkPos::new(0, 0))
                 .expect("chunk exists");
-            let lamp = chunk.voxel(6, 64, 5);
-            let observer = chunk.voxel(5, 64, 5);
-            let output_wire = chunk.voxel(4, 64, 5);
+            let lamp = chunk.voxel(6, local_y, 5);
+            let observer = chunk.voxel(5, local_y, 5);
+            let output_wire = chunk.voxel(4, local_y, 5);
 
             Snap {
                 lamp_lit: lamp.id == redstone_blocks::REDSTONE_LAMP_LIT,
@@ -338,10 +343,13 @@ fn micro_redstone_two_lever_door_snapshot() {
         door_open: bool,
     }
 
+    const WORLD_Y: i32 = 64;
+    let local_y = world_y_to_local_y(WORLD_Y).expect("world y within chunk bounds");
+    let local_y_upper = world_y_to_local_y(WORLD_Y + 1).expect("world y within chunk bounds");
     let mut chunk = Chunk::new(ChunkPos::new(0, 0));
     chunk.set_voxel(
         8,
-        64,
+        local_y,
         5,
         Voxel {
             id: mdminecraft_world::interactive_blocks::IRON_DOOR_LOWER,
@@ -350,7 +358,7 @@ fn micro_redstone_two_lever_door_snapshot() {
     );
     chunk.set_voxel(
         8,
-        65,
+        local_y_upper,
         5,
         Voxel {
             id: mdminecraft_world::interactive_blocks::IRON_DOOR_UPPER,
@@ -360,7 +368,7 @@ fn micro_redstone_two_lever_door_snapshot() {
 
     chunk.set_voxel(
         7,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::LEVER,
@@ -369,7 +377,7 @@ fn micro_redstone_two_lever_door_snapshot() {
     );
     chunk.set_voxel(
         9,
-        64,
+        local_y,
         5,
         Voxel {
             id: redstone_blocks::LEVER,
@@ -380,8 +388,8 @@ fn micro_redstone_two_lever_door_snapshot() {
     let mut state = State::default();
     state.chunks.insert(ChunkPos::new(0, 0), chunk);
 
-    let left_pos = RedstonePos::new(7, 64, 5);
-    let right_pos = RedstonePos::new(9, 64, 5);
+    let left_pos = RedstonePos::new(7, WORLD_Y, 5);
+    let right_pos = RedstonePos::new(9, WORLD_Y, 5);
 
     run_micro_worldtest(
         MicroWorldtestConfig {
@@ -405,9 +413,9 @@ fn micro_redstone_two_lever_door_snapshot() {
                 .chunks
                 .get(&ChunkPos::new(0, 0))
                 .expect("chunk exists");
-            let left = chunk.voxel(7, 64, 5);
-            let right = chunk.voxel(9, 64, 5);
-            let door = chunk.voxel(8, 64, 5);
+            let left = chunk.voxel(7, local_y, 5);
+            let right = chunk.voxel(9, local_y, 5);
+            let door = chunk.voxel(8, local_y, 5);
 
             Snap {
                 left_on: is_active(left.state),
@@ -451,6 +459,7 @@ fn micro_item_sorter_lite_snapshot() {
     let comparator_pos = RedstonePos::new(9, 64, 5);
     let hopper_pos = RedstonePos::new(10, 64, 5);
     let output_chest_pos = RedstonePos::new(10, 64, 6);
+    let local_y = world_y_to_local_y(control_pos.y).expect("world y within chunk bounds");
 
     let control_key = BlockEntityKey {
         dimension: DimensionId::Overworld,
@@ -474,7 +483,7 @@ fn micro_item_sorter_lite_snapshot() {
     let mut chunk = Chunk::new(ChunkPos::new(0, 0));
     chunk.set_voxel(
         control_pos.x as usize,
-        control_pos.y as usize,
+        local_y,
         control_pos.z as usize,
         Voxel {
             id: mdminecraft_world::interactive_blocks::CHEST,
@@ -488,7 +497,7 @@ fn micro_item_sorter_lite_snapshot() {
     comparator_state = set_comparator_output_power(comparator_state, 1);
     chunk.set_voxel(
         comparator_pos.x as usize,
-        comparator_pos.y as usize,
+        local_y,
         comparator_pos.z as usize,
         Voxel {
             id: redstone_blocks::REDSTONE_COMPARATOR,
@@ -502,7 +511,7 @@ fn micro_item_sorter_lite_snapshot() {
     hopper_state = set_hopper_outputs_down(hopper_state, false);
     chunk.set_voxel(
         hopper_pos.x as usize,
-        hopper_pos.y as usize,
+        local_y,
         hopper_pos.z as usize,
         Voxel {
             id: mechanical_blocks::HOPPER,
@@ -513,7 +522,7 @@ fn micro_item_sorter_lite_snapshot() {
 
     chunk.set_voxel(
         output_chest_pos.x as usize,
-        output_chest_pos.y as usize,
+        local_y,
         output_chest_pos.z as usize,
         Voxel {
             id: mdminecraft_world::interactive_blocks::CHEST,
@@ -599,17 +608,17 @@ fn micro_item_sorter_lite_snapshot() {
                 .expect("chunk exists");
             let control_voxel = chunk.voxel(
                 control_pos.x as usize,
-                control_pos.y as usize,
+                local_y,
                 control_pos.z as usize,
             );
             let comparator_voxel = chunk.voxel(
                 comparator_pos.x as usize,
-                comparator_pos.y as usize,
+                local_y,
                 comparator_pos.z as usize,
             );
             let hopper_voxel = chunk.voxel(
                 hopper_pos.x as usize,
-                hopper_pos.y as usize,
+                local_y,
                 hopper_pos.z as usize,
             );
 

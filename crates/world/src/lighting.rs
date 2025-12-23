@@ -474,7 +474,6 @@ pub fn init_skylight(chunk: &mut Chunk, registry: &dyn BlockOpacityProvider) -> 
     }
 
     let nodes_processed = queue.propagate_skylight(chunk, registry);
-    chunk.take_dirty_flags(); // Clear dirty flags after init.
 
     LightUpdate {
         chunk_pos,
@@ -506,7 +505,6 @@ pub fn init_skylight_with_neighbors(
 
     let nodes_processed = queue.propagate_skylight(chunk, registry);
     let cross_chunk_updates = queue.take_cross_chunk_updates();
-    chunk.take_dirty_flags();
 
     (
         LightUpdate {
@@ -516,6 +514,73 @@ pub fn init_skylight_with_neighbors(
         },
         cross_chunk_updates,
     )
+}
+
+/// Recompute skylight for a local area centered on `center`.
+///
+/// This clears skylight for chunks within a 3×3 area (including diagonals), re-initializes skylight
+/// for that area, and then stitches seams with a 5×5 border to import skylight from neighboring
+/// chunks (e.g., cave openings in adjacent chunks).
+///
+/// Returns the chunk positions that may have received lighting updates (within the 5×5 border).
+pub fn recompute_skylight_local(
+    chunks: &mut HashMap<ChunkPos, Chunk>,
+    registry: &dyn BlockOpacityProvider,
+    center: ChunkPos,
+) -> BTreeSet<ChunkPos> {
+    let mut clear_chunks = BTreeSet::new();
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            let pos = ChunkPos::new(center.x + dx, center.z + dz);
+            if chunks.contains_key(&pos) {
+                clear_chunks.insert(pos);
+            }
+        }
+    }
+
+    for chunk_pos in clear_chunks.iter().copied() {
+        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+            continue;
+        };
+
+        for y in 0..CHUNK_SIZE_Y {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    let mut voxel = chunk.voxel(x, y, z);
+                    if voxel.light_sky != 0 {
+                        voxel.light_sky = 0;
+                        chunk.set_voxel(x, y, z, voxel);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut cross_chunk_updates = Vec::new();
+    for chunk_pos in clear_chunks.iter().copied() {
+        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+            continue;
+        };
+        let (_update, updates) = init_skylight_with_neighbors(chunk, registry);
+        cross_chunk_updates.extend(updates);
+    }
+    let _ = apply_cross_chunk_updates(chunks, registry, cross_chunk_updates);
+
+    let mut seam_chunks = BTreeSet::new();
+    for dz in -2..=2 {
+        for dx in -2..=2 {
+            let pos = ChunkPos::new(center.x + dx, center.z + dz);
+            if chunks.contains_key(&pos) {
+                seam_chunks.insert(pos);
+            }
+        }
+    }
+
+    for pos in seam_chunks.iter().copied() {
+        let _ = stitch_light_seams(chunks, registry, pos, LightType::Skylight);
+    }
+
+    seam_chunks
 }
 
 /// Add a block light source at the given position.
@@ -1228,5 +1293,67 @@ mod tests {
         let updates = stitch_light_seams(&mut chunks, &registry, pos_a, LightType::Skylight);
 
         assert!(updates > 0, "Should have stitched some skylight");
+    }
+
+    #[test]
+    fn recompute_skylight_local_clears_stale_light_under_roof() {
+        let registry = MockRegistry;
+        let pos = ChunkPos::new(0, 0);
+
+        let mut chunk = Chunk::new(pos);
+        init_skylight(&mut chunk, &registry);
+        assert_eq!(
+            chunk.voxel(8, 100, 8).light_sky,
+            MAX_LIGHT_LEVEL,
+            "expected empty chunk to be fully skylit"
+        );
+
+        // Add a solid roof plane; re-running init must clear any stale skylight below it.
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                let mut voxel = chunk.voxel(x, 200, z);
+                voxel.id = 1;
+                chunk.set_voxel(x, 200, z, voxel);
+            }
+        }
+
+        let mut chunks = HashMap::new();
+        chunks.insert(pos, chunk);
+        let affected = recompute_skylight_local(&mut chunks, &registry, pos);
+        assert!(affected.contains(&pos));
+
+        let chunk = chunks.get(&pos).expect("chunk exists");
+        assert_eq!(chunk.voxel(8, 201, 8).light_sky, MAX_LIGHT_LEVEL);
+        assert_eq!(chunk.voxel(8, 100, 8).light_sky, 0);
+    }
+
+    #[test]
+    fn recompute_skylight_local_imports_light_from_neighbor_chunk() {
+        let registry = MockRegistry;
+        let pos_a = ChunkPos::new(0, 0);
+        let pos_b = ChunkPos::new(1, 0);
+
+        let chunk_a = Chunk::new(pos_a);
+        let mut chunk_b = Chunk::new(pos_b);
+
+        // Block direct skylight in chunk B with a solid roof plane.
+        for x in 0..CHUNK_SIZE_X {
+            for z in 0..CHUNK_SIZE_Z {
+                let mut voxel = chunk_b.voxel(x, 60, z);
+                voxel.id = 1;
+                chunk_b.set_voxel(x, 60, z, voxel);
+            }
+        }
+
+        let mut chunks = HashMap::new();
+        chunks.insert(pos_a, chunk_a);
+        chunks.insert(pos_b, chunk_b);
+
+        // Recompute around chunk B; light should still enter from chunk A across the seam.
+        let _ = recompute_skylight_local(&mut chunks, &registry, pos_b);
+
+        let chunk_b = chunks.get(&pos_b).expect("chunk B exists");
+        assert_eq!(chunk_b.voxel(0, 50, 8).light_sky, MAX_LIGHT_LEVEL - 1);
+        assert_eq!(chunk_b.voxel(1, 50, 8).light_sky, MAX_LIGHT_LEVEL - 2);
     }
 }

@@ -28,7 +28,7 @@ use mdminecraft_ui3d::render::{
 };
 use mdminecraft_world::{
     get_fluid_type, interactive_blocks,
-    lighting::{init_skylight, stitch_light_seams, LightType},
+    lighting::{init_skylight, recompute_skylight_local as recompute_skylight_local_world, stitch_light_seams, LightType},
     local_y_to_world_y, world_y_to_local_y, ArmorPiece, ArmorSlot, BlockEntitiesState,
     BlockEntityKey, BlockId, BlockPropertiesRegistry, BlockState, BrewingStandState, ChestState,
     Chunk, ChunkPos, CropGrowthSystem, CropPosition, DispenserState, EnchantingTableState,
@@ -2238,7 +2238,7 @@ impl GameWorld {
                         for y in (0..CHUNK_SIZE_Y).rev() {
                             let voxel = chunk.voxel(local_x, y, local_z);
                             if voxel.id != BLOCK_AIR {
-                                *height = y as i32;
+                                *height = local_y_to_world_y(y);
                                 break;
                             }
                         }
@@ -2319,7 +2319,7 @@ impl GameWorld {
                 let voxel = chunk.voxel(local_x, y, local_z);
                 if let Some(top_offset) = Self::voxel_collision_top_offset(block_properties, &voxel)
                 {
-                    return y as f32 + top_offset;
+                    return local_y_to_world_y(y) as f32 + top_offset;
                 }
             }
         }
@@ -3146,7 +3146,7 @@ impl GameWorld {
                     else {
                         continue;
                     };
-                    let top_world_y = y as f32 + top_offset;
+                    let top_world_y = local_y_to_world_y(y) as f32 + top_offset;
                     let world_x = base_x + local_x as i32;
                     let world_z = base_z + local_z as i32;
                     if best.is_none_or(|(best_top_y, _, _)| top_world_y > best_top_y) {
@@ -4296,7 +4296,7 @@ impl GameWorld {
         let dirty_fluids = self.fluid_sim.take_dirty_chunks();
         let dirty_fluid_lighting = self.fluid_sim.take_dirty_light_chunks();
         for chunk_pos in dirty_fluids {
-            self.recompute_chunk_lighting(chunk_pos);
+            mesh_refresh.extend(self.recompute_skylight_local(chunk_pos));
             mesh_refresh.insert(chunk_pos);
             for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
                 mesh_refresh.insert(neighbor);
@@ -4334,7 +4334,7 @@ impl GameWorld {
 
         // Geometry changes can affect skylight and block-light occlusion; recompute both locally.
         for chunk_pos in &dirty_redstone_geometry_chunks {
-            self.recompute_chunk_lighting(*chunk_pos);
+            mesh_refresh.extend(self.recompute_skylight_local(*chunk_pos));
             mesh_refresh.insert(*chunk_pos);
             for neighbor in Self::neighbor_chunk_positions(*chunk_pos) {
                 mesh_refresh.insert(neighbor);
@@ -4628,14 +4628,14 @@ impl GameWorld {
         let camera_pos = self.renderer.camera().position;
         let center_y = (camera_pos.y - self.player_physics.eye_height)
             .floor()
-            .clamp(0.0, 255.0) as i32;
+            .clamp(WORLD_MIN_Y as f32, WORLD_MAX_Y as f32) as i32;
         let center = IVec3::new(target_x.floor() as i32, center_y, target_z.floor() as i32);
 
         if let Some((portal_block, _axis)) =
             self.find_portal_block_near(center, NETHER_PORTAL_SEARCH_RADIUS)
         {
             let mut bottom = portal_block;
-            while bottom.y > 0 {
+            while bottom.y > WORLD_MIN_Y {
                 let below = bottom + IVec3::new(0, -1, 0);
                 if self.get_block_at(below) != Some(BLOCK_NETHER_PORTAL) {
                     break;
@@ -4958,7 +4958,7 @@ impl GameWorld {
                             worldgen_chests.insert(BlockEntityKey {
                                 dimension: self.active_dimension,
                                 x: world_x,
-                                y: y as i32,
+                                y: local_y_to_world_y(y),
                                 z: world_z,
                             });
                         }
@@ -5064,7 +5064,7 @@ impl GameWorld {
 
                                 let mut ghast = Mob::new(
                                     world_x as f64 + 0.5,
-                                    local_y as f64,
+                                    local_y_to_world_y(local_y as usize) as f64,
                                     world_z as f64 + 0.5,
                                     MobType::Ghast,
                                 );
@@ -5084,7 +5084,7 @@ impl GameWorld {
             for base in sugar_cane_bases_to_register {
                 self.sugar_cane_growth.register_base(base);
             }
-            self.recompute_chunk_lighting(pos);
+            self.init_chunk_skylight(pos);
             let affected = mdminecraft_world::recompute_block_light_local(
                 &mut self.chunks,
                 &self.registry,
@@ -5117,7 +5117,7 @@ impl GameWorld {
                         for y in (0..CHUNK_SIZE_Y).rev() {
                             let voxel = chunk.voxel(local_x, y, local_z);
                             if voxel.id != BLOCK_AIR {
-                                *height = y as i32;
+                                *height = local_y_to_world_y(y);
                                 break;
                             }
                         }
@@ -5176,7 +5176,7 @@ impl GameWorld {
                         worldgen_chests.insert(BlockEntityKey {
                             dimension: self.active_dimension,
                             x: world_x,
-                            y: y as i32,
+                            y: local_y_to_world_y(y),
                             z: world_z,
                         });
                     }
@@ -5893,8 +5893,9 @@ impl GameWorld {
             dirty_chunks.insert(ChunkPos::new(pos.x.div_euclid(16), pos.z.div_euclid(16)));
         }
 
+        let mut skylight_affected = std::collections::BTreeSet::new();
         for pos in &dirty_chunks {
-            self.recompute_chunk_lighting(*pos);
+            skylight_affected.extend(self.recompute_skylight_local(*pos));
         }
 
         let mut affected = std::collections::BTreeSet::new();
@@ -5911,6 +5912,7 @@ impl GameWorld {
             mesh_refresh.insert(*pos);
             mesh_refresh.extend(Self::neighbor_chunk_positions(*pos));
         }
+        mesh_refresh.extend(skylight_affected);
         mesh_refresh.extend(affected);
         for pos in mesh_refresh {
             let _ = self.upload_chunk_mesh(pos);
@@ -6770,7 +6772,7 @@ impl GameWorld {
 
                     let mut mesh_refresh = std::collections::BTreeSet::new();
                     for dirty_chunk in affected_chunks {
-                        self.recompute_chunk_lighting(dirty_chunk);
+                        mesh_refresh.extend(self.recompute_skylight_local(dirty_chunk));
                         mesh_refresh.insert(dirty_chunk);
                         mesh_refresh.extend(Self::neighbor_chunk_positions(dirty_chunk));
 
@@ -7231,8 +7233,9 @@ impl GameWorld {
 
                 // Update lighting (skylight + seams) for any affected chunks (including
                 // cross-chunk multi-block placements like beds).
+                let mut skylight_affected = std::collections::BTreeSet::new();
                 for pos in &dirty_chunks {
-                    self.recompute_chunk_lighting(*pos);
+                    skylight_affected.extend(self.recompute_skylight_local(*pos));
                 }
 
                 // Update blocklight and refresh affected meshes.
@@ -7252,6 +7255,7 @@ impl GameWorld {
                     mesh_refresh.insert(*pos);
                     mesh_refresh.extend(Self::neighbor_chunk_positions(*pos));
                 }
+                mesh_refresh.extend(skylight_affected);
                 mesh_refresh.extend(affected);
                 for pos in mesh_refresh {
                     if self.upload_chunk_mesh(pos) {
@@ -8054,8 +8058,11 @@ impl GameWorld {
         removed
     }
 
-    /// Recompute skylight for a chunk and stitch across neighboring seams.
-    fn recompute_chunk_lighting(&mut self, chunk_pos: ChunkPos) {
+    /// Initialize skylight for a chunk and stitch across neighboring seams.
+    ///
+    /// This is intended for newly loaded/generated chunks. For geometry edits (which can
+    /// decrease skylight), use [`Self::recompute_skylight_local`] instead.
+    fn init_chunk_skylight(&mut self, chunk_pos: ChunkPos) {
         if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
             let _ = init_skylight(chunk, &self.registry);
         }
@@ -8074,6 +8081,14 @@ impl GameWorld {
                     stitch_light_seams(&mut self.chunks, &self.registry, pos, LightType::Skylight);
             }
         }
+    }
+
+    /// Recompute skylight for a local neighborhood around `center`.
+    ///
+    /// This handles both increases and decreases by clearing and reinitializing skylight for a
+    /// small neighborhood and then stitching seams to import skylight from nearby chunks.
+    fn recompute_skylight_local(&mut self, center: ChunkPos) -> std::collections::BTreeSet<ChunkPos> {
+        recompute_skylight_local_world(&mut self.chunks, &self.registry, center)
     }
 
     fn render(&mut self) {
@@ -8784,19 +8799,18 @@ impl GameWorld {
                 let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
                 let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
-                let start_y = match self.active_dimension {
-                    DimensionId::Nether => 140,
-                    _ => (CHUNK_SIZE_Y - 2) as i32,
+                let start_local_y = match self.active_dimension {
+                    DimensionId::Nether => world_y_to_local_y(140).unwrap_or(CHUNK_SIZE_Y - 2),
+                    _ => CHUNK_SIZE_Y - 2,
                 };
-                for y in (1..=start_y).rev() {
-                    let y_usize = y as usize;
-                    if y_usize + 1 >= CHUNK_SIZE_Y {
+                for local_y in (1..=start_local_y).rev() {
+                    if local_y + 1 >= CHUNK_SIZE_Y {
                         continue;
                     }
 
-                    let below = chunk.voxel(local_x, (y - 1) as usize, local_z).id;
-                    let feet = chunk.voxel(local_x, y_usize, local_z).id;
-                    let head = chunk.voxel(local_x, y_usize + 1, local_z).id;
+                    let below = chunk.voxel(local_x, local_y - 1, local_z).id;
+                    let feet = chunk.voxel(local_x, local_y, local_z).id;
+                    let head = chunk.voxel(local_x, local_y + 1, local_z).id;
 
                     if !self.block_properties.get(below).is_solid {
                         continue;
@@ -8811,9 +8825,10 @@ impl GameWorld {
                         continue;
                     }
 
+                    let world_y = local_y_to_world_y(local_y);
                     return Some(glam::Vec3::new(
                         x as f32 + 0.5,
-                        y as f32 + PlayerPhysics::GROUND_EPS,
+                        world_y as f32 + PlayerPhysics::GROUND_EPS,
                         z as f32 + 0.5,
                     ));
                 }
@@ -8832,10 +8847,11 @@ impl GameWorld {
         let base_x = world_x.floor() as i32;
         let base_z = world_z.floor() as i32;
         let base_y = world_y.floor() as i32;
+        let start_world_y = base_y.clamp(WORLD_MIN_Y + 1, WORLD_MAX_Y - 2);
+        let start_local_y = world_y_to_local_y(start_world_y).unwrap_or(CHUNK_SIZE_Y - 2) as i32;
 
-        let start_y = base_y.clamp(1, (CHUNK_SIZE_Y.saturating_sub(2)) as i32);
-        let min_y = (start_y - 16).max(1);
-        let max_y = (start_y + 8).min((CHUNK_SIZE_Y.saturating_sub(2)) as i32);
+        let min_local_y = (start_local_y - 16).max(1);
+        let max_local_y = (start_local_y + 8).min((CHUNK_SIZE_Y.saturating_sub(2)) as i32);
 
         for dz in -2i32..=2 {
             for dx in -2i32..=2 {
@@ -8852,16 +8868,16 @@ impl GameWorld {
                 let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
                 let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
-                let check_candidate = |y: i32| -> Option<glam::Vec3> {
-                    if y <= 0 {
+                let check_candidate = |local_y: i32| -> Option<glam::Vec3> {
+                    if local_y <= 0 {
                         return None;
                     }
-                    let y_usize = y as usize;
+                    let y_usize = local_y as usize;
                     if y_usize + 1 >= CHUNK_SIZE_Y {
                         return None;
                     }
 
-                    let below = chunk.voxel(local_x, (y - 1) as usize, local_z).id;
+                    let below = chunk.voxel(local_x, (local_y - 1) as usize, local_z).id;
                     let feet = chunk.voxel(local_x, y_usize, local_z).id;
                     let head = chunk.voxel(local_x, y_usize + 1, local_z).id;
 
@@ -8878,20 +8894,21 @@ impl GameWorld {
                         return None;
                     }
 
+                    let world_y = local_y_to_world_y(y_usize);
                     Some(glam::Vec3::new(
                         x as f32 + 0.5,
-                        y as f32 + PlayerPhysics::GROUND_EPS,
+                        world_y as f32 + PlayerPhysics::GROUND_EPS,
                         z as f32 + 0.5,
                     ))
                 };
 
-                for y in (min_y..=start_y).rev() {
-                    if let Some(pos) = check_candidate(y) {
+                for local_y in (min_local_y..=start_local_y).rev() {
+                    if let Some(pos) = check_candidate(local_y) {
                         return Some(pos);
                     }
                 }
-                for y in (start_y + 1)..=max_y {
-                    if let Some(pos) = check_candidate(y) {
+                for local_y in (start_local_y + 1)..=max_local_y {
+                    if let Some(pos) = check_candidate(local_y) {
                         return Some(pos);
                     }
                 }
@@ -9851,9 +9868,11 @@ impl GameWorld {
                         _ => MobType::Creeper,
                     };
 
+                    let world_spawn_y = local_y_to_world_y(spawn_y as usize);
+
                     let mut mob = Mob::new(
                         spawn_block_x as f64 + 0.5,
-                        spawn_y as f64,
+                        world_spawn_y as f64,
                         spawn_block_z as f64 + 0.5,
                         mob_type,
                     );
@@ -9865,7 +9884,7 @@ impl GameWorld {
                         "Spawned {:?} at ({}, {}, {})",
                         mob_type,
                         spawn_block_x,
-                        spawn_y,
+                        world_spawn_y,
                         spawn_block_z
                     );
                     break;
@@ -9967,7 +9986,7 @@ impl GameWorld {
 
                     let mut mob = Mob::new(
                         spawn_block_x as f64 + 0.5,
-                        local_y as f64,
+                        local_y_to_world_y(local_y) as f64,
                         spawn_block_z as f64 + 0.5,
                         MobType::Ghast,
                     );
@@ -10420,21 +10439,23 @@ impl GameWorld {
                     let block_z = cz.floor() as i32 + dz;
 
                     // Skip if out of world bounds
-                    if !(1..255).contains(&block_y) {
-                        continue; // Don't destroy bedrock layer or above world
+                    if !((WORLD_MIN_Y + 1)..=(WORLD_MAX_Y - 1)).contains(&block_y) {
+                        continue;
                     }
 
                     let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
                     let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
                     let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-                    let local_y = block_y as usize;
+                    let Some(local_y) = world_y_to_local_y(block_y) else {
+                        continue;
+                    };
                     let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
 
                     let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
                     if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
                         let voxel = chunk.voxel(local_x, local_y, local_z);
                         // Don't destroy bedrock (block 10) or air
-                        if voxel.id != BLOCK_AIR && voxel.id != 10 {
+                        if voxel.id != BLOCK_AIR && voxel.id != mdminecraft_world::BLOCK_BEDROCK {
                             let removed_id = voxel.id;
                             chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
                             affected_chunks.insert(chunk_pos);
@@ -10472,7 +10493,7 @@ impl GameWorld {
         // Update lighting and meshes for affected chunks
         let mut mesh_refresh = std::collections::BTreeSet::new();
         for chunk_pos in affected_chunks {
-            self.recompute_chunk_lighting(chunk_pos);
+            mesh_refresh.extend(self.recompute_skylight_local(chunk_pos));
             mesh_refresh.insert(chunk_pos);
             for neighbor in Self::neighbor_chunk_positions(chunk_pos) {
                 mesh_refresh.insert(neighbor);

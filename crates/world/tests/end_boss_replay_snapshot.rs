@@ -2,7 +2,7 @@ use mdminecraft_core::DimensionId;
 use mdminecraft_testkit::{run_micro_worldtest, MicroWorldtestConfig};
 use mdminecraft_world::{
     place_end_exit_portal, Chunk, ChunkPos, Mob, MobState, MobType, ProjectileManager,
-    BLOCK_END_PORTAL,
+    world_y_to_local_y, BLOCK_END_PORTAL,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -202,6 +202,7 @@ fn micro_end_boss_replay_script_snapshot() {
             let boss_enraged =
                 (state.boss.health as f64) <= (state.boss.mob_type.max_health() as f64) * 0.5;
 
+            let portal_local_y = world_y_to_local_y(PORTAL_Y).expect("portal y is within bounds");
             let portal_blocks = (-1..=1)
                 .flat_map(|dx| (-1..=1).map(move |dz| (dx, dz)))
                 .filter(|(dx, dz)| {
@@ -213,7 +214,7 @@ fn micro_end_boss_replay_script_snapshot() {
                         .chunks
                         .get(&ChunkPos::new(0, 0))
                         .expect("chunk exists")
-                        .voxel(local_x, PORTAL_Y as usize, local_z)
+                        .voxel(local_x, portal_local_y, local_z)
                         .id
                         == BLOCK_END_PORTAL
                 })
