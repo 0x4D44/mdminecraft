@@ -301,8 +301,12 @@ mod unit_tests {
     pub struct LocalTestRegistry;
 
     impl mdminecraft_world::lighting::BlockOpacityProvider for LocalTestRegistry {
-        fn is_opaque(&self, block_id: u16) -> bool {
-            block_id != 0
+        fn light_opacity(&self, block_id: u16) -> u8 {
+            if block_id == 0 {
+                0
+            } else {
+                15
+            }
         }
     }
 }

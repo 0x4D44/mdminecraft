@@ -13,6 +13,14 @@ pub const MAX_LIGHT_LEVEL: u8 = 15;
 /// Minimum light level (complete darkness).
 pub const MIN_LIGHT_LEVEL: u8 = 0;
 
+fn light_opacity_for_voxel(voxel: crate::chunk::Voxel, registry: &dyn BlockOpacityProvider) -> u8 {
+    let mut opacity = registry.light_opacity(voxel.id);
+    if crate::block_supports_waterlogging(voxel.id) && crate::is_waterlogged(voxel.state) {
+        opacity = opacity.max(registry.light_opacity(crate::chunk::BLOCK_WATER));
+    }
+    opacity
+}
+
 /// Position within world space (chunk-relative).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockPos {
@@ -41,7 +49,7 @@ pub struct CrossChunkLightUpdate {
     pub target_chunk: ChunkPos,
     /// Local position within the target chunk.
     pub target_pos: LocalPos,
-    /// Light level to propagate.
+    /// Source light level before applying target opacity/decay.
     pub level: u8,
     /// Type of light (skylight or block light).
     pub light_type: LightType,
@@ -207,18 +215,6 @@ impl LightQueue {
             let ny = pos.y as i32 + dy;
             let nz = pos.z as i32 + dz;
 
-            // Calculate new light level (decay by 1, special case for skylight downward).
-            let new_level = if is_skylight && dy == -1 {
-                // Skylight propagates downward without decay.
-                level
-            } else {
-                level.saturating_sub(1)
-            };
-
-            if new_level == 0 {
-                continue; // No point propagating zero light
-            }
-
             // Check vertical bounds (no chunks above/below).
             if ny < 0 || ny >= CHUNK_SIZE_Y as i32 {
                 continue;
@@ -249,6 +245,11 @@ impl LightQueue {
 
             // If we crossed a chunk boundary, queue the cross-chunk update
             if target_chunk != self.chunk_pos {
+                // Cross-chunk propagation only happens horizontally (X/Z), so the minimum decay is 1.
+                if level <= 1 {
+                    continue;
+                }
+
                 let light_type = if is_skylight {
                     LightType::Skylight
                 } else {
@@ -262,7 +263,7 @@ impl LightQueue {
                         y: ny as usize,
                         z: local_z as usize,
                     },
-                    level: new_level,
+                    level,
                     light_type,
                 });
                 continue;
@@ -277,9 +278,20 @@ impl LightQueue {
 
             let neighbor_voxel = chunk.voxel(neighbor_pos.x, neighbor_pos.y, neighbor_pos.z);
 
-            // Check if neighbor blocks light.
-            if registry.is_opaque(neighbor_voxel.id) {
+            let neighbor_opacity = light_opacity_for_voxel(neighbor_voxel, registry);
+            if neighbor_opacity >= MAX_LIGHT_LEVEL {
                 continue;
+            }
+
+            // Calculate new light level (decay by opacity, special case for skylight downward).
+            let decay = if is_skylight && dy == -1 {
+                neighbor_opacity
+            } else {
+                neighbor_opacity.max(1)
+            };
+            let new_level = level.saturating_sub(decay);
+            if new_level == 0 {
+                continue; // No point propagating zero light
             }
 
             self.enqueue(neighbor_pos, new_level);
@@ -353,15 +365,17 @@ pub fn stitch_light_seams(
                 };
 
                 let voxel = chunk.voxel(neighbor_local.x, neighbor_local.y, neighbor_local.z);
-                if registry.is_opaque(voxel.id) {
+                let neighbor_opacity = light_opacity_for_voxel(voxel, registry);
+                if neighbor_opacity >= MAX_LIGHT_LEVEL {
                     continue;
                 }
 
-                let new_level = if light_type == LightType::Skylight && dy == -1 {
-                    level
+                let decay = if light_type == LightType::Skylight && dy == -1 {
+                    neighbor_opacity
                 } else {
-                    level.saturating_sub(1)
+                    neighbor_opacity.max(1)
                 };
+                let new_level = level.saturating_sub(decay);
 
                 if new_level == 0 {
                     continue;
@@ -452,7 +466,24 @@ impl Default for LightQueue {
 
 /// Trait for querying block opacity (used by lighting system).
 pub trait BlockOpacityProvider {
-    fn is_opaque(&self, block_id: u16) -> bool;
+    /// Return light opacity in the 0..=15 range.
+    ///
+    /// - `0` means fully transparent (light passes through).
+    /// - `15` means fully opaque (light does not pass through).
+    fn light_opacity(&self, block_id: u16) -> u8;
+
+    /// Return the base block-light emission level for a block (0..=15).
+    ///
+    /// This is used to seed block-light propagation. Blocks with state-dependent emission
+    /// (e.g., redstone components) should be handled in gameplay logic.
+    fn base_block_light_emission(&self, _block_id: u16) -> u8 {
+        0
+    }
+
+    /// Convenience helper for "fully blocks light" checks.
+    fn is_opaque(&self, block_id: u16) -> bool {
+        self.light_opacity(block_id) >= MAX_LIGHT_LEVEL
+    }
 }
 
 /// Skylight initialization: flood from top of chunk downward.
@@ -662,6 +693,15 @@ pub fn apply_cross_chunk_updates(
             continue;
         }
 
+        let opacity = light_opacity_for_voxel(voxel, registry);
+        if opacity >= MAX_LIGHT_LEVEL {
+            continue;
+        }
+        let incoming_level = update.level.saturating_sub(opacity.max(1));
+        if incoming_level == 0 {
+            continue;
+        }
+
         // Check current light level
         let current_level = match update.light_type {
             LightType::Skylight => voxel.light_sky,
@@ -669,15 +709,15 @@ pub fn apply_cross_chunk_updates(
         };
 
         // Only update if new level is higher
-        if update.level <= current_level {
+        if incoming_level <= current_level {
             continue;
         }
 
         // Update the voxel's light level
         let mut updated_voxel = voxel;
         match update.light_type {
-            LightType::Skylight => updated_voxel.light_sky = update.level,
-            LightType::BlockLight => updated_voxel.light_block = update.level,
+            LightType::Skylight => updated_voxel.light_sky = incoming_level,
+            LightType::BlockLight => updated_voxel.light_block = incoming_level,
         }
         chunk.set_voxel(
             update.target_pos.x,
@@ -689,7 +729,7 @@ pub fn apply_cross_chunk_updates(
 
         // Propagate to neighbors using a local queue
         let mut queue = LightQueue::new_for_chunk(update.target_chunk);
-        queue.enqueue(update.target_pos, update.level);
+        queue.enqueue(update.target_pos, incoming_level);
 
         // Only propagate to get cross-chunk updates (don't re-process same chunk)
         // The BFS will naturally handle intra-chunk propagation
@@ -833,7 +873,7 @@ pub fn recompute_block_light_local(
                 for x in 0..CHUNK_SIZE_X {
                     let mut voxel = chunk.voxel(x, y, z);
 
-                    let emission = crate::block_light_emission(voxel.id, voxel.state);
+                    let emission = crate::block_light_emission(voxel.id, voxel.state, registry);
                     if emission > 0 {
                         sources.push((chunk_pos, LocalPos { x, y, z }, emission));
                     }
@@ -878,14 +918,38 @@ pub fn recompute_block_light_local(
 mod tests {
     use super::*;
     use crate::chunk::{BlockId, BLOCK_AIR};
+    use crate::Voxel;
     use std::collections::HashMap;
 
     /// Mock block registry for testing.
     struct MockRegistry;
 
     impl BlockOpacityProvider for MockRegistry {
-        fn is_opaque(&self, block_id: BlockId) -> bool {
-            block_id != BLOCK_AIR
+        fn light_opacity(&self, block_id: BlockId) -> u8 {
+            if block_id == BLOCK_AIR {
+                0
+            } else {
+                15
+            }
+        }
+    }
+
+    struct EmissiveRegistry;
+
+    impl BlockOpacityProvider for EmissiveRegistry {
+        fn light_opacity(&self, block_id: BlockId) -> u8 {
+            match block_id {
+                BLOCK_AIR | 1 => 0,
+                _ => 15,
+            }
+        }
+
+        fn base_block_light_emission(&self, block_id: BlockId) -> u8 {
+            if block_id == 1 {
+                MAX_LIGHT_LEVEL
+            } else {
+                0
+            }
         }
     }
 
@@ -993,6 +1057,44 @@ mod tests {
     }
 
     #[test]
+    fn recompute_block_light_local_seeds_from_registry_emission() {
+        let mut chunks = HashMap::new();
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+
+        let source_pos = LocalPos { x: 8, y: 64, z: 8 };
+        chunk.set_voxel(
+            source_pos.x,
+            source_pos.y,
+            source_pos.z,
+            Voxel {
+                id: 1,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(pos, chunk);
+
+        let registry = EmissiveRegistry;
+        let _affected = recompute_block_light_local(&mut chunks, &registry, pos);
+
+        let chunk = chunks.get(&pos).expect("chunk still present");
+        assert_eq!(
+            chunk
+                .voxel(source_pos.x, source_pos.y, source_pos.z)
+                .light_block,
+            MAX_LIGHT_LEVEL
+        );
+        assert_eq!(
+            chunk
+                .voxel(source_pos.x + 1, source_pos.y, source_pos.z)
+                .light_block,
+            MAX_LIGHT_LEVEL - 1
+        );
+    }
+
+    #[test]
     fn add_block_light_generates_cross_chunk_updates() {
         let pos = ChunkPos::new(0, 0);
         let mut chunk = Chunk::new(pos);
@@ -1032,7 +1134,7 @@ mod tests {
         assert_eq!(first_east.target_pos.x, 0); // Should be west edge of east chunk
         assert_eq!(first_east.target_pos.y, torch_pos.y);
         assert_eq!(first_east.light_type, LightType::BlockLight);
-        assert_eq!(first_east.level, MAX_LIGHT_LEVEL - 1); // Decayed by 1
+        assert_eq!(first_east.level, MAX_LIGHT_LEVEL); // Source level (decay happens on apply)
     }
 
     #[test]

@@ -13,6 +13,8 @@ pub enum WeatherState {
     Clear,
     /// Active precipitation (rain in warm biomes, snow in cold biomes).
     Precipitation,
+    /// Active precipitation plus thunder/lightning (Overworld-only visuals/gameplay).
+    Thunderstorm,
 }
 
 /// Component attached to world singleton for weather management.
@@ -39,13 +41,21 @@ impl WeatherToggle {
     pub fn toggle(&mut self) {
         self.state = match self.state {
             WeatherState::Clear => WeatherState::Precipitation,
-            WeatherState::Precipitation => WeatherState::Clear,
+            WeatherState::Precipitation | WeatherState::Thunderstorm => WeatherState::Clear,
         };
     }
 
     /// Check if currently raining/snowing.
     pub fn is_precipitating(&self) -> bool {
-        self.state == WeatherState::Precipitation
+        matches!(
+            self.state,
+            WeatherState::Precipitation | WeatherState::Thunderstorm
+        )
+    }
+
+    /// Check if currently thundering.
+    pub fn is_thundering(&self) -> bool {
+        self.state == WeatherState::Thunderstorm
     }
 
     /// Get weather-modified skylight scalar (optional: reduce light during storms).
@@ -53,6 +63,7 @@ impl WeatherToggle {
         match self.state {
             WeatherState::Clear => 1.0,
             WeatherState::Precipitation => 0.85, // 15% light reduction during storms
+            WeatherState::Thunderstorm => 0.78,  // darker and more dramatic
         }
     }
 }
@@ -88,6 +99,7 @@ mod tests {
         let weather = WeatherToggle::new();
         assert_eq!(weather.state, WeatherState::Clear);
         assert!(!weather.is_precipitating());
+        assert!(!weather.is_thundering());
     }
 
     #[test]
@@ -111,6 +123,10 @@ mod tests {
         rainy.set_state(WeatherState::Precipitation);
         assert!(rainy.skylight_modifier() < 1.0);
         assert!((rainy.skylight_modifier() - 0.85).abs() < 0.01);
+
+        rainy.set_state(WeatherState::Thunderstorm);
+        assert!(rainy.is_thundering());
+        assert!(rainy.skylight_modifier() < 0.85);
     }
 
     #[test]

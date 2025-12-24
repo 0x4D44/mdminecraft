@@ -66,6 +66,13 @@ impl FluidType {
 /// Block ID for lava (added to registry)
 pub const BLOCK_LAVA: BlockId = 20;
 
+/// Legacy alias for the lava source block.
+///
+/// Historically `config/blocks.json` contained a second lava-like entry at id 81 that could be
+/// referenced by name via the block registry. Keep it behaving like lava for backward
+/// compatibility with existing saves/scripts.
+pub const BLOCK_LAVA_LEGACY: BlockId = 81;
+
 /// Block ID for flowing water (level encoded in state)
 pub const BLOCK_WATER_FLOWING: BlockId = 21;
 
@@ -103,7 +110,7 @@ pub fn set_falling(state: BlockState, falling: bool) -> BlockState {
 pub fn get_fluid_type(block_id: BlockId) -> Option<FluidType> {
     match block_id {
         blocks::WATER | BLOCK_WATER_FLOWING => Some(FluidType::Water),
-        BLOCK_LAVA | BLOCK_LAVA_FLOWING => Some(FluidType::Lava),
+        BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING => Some(FluidType::Lava),
         _ => None,
     }
 }
@@ -115,7 +122,7 @@ pub fn is_fluid(block_id: BlockId) -> bool {
 
 /// Check if a block ID is a source fluid
 pub fn is_source_fluid(block_id: BlockId) -> bool {
-    matches!(block_id, blocks::WATER | BLOCK_LAVA)
+    matches!(block_id, blocks::WATER | BLOCK_LAVA | BLOCK_LAVA_LEGACY)
 }
 
 /// Check if a block ID is flowing fluid
@@ -456,8 +463,12 @@ impl FluidSimulator {
         let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         if let Some(chunk) = chunks.get_mut(&chunk_pos) {
             let old = chunk.voxel(local_x, local_y, local_z);
-            let old_emissive = matches!(old.id, BLOCK_LAVA | BLOCK_LAVA_FLOWING);
-            let new_emissive = matches!(voxel.id, BLOCK_LAVA | BLOCK_LAVA_FLOWING);
+            let old_emissive =
+                matches!(old.id, BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING);
+            let new_emissive = matches!(
+                voxel.id,
+                BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING
+            );
             let old_opaque = matches!(old.id, blocks::STONE | BLOCK_OBSIDIAN);
             let new_opaque = matches!(voxel.id, blocks::STONE | BLOCK_OBSIDIAN);
 

@@ -32,7 +32,7 @@ use mdminecraft_world::{
         init_skylight, recompute_skylight_local as recompute_skylight_local_world,
         stitch_light_seams, LightType,
     },
-    local_y_to_world_y, world_y_to_local_y, ArmorPiece, ArmorSlot, BlockEntitiesState,
+    local_y_to_world_y, world_y_to_local_y, ArmorPiece, ArmorSlot, BiomeId, BlockEntitiesState,
     BlockEntityKey, BlockId, BlockPropertiesRegistry, BlockState, BrewingStandState, ChestState,
     Chunk, ChunkPos, CropGrowthSystem, CropPosition, DispenserState, EnchantingTableState,
     FluidPos, FluidSimulator, FluidType, FurnaceState, HopperState, InteractionManager, Inventory,
@@ -43,9 +43,9 @@ use mdminecraft_world::{
     WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
     BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_CRYING_OBSIDIAN,
     BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME, BLOCK_FURNACE,
-    BLOCK_FURNACE_LIT, BLOCK_GLOWSTONE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
-    BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SUGAR_CANE, CHUNK_SIZE_X, CHUNK_SIZE_Y,
-    CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y,
+    BLOCK_FURNACE_LIT, BLOCK_GLOWSTONE, BLOCK_ICE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG,
+    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SNOW, BLOCK_SUGAR_CANE,
+    BLOCK_WATER, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
@@ -59,9 +59,30 @@ use std::{
 };
 
 const MAX_PARTICLES: usize = 8_192;
+const MAX_ARROW_PROJECTILES_IN_FLIGHT: usize = 32;
 const PRECIPITATION_SPAWN_RATE: f32 = 480.0;
 const PRECIPITATION_RADIUS: f32 = 18.0;
 const PRECIPITATION_CEILING_OFFSET: f32 = 12.0;
+const LIGHTNING_FLASH_TICKS: u8 = 8;
+const LIGHTNING_STRIKE_CHANCE_DENOMINATOR: u32 = 180; // ~9s average at 20 TPS
+const LIGHTNING_STRIKE_TARGET_RADIUS_BLOCKS: i32 = 64;
+const LIGHTNING_HIT_RADIUS_BLOCKS: f64 = 3.0;
+const LIGHTNING_DAMAGE: f32 = 5.0; // vanilla-ish: 2.5 hearts
+const LIGHTNING_FIRE_TICKS: u16 = 160; // 8s at 20 TPS
+const ICE_FREEZE_INTERVAL_TICKS: u64 = 20; // ~1s at 20 TPS
+const ICE_FREEZE_ATTEMPTS_PER_INTERVAL: u8 = 3;
+const ICE_FREEZE_CLEAR_INTERVAL_TICKS: u64 = 80; // ~4s at 20 TPS
+const ICE_FREEZE_CLEAR_ATTEMPTS_PER_INTERVAL: u8 = 1;
+const ICE_FREEZE_RADIUS_BLOCKS: i32 = 32;
+const SNOW_ACCUMULATION_INTERVAL_TICKS: u64 = 40; // ~2s at 20 TPS
+const SNOW_ACCUMULATION_ATTEMPTS_PER_INTERVAL: u8 = 2;
+const SNOW_ACCUMULATION_RADIUS_BLOCKS: i32 = 32;
+const WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT: u8 = 11;
+const WEATHER_MELT_INTERVAL_TICKS: u64 = 60; // ~3s at 20 TPS
+const WEATHER_MELT_ATTEMPTS_PER_INTERVAL: u8 = 3;
+const WEATHER_MELT_RADIUS_BLOCKS: i32 = 32;
+const UNDEAD_SUNLIGHT_MIN_SKY_LIGHT: u8 = 14;
+const UNDEAD_SUNLIGHT_FIRE_TICKS: u32 = 40; // ~2s at 20 TPS
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
 const NETHER_PORTAL_CHARGE_TICKS: u16 = 80;
@@ -1607,6 +1628,7 @@ pub struct GameWorld {
     precipitation_accumulator: f32,
     rng: StdRng,
     weather_blend: f32,
+    lightning_flash_ticks: u8,
     /// Last frame delta time (seconds)
     frame_dt: f32,
     /// Current player state (alive/dead)
@@ -2236,6 +2258,7 @@ impl GameWorld {
             precipitation_accumulator: 0.0,
             rng,
             weather_blend: 0.0,
+            lightning_flash_ticks: 0,
             frame_dt: 0.0,
             player_state: PlayerState::Alive,
             death_message: String::new(),
@@ -3916,10 +3939,29 @@ impl GameWorld {
         self.weather_blend
     }
 
+    fn lightning_flash_intensity(&self) -> f32 {
+        if self.lightning_flash_ticks == 0 {
+            return 0.0;
+        }
+
+        let age = LIGHTNING_FLASH_TICKS.saturating_sub(self.lightning_flash_ticks);
+        match age {
+            0 => 1.0,
+            1 => 0.0,
+            2 => 0.7,
+            3 => 0.0,
+            4 => 0.4,
+            5 => 0.2,
+            6 => 0.1,
+            _ => 0.0,
+        }
+    }
+
     fn weather_state_label(&self) -> &'static str {
         match self.weather.state {
             WeatherState::Clear => "Clear",
             WeatherState::Precipitation => "Precipitation",
+            WeatherState::Thunderstorm => "Thunderstorm",
         }
     }
 
@@ -3947,16 +3989,38 @@ impl GameWorld {
         let delay_ticks = rng.gen_range(1200..3000); // 60..150 seconds at 20 TPS
         self.weather_next_change_tick = self.sim_tick.advance(delay_ticks);
 
-        let target_state = if self.weather.is_precipitating() {
-            if rng.gen_bool(0.7) {
-                WeatherState::Clear
-            } else {
-                WeatherState::Precipitation
+        let target_state = match self.weather.state {
+            WeatherState::Clear => {
+                if rng.gen_bool(0.55) {
+                    if rng.gen_bool(0.12) {
+                        WeatherState::Thunderstorm
+                    } else {
+                        WeatherState::Precipitation
+                    }
+                } else {
+                    WeatherState::Clear
+                }
             }
-        } else if rng.gen_bool(0.55) {
-            WeatherState::Precipitation
-        } else {
-            WeatherState::Clear
+            WeatherState::Precipitation => {
+                let roll: f32 = rng.gen();
+                if roll < 0.70 {
+                    WeatherState::Clear
+                } else if roll < 0.82 {
+                    WeatherState::Thunderstorm
+                } else {
+                    WeatherState::Precipitation
+                }
+            }
+            WeatherState::Thunderstorm => {
+                let roll: f32 = rng.gen();
+                if roll < 0.58 {
+                    WeatherState::Precipitation
+                } else if roll < 0.76 {
+                    WeatherState::Thunderstorm
+                } else {
+                    WeatherState::Clear
+                }
+            }
         };
 
         if target_state != self.weather.state {
@@ -3966,8 +4030,484 @@ impl GameWorld {
         }
     }
 
+    fn tick_lightning(&mut self) {
+        self.lightning_flash_ticks = self.lightning_flash_ticks.saturating_sub(1);
+
+        if self.active_dimension != DimensionId::Overworld {
+            return;
+        }
+
+        if !self.weather.is_thundering() {
+            return;
+        }
+
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xA24B_AED4_963E_E407)
+            ^ 0x004C_4947_4854_4E47_u64; // "LIGHTNG"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        if rng.gen_ratio(1, LIGHTNING_STRIKE_CHANCE_DENOMINATOR) {
+            self.lightning_flash_ticks = LIGHTNING_FLASH_TICKS;
+            self.trigger_lightning_strike(&mut rng);
+        }
+    }
+
+    fn trigger_lightning_strike(&mut self, rng: &mut StdRng) {
+        let camera_pos = self.renderer.camera().position;
+        let base_x = camera_pos.x.floor() as i32;
+        let base_z = camera_pos.z.floor() as i32;
+
+        let strike_x = base_x
+            + rng.gen_range(
+                -LIGHTNING_STRIKE_TARGET_RADIUS_BLOCKS..=LIGHTNING_STRIKE_TARGET_RADIUS_BLOCKS,
+            );
+        let strike_z = base_z
+            + rng.gen_range(
+                -LIGHTNING_STRIKE_TARGET_RADIUS_BLOCKS..=LIGHTNING_STRIKE_TARGET_RADIUS_BLOCKS,
+            );
+
+        let Some(top_y) = self.column_highest_non_air_y(strike_x, strike_z) else {
+            return;
+        };
+
+        let strike_y = (top_y.saturating_add(1)).clamp(WORLD_MIN_Y, WORLD_MAX_Y);
+        let strike_pos = (
+            strike_x as f64 + 0.5,
+            strike_y as f64,
+            strike_z as f64 + 0.5,
+        );
+
+        self.apply_lightning_strike(strike_pos);
+    }
+
+    fn column_highest_non_air_y(&self, world_x: i32, world_z: i32) -> Option<i32> {
+        let chunk_pos = ChunkPos::new(
+            world_x.div_euclid(CHUNK_SIZE_X as i32),
+            world_z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let chunk = self.chunks.get(&chunk_pos)?;
+
+        let local_x = world_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = world_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        for local_y in (0..CHUNK_SIZE_Y).rev() {
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+            if voxel.id != BLOCK_AIR {
+                return Some(local_y_to_world_y(local_y));
+            }
+        }
+
+        None
+    }
+
+    fn apply_lightning_strike(&mut self, strike_pos: (f64, f64, f64)) {
+        let (strike_x, strike_y, strike_z) = strike_pos;
+        let hit_radius_sq = LIGHTNING_HIT_RADIUS_BLOCKS * LIGHTNING_HIT_RADIUS_BLOCKS;
+
+        let mut charged_creepers = 0usize;
+        let mut hit_mobs = 0usize;
+
+        for mob in &mut self.mobs {
+            if mob.dead || mob.dimension != self.active_dimension {
+                continue;
+            }
+
+            let dx = mob.x - strike_x;
+            let dy = mob.y - strike_y;
+            let dz = mob.z - strike_z;
+            if (dx * dx + dy * dy + dz * dz) > hit_radius_sq {
+                continue;
+            }
+
+            if mob.mob_type == MobType::Creeper && !mob.charged {
+                mob.charged = true;
+                charged_creepers += 1;
+            }
+
+            mob.set_on_fire(u32::from(LIGHTNING_FIRE_TICKS));
+            mob.damage(LIGHTNING_DAMAGE);
+            hit_mobs += 1;
+        }
+
+        if self.player_state == PlayerState::Alive && !self.player_health.is_dead() {
+            let camera_pos = self.renderer.camera().position;
+            let dx = camera_pos.x as f64 - strike_x;
+            let dy = camera_pos.y as f64 - strike_y;
+            let dz = camera_pos.z as f64 - strike_z;
+            if (dx * dx + dy * dy + dz * dz) <= hit_radius_sq {
+                self.player_health.ignite(LIGHTNING_FIRE_TICKS);
+                self.player_health.damage(LIGHTNING_DAMAGE);
+                if self.player_health.is_dead() {
+                    self.handle_death("Struck by lightning");
+                }
+            }
+        }
+
+        if hit_mobs > 0 || charged_creepers > 0 {
+            tracing::debug!(
+                x = strike_x,
+                y = strike_y,
+                z = strike_z,
+                hit_mobs,
+                charged_creepers,
+                "Lightning strike applied"
+            );
+        }
+    }
+
+    fn tick_ice_freezing(&mut self) -> std::collections::BTreeSet<ChunkPos> {
+        let mut frozen_chunks = std::collections::BTreeSet::new();
+        let mut removed_fluids = Vec::new();
+
+        if self.active_dimension != DimensionId::Overworld {
+            return frozen_chunks;
+        }
+
+        let is_precipitating = self.weather.is_precipitating();
+        let (interval_ticks, attempts_per_interval) = if is_precipitating {
+            (ICE_FREEZE_INTERVAL_TICKS, ICE_FREEZE_ATTEMPTS_PER_INTERVAL)
+        } else {
+            (
+                ICE_FREEZE_CLEAR_INTERVAL_TICKS,
+                ICE_FREEZE_CLEAR_ATTEMPTS_PER_INTERVAL,
+            )
+        };
+
+        if !self.sim_tick.0.is_multiple_of(interval_ticks) {
+            return frozen_chunks;
+        }
+
+        let camera_pos = self.renderer.camera().position;
+        let base_x = camera_pos.x.floor() as i32;
+        let base_z = camera_pos.z.floor() as i32;
+
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xB2D1_8D9E_84C9_1A77)
+            ^ 0x0046_5245_455A_455F_u64; // "FREEZE_"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let biome_assigner = self.terrain_generator.biome_assigner();
+
+        for _attempt in 0..attempts_per_interval {
+            let x = base_x + rng.gen_range(-ICE_FREEZE_RADIUS_BLOCKS..=ICE_FREEZE_RADIUS_BLOCKS);
+            let z = base_z + rng.gen_range(-ICE_FREEZE_RADIUS_BLOCKS..=ICE_FREEZE_RADIUS_BLOCKS);
+
+            let Some(top_y) = self.column_highest_non_air_y(x, z) else {
+                continue;
+            };
+
+            let biome = biome_assigner.get_blended_biome(x, z, 2);
+            let elevation_bias = ((top_y as f32 - 64.0).max(0.0) / 600.0).clamp(0.0, 1.0);
+            let effective_temperature = biome.temperature - elevation_bias;
+
+            // Vanilla-ish: ice forms in cold biomes (faster while snowing).
+            if effective_temperature >= 0.25 {
+                continue;
+            }
+
+            let chunk_pos = ChunkPos::new(
+                x.div_euclid(CHUNK_SIZE_X as i32),
+                z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                continue;
+            };
+            let Some(local_y) = world_y_to_local_y(top_y) else {
+                continue;
+            };
+            let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+            if voxel.id != BLOCK_WATER {
+                continue;
+            }
+            if voxel.light_block > WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT {
+                continue;
+            }
+
+            // Replace the topmost water source with ice.
+            chunk.set_voxel(
+                local_x,
+                local_y,
+                local_z,
+                Voxel {
+                    id: BLOCK_ICE,
+                    state: 0,
+                    ..voxel
+                },
+            );
+            frozen_chunks.insert(chunk_pos);
+            removed_fluids.push(FluidPos::new(x, top_y, z));
+        }
+
+        for pos in removed_fluids {
+            self.fluid_sim.on_fluid_removed(pos, &self.chunks);
+        }
+
+        frozen_chunks
+    }
+
+    fn tick_snow_accumulation(&mut self) -> std::collections::BTreeSet<ChunkPos> {
+        let mut snowy_chunks = std::collections::BTreeSet::new();
+
+        if self.active_dimension != DimensionId::Overworld {
+            return snowy_chunks;
+        }
+
+        if !self.weather.is_precipitating() {
+            return snowy_chunks;
+        }
+
+        if !self
+            .sim_tick
+            .0
+            .is_multiple_of(SNOW_ACCUMULATION_INTERVAL_TICKS)
+        {
+            return snowy_chunks;
+        }
+
+        let camera_pos = self.renderer.camera().position;
+        let base_x = camera_pos.x.floor() as i32;
+        let base_z = camera_pos.z.floor() as i32;
+
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xC0EE_D00D_8F9B_1A21)
+            ^ 0x0053_4E4F_5741_4343_u64; // "SNOWACC"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let biome_assigner = self.terrain_generator.biome_assigner();
+
+        for _attempt in 0..SNOW_ACCUMULATION_ATTEMPTS_PER_INTERVAL {
+            let x = base_x
+                + rng.gen_range(-SNOW_ACCUMULATION_RADIUS_BLOCKS..=SNOW_ACCUMULATION_RADIUS_BLOCKS);
+            let z = base_z
+                + rng.gen_range(-SNOW_ACCUMULATION_RADIUS_BLOCKS..=SNOW_ACCUMULATION_RADIUS_BLOCKS);
+
+            let Some(top_y) = self.column_highest_non_air_y(x, z) else {
+                continue;
+            };
+
+            let biome = biome_assigner.get_blended_biome(x, z, 2);
+            let elevation_bias = ((top_y as f32 - 64.0).max(0.0) / 600.0).clamp(0.0, 1.0);
+            let effective_temperature = biome.temperature - elevation_bias;
+            if effective_temperature >= 0.25 {
+                continue;
+            }
+
+            let chunk_pos = ChunkPos::new(
+                x.div_euclid(CHUNK_SIZE_X as i32),
+                z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let Some(chunk) = self.chunks.get(&chunk_pos) else {
+                continue;
+            };
+            let Some(local_y) = world_y_to_local_y(top_y) else {
+                continue;
+            };
+            let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+
+            if voxel.id == BLOCK_WATER {
+                continue;
+            }
+
+            if voxel.id == BLOCK_SNOW {
+                let layers = mdminecraft_world::snow_layers(voxel.state);
+                if layers < mdminecraft_world::SNOW_LAYERS_MAX {
+                    let place_y = top_y + 1;
+                    let Some(place_local_y) = world_y_to_local_y(place_y) else {
+                        continue;
+                    };
+                    let above = chunk.voxel(local_x, place_local_y, local_z);
+                    if above.id != BLOCK_AIR {
+                        continue;
+                    }
+                    if above.light_block > WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT {
+                        continue;
+                    }
+
+                    let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                        continue;
+                    };
+                    chunk.set_voxel(
+                        local_x,
+                        local_y,
+                        local_z,
+                        Voxel {
+                            state: mdminecraft_world::set_snow_layers(
+                                voxel.state,
+                                layers.saturating_add(1),
+                            ),
+                            ..voxel
+                        },
+                    );
+                    snowy_chunks.insert(chunk_pos);
+                    continue;
+                }
+            }
+
+            let Some(top_offset) = Self::voxel_collision_top_offset(&self.block_properties, &voxel)
+            else {
+                continue;
+            };
+            if !(0.999..=1.001).contains(&top_offset) {
+                continue;
+            }
+
+            let place_y = top_y + 1;
+            let Some(place_local_y) = world_y_to_local_y(place_y) else {
+                continue;
+            };
+            let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                continue;
+            };
+            let above = chunk.voxel(local_x, place_local_y, local_z);
+            if above.id != BLOCK_AIR {
+                continue;
+            }
+            if above.light_block > WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT {
+                continue;
+            }
+
+            chunk.set_voxel(
+                local_x,
+                place_local_y,
+                local_z,
+                Voxel {
+                    id: BLOCK_SNOW,
+                    state: mdminecraft_world::set_snow_layers(0, 1),
+                    ..above
+                },
+            );
+            snowy_chunks.insert(chunk_pos);
+        }
+
+        snowy_chunks
+    }
+
+    fn tick_weather_melting(&mut self) -> std::collections::BTreeSet<ChunkPos> {
+        let mut melted_chunks = std::collections::BTreeSet::new();
+        let mut placed_fluids = Vec::new();
+
+        if self.active_dimension != DimensionId::Overworld {
+            return melted_chunks;
+        }
+
+        if !self.sim_tick.0.is_multiple_of(WEATHER_MELT_INTERVAL_TICKS) {
+            return melted_chunks;
+        }
+
+        let camera_pos = self.renderer.camera().position;
+        let base_x = camera_pos.x.floor() as i32;
+        let base_z = camera_pos.z.floor() as i32;
+
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xE5A1_47B1_0C8D_5F33)
+            ^ 0x004D_454C_545F_5F5F_u64; // "MELT__"
+        let mut rng = StdRng::seed_from_u64(seed);
+        let biome_assigner = self.terrain_generator.biome_assigner();
+
+        for _attempt in 0..WEATHER_MELT_ATTEMPTS_PER_INTERVAL {
+            let x =
+                base_x + rng.gen_range(-WEATHER_MELT_RADIUS_BLOCKS..=WEATHER_MELT_RADIUS_BLOCKS);
+            let z =
+                base_z + rng.gen_range(-WEATHER_MELT_RADIUS_BLOCKS..=WEATHER_MELT_RADIUS_BLOCKS);
+
+            let Some(top_y) = self.column_highest_non_air_y(x, z) else {
+                continue;
+            };
+
+            let biome = biome_assigner.get_blended_biome(x, z, 2);
+            let elevation_bias = ((top_y as f32 - 64.0).max(0.0) / 600.0).clamp(0.0, 1.0);
+            let effective_temperature = biome.temperature - elevation_bias;
+            let warm_enough_for_sun_melt = effective_temperature >= 0.25;
+
+            let chunk_pos = ChunkPos::new(
+                x.div_euclid(CHUNK_SIZE_X as i32),
+                z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                continue;
+            };
+            let Some(local_y) = world_y_to_local_y(top_y) else {
+                continue;
+            };
+            let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+
+            let strong_block_light = voxel.light_block > WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT;
+            let effective_skylight = self.sim_time.effective_skylight() as u16;
+            let scaled_sky = ((voxel.light_sky as u16) * effective_skylight + 7) / 15;
+            let strong_sky_light = scaled_sky > u16::from(WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT);
+
+            if !(strong_block_light || (strong_sky_light && warm_enough_for_sun_melt)) {
+                continue;
+            }
+
+            match voxel.id {
+                BLOCK_ICE => {
+                    chunk.set_voxel(
+                        local_x,
+                        local_y,
+                        local_z,
+                        Voxel {
+                            id: BLOCK_WATER,
+                            state: 0,
+                            ..voxel
+                        },
+                    );
+                    melted_chunks.insert(chunk_pos);
+                    placed_fluids.push(FluidPos::new(x, top_y, z));
+                }
+                BLOCK_SNOW => {
+                    let layers = mdminecraft_world::snow_layers(voxel.state);
+                    if layers <= 1 {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                id: BLOCK_AIR,
+                                state: 0,
+                                ..voxel
+                            },
+                        );
+                        melted_chunks.insert(chunk_pos);
+                    } else {
+                        chunk.set_voxel(
+                            local_x,
+                            local_y,
+                            local_z,
+                            Voxel {
+                                state: mdminecraft_world::set_snow_layers(
+                                    voxel.state,
+                                    layers.saturating_sub(1),
+                                ),
+                                ..voxel
+                            },
+                        );
+                        melted_chunks.insert(chunk_pos);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for pos in placed_fluids {
+            self.fluid_sim.on_fluid_placed(pos, FluidType::Water);
+        }
+
+        melted_chunks
+    }
+
     fn update_weather(&mut self, dt: f32) {
-        if self.weather.is_precipitating() {
+        if self.weather.is_precipitating()
+            && self.active_dimension == DimensionId::Overworld
+            && !self.is_camera_underwater(self.renderer.camera().position)
+        {
             self.spawn_precipitation_particles(dt);
         } else {
             self.precipitation_accumulator = 0.0;
@@ -3985,8 +4525,22 @@ impl GameWorld {
 
     fn spawn_precipitation_particles(&mut self, dt: f32) {
         let camera_pos = self.renderer.camera().position;
+        let sample_x = camera_pos.x.floor() as i32;
+        let sample_z = camera_pos.z.floor() as i32;
+        let biome = self
+            .terrain_generator
+            .biome_assigner()
+            .get_blended_biome(sample_x, sample_z, 2);
+        if biome.id == BiomeId::Desert {
+            // Vanilla deserts do not precipitate even while global weather is rainy.
+            self.precipitation_accumulator = 0.0;
+            return;
+        }
+
         self.precipitation_accumulator += PRECIPITATION_SPAWN_RATE * dt;
-        let is_snow = camera_pos.y > 90.0;
+        let elevation_bias = ((camera_pos.y - 64.0).max(0.0) / 600.0).clamp(0.0, 1.0);
+        let effective_temperature = biome.temperature - elevation_bias;
+        let is_snow = effective_temperature < 0.25;
 
         while self.precipitation_accumulator >= 1.0 {
             self.precipitation_accumulator -= 1.0;
@@ -4004,6 +4558,26 @@ impl GameWorld {
                 spawn_height,
                 camera_pos.z + offset_z,
             );
+
+            // Suppress precipitation under cover: if there's a block between the camera and the
+            // particle spawn height, that drop would hit a roof before reaching the player.
+            let column_x = position.x.floor() as i32;
+            let column_z = position.z.floor() as i32;
+            let start_y = (camera_pos.y.floor() as i32 + 1).clamp(WORLD_MIN_Y, WORLD_MAX_Y);
+            let end_y = (spawn_height.floor() as i32).clamp(start_y, WORLD_MAX_Y);
+            let mut blocked = false;
+            for y in start_y..=end_y {
+                if self
+                    .get_block_at(IVec3::new(column_x, y, column_z))
+                    .is_some_and(|id| id != BLOCK_AIR)
+                {
+                    blocked = true;
+                    break;
+                }
+            }
+            if blocked {
+                continue;
+            }
 
             let wind = glam::Vec3::new(
                 self.rng.gen_range(-2.0..2.0),
@@ -4203,7 +4777,14 @@ impl GameWorld {
             let color = match mob.mob_type {
                 MobType::Zombie => [0.0, 0.5, 0.0, 1.0],
                 MobType::Skeleton => [0.8, 0.8, 0.8, 1.0],
-                MobType::Creeper => [0.0, 0.8, 0.0, 1.0],
+                MobType::Creeper => {
+                    if mob.charged {
+                        // Charged creepers have a distinctive blue glow in vanilla; approximate via tint.
+                        [0.2, 0.8, 1.0, 1.0]
+                    } else {
+                        [0.0, 0.8, 0.0, 1.0]
+                    }
+                }
                 MobType::Spider => [0.1, 0.1, 0.1, 1.0],
                 MobType::Pig => [1.0, 0.6, 0.6, 1.0],
                 MobType::Cow => [0.3, 0.2, 0.1, 1.0],
@@ -4501,6 +5082,7 @@ impl GameWorld {
         }
 
         self.tick_weather();
+        self.tick_lightning();
         let dt = TICK_RATE as f32;
 
         // Tick player survival systems (deterministic, once per sim tick).
@@ -4551,6 +5133,27 @@ impl GameWorld {
             }
         }
         for chunk_pos in dirty_fluid_lighting {
+            let affected = mdminecraft_world::recompute_block_light_local(
+                &mut self.chunks,
+                &self.registry,
+                chunk_pos,
+            );
+            mesh_refresh.extend(affected);
+        }
+
+        // Vanilla-ish weather: water can freeze into ice, snow can accumulate, and both melt under strong block-light.
+        let mut dirty_weather_geometry_chunks = self.tick_ice_freezing();
+        dirty_weather_geometry_chunks.extend(self.tick_snow_accumulation());
+        dirty_weather_geometry_chunks.extend(self.tick_weather_melting());
+
+        for chunk_pos in &dirty_weather_geometry_chunks {
+            mesh_refresh.extend(self.recompute_skylight_local(*chunk_pos));
+            mesh_refresh.insert(*chunk_pos);
+            for neighbor in Self::neighbor_chunk_positions(*chunk_pos) {
+                mesh_refresh.insert(neighbor);
+            }
+        }
+        for chunk_pos in dirty_weather_geometry_chunks {
             let affected = mdminecraft_world::recompute_block_light_local(
                 &mut self.chunks,
                 &self.registry,
@@ -7291,6 +7894,7 @@ impl GameWorld {
             let mut place_block_id = block_id;
             let mut place_state = place_state;
             let mut allow_replace_existing_slab = false;
+            let mut allow_replace_existing_snow = false;
             let mut place_pos = IVec3::new(
                 hit.block_pos.x + hit.face_normal.x,
                 hit.block_pos.y + hit.face_normal.y,
@@ -7317,6 +7921,33 @@ impl GameWorld {
                             place_block_id = double_slab_id;
                             place_state = 0;
                             allow_replace_existing_slab = true;
+                        }
+                    }
+                }
+            }
+
+            if block_id == BLOCK_SNOW && hit.face_normal == IVec3::new(0, 1, 0) {
+                let support_chunk_pos = ChunkPos::new(
+                    hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                    hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                if let Some(chunk) = self.chunks.get(&support_chunk_pos) {
+                    let local_x = hit.block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let Some(local_y) = world_y_to_local_y(hit.block_pos.y) else {
+                        return;
+                    };
+                    let local_z = hit.block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                    let existing = chunk.voxel(local_x, local_y, local_z);
+                    if existing.id == BLOCK_SNOW {
+                        let layers = mdminecraft_world::snow_layers(existing.state);
+                        if layers < mdminecraft_world::SNOW_LAYERS_MAX {
+                            place_pos = hit.block_pos;
+                            place_block_id = block_id;
+                            place_state = mdminecraft_world::set_snow_layers(
+                                existing.state,
+                                layers.saturating_add(1),
+                            );
+                            allow_replace_existing_snow = true;
                         }
                     }
                 }
@@ -7455,6 +8086,9 @@ impl GameWorld {
                     || (allow_replace_existing_slab
                         && current.id == block_id
                         && place_block_id != block_id)
+                    || (allow_replace_existing_snow
+                        && current.id == block_id
+                        && place_block_id == block_id)
                 {
                     if can_place_into_water && self.active_dimension != DimensionId::Nether {
                         place_state = mdminecraft_world::set_waterlogged(place_state, true);
@@ -8507,6 +9141,8 @@ impl GameWorld {
                 night_vision_strength,
             );
             time_uniform.time[1] = self.active_dimension.as_u8() as f32;
+            // Use a deterministic simulation-time surface for visual animation (fluids, portals).
+            time_uniform.time[3] = self.sim_tick.0 as f32 / 20.0;
 
             let sample_x = camera.position.x.floor() as i32;
             let sample_z = camera.position.z.floor() as i32;
@@ -8520,21 +9156,26 @@ impl GameWorld {
             }
 
             if self.is_camera_underwater(camera.position) {
-                let water_tint = overworld_water_fog_tint
-                    .unwrap_or_else(|| self.biome_water_tint_at(sample_x, sample_z));
+                time_uniform.time[2] = 1.0;
+                let (water_tint, fog_strength) = match overworld_water_fog_tint {
+                    Some(water_fog_tint) => (water_fog_tint, 1.0),
+                    None => (self.biome_water_tint_at(sample_x, sample_z), 0.6),
+                };
                 time_uniform.fog_color = [
-                    (water_tint[0] * 0.6).min(1.0),
-                    (water_tint[1] * 0.6).min(1.0),
-                    (water_tint[2] * 0.6).min(1.0),
+                    (water_tint[0] * fog_strength).min(1.0),
+                    (water_tint[1] * fog_strength).min(1.0),
+                    (water_tint[2] * fog_strength).min(1.0),
                     1.0,
                 ];
-                let base_end = 32.0;
-                let max_end = 80.0;
+                let base_end = 18.0;
+                let max_end = 56.0;
                 let fog_end = base_end + (max_end - base_end) * night_vision_strength;
                 time_uniform.fog_params[0] = 0.0;
                 time_uniform.fog_params[1] = fog_end;
                 time_uniform.fog_params[3] = 0.0;
+                time_uniform.sky_color = time_uniform.fog_color;
             } else {
+                time_uniform.time[2] = 0.0;
                 match self.active_dimension {
                     DimensionId::Nether => {
                         time_uniform.fog_color = [0.22, 0.05, 0.03, 1.0];
@@ -8551,6 +9192,26 @@ impl GameWorld {
                     DimensionId::Overworld => {}
                 }
             }
+
+            let thunder_strength = if self.active_dimension == DimensionId::Overworld
+                && self.weather.is_thundering()
+                && !self.is_camera_underwater(camera.position)
+            {
+                weather_intensity
+            } else {
+                0.0
+            };
+            time_uniform.fog_color[3] = thunder_strength;
+
+            let lightning_flash = if self.active_dimension == DimensionId::Overworld
+                && self.weather.is_thundering()
+                && !self.is_camera_underwater(camera.position)
+            {
+                self.lightning_flash_intensity()
+            } else {
+                0.0
+            };
+            time_uniform.sky_color[3] = lightning_flash;
 
             // Update time uniforms
             resources
@@ -9801,6 +10462,8 @@ impl GameWorld {
         let active_dimension = self.active_dimension;
         let chunks = &self.chunks;
         let block_properties = &self.block_properties;
+        let biome_assigner = self.terrain_generator.biome_assigner();
+        let is_precipitating = self.weather.is_precipitating();
 
         // Get player position for hostile mob targeting
         let player_pos = self.renderer.camera().position;
@@ -9849,11 +10512,13 @@ impl GameWorld {
         let mut dragon_fireballs_in_flight = 0usize;
         let mut blaze_fireballs_in_flight = 0usize;
         let mut ghast_fireballs_in_flight = 0usize;
+        let mut arrows_in_flight = 0usize;
         for projectile in &self.projectiles.projectiles {
             if projectile.dimension != active_dimension || projectile.dead {
                 continue;
             }
             match projectile.projectile_type {
+                mdminecraft_world::ProjectileType::Arrow => arrows_in_flight += 1,
                 mdminecraft_world::ProjectileType::DragonFireball => {
                     dragon_fireballs_in_flight += 1
                 }
@@ -9881,6 +10546,62 @@ impl GameWorld {
 
             // Update fire damage (from Fire Aspect enchantment)
             mob.update_fire();
+
+            // Vanilla-ish: zombies/skeletons burn in daylight when exposed to the sky,
+            // and they are extinguished by water (and rain/snow).
+            if matches!(mob.mob_type, MobType::Zombie | MobType::Skeleton)
+                && mob.dimension == DimensionId::Overworld
+                && !is_night
+            {
+                let mob_block_x = mob.x.floor() as i32;
+                let mob_block_y = mob.y.floor() as i32;
+                let mob_block_z = mob.z.floor() as i32;
+
+                let head_y = mob_block_y + 1;
+                let chunk_pos = ChunkPos::new(
+                    mob_block_x.div_euclid(CHUNK_SIZE_X as i32),
+                    mob_block_z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+
+                if let (Some(chunk), Some(local_head_y)) =
+                    (chunks.get(&chunk_pos), world_y_to_local_y(head_y))
+                {
+                    let local_x = mob_block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let local_z = mob_block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                    let head_voxel = chunk.voxel(local_x, local_head_y, local_z);
+
+                    let is_wet = get_fluid_type(head_voxel.id) == Some(FluidType::Water)
+                        || (mdminecraft_world::block_supports_waterlogging(head_voxel.id)
+                            && mdminecraft_world::is_waterlogged(head_voxel.state));
+                    if is_wet {
+                        mob.extinguish();
+                    } else {
+                        let sky_exposed =
+                            Self::column_is_clear_to_sky(chunk, local_x, local_head_y, local_z);
+                        let is_precipitating_here = is_precipitating
+                            && biome_assigner
+                                .get_blended_biome(mob_block_x, mob_block_z, 2)
+                                .id
+                                != BiomeId::Desert;
+
+                        if Self::undead_should_extinguish(
+                            is_wet,
+                            is_precipitating_here,
+                            sky_exposed,
+                        ) {
+                            mob.extinguish();
+                        } else if Self::undead_should_burn_in_sun(
+                            is_night,
+                            is_precipitating_here,
+                            is_wet,
+                            head_voxel.light_sky,
+                            sky_exposed,
+                        ) {
+                            mob.set_on_fire(UNDEAD_SUNLIGHT_FIRE_TICKS);
+                        }
+                    }
+                }
+            }
 
             // Spiders are only hostile at night, other hostile mobs always attack
             if mob.mob_type.is_hostile_at_time(is_night) {
@@ -9974,16 +10695,19 @@ impl GameWorld {
                 if dealt_damage {
                     // Check if this was a creeper explosion
                     if mob.mob_type.explodes() && mob.dead {
+                        let mut explosion_damage = mob.mob_type.explosion_damage();
+                        let mut explosion_radius = mob.mob_type.explosion_radius();
+                        if mob.mob_type == MobType::Creeper && mob.charged {
+                            // Vanilla-ish: charged creepers have roughly double explosion power.
+                            explosion_damage *= 2.0;
+                            explosion_radius *= 2.0;
+                        }
+
                         // Creeper explosion - high damage!
-                        total_damage += mob.mob_type.explosion_damage();
+                        total_damage += explosion_damage;
                         exploded_creeper = true;
                         // Record explosion position for block destruction
-                        explosion_positions.push((
-                            mob.x,
-                            mob.y,
-                            mob.z,
-                            mob.mob_type.explosion_radius(),
-                        ));
+                        explosion_positions.push((mob.x, mob.y, mob.z, explosion_radius));
                         tracing::info!("Creeper exploded!");
                     } else {
                         // Normal attack damage
@@ -10015,6 +10739,17 @@ impl GameWorld {
                     {
                         hostile_projectiles.push(projectile);
                         ghast_fireballs_in_flight += 1;
+                    }
+                }
+
+                if can_fire_hostile_projectiles
+                    && arrows_in_flight < MAX_ARROW_PROJECTILES_IN_FLIGHT
+                {
+                    if let Some(projectile) =
+                        mob.try_spawn_skeleton_arrow(tick, player_x, player_y, player_z, visibility)
+                    {
+                        hostile_projectiles.push(projectile);
+                        arrows_in_flight += 1;
                     }
                 }
             } else {
@@ -10193,6 +10928,18 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::Bone,
                                     bone_count,
+                                ));
+                            }
+
+                            // Vanilla-ish: skeletons also drop arrows (deterministic).
+                            let arrow_count = (tick.wrapping_add(1) % 3) as u32;
+                            if arrow_count > 0 {
+                                loot_drops.push((
+                                    mob.x,
+                                    mob.y + 0.5,
+                                    mob.z,
+                                    DroppedItemType::Arrow,
+                                    arrow_count,
                                 ));
                             }
                         }
@@ -10607,6 +11354,46 @@ impl GameWorld {
         scaled_sky.max(voxel.light_block as u16) as u8
     }
 
+    fn column_is_clear_to_sky(
+        chunk: &Chunk,
+        local_x: usize,
+        local_y: usize,
+        local_z: usize,
+    ) -> bool {
+        if local_y >= CHUNK_SIZE_Y - 1 {
+            return true;
+        }
+
+        for y in (local_y + 1)..CHUNK_SIZE_Y {
+            if chunk.voxel(local_x, y, local_z).id != BLOCK_AIR {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn undead_should_extinguish(
+        is_wet: bool,
+        is_precipitating_here: bool,
+        sky_exposed: bool,
+    ) -> bool {
+        is_wet || (is_precipitating_here && sky_exposed)
+    }
+
+    fn undead_should_burn_in_sun(
+        is_night: bool,
+        is_precipitating_here: bool,
+        is_wet: bool,
+        light_sky: u8,
+        sky_exposed: bool,
+    ) -> bool {
+        !is_night
+            && sky_exposed
+            && !Self::undead_should_extinguish(is_wet, is_precipitating_here, sky_exposed)
+            && light_sky >= UNDEAD_SUNLIGHT_MIN_SKY_LIGHT
+    }
+
     /// Update all projectiles - physics, collisions, and damage
     fn update_projectiles(&mut self) {
         let active_dimension = self.active_dimension;
@@ -10744,7 +11531,7 @@ impl GameWorld {
             }
         }
 
-        // Check for player collisions (hostile mob fireballs).
+        // Check for player collisions (arrows + hostile mob fireballs).
         let mut projectile_damage_to_player = 0.0f32;
         let mut projectile_damage_source: Option<&'static str> = None;
         for projectile in &mut self.projectiles.projectiles {
@@ -10752,10 +11539,11 @@ impl GameWorld {
                 continue;
             }
 
-            let source = match projectile.projectile_type {
-                mdminecraft_world::ProjectileType::DragonFireball => "Ender Dragon",
-                mdminecraft_world::ProjectileType::BlazeFireball => "Blaze",
-                mdminecraft_world::ProjectileType::GhastFireball => "Ghast",
+            let (source, ignite_ticks) = match projectile.projectile_type {
+                mdminecraft_world::ProjectileType::Arrow => ("Arrow", None),
+                mdminecraft_world::ProjectileType::DragonFireball => ("Ender Dragon", None),
+                mdminecraft_world::ProjectileType::BlazeFireball => ("Blaze", Some(100)),
+                mdminecraft_world::ProjectileType::GhastFireball => ("Ghast", Some(160)),
                 _ => continue,
             };
 
@@ -10770,15 +11558,9 @@ impl GameWorld {
                 projectile.hit();
                 projectile_damage_source.get_or_insert(source);
 
-                if !has_fire_resistance {
-                    match projectile.projectile_type {
-                        mdminecraft_world::ProjectileType::BlazeFireball => {
-                            self.player_health.ignite(100);
-                        }
-                        mdminecraft_world::ProjectileType::GhastFireball => {
-                            self.player_health.ignite(160);
-                        }
-                        _ => {}
+                if let Some(ticks) = ignite_ticks {
+                    if !has_fire_resistance {
+                        self.player_health.ignite(ticks);
                     }
                 }
             }
@@ -24730,6 +25512,79 @@ mod tests {
     }
 
     #[test]
+    fn column_is_clear_to_sky_detects_cover_blocks() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        let x = 0;
+        let z = 0;
+
+        assert!(GameWorld::column_is_clear_to_sky(&chunk, x, local_y(64), z));
+
+        chunk.set_voxel(
+            x,
+            local_y(70),
+            z,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        assert!(!GameWorld::column_is_clear_to_sky(
+            &chunk,
+            x,
+            local_y(64),
+            z
+        ));
+        assert!(GameWorld::column_is_clear_to_sky(&chunk, x, local_y(71), z));
+    }
+
+    #[test]
+    fn undead_sunlight_helpers_match_expected_rules() {
+        assert!(GameWorld::undead_should_extinguish(true, false, false));
+        assert!(GameWorld::undead_should_extinguish(true, true, true));
+
+        // Rain should not extinguish if the mob is under cover.
+        assert!(!GameWorld::undead_should_extinguish(false, true, false));
+
+        // Rain extinguishes exposed mobs.
+        assert!(GameWorld::undead_should_extinguish(false, true, true));
+
+        // Daylight burn: day + exposed + bright skylight.
+        assert!(GameWorld::undead_should_burn_in_sun(
+            false, false, false, 15, true
+        ));
+
+        // No burn at night.
+        assert!(!GameWorld::undead_should_burn_in_sun(
+            true, false, false, 15, true
+        ));
+
+        // No burn while wet.
+        assert!(!GameWorld::undead_should_burn_in_sun(
+            false, false, true, 15, true
+        ));
+
+        // No burn during rain/snow when exposed.
+        assert!(!GameWorld::undead_should_burn_in_sun(
+            false, true, false, 15, true
+        ));
+
+        // No burn in shade.
+        assert!(!GameWorld::undead_should_burn_in_sun(
+            false, false, false, 15, false
+        ));
+
+        // No burn when skylight is low.
+        assert!(!GameWorld::undead_should_burn_in_sun(
+            false,
+            false,
+            false,
+            super::UNDEAD_SUNLIGHT_MIN_SKY_LIGHT - 1,
+            true
+        ));
+    }
+
+    #[test]
     fn torch_breaks_when_support_removed() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -28790,6 +29645,9 @@ mod tests {
                     key: None,
                     tags: vec!["test:planks".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -28822,6 +29680,9 @@ mod tests {
                     key: None,
                     tags: vec!["planks".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -28853,6 +29714,9 @@ mod tests {
                     key: None,
                     tags: vec!["minecraft:planks".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -28879,6 +29743,9 @@ mod tests {
                     key: None,
                     tags: vec!["test:wood".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -28890,6 +29757,9 @@ mod tests {
                     key: None,
                     tags: vec!["test:wood".to_string(), "test:logs".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -28919,6 +29789,9 @@ mod tests {
                     key: None,
                     tags: vec!["planks".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -28930,6 +29803,9 @@ mod tests {
                     key: None,
                     tags: vec!["planks".to_string()],
                     opaque: true,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,

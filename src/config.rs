@@ -153,7 +153,16 @@ fn load_block_registry_lenient(base_path: &Path, packs_root: &Path) -> BlockRegi
         }
     };
 
-    let mut used_keys: BTreeSet<RegistryKey> = descriptors.iter().map(|d| d.key.clone()).collect();
+    let mut used_keys: BTreeSet<RegistryKey> = BTreeSet::new();
+    for descriptor in &descriptors {
+        if !used_keys.insert(descriptor.key.clone()) {
+            warn!(
+                "Duplicate block key {} while loading {}",
+                descriptor.key,
+                base_path.display()
+            );
+        }
+    }
 
     for pack in content_packs::discover_packs_lenient(packs_root) {
         let blocks_path = pack.dir.join("blocks.json");
@@ -193,7 +202,16 @@ fn load_block_registry_strict_from_paths(
     packs_root: &Path,
 ) -> Result<BlockRegistry> {
     let mut descriptors = load_block_descriptors_from_file(base_path)?;
-    let mut used_keys: BTreeSet<RegistryKey> = descriptors.iter().map(|d| d.key.clone()).collect();
+    let mut used_keys: BTreeSet<RegistryKey> = BTreeSet::new();
+    for descriptor in &descriptors {
+        if !used_keys.insert(descriptor.key.clone()) {
+            anyhow::bail!(
+                "Duplicate block key {} while loading {}",
+                descriptor.key,
+                base_path.display()
+            );
+        }
+    }
 
     for pack in content_packs::discover_packs_strict(packs_root)? {
         let blocks_path = pack.dir.join("blocks.json");

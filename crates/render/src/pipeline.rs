@@ -156,7 +156,7 @@ impl ChunkUniform {
         let z = (chunk_pos.z * 16) as f32;
 
         Self {
-            chunk_offset: [x, 0.0, z],
+            chunk_offset: [x, mdminecraft_world::WORLD_MIN_Y as f32, z],
             _padding0: 0.0,
             grass_tint,
             _padding1: 0.0,
@@ -165,6 +165,24 @@ impl ChunkUniform {
             water_tint,
             _padding3: 0.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_uniform_offsets_match_world_origin() {
+        let u = ChunkUniform::from_chunk_pos_with_tints(
+            mdminecraft_world::ChunkPos::new(2, -3),
+            [1.0; 3],
+            [1.0; 3],
+            [1.0; 3],
+        );
+        assert_eq!(u.chunk_offset[0], 32.0);
+        assert_eq!(u.chunk_offset[1], mdminecraft_world::WORLD_MIN_Y as f32);
+        assert_eq!(u.chunk_offset[2], -48.0);
     }
 }
 
@@ -510,7 +528,7 @@ impl VoxelPipeline {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest, // Pixel-perfect rendering
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
 
