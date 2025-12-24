@@ -121,11 +121,11 @@ pub struct TimeUniform {
     pub time: [f32; 4],
     /// Sun direction (normalized)
     pub sun_dir: [f32; 4],
-    /// Fog color for current time
+    /// Fog color for current time (rgb) and optional thunder strength (a).
     pub fog_color: [f32; 4],
     /// Fog parameters (start, end, night_vision, precipitation)
     pub fog_params: [f32; 4],
-    /// Base sky color tint (rgb, a ignored).
+    /// Base sky color tint (rgb) and optional lightning flash (a).
     pub sky_color: [f32; 4],
 }
 
@@ -146,9 +146,9 @@ impl TimeUniform {
         Self {
             time: [time.time(), 0.0, 0.0, 0.0],
             sun_dir: [dir[0], dir[1], dir[2], 0.0],
-            fog_color: [fog_color[0], fog_color[1], fog_color[2], 1.0],
+            fog_color: [fog_color[0], fog_color[1], fog_color[2], 0.0],
             fog_params: [fog_start, fog_end, night_vision, weather_intensity],
-            sky_color: [fog_color[0], fog_color[1], fog_color[2], 1.0],
+            sky_color: [fog_color[0], fog_color[1], fog_color[2], 0.0],
         }
     }
 }

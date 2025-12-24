@@ -54,6 +54,13 @@ pub struct BlockDescriptor {
     pub name: String,
     /// Whether the block blocks light/vision.
     pub opaque: bool,
+    /// How strongly this block attenuates light passing through it (0-15).
+    ///
+    /// - `0` means fully transparent (light passes through).
+    /// - `15` means fully opaque (light does not pass through).
+    pub light_opacity: u8,
+    /// Block-light emitted by this block (0-15).
+    pub light_emission: u8,
     /// Tag keys applied to this block.
     pub tags: BTreeSet<RegistryKey>,
     textures: BlockTextures,
@@ -79,6 +86,28 @@ impl BlockDescriptor {
         let base_name = def.texture.clone().unwrap_or_else(|| name.clone());
         let textures = BlockTextures::from_config(&base_name, def.textures);
         let harvest_level = def.harvest_level.and_then(|s| HarvestLevel::parse(&s));
+        let light_opacity = match def.light_opacity {
+            Some(value) if value <= 15 => value,
+            Some(value) => return Err(AssetError::InvalidLightOpacity(value)),
+            None => {
+                if def.opaque {
+                    15
+                } else {
+                    0
+                }
+            }
+        };
+        let light_emission = match def.light_emission {
+            Some(value) if value <= 15 => value,
+            Some(value) => return Err(AssetError::InvalidLightEmission(value)),
+            None => {
+                if def.emissive.unwrap_or(false) {
+                    15
+                } else {
+                    0
+                }
+            }
+        };
 
         let mut tags = BTreeSet::new();
         for raw_tag in def.tags {
@@ -91,6 +120,8 @@ impl BlockDescriptor {
             key,
             name,
             opaque: def.opaque,
+            light_opacity,
+            light_emission,
             tags,
             textures,
             harvest_level,
@@ -111,6 +142,9 @@ impl BlockDescriptor {
             key: None,
             tags: Vec::new(),
             opaque,
+            light_opacity: None,
+            light_emission: None,
+            emissive: None,
             texture: None,
             textures: None,
             harvest_level: None,
@@ -180,8 +214,16 @@ impl BlockRegistry {
 }
 
 impl BlockOpacityProvider for BlockRegistry {
-    fn is_opaque(&self, block_id: u16) -> bool {
-        self.descriptor(block_id).map(|d| d.opaque).unwrap_or(false)
+    fn light_opacity(&self, block_id: u16) -> u8 {
+        self.descriptor(block_id)
+            .map(|d| d.light_opacity)
+            .unwrap_or(15)
+    }
+
+    fn base_block_light_emission(&self, block_id: u16) -> u8 {
+        self.descriptor(block_id)
+            .map(|d| d.light_emission)
+            .unwrap_or(0)
     }
 }
 
@@ -359,6 +401,9 @@ mod tests {
                 key: None,
                 tags: Vec::new(),
                 opaque: false,
+                light_opacity: None,
+                light_emission: None,
+                emissive: None,
                 texture: None,
                 textures: None,
                 harvest_level: None,
@@ -368,6 +413,9 @@ mod tests {
                 key: Some("mdm:stone".to_string()),
                 tags: vec!["mdm:mineable/pickaxe".to_string()],
                 opaque: true,
+                light_opacity: None,
+                light_emission: None,
+                emissive: None,
                 texture: None,
                 textures: None,
                 harvest_level: Some("wood".to_string()),
@@ -388,12 +436,143 @@ mod tests {
     }
 
     #[test]
+    fn test_light_opacity_defaults_follow_opaque_flag() {
+        let stone = BlockDescriptor::try_from_definition(BlockDefinition {
+            name: "stone".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: true,
+            light_opacity: None,
+            light_emission: None,
+            emissive: None,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        })
+        .expect("stone parses");
+        assert_eq!(stone.light_opacity, 15);
+
+        let glass = BlockDescriptor::try_from_definition(BlockDefinition {
+            name: "glass".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: false,
+            light_opacity: None,
+            light_emission: None,
+            emissive: None,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        })
+        .expect("glass parses");
+        assert_eq!(glass.light_opacity, 0);
+    }
+
+    #[test]
+    fn test_light_emission_defaults_to_zero() {
+        let stone = BlockDescriptor::try_from_definition(BlockDefinition {
+            name: "stone".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: true,
+            light_opacity: None,
+            light_emission: None,
+            emissive: None,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        })
+        .expect("stone parses");
+        assert_eq!(stone.light_emission, 0);
+    }
+
+    #[test]
+    fn test_emissive_flag_falls_back_to_full_light_emission() {
+        let torch = BlockDescriptor::try_from_definition(BlockDefinition {
+            name: "torch".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: false,
+            light_opacity: None,
+            light_emission: None,
+            emissive: Some(true),
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        })
+        .expect("torch parses");
+        assert_eq!(torch.light_emission, 15);
+
+        let dim = BlockDescriptor::try_from_definition(BlockDefinition {
+            name: "dim_torch".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: false,
+            light_opacity: None,
+            light_emission: Some(7),
+            emissive: Some(true),
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        })
+        .expect("dim torch parses");
+        assert_eq!(dim.light_emission, 7);
+    }
+
+    #[test]
+    fn test_invalid_light_emission_errors() {
+        let def = BlockDefinition {
+            name: "torch".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: false,
+            light_opacity: None,
+            light_emission: Some(16),
+            emissive: None,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        };
+
+        let err = BlockDescriptor::try_from_definition(def).unwrap_err();
+        match err {
+            AssetError::InvalidLightEmission(16) => {}
+            other => panic!("expected InvalidLightEmission(16), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_light_opacity_errors() {
+        let def = BlockDefinition {
+            name: "stone".to_string(),
+            key: None,
+            tags: Vec::new(),
+            opaque: true,
+            light_opacity: Some(16),
+            light_emission: None,
+            emissive: None,
+            texture: None,
+            textures: None,
+            harvest_level: None,
+        };
+
+        let err = BlockDescriptor::try_from_definition(def).unwrap_err();
+        match err {
+            AssetError::InvalidLightOpacity(16) => {}
+            other => panic!("expected InvalidLightOpacity(16), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_invalid_tag_key_errors() {
         let def = BlockDefinition {
             name: "stone".to_string(),
             key: None,
             tags: vec!["NotAllowed".to_string()],
             opaque: true,
+            light_opacity: None,
+            light_emission: None,
+            emissive: None,
             texture: None,
             textures: None,
             harvest_level: None,

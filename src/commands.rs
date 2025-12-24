@@ -1173,13 +1173,14 @@ fn parse_time_command(args: &[&str]) -> Result<GameCommand, CommandError> {
 
 fn parse_weather_command(args: &[&str]) -> Result<GameCommand, CommandError> {
     if args.len() != 1 {
-        return Err(CommandError::new("Usage: /weather <clear|rain>"));
+        return Err(CommandError::new("Usage: /weather <clear|rain|thunder>"));
     }
     let value = args[0].to_ascii_lowercase();
     let state = match value.as_str() {
         "clear" | "sun" => WeatherState::Clear,
         "rain" | "precipitation" | "precip" => WeatherState::Precipitation,
-        _ => return Err(CommandError::new("Usage: /weather <clear|rain>")),
+        "thunder" | "storm" | "thunderstorm" => WeatherState::Thunderstorm,
+        _ => return Err(CommandError::new("Usage: /weather <clear|rain|thunder>")),
     };
     Ok(GameCommand::WeatherSet { state })
 }

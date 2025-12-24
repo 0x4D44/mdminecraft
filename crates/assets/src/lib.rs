@@ -35,6 +35,30 @@ pub struct BlockDefinition {
     /// Whether the block is opaque.
     #[serde(default)]
     pub opaque: bool,
+    /// How strongly this block attenuates light passing through it (0-15).
+    ///
+    /// - `0` means fully transparent (light passes through).
+    /// - `15` means fully opaque (light does not pass through).
+    ///
+    /// When omitted, defaults to `15` when `opaque=true`, otherwise `0`.
+    #[serde(default)]
+    pub light_opacity: Option<u8>,
+    /// Block-light emitted by this block (0-15).
+    ///
+    /// This is used as a base emission level for block-light propagation. Some blocks have
+    /// state-dependent emission (e.g., redstone components), which is handled in gameplay logic.
+    ///
+    /// When omitted, defaults to `0`.
+    #[serde(default)]
+    pub light_emission: Option<u8>,
+    /// Legacy boolean emissive flag.
+    ///
+    /// This is kept for backward compatibility with older configs/packs that used `emissive: true`
+    /// to mark blocks as light sources.
+    ///
+    /// Prefer [`BlockDefinition::light_emission`] for new content.
+    #[serde(default)]
+    pub emissive: Option<bool>,
     /// Atlas entry name to use for all faces (defaults to `name`).
     #[serde(default)]
     pub texture: Option<String>,
@@ -66,6 +90,12 @@ pub enum AssetError {
     /// Validation error when parsing tag keys.
     #[error("invalid tag key: {0}")]
     InvalidTagKey(String),
+    /// Validation error when parsing the light opacity range.
+    #[error("invalid light opacity {0}; expected 0..=15")]
+    InvalidLightOpacity(u8),
+    /// Validation error when parsing the light emission range.
+    #[error("invalid light emission {0}; expected 0..=15")]
+    InvalidLightEmission(u8),
 }
 
 /// Parse a JSON string into a list of blocks.

@@ -4,18 +4,24 @@ use mdminecraft_core::RegistryKey;
 use mdminecraft_world::{
     block_supports_waterlogging, get_fluid_level, get_fluid_type, interactive_blocks, is_falling,
     is_fluid, is_waterlogged, local_y_to_world_y, world_y_to_local_y, BlockId, Chunk, FluidType,
-    Voxel, BLOCK_AIR, BLOCK_WATER, BLOCK_WATER_FLOWING, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z,
-    FLUID_LEVEL_SOURCE,
+    Voxel, BLOCK_AIR, BLOCK_SNOW, BLOCK_WATER, BLOCK_WATER_FLOWING, CHUNK_SIZE_X, CHUNK_SIZE_Y,
+    CHUNK_SIZE_Z, FLUID_LEVEL_SOURCE,
 };
 
 const AXIS_SIZE: [usize; 3] = [CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z];
 const EXTRA_ALPHA_BIT: u8 = 0x80;
 const EXTRA_TINT_SHIFT: u8 = 4;
+const EXTRA_TINT_MASK: u8 = 0x70;
 const EXTRA_TINT_GRASS: u8 = 1 << EXTRA_TINT_SHIFT;
 const EXTRA_TINT_FOLIAGE: u8 = 2 << EXTRA_TINT_SHIFT;
 const EXTRA_TINT_GRASS_SIDE: u8 = 3 << EXTRA_TINT_SHIFT;
 const EXTRA_TINT_FOLIAGE_BIRCH: u8 = 4 << EXTRA_TINT_SHIFT;
 const EXTRA_TINT_FOLIAGE_SPRUCE: u8 = 5 << EXTRA_TINT_SHIFT;
+const EXTRA_ALPHA_KIND_WATER: u8 = 1 << EXTRA_TINT_SHIFT;
+const EXTRA_ALPHA_KIND_LAVA: u8 = 2 << EXTRA_TINT_SHIFT;
+const EXTRA_ALPHA_KIND_GLASS: u8 = 3 << EXTRA_TINT_SHIFT;
+const EXTRA_ALPHA_KIND_NETHER_PORTAL: u8 = 4 << EXTRA_TINT_SHIFT;
+const EXTRA_ALPHA_KIND_END_PORTAL: u8 = 5 << EXTRA_TINT_SHIFT;
 
 /// Hash of the combined vertex/index buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +118,7 @@ where
     mesh_oak_fence_gates(chunk, &mut builder);
     mesh_stairs(chunk, &mut builder, &voxel_at_world);
     mesh_slabs(chunk, &mut builder);
+    mesh_snow_layers(chunk, &mut builder);
     mesh_trapdoors(chunk, &mut builder);
     mesh_doors(chunk, &mut builder);
     mesh_ladders(chunk, &mut builder);
@@ -773,6 +780,35 @@ fn render_translucent_tag() -> &'static RegistryKey {
     })
 }
 
+fn render_alpha_glass_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/alpha/glass").expect("valid render alpha glass tag")
+    })
+}
+
+fn render_alpha_portal_nether_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/alpha/portal/nether")
+            .expect("valid render alpha nether portal tag")
+    })
+}
+
+fn render_alpha_portal_end_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/alpha/portal/end")
+            .expect("valid render alpha end portal tag")
+    })
+}
+
 fn render_tint_grass_tag() -> &'static RegistryKey {
     use std::sync::OnceLock;
 
@@ -813,6 +849,24 @@ fn render_tint_foliage_spruce_tag() -> &'static RegistryKey {
 
 fn is_alpha_blended(block_id: BlockId, registry: &BlockRegistry) -> bool {
     is_fluid(block_id) || registry.has_tag(block_id, render_translucent_tag())
+}
+
+fn alpha_kind_extra(block_id: BlockId, registry: &BlockRegistry) -> u8 {
+    match get_fluid_type(block_id) {
+        Some(FluidType::Water) => return EXTRA_ALPHA_KIND_WATER,
+        Some(FluidType::Lava) => return EXTRA_ALPHA_KIND_LAVA,
+        None => {}
+    }
+
+    if registry.has_tag(block_id, render_alpha_glass_tag()) {
+        EXTRA_ALPHA_KIND_GLASS
+    } else if registry.has_tag(block_id, render_alpha_portal_nether_tag()) {
+        EXTRA_ALPHA_KIND_NETHER_PORTAL
+    } else if registry.has_tag(block_id, render_alpha_portal_end_tag()) {
+        EXTRA_ALPHA_KIND_END_PORTAL
+    } else {
+        0
+    }
 }
 
 /// Internal helper for building mesh data.
@@ -913,7 +967,11 @@ impl<'a> MeshBuilder<'a> {
         } else {
             0
         };
-        let extra = extra | tint_extra;
+        let extra = if alpha_blended {
+            (extra & !EXTRA_TINT_MASK) | alpha_kind_extra(block_id, self.registry)
+        } else {
+            (extra & !EXTRA_TINT_MASK) | tint_extra
+        };
         let extra = if alpha_blended {
             extra | EXTRA_ALPHA_BIT
         } else {
@@ -1866,6 +1924,35 @@ fn mesh_slabs(chunk: &Chunk, builder: &mut MeshBuilder) {
                     voxel.id,
                     [base_x, base_y + min_y, base_z],
                     [base_x + 1.0, base_y + max_y, base_z + 1.0],
+                    light,
+                );
+            }
+        }
+    }
+}
+
+fn mesh_snow_layers(chunk: &Chunk, builder: &mut MeshBuilder) {
+    for y in 0..CHUNK_SIZE_Y {
+        for z in 0..CHUNK_SIZE_Z {
+            for x in 0..CHUNK_SIZE_X {
+                let voxel = chunk.voxel(x, y, z);
+                if voxel.id != BLOCK_SNOW {
+                    continue;
+                }
+
+                let layers = mdminecraft_world::snow_layers(voxel.state);
+                let height = layers as f32 / mdminecraft_world::SNOW_LAYERS_MAX as f32;
+                let light = voxel.light_sky.max(voxel.light_block);
+
+                let base_x = x as f32;
+                let base_y = y as f32;
+                let base_z = z as f32;
+
+                emit_box(
+                    builder,
+                    voxel.id,
+                    [base_x, base_y, base_z],
+                    [base_x + 1.0, base_y + height, base_z + 1.0],
                     light,
                 );
             }
@@ -3328,6 +3415,7 @@ fn is_solid(voxel: Voxel) -> bool {
         && !is_fluid(voxel.id)
         && !mdminecraft_world::is_stairs(voxel.id)
         && !mdminecraft_world::is_slab(voxel.id)
+        && voxel.id != BLOCK_SNOW
         && !mdminecraft_world::is_trapdoor(voxel.id)
         && !mdminecraft_world::is_door(voxel.id)
         && !mdminecraft_world::is_ladder(voxel.id)
@@ -3389,6 +3477,9 @@ mod tests {
                 key: None,
                 tags: vec!["render/tint/grass".to_string()],
                 opaque: true,
+                light_opacity: None,
+                light_emission: None,
+                emissive: None,
                 texture: None,
                 textures: None,
                 harvest_level: None,
@@ -3398,6 +3489,9 @@ mod tests {
                 key: None,
                 tags: vec!["render/tint/foliage".to_string()],
                 opaque: false,
+                light_opacity: None,
+                light_emission: None,
+                emissive: None,
                 texture: None,
                 textures: None,
                 harvest_level: None,
@@ -3435,6 +3529,9 @@ mod tests {
                     key: None,
                     tags: vec!["render/translucent".to_string()],
                     opaque,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -3442,6 +3539,24 @@ mod tests {
             } else {
                 descriptors.push(BlockDescriptor::simple(&name, opaque));
             }
+        }
+
+        BlockRegistry::new(descriptors)
+    }
+
+    fn registry_with_snow() -> BlockRegistry {
+        let max_id = BLOCK_SNOW as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+
+        for id in 0..=max_id {
+            let id_u16 = id as u16;
+            let opaque = id_u16 != BLOCK_AIR && id_u16 != BLOCK_SNOW;
+            let name = match id_u16 {
+                BLOCK_AIR => "air".to_string(),
+                BLOCK_SNOW => "snow".to_string(),
+                _ => format!("block_{id}"),
+            };
+            descriptors.push(BlockDescriptor::simple(&name, opaque));
         }
 
         BlockRegistry::new(descriptors)
@@ -3463,8 +3578,14 @@ mod tests {
                 descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
                     name,
                     key: None,
-                    tags: vec!["render/translucent".to_string()],
+                    tags: vec![
+                        "render/translucent".to_string(),
+                        "render/alpha/glass".to_string(),
+                    ],
                     opaque,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -3487,8 +3608,14 @@ mod tests {
                 descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
                     name: "end_portal".to_string(),
                     key: None,
-                    tags: vec!["render/translucent".to_string()],
+                    tags: vec![
+                        "render/translucent".to_string(),
+                        "render/alpha/portal/end".to_string(),
+                    ],
                     opaque: false,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -3511,8 +3638,14 @@ mod tests {
                 descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
                     name: "nether_portal".to_string(),
                     key: None,
-                    tags: vec!["render/translucent".to_string()],
+                    tags: vec![
+                        "render/translucent".to_string(),
+                        "render/alpha/portal/nether".to_string(),
+                    ],
                     opaque: false,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,
@@ -3720,6 +3853,157 @@ mod tests {
             mesh.indices_opaque.is_empty(),
             "Expected no opaque indices for a chunk containing only glass"
         );
+    }
+
+    #[test]
+    fn alpha_pass_vertices_encode_alpha_kind() {
+        let pos = ChunkPos::new(0, 0);
+
+        // Water.
+        {
+            let registry = registry_with_fluids();
+            let mut chunk = Chunk::new(pos);
+            chunk.set_voxel(
+                1,
+                1,
+                1,
+                Voxel {
+                    id: BLOCK_WATER,
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                },
+            );
+
+            let mesh = mesh_chunk(&chunk, &registry, None);
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| v.block_id == BLOCK_WATER)
+                .collect();
+            assert!(!vertices.is_empty());
+            for v in vertices {
+                assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
+                assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 1);
+            }
+        }
+
+        // Lava.
+        {
+            let registry = registry_with_fluids();
+            let mut chunk = Chunk::new(pos);
+            chunk.set_voxel(
+                1,
+                1,
+                1,
+                Voxel {
+                    id: mdminecraft_world::BLOCK_LAVA,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+
+            let mesh = mesh_chunk(&chunk, &registry, None);
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| v.block_id == mdminecraft_world::BLOCK_LAVA)
+                .collect();
+            assert!(!vertices.is_empty());
+            for v in vertices {
+                assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
+                assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 2);
+            }
+        }
+
+        // Glass.
+        {
+            let registry = registry_with_glass();
+            let mut chunk = Chunk::new(pos);
+            chunk.set_voxel(
+                1,
+                1,
+                1,
+                Voxel {
+                    id: mdminecraft_world::BLOCK_GLASS,
+                    state: 0,
+                    light_sky: 15,
+                    light_block: 0,
+                },
+            );
+
+            let mesh = mesh_chunk(&chunk, &registry, None);
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| v.block_id == mdminecraft_world::BLOCK_GLASS)
+                .collect();
+            assert!(!vertices.is_empty());
+            for v in vertices {
+                assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
+                assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 3);
+                assert_eq!(v.extra & 0x0F, 0);
+            }
+        }
+
+        // Nether portal.
+        {
+            let registry = registry_with_nether_portal();
+            let mut chunk = Chunk::new(pos);
+            chunk.set_voxel(
+                1,
+                1,
+                1,
+                Voxel {
+                    id: mdminecraft_world::BLOCK_NETHER_PORTAL,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+
+            let mesh = mesh_chunk(&chunk, &registry, None);
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| v.block_id == mdminecraft_world::BLOCK_NETHER_PORTAL)
+                .collect();
+            assert!(!vertices.is_empty());
+            for v in vertices {
+                assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
+                assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 4);
+            }
+        }
+
+        // End portal.
+        {
+            let registry = registry_with_end_portal();
+            let mut chunk = Chunk::new(pos);
+            chunk.set_voxel(
+                1,
+                1,
+                1,
+                Voxel {
+                    id: mdminecraft_world::BLOCK_END_PORTAL,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+
+            let mesh = mesh_chunk(&chunk, &registry, None);
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| v.block_id == mdminecraft_world::BLOCK_END_PORTAL)
+                .collect();
+            assert!(!vertices.is_empty());
+            for v in vertices {
+                assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
+                assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 5);
+            }
+        }
     }
 
     #[test]
@@ -4144,6 +4428,43 @@ mod tests {
     }
 
     #[test]
+    fn snow_layer_mesh_height_matches_layers() {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        let registry = registry_with_snow();
+
+        chunk.set_voxel(
+            1,
+            1,
+            1,
+            Voxel {
+                id: BLOCK_SNOW,
+                state: mdminecraft_world::set_snow_layers(0, 3),
+                light_sky: 15,
+                light_block: 0,
+            },
+        );
+
+        let mesh = mesh_chunk(&chunk, &registry, None);
+        let top_vertices: Vec<_> = mesh
+            .vertices
+            .iter()
+            .filter(|v| v.block_id == BLOCK_SNOW && v.normal == [0.0, 1.0, 0.0])
+            .collect();
+
+        assert_eq!(top_vertices.len(), 4);
+
+        let expected_y = 1.0 + 3.0 / 8.0;
+        for vertex in top_vertices {
+            assert!(
+                (vertex.position[1] - expected_y).abs() < 0.0001,
+                "Expected snow layer top at y={expected_y}, got y={}",
+                vertex.position[1]
+            );
+        }
+    }
+
+    #[test]
     fn ice_is_treated_as_translucent_for_face_culling() {
         let pos = ChunkPos::new(0, 0);
         let mut chunk = Chunk::new(pos);
@@ -4231,6 +4552,9 @@ mod tests {
             key: None,
             tags: vec!["render/translucent".to_string()],
             opaque: false,
+            light_opacity: None,
+            light_emission: None,
+            emissive: None,
             texture: None,
             textures: None,
             harvest_level: None,
@@ -4360,6 +4684,9 @@ mod tests {
                     key: None,
                     tags: vec!["render/translucent".to_string()],
                     opaque: false,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
                     texture: None,
                     textures: None,
                     harvest_level: None,

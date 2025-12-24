@@ -289,8 +289,14 @@ pub struct Mob {
     pub fuse_timer: f32,
     /// Whether the creeper is about to explode
     pub exploding: bool,
+    /// Whether this mob has been charged by lightning (creeper-only behavior for now).
+    #[serde(default)]
+    pub charged: bool,
     /// Fire ticks remaining (mob takes fire damage while > 0)
     pub fire_ticks: u32,
+    /// Counts burning ticks to apply periodic fire damage deterministically.
+    #[serde(default)]
+    pub fire_damage_timer: u8,
 }
 
 /// AI state for mob behavior.
@@ -329,7 +335,9 @@ impl Mob {
             damage_flash: 0.0,
             fuse_timer: 0.0,
             exploding: false,
+            charged: false,
             fire_ticks: 0,
+            fire_damage_timer: 0,
         }
     }
 
@@ -365,17 +373,33 @@ impl Mob {
         }
     }
 
+    /// Extinguish the mob, clearing any ongoing fire damage scheduling.
+    pub fn extinguish(&mut self) {
+        self.fire_ticks = 0;
+        self.fire_damage_timer = 0;
+    }
+
     /// Update fire damage (call once per game tick).
     /// Returns true if fire damage was dealt this tick.
     pub fn update_fire(&mut self) -> bool {
-        if self.fire_ticks > 0 {
-            // Extinguish fire after duration
-            self.fire_ticks = self.fire_ticks.saturating_sub(1);
-            if self.fire_ticks.is_multiple_of(20) {
-                // Fire damage every second (20 ticks)
-                self.damage(1.0);
-            }
+        if self.fire_ticks == 0 {
+            self.fire_damage_timer = 0;
+            return false;
         }
+
+        self.fire_ticks = self.fire_ticks.saturating_sub(1);
+
+        self.fire_damage_timer = self.fire_damage_timer.saturating_add(1);
+        if self.fire_damage_timer >= 20 {
+            self.fire_damage_timer = 0;
+            self.damage(1.0);
+            return true;
+        }
+
+        if self.fire_ticks == 0 {
+            self.fire_damage_timer = 0;
+        }
+
         false
     }
 
@@ -525,6 +549,10 @@ impl Mob {
 
         if self.mob_type == MobType::Ghast {
             return self.update_ghast(tick, target_x, target_y, target_z, visibility);
+        }
+
+        if self.mob_type == MobType::Skeleton {
+            return self.update_skeleton(tick, target_x, target_y, target_z, visibility);
         }
 
         let distance = self.distance_to(target_x, target_y, target_z);
@@ -922,6 +950,73 @@ impl Mob {
         false
     }
 
+    fn update_skeleton(
+        &mut self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> bool {
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+
+        if distance > detection_range {
+            self.update_wander(tick);
+        } else {
+            let dx = target_x - self.x;
+            let dz = target_z - self.z;
+            let dist_h = (dx * dx + dz * dz).sqrt();
+            let speed = self.mob_type.movement_speed() as f64;
+
+            const DESIRED_MIN_RANGE: f64 = 6.0;
+            const DESIRED_MAX_RANGE: f64 = 12.0;
+
+            self.state = MobState::Chasing;
+            self.ai_timer = 0;
+
+            if dist_h > 0.1 {
+                if dist_h < DESIRED_MIN_RANGE {
+                    // Too close: retreat.
+                    self.vel_x = (-dx / dist_h) * speed;
+                    self.vel_z = (-dz / dist_h) * speed;
+                } else if dist_h > DESIRED_MAX_RANGE {
+                    // Too far: approach.
+                    self.vel_x = (dx / dist_h) * speed;
+                    self.vel_z = (dz / dist_h) * speed;
+                } else {
+                    // In range: strafe in a deterministic pattern.
+                    self.state = MobState::Attacking;
+                    let period = 80_u64;
+                    let phase = tick
+                        .wrapping_add(self.id)
+                        .wrapping_add(0x534B_454C_5354_5246_u64) // "SKELSTRF"
+                        % period;
+                    let sign = if phase < period / 2 { 1.0 } else { -1.0 };
+                    let strafe_speed = speed * 0.6;
+                    let perp_x = -dz / dist_h;
+                    let perp_z = dx / dist_h;
+                    self.vel_x = perp_x * strafe_speed * sign;
+                    self.vel_z = perp_z * strafe_speed * sign;
+                }
+            } else {
+                self.vel_x = 0.0;
+                self.vel_z = 0.0;
+            }
+        }
+
+        self.x += self.vel_x;
+        self.z += self.vel_z;
+
+        if self.vel_y.abs() > 0.01 {
+            self.y += self.vel_y;
+            self.vel_y -= 0.08;
+            self.vel_y *= 0.98;
+        }
+
+        false
+    }
+
     /// Deterministically decide whether the Ender Dragon should fire a projectile this tick.
     ///
     /// The game layer is responsible for enforcing any global in-flight limits and for applying
@@ -1034,6 +1129,70 @@ impl Mob {
         let spawn_y = self.y + self.mob_type.size() as f64 * 0.6;
         Some(crate::Projectile::shoot_ghast_fireball(
             self.x, spawn_y, self.z, target_x, target_y, target_z,
+        ))
+    }
+
+    /// Deterministically decide whether a Skeleton should fire an arrow this tick.
+    ///
+    /// The game layer is responsible for enforcing global in-flight limits and for applying
+    /// collision/damage effects.
+    pub fn try_spawn_skeleton_arrow(
+        &self,
+        tick: u64,
+        target_x: f64,
+        target_y: f64,
+        target_z: f64,
+        visibility: f64,
+    ) -> Option<crate::Projectile> {
+        if self.dead || self.mob_type != MobType::Skeleton {
+            return None;
+        }
+
+        let visibility = visibility.max(0.0);
+        let distance = self.distance_to(target_x, target_y, target_z);
+        let detection_range = (self.mob_type.detection_range() as f64) * visibility;
+
+        // Vanilla-ish: skeletons prefer ranged pressure; don't fire at point-blank range.
+        if distance > detection_range || distance <= 3.0 {
+            return None;
+        }
+
+        let period = 40_u64;
+        let phase = tick
+            .wrapping_add(self.id)
+            .wrapping_add(0x534B_454C_4152_524F_u64) // "SKELARRO"
+            % period;
+        if phase != 0 {
+            return None;
+        }
+
+        let spawn_x = self.x;
+        let spawn_y = self.y + 1.4;
+        let spawn_z = self.z;
+
+        let dx = target_x - spawn_x;
+        let dy = target_y - spawn_y;
+        let dz = target_z - spawn_z;
+        let len = (dx * dx + dy * dy + dz * dz).sqrt();
+        if len <= 0.0001 {
+            return None;
+        }
+
+        let speed = 1.25;
+        let vel_x = (dx / len) * speed;
+        let vel_y = (dy / len) * speed;
+        let vel_z = (dz / len) * speed;
+        let charge = 0.35;
+
+        Some(crate::Projectile::new(
+            spawn_x,
+            spawn_y,
+            spawn_z,
+            vel_x,
+            vel_y,
+            vel_z,
+            crate::ProjectileType::Arrow,
+            charge,
         ))
     }
 
@@ -1529,9 +1688,23 @@ mod tests {
         }
 
         // At tick 20, fire damage is dealt
-        mob.update_fire();
+        assert!(mob.update_fire());
         // Health should be reduced by fire damage
         assert!(mob.health < 10.0);
+    }
+
+    #[test]
+    fn refreshing_fire_still_deals_periodic_damage() {
+        let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Pig);
+        for _ in 0..60 {
+            mob.set_on_fire(40);
+            mob.update_fire();
+        }
+
+        assert!(
+            mob.health < MobType::Pig.max_health(),
+            "expected refreshed fire to deal damage over time"
+        );
     }
 
     #[test]
@@ -1697,6 +1870,57 @@ mod tests {
                     .try_spawn_ghast_fireball(tick, 200.0, 96.0, 0.0, 1.0)
                     .is_none(),
                 "expected ghast not to fire outside detection range"
+            );
+        }
+    }
+
+    #[test]
+    fn skeleton_arrow_schedule_is_deterministic_and_respects_range() {
+        let mut skel_a = Mob::new(0.0, 64.0, 0.0, MobType::Skeleton);
+        skel_a.id = 42;
+        let skel_b = skel_a.clone();
+
+        let mut fired_a = Vec::new();
+        let mut fired_b = Vec::new();
+
+        for tick in 0..200_u64 {
+            if skel_a
+                .try_spawn_skeleton_arrow(tick, 12.0, 65.6, 0.0, 1.0)
+                .is_some()
+            {
+                fired_a.push(tick);
+            }
+            if skel_b
+                .try_spawn_skeleton_arrow(tick, 12.0, 65.6, 0.0, 1.0)
+                .is_some()
+            {
+                fired_b.push(tick);
+            }
+        }
+
+        assert_eq!(fired_a, fired_b);
+        assert!(
+            !fired_a.is_empty(),
+            "expected skeleton to fire periodically"
+        );
+
+        // Too close: should not fire.
+        for tick in 0..200_u64 {
+            assert!(
+                skel_a
+                    .try_spawn_skeleton_arrow(tick, 2.0, 65.6, 0.0, 1.0)
+                    .is_none(),
+                "expected skeleton not to fire at melee distance"
+            );
+        }
+
+        // Too far: should not fire.
+        for tick in 0..200_u64 {
+            assert!(
+                skel_a
+                    .try_spawn_skeleton_arrow(tick, 64.0, 65.6, 0.0, 1.0)
+                    .is_none(),
+                "expected skeleton not to fire outside detection range"
             );
         }
     }

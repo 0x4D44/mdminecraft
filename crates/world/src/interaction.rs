@@ -4,7 +4,7 @@
 
 use crate::chunk::{
     BlockId, BlockState, Chunk, ChunkPos, Voxel, BLOCK_BREWING_STAND, BLOCK_ENCHANTING_TABLE,
-    CHUNK_SIZE_Y,
+    BLOCK_SNOW, CHUNK_SIZE_Y,
 };
 use crate::farming_blocks;
 use crate::terrain::blocks;
@@ -241,6 +241,21 @@ impl SlabPosition {
     }
 }
 
+pub const SNOW_LAYERS_MIN: u8 = 1;
+pub const SNOW_LAYERS_MAX: u8 = 8;
+const SNOW_LAYERS_MASK: BlockState = 0x07;
+
+/// Get the number of snow layers encoded in state (1..=8).
+pub fn snow_layers(state: BlockState) -> u8 {
+    ((state & SNOW_LAYERS_MASK) as u8).min(SNOW_LAYERS_MAX - 1) + 1
+}
+
+/// Set the snow layers in the given state (clamped to 1..=8).
+pub fn set_snow_layers(state: BlockState, layers: u8) -> BlockState {
+    let layers = layers.clamp(SNOW_LAYERS_MIN, SNOW_LAYERS_MAX);
+    (state & !SNOW_LAYERS_MASK) | ((layers - 1) as BlockState)
+}
+
 /// Check if block state indicates door is open
 pub fn is_door_open(state: BlockState) -> bool {
     (state & 0x08) != 0
@@ -314,10 +329,7 @@ pub fn is_full_cube_block(block_id: BlockId) -> bool {
         return false;
     }
 
-    if matches!(
-        block_id,
-        blocks::WATER | crate::BLOCK_LAVA | crate::BLOCK_WATER_FLOWING | crate::BLOCK_LAVA_FLOWING
-    ) {
+    if crate::is_fluid(block_id) {
         return false;
     }
 
@@ -699,6 +711,11 @@ pub fn get_collision_type(block_id: BlockId, state: BlockState) -> CollisionType
     match block_id {
         blocks::AIR => CollisionType::None,
         blocks::WATER => CollisionType::None,
+
+        BLOCK_SNOW => CollisionType::Partial {
+            min_y: 0.0,
+            max_y: snow_layers(state) as f32 / SNOW_LAYERS_MAX as f32,
+        },
 
         farming_blocks::FARMLAND | farming_blocks::FARMLAND_WET => CollisionType::Partial {
             min_y: 0.0,
@@ -1173,6 +1190,23 @@ mod tests {
             }
             _ => panic!("Expected partial collision for bottom slab"),
         }
+
+        let snow_collision = get_collision_type(BLOCK_SNOW, set_snow_layers(0, 3));
+        match snow_collision {
+            CollisionType::Partial { min_y, max_y } => {
+                assert_eq!(min_y, 0.0);
+                assert!((max_y - 0.375).abs() < 0.0001);
+            }
+            _ => panic!("Expected partial collision for snow"),
+        }
+    }
+
+    #[test]
+    fn snow_layers_roundtrip() {
+        assert_eq!(snow_layers(0), 1);
+        assert_eq!(snow_layers(set_snow_layers(0, 4)), 4);
+        assert_eq!(snow_layers(set_snow_layers(0, 0)), 1);
+        assert_eq!(snow_layers(set_snow_layers(0, 99)), 8);
     }
 
     #[test]

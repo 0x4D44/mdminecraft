@@ -549,13 +549,19 @@ fn fog_color_for_biome(_id: BiomeId) -> (u8, u8, u8) {
     (192, 216, 255) // 0xC0D8FF
 }
 
-fn water_fog_color_for_biome(_id: BiomeId, water_color: (u8, u8, u8)) -> (u8, u8, u8) {
-    // Vanilla uses biome-configurable underwater fog; keep it aligned to water color for now.
-    water_color
+fn water_fog_color_for_biome(id: BiomeId, _water_color: (u8, u8, u8)) -> (u8, u8, u8) {
+    // Vanilla uses biome-configurable underwater fog. Values here are vanilla-ish defaults
+    // (not exhaustive), chosen to improve underwater feel without claiming byte-for-byte parity.
+    match id {
+        BiomeId::Swamp => (4, 31, 51), // greener haze
+        _ => (5, 5, 51),               // 0x050533 (common vanilla default)
+    }
 }
 
 fn sky_color_from_temperature(temperature: f32) -> (u8, u8, u8) {
-    let temp = (temperature / 3.0).clamp(-1.0, 1.0);
+    // Vanilla uses `temp / 3.0` but its biome temperatures commonly exceed 1.0 (e.g. deserts).
+    // Our temperatures are normalized to ~[0,1], so scale them to better span the vanilla curve.
+    let temp = (temperature * (2.0 / 3.0)).clamp(-1.0, 1.0);
     let hue = 0.622_222_24 - temp * 0.05;
     let saturation = 0.5 + temp * 0.1;
     hsv_to_rgb(hue, saturation, 1.0)
