@@ -163,5 +163,6 @@
   { "name": "end_portal", "opaque": false, "light_emission": 15, "texture": "blocks/amethyst_block", "emissive": true, "tags": ["render/translucent", "render/alpha/portal/end"] },
   { "name": "glowstone", "opaque": true, "light_emission": 15, "texture": "blocks/glow_lichen", "emissive": true },
   { "name": "crying_obsidian", "opaque": true, "light_emission": 10, "texture": "blocks/bedrock", "emissive": true, "harvest_level": "diamond" },
-  { "name": "respawn_anchor", "opaque": true, "texture": "blocks/bedrock", "emissive": true, "harvest_level": "diamond" }
+  { "name": "respawn_anchor", "opaque": true, "texture": "blocks/bedrock", "emissive": true, "harvest_level": "diamond" },
+  { "name": "fire", "opaque": false, "light_emission": 15, "texture": "blocks/lava", "tags": ["render/translucent", "render/alpha/fire"] }
 ]

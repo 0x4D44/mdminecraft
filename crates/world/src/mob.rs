@@ -285,6 +285,9 @@ pub struct Mob {
     pub dead: bool,
     /// Damage flash timer (for visual feedback)
     pub damage_flash: f32,
+    /// Invulnerability ticks after taking damage (20 TPS).
+    #[serde(default)]
+    pub invulnerability_ticks: u8,
     /// Fuse timer for creepers (counts down to explosion)
     pub fuse_timer: f32,
     /// Whether the creeper is about to explode
@@ -333,6 +336,7 @@ impl Mob {
             attack_cooldown: 0.0,
             dead: false,
             damage_flash: 0.0,
+            invulnerability_ticks: 0,
             fuse_timer: 0.0,
             exploding: false,
             charged: false,
@@ -343,8 +347,17 @@ impl Mob {
 
     /// Take damage and return true if mob died.
     pub fn damage(&mut self, amount: f32) -> bool {
+        if amount <= 0.0 {
+            return false;
+        }
+
+        if self.invulnerability_ticks > 0 {
+            return false;
+        }
+
         self.health -= amount;
         self.damage_flash = 0.5; // Flash for 0.5 seconds
+        self.invulnerability_ticks = 10; // 0.5 seconds at 20 TPS
 
         if self.health <= 0.0 {
             self.dead = true;
@@ -440,6 +453,9 @@ impl Mob {
         if self.damage_flash > 0.0 {
             self.damage_flash -= 0.05;
         }
+        if self.invulnerability_ticks > 0 {
+            self.invulnerability_ticks = self.invulnerability_ticks.saturating_sub(1);
+        }
 
         self.ai_timer += 1;
 
@@ -531,6 +547,9 @@ impl Mob {
         }
         if self.damage_flash > 0.0 {
             self.damage_flash -= 0.05;
+        }
+        if self.invulnerability_ticks > 0 {
+            self.invulnerability_ticks = self.invulnerability_ticks.saturating_sub(1);
         }
 
         // If not hostile, use regular update
@@ -1171,17 +1190,34 @@ impl Mob {
         let spawn_z = self.z;
 
         let dx = target_x - spawn_x;
-        let dy = target_y - spawn_y;
         let dz = target_z - spawn_z;
-        let len = (dx * dx + dy * dy + dz * dz).sqrt();
-        if len <= 0.0001 {
+        let dist_h = (dx * dx + dz * dz).sqrt();
+        if dist_h <= 0.0001 {
             return None;
         }
 
-        let speed = 1.25;
-        let vel_x = (dx / len) * speed;
-        let vel_y = (dy / len) * speed;
-        let vel_z = (dz / len) * speed;
+        // Gravity-aware aim so skeletons can actually hit targets at medium range.
+        let speed = 1.25_f64;
+        let g = crate::ProjectileType::Arrow.gravity();
+        let dy = target_y - spawn_y;
+
+        let v2 = speed * speed;
+        let disc = v2 * v2 - g * (g * dist_h * dist_h + 2.0 * dy * v2);
+        let theta = if disc > 0.0 && (g * dist_h).abs() > 1.0e-6 {
+            let root = disc.sqrt();
+            ((v2 - root) / (g * dist_h)).atan()
+        } else {
+            // Unreachable (too far / too much vertical delta) at this speed: fall back to a
+            // simple line aim with an upward bias so the arrow still feels "ranged".
+            (dy / dist_h).atan() + 0.25
+        };
+
+        let cos = theta.cos();
+        let sin = theta.sin();
+        let vel_h = speed * cos;
+        let vel_x = (dx / dist_h) * vel_h;
+        let vel_z = (dz / dist_h) * vel_h;
+        let vel_y = speed * sin;
         let charge = 0.35;
 
         Some(crate::Projectile::new(
@@ -1624,6 +1660,17 @@ mod tests {
         assert!(mob.damage_flash > 0.0);
         assert!(!mob.dead);
 
+        // Mobs get brief invulnerability after being hit (vanilla-ish).
+        let died = mob.damage(10.0);
+        assert!(!died);
+        assert_eq!(mob.health, 5.0);
+        assert!(!mob.dead);
+
+        // Advance past invulnerability.
+        for tick in 0..12 {
+            mob.update(tick);
+        }
+
         let died = mob.damage(10.0);
         assert!(died);
         assert!(mob.dead);
@@ -1923,6 +1970,41 @@ mod tests {
                 "expected skeleton not to fire outside detection range"
             );
         }
+    }
+
+    #[test]
+    fn skeleton_arrow_aims_with_gravity_compensation() {
+        let mut skel = Mob::new(0.0, 64.0, 0.0, MobType::Skeleton);
+        skel.id = 42;
+
+        let target = (12.0_f64, 65.6_f64, 0.0_f64);
+        let projectile = (0..200_u64)
+            .find_map(|tick| skel.try_spawn_skeleton_arrow(tick, target.0, target.1, target.2, 1.0))
+            .expect("expected skeleton to fire within the sample window");
+
+        assert!(
+            projectile.vel_y > 0.0,
+            "expected skeleton arrow to lead upward, got vel_y={}",
+            projectile.vel_y
+        );
+
+        let spawn_y = skel.y + 1.4;
+        let dx = target.0 - skel.x;
+        let dz = target.2 - skel.z;
+        let dist_h = (dx * dx + dz * dz).sqrt();
+        let vel_h = (projectile.vel_x * projectile.vel_x + projectile.vel_z * projectile.vel_z)
+            .sqrt()
+            .max(1.0e-9);
+        let t = dist_h / vel_h;
+
+        let g = crate::ProjectileType::Arrow.gravity();
+        let predicted_y = spawn_y + projectile.vel_y * t - 0.5 * g * t * t;
+        assert!(
+            (predicted_y - target.1).abs() < 0.05,
+            "expected predicted_y≈target_y, got predicted_y={}, target_y={}",
+            predicted_y,
+            target.1
+        );
     }
 
     #[test]
@@ -2285,11 +2367,15 @@ mod tests {
         let mut mob = Mob::new(0.0, 64.0, 0.0, MobType::Skeleton);
         mob.attack_cooldown = 0.0;
 
-        // Player within attack range
+        // Player is very close: skeleton should retreat and not deal direct melee damage
         let dealt = mob.update_with_target(0, 1.0, 64.0, 0.0);
 
-        assert!(dealt);
-        assert_eq!(mob.state, MobState::Attacking);
+        assert!(!dealt);
+        assert_eq!(mob.state, MobState::Chasing);
+        assert!(
+            mob.vel_x < 0.0,
+            "expected skeleton to move away from target"
+        );
     }
 
     #[test]
@@ -2301,7 +2387,7 @@ mod tests {
         let dealt = mob.update_with_target(0, 10.0, 64.0, 0.0);
 
         assert!(!dealt);
-        assert_eq!(mob.state, MobState::Chasing);
+        assert_eq!(mob.state, MobState::Attacking);
     }
 
     #[test]

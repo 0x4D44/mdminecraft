@@ -3,7 +3,8 @@
 //! Implements cellular automata-based fluid flow mechanics with deterministic updates.
 
 use crate::chunk::{
-    world_y_to_local_y, BlockId, BlockState, Chunk, ChunkPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Z,
+    world_y_to_local_y, BlockId, BlockState, Chunk, ChunkPos, Voxel, BLOCK_FIRE, CHUNK_SIZE_X,
+    CHUNK_SIZE_Z,
 };
 use crate::terrain::blocks;
 use crate::{block_supports_waterlogging, is_waterlogged};
@@ -132,7 +133,7 @@ pub fn is_flowing_fluid(block_id: BlockId) -> bool {
 
 /// Check if a block can be replaced by fluid (air, flowers, etc.)
 pub fn can_fluid_replace(block_id: BlockId) -> bool {
-    block_id == blocks::AIR || is_fluid(block_id)
+    block_id == blocks::AIR || block_id == BLOCK_FIRE || is_fluid(block_id)
 }
 
 fn voxel_is_waterlogged(voxel: Voxel) -> bool {
@@ -376,24 +377,34 @@ impl FluidSimulator {
             }
         }
 
-        // Handle lava setting things on fire
+        // Handle lava starting fires near flammable blocks (vanilla-ish; simplified).
         if fluid_type == FluidType::Lava {
             for neighbor in pos.horizontal_neighbors() {
-                if let Some(neighbor_voxel) = self.get_voxel(neighbor, chunks) {
-                    if is_flammable(neighbor_voxel.id) {
-                        // Replace with fire (or just remove for now)
-                        self.set_voxel(
-                            neighbor,
-                            Voxel {
-                                id: blocks::AIR,
-                                state: 0,
-                                light_sky: 0,
-                                light_block: 0,
-                            },
-                            chunks,
-                        );
-                    }
+                let Some(here) = self.get_voxel(neighbor, chunks) else {
+                    continue;
+                };
+                if here.id != blocks::AIR {
+                    continue;
                 }
+
+                let below = FluidPos::new(neighbor.x, neighbor.y - 1, neighbor.z);
+                let Some(below_voxel) = self.get_voxel(below, chunks) else {
+                    continue;
+                };
+                if !is_flammable(below_voxel.id) {
+                    continue;
+                }
+
+                self.set_voxel(
+                    neighbor,
+                    Voxel {
+                        id: BLOCK_FIRE,
+                        state: 0,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                    chunks,
+                );
             }
         }
     }
@@ -463,11 +474,13 @@ impl FluidSimulator {
         let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
         if let Some(chunk) = chunks.get_mut(&chunk_pos) {
             let old = chunk.voxel(local_x, local_y, local_z);
-            let old_emissive =
-                matches!(old.id, BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING);
+            let old_emissive = matches!(
+                old.id,
+                BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING | BLOCK_FIRE
+            );
             let new_emissive = matches!(
                 voxel.id,
-                BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING
+                BLOCK_LAVA | BLOCK_LAVA_LEGACY | BLOCK_LAVA_FLOWING | BLOCK_FIRE
             );
             let old_opaque = matches!(old.id, blocks::STONE | BLOCK_OBSIDIAN);
             let new_opaque = matches!(voxel.id, blocks::STONE | BLOCK_OBSIDIAN);
@@ -711,6 +724,7 @@ mod tests {
     #[test]
     fn test_can_fluid_replace() {
         assert!(can_fluid_replace(blocks::AIR));
+        assert!(can_fluid_replace(BLOCK_FIRE));
         assert!(can_fluid_replace(blocks::WATER));
         assert!(can_fluid_replace(BLOCK_LAVA));
         assert!(can_fluid_replace(BLOCK_WATER_FLOWING));
@@ -1488,19 +1502,20 @@ mod tests {
     }
 
     #[test]
-    fn test_lava_destroys_flammable() {
+    fn test_lava_ignites_fire_near_flammable() {
         let mut sim = FluidSimulator::new();
         let mut chunks = HashMap::new();
         let mut chunk = create_test_chunk();
 
-        // Place lava next to wood
+        // Place flowing lava with minimal level so it won't spread into neighbors, but can still
+        // ignite nearby air above a flammable block (vanilla-ish; simplified).
         chunk.set_voxel(
             5,
             local_y(64),
             5,
             Voxel {
-                id: BLOCK_LAVA,
-                state: 0,
+                id: BLOCK_LAVA_FLOWING,
+                state: set_fluid_level(0, 1),
                 light_sky: 0,
                 light_block: 15,
             },
@@ -1518,7 +1533,7 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            local_y(64),
+            local_y(63),
             5,
             Voxel {
                 id: 11, // oak_log (flammable)
@@ -1529,12 +1544,12 @@ mod tests {
         );
         chunk.set_voxel(
             6,
-            local_y(63),
+            local_y(64),
             5,
             Voxel {
-                id: blocks::STONE,
+                id: blocks::AIR,
                 state: 0,
-                light_sky: 0,
+                light_sky: 15,
                 light_block: 0,
             },
         );
@@ -1544,10 +1559,10 @@ mod tests {
         sim.tick(&mut chunks);
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
-        let adjacent = chunk.voxel(6, local_y(64), 5);
-
-        // Wood should be replaced (with air for now)
-        assert_eq!(adjacent.id, blocks::AIR);
+        let fire = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(fire.id, BLOCK_FIRE);
+        let flammable = chunk.voxel(6, local_y(63), 5);
+        assert_eq!(flammable.id, 11);
     }
 
     #[test]

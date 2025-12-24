@@ -34,18 +34,19 @@ use mdminecraft_world::{
     },
     local_y_to_world_y, world_y_to_local_y, ArmorPiece, ArmorSlot, BiomeId, BlockEntitiesState,
     BlockEntityKey, BlockId, BlockPropertiesRegistry, BlockState, BrewingStandState, ChestState,
-    Chunk, ChunkPos, CropGrowthSystem, CropPosition, DispenserState, EnchantingTableState,
-    FluidPos, FluidSimulator, FluidType, FurnaceState, HopperState, InteractionManager, Inventory,
-    ItemManager, ItemType as DroppedItemType, Mob, MobSpawner, MobType, PlayerArmor, PlayerSave,
-    PlayerTransform, PotionType, Projectile, ProjectileManager, RedstonePos, RedstoneSimulator,
-    RegionStore, SimTime, StatusEffectType, StatusEffects, SugarCaneGrowthSystem,
-    SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle, WorldEntitiesState,
-    WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF, BLOCK_BREWING_STAND,
-    BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE, BLOCK_CRYING_OBSIDIAN,
-    BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME, BLOCK_FURNACE,
-    BLOCK_FURNACE_LIT, BLOCK_GLOWSTONE, BLOCK_ICE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG,
-    BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SNOW, BLOCK_SUGAR_CANE,
-    BLOCK_WATER, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, WORLD_MAX_Y, WORLD_MIN_Y,
+    Chunk, ChunkPos, CropGrowthSystem, CropPosition, DamageKind, DispenserState,
+    EnchantingTableState, FluidPos, FluidSimulator, FluidType, FurnaceState, HopperState,
+    InteractionManager, Inventory, ItemManager, ItemType as DroppedItemType, Mob, MobSpawner,
+    MobType, PlayerArmor, PlayerSave, PlayerTransform, PotionType, Projectile, ProjectileManager,
+    RedstonePos, RedstoneSimulator, RegionStore, SimTime, StatusEffectType, StatusEffects,
+    SugarCaneGrowthSystem, SugarCanePosition, TerrainGenerator, Voxel, WeatherState, WeatherToggle,
+    WorldEntitiesState, WorldMeta, WorldPoint, WorldState, BLOCK_AIR, BLOCK_BOOKSHELF,
+    BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
+    BLOCK_CRYING_OBSIDIAN, BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME,
+    BLOCK_FURNACE, BLOCK_FURNACE_LIT, BLOCK_GLOWSTONE, BLOCK_ICE, BLOCK_NETHER_PORTAL,
+    BLOCK_OAK_LOG, BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SNOW,
+    BLOCK_SUGAR_CANE, BLOCK_WATER, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, WORLD_MAX_Y,
+    WORLD_MIN_Y,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::Deserialize;
@@ -69,6 +70,7 @@ const LIGHTNING_STRIKE_TARGET_RADIUS_BLOCKS: i32 = 64;
 const LIGHTNING_HIT_RADIUS_BLOCKS: f64 = 3.0;
 const LIGHTNING_DAMAGE: f32 = 5.0; // vanilla-ish: 2.5 hearts
 const LIGHTNING_FIRE_TICKS: u16 = 160; // 8s at 20 TPS
+const LIGHTNING_FIRE_ATTEMPTS: u8 = 4;
 const ICE_FREEZE_INTERVAL_TICKS: u64 = 20; // ~1s at 20 TPS
 const ICE_FREEZE_ATTEMPTS_PER_INTERVAL: u8 = 3;
 const ICE_FREEZE_CLEAR_INTERVAL_TICKS: u64 = 80; // ~4s at 20 TPS
@@ -78,6 +80,9 @@ const SNOW_ACCUMULATION_INTERVAL_TICKS: u64 = 40; // ~2s at 20 TPS
 const SNOW_ACCUMULATION_ATTEMPTS_PER_INTERVAL: u8 = 2;
 const SNOW_ACCUMULATION_RADIUS_BLOCKS: i32 = 32;
 const WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT: u8 = 11;
+const FIRE_EXTINGUISH_INTERVAL_TICKS: u64 = 20; // ~1s at 20 TPS
+const FIRE_EXTINGUISH_ATTEMPTS_PER_INTERVAL: u8 = 4;
+const FIRE_EXTINGUISH_RADIUS_BLOCKS: i32 = 32;
 const WEATHER_MELT_INTERVAL_TICKS: u64 = 60; // ~3s at 20 TPS
 const WEATHER_MELT_ATTEMPTS_PER_INTERVAL: u8 = 3;
 const WEATHER_MELT_RADIUS_BLOCKS: i32 = 32;
@@ -627,6 +632,89 @@ impl AABB {
         }
     }
 
+    fn expand(&self, amount: f32) -> Self {
+        let delta = glam::Vec3::splat(amount);
+        Self {
+            min: self.min - delta,
+            max: self.max + delta,
+        }
+    }
+
+    fn ray_intersects(&self, origin: glam::Vec3, direction: glam::Vec3, max_distance: f32) -> bool {
+        let mut t_min = 0.0_f32;
+        let mut t_max = max_distance;
+
+        for axis in 0..3 {
+            let origin_axis = origin[axis];
+            let dir_axis = direction[axis];
+            let min_axis = self.min[axis];
+            let max_axis = self.max[axis];
+
+            if dir_axis.abs() < 1.0e-8 {
+                if origin_axis < min_axis || origin_axis > max_axis {
+                    return false;
+                }
+                continue;
+            }
+
+            let inv_dir = 1.0 / dir_axis;
+            let mut t1 = (min_axis - origin_axis) * inv_dir;
+            let mut t2 = (max_axis - origin_axis) * inv_dir;
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+
+            t_min = t_min.max(t1);
+            t_max = t_max.min(t2);
+
+            if t_max < t_min {
+                return false;
+            }
+        }
+
+        t_max >= 0.0 && t_min <= max_distance
+    }
+
+    fn segment_entry_fraction(&self, from: glam::Vec3, to: glam::Vec3) -> Option<f32> {
+        let direction = to - from;
+        let mut t_min = 0.0_f32;
+        let mut t_max = 1.0_f32;
+
+        for axis in 0..3 {
+            let origin_axis = from[axis];
+            let dir_axis = direction[axis];
+            let min_axis = self.min[axis];
+            let max_axis = self.max[axis];
+
+            if dir_axis.abs() < 1.0e-8 {
+                if origin_axis < min_axis || origin_axis > max_axis {
+                    return None;
+                }
+                continue;
+            }
+
+            let inv_dir = 1.0 / dir_axis;
+            let mut t1 = (min_axis - origin_axis) * inv_dir;
+            let mut t2 = (max_axis - origin_axis) * inv_dir;
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+
+            t_min = t_min.max(t1);
+            t_max = t_max.min(t2);
+
+            if t_max < t_min {
+                return None;
+            }
+        }
+
+        if t_max < 0.0 || t_min > 1.0 {
+            return None;
+        }
+
+        Some(t_min.max(0.0))
+    }
+
     /// Check if this AABB intersects with another
     fn intersects(&self, other: &AABB) -> bool {
         self.min.x < other.max.x
@@ -903,13 +991,20 @@ impl PlayerHealth {
         }
     }
 
-    fn tick_air(&mut self, underwater: bool, has_water_breathing: bool) -> bool {
-        const MAX_AIR_TICKS: u16 = 300;
+    fn tick_air(
+        &mut self,
+        underwater: bool,
+        max_air_ticks: u16,
+        has_water_breathing: bool,
+    ) -> bool {
+        let max_air_ticks = max_air_ticks.max(1);
         const AIR_REGEN_PER_TICK: u16 = 4;
         const DROWNING_DAMAGE_INTERVAL_TICKS: u8 = 20;
 
+        self.air_ticks = self.air_ticks.min(max_air_ticks);
+
         if has_water_breathing {
-            self.air_ticks = MAX_AIR_TICKS;
+            self.air_ticks = max_air_ticks;
             self.drowning_timer_ticks = 0;
             return false;
         }
@@ -932,7 +1027,7 @@ impl PlayerHealth {
             return false;
         }
 
-        self.air_ticks = (self.air_ticks + AIR_REGEN_PER_TICK).min(MAX_AIR_TICKS);
+        self.air_ticks = (self.air_ticks + AIR_REGEN_PER_TICK).min(max_air_ticks);
         self.drowning_timer_ticks = 0;
         false
     }
@@ -1875,22 +1970,40 @@ impl GameWorld {
     }
 
     fn is_camera_underwater(&self, camera_pos: glam::Vec3) -> bool {
-        let block_pos = glam::IVec3::new(
-            camera_pos.x.floor() as i32,
-            camera_pos.y.floor() as i32,
-            camera_pos.z.floor() as i32,
-        );
-        let Some(voxel) = self.get_voxel_at(block_pos) else {
-            return false;
-        };
+        self.fluid_at_world_pos(camera_pos) == Some(FluidType::Water)
+    }
 
-        if mdminecraft_world::get_fluid_type(voxel.id) == Some(mdminecraft_world::FluidType::Water)
-        {
-            return true;
+    fn fluid_at_world_pos(&self, world_pos: glam::Vec3) -> Option<FluidType> {
+        let block_pos = glam::IVec3::new(
+            world_pos.x.floor() as i32,
+            world_pos.y.floor() as i32,
+            world_pos.z.floor() as i32,
+        );
+        let voxel = self.get_voxel_at(block_pos)?;
+
+        if let Some(ft) = mdminecraft_world::get_fluid_type(voxel.id) {
+            return Some(ft);
         }
 
-        mdminecraft_world::block_supports_waterlogging(voxel.id)
+        if mdminecraft_world::block_supports_waterlogging(voxel.id)
             && mdminecraft_world::is_waterlogged(voxel.state)
+        {
+            return Some(FluidType::Water);
+        }
+
+        None
+    }
+
+    fn camera_eye_and_feet_fluids(
+        &self,
+        camera_pos: glam::Vec3,
+    ) -> (Option<FluidType>, Option<FluidType>) {
+        let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
+        let feet_sample = feet_pos + glam::Vec3::new(0.0, 0.1, 0.0);
+        (
+            self.fluid_at_world_pos(camera_pos),
+            self.fluid_at_world_pos(feet_sample),
+        )
     }
 
     fn chunk_biome_tints(&self, chunk_pos: ChunkPos) -> ([f32; 3], [f32; 3], [f32; 3]) {
@@ -3088,6 +3201,261 @@ impl GameWorld {
         false
     }
 
+    fn projectile_point_collides_with_world(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> bool {
+        let block_x = x.floor() as i32;
+        let block_y = y.floor() as i32;
+        let block_z = z.floor() as i32;
+
+        if world_y_to_local_y(block_y).is_none() {
+            return true;
+        }
+
+        // Projectiles are treated as points for collision, but we use a tiny AABB to avoid
+        // edge-case misses when interacting with thin collision shapes.
+        const EPS: f32 = 1.0 / 1024.0;
+        let projectile_aabb = AABB {
+            min: glam::Vec3::new(x as f32 - EPS, y as f32 - EPS, z as f32 - EPS),
+            max: glam::Vec3::new(x as f32 + EPS, y as f32 + EPS, z as f32 + EPS),
+        };
+
+        // Check the current block and the block below to handle blocks with collision that
+        // extends above their voxel (e.g., fences/walls at 1.5 blocks high).
+        for (bx, by, bz) in [(block_x, block_y, block_z), (block_x, block_y - 1, block_z)] {
+            let block_aabbs = Self::block_collision_aabbs_at(chunks, block_properties, bx, by, bz);
+            for block_aabb in block_aabbs.iter() {
+                if projectile_aabb.intersects(block_aabb) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn projectile_first_block_hit_along_segment(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        from: (f64, f64, f64),
+        to: (f64, f64, f64),
+    ) -> Option<(f64, f64, f64)> {
+        if Self::projectile_point_collides_with_world(
+            chunks,
+            block_properties,
+            from.0,
+            from.1,
+            from.2,
+        ) {
+            return Some(from);
+        }
+
+        let dx = to.0 - from.0;
+        let dy = to.1 - from.1;
+        let dz = to.2 - from.2;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        if dist <= 1.0e-9 {
+            return None;
+        }
+
+        let steps = ((dist * 64.0).ceil() as u32).clamp(1, 256);
+        for step in 1..=steps {
+            let t = step as f64 / steps as f64;
+            let x = from.0 + dx * t;
+            let y = from.1 + dy * t;
+            let z = from.2 + dz * t;
+
+            if Self::projectile_point_collides_with_world(chunks, block_properties, x, y, z) {
+                return Some((x, y, z));
+            }
+        }
+
+        None
+    }
+
+    fn line_of_sight_clear(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        from: glam::Vec3,
+        to: glam::Vec3,
+    ) -> bool {
+        let delta = to - from;
+        let max_distance = delta.length();
+        if max_distance <= 1.0e-5 {
+            return true;
+        }
+
+        let direction = delta / max_distance;
+        let origin = from + direction * 1.0e-4;
+
+        let mut voxel = glam::IVec3::new(
+            origin.x.floor() as i32,
+            origin.y.floor() as i32,
+            origin.z.floor() as i32,
+        );
+
+        let step = glam::IVec3::new(
+            if direction.x >= 0.0 { 1 } else { -1 },
+            if direction.y >= 0.0 { 1 } else { -1 },
+            if direction.z >= 0.0 { 1 } else { -1 },
+        );
+
+        let delta_t = glam::Vec3::new(
+            if direction.x != 0.0 {
+                (1.0 / direction.x).abs()
+            } else {
+                f32::MAX
+            },
+            if direction.y != 0.0 {
+                (1.0 / direction.y).abs()
+            } else {
+                f32::MAX
+            },
+            if direction.z != 0.0 {
+                (1.0 / direction.z).abs()
+            } else {
+                f32::MAX
+            },
+        );
+
+        let mut t_max = glam::Vec3::new(
+            if direction.x != 0.0 {
+                if direction.x > 0.0 {
+                    ((voxel.x + 1) as f32 - origin.x) / direction.x
+                } else {
+                    (voxel.x as f32 - origin.x) / direction.x
+                }
+            } else {
+                f32::MAX
+            },
+            if direction.y != 0.0 {
+                if direction.y > 0.0 {
+                    ((voxel.y + 1) as f32 - origin.y) / direction.y
+                } else {
+                    (voxel.y as f32 - origin.y) / direction.y
+                }
+            } else {
+                f32::MAX
+            },
+            if direction.z != 0.0 {
+                if direction.z > 0.0 {
+                    ((voxel.z + 1) as f32 - origin.z) / direction.z
+                } else {
+                    (voxel.z as f32 - origin.z) / direction.z
+                }
+            } else {
+                f32::MAX
+            },
+        );
+
+        let max_steps = (max_distance * 3.0).ceil() as i32 + 1;
+        for _ in 0..max_steps {
+            for (bx, by, bz) in [(voxel.x, voxel.y, voxel.z), (voxel.x, voxel.y - 1, voxel.z)] {
+                let block_aabbs =
+                    Self::block_collision_aabbs_at(chunks, block_properties, bx, by, bz);
+                for block_aabb in block_aabbs.iter() {
+                    if block_aabb.ray_intersects(origin, direction, max_distance) {
+                        return false;
+                    }
+                }
+            }
+
+            if t_max.x < t_max.y && t_max.x < t_max.z {
+                voxel.x += step.x;
+                t_max.x += delta_t.x;
+            } else if t_max.y < t_max.z {
+                voxel.y += step.y;
+                t_max.y += delta_t.y;
+            } else {
+                voxel.z += step.z;
+                t_max.z += delta_t.z;
+            }
+
+            if t_max.min_element() > max_distance {
+                break;
+            }
+        }
+
+        true
+    }
+
+    fn explosion_exposure(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        origin: glam::Vec3,
+        target_aabb: &AABB,
+    ) -> f32 {
+        const EPS: f32 = 1.0 / 256.0;
+        let min = target_aabb.min + glam::Vec3::splat(EPS);
+        let max = target_aabb.max - glam::Vec3::splat(EPS);
+
+        let center = (min + max) * 0.5;
+        let samples = [
+            center,
+            glam::Vec3::new(min.x, min.y, min.z),
+            glam::Vec3::new(min.x, min.y, max.z),
+            glam::Vec3::new(min.x, max.y, min.z),
+            glam::Vec3::new(min.x, max.y, max.z),
+            glam::Vec3::new(max.x, min.y, min.z),
+            glam::Vec3::new(max.x, min.y, max.z),
+            glam::Vec3::new(max.x, max.y, min.z),
+            glam::Vec3::new(max.x, max.y, max.z),
+        ];
+
+        let mut visible = 0u32;
+        for sample in samples {
+            if Self::line_of_sight_clear(chunks, block_properties, origin, sample) {
+                visible += 1;
+            }
+        }
+
+        visible as f32 / samples.len() as f32
+    }
+
+    fn nudge_explosion_origin_out_of_collision(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        origin: glam::Vec3,
+        incoming_velocity: glam::Vec3,
+    ) -> glam::Vec3 {
+        let collides = |pos: glam::Vec3| -> bool {
+            Self::projectile_point_collides_with_world(
+                chunks,
+                block_properties,
+                pos.x as f64,
+                pos.y as f64,
+                pos.z as f64,
+            )
+        };
+
+        if !collides(origin) {
+            return origin;
+        }
+
+        let direction = if incoming_velocity.length_squared() > 1.0e-8 {
+            incoming_velocity.normalize()
+        } else {
+            glam::Vec3::Z
+        };
+
+        // The projectile sweep can report hit points slightly inside the collided voxel.
+        // For explosion visibility sampling, step the origin backward out of collision.
+        const STEP: f32 = 1.0 / 64.0;
+        let mut adjusted = origin;
+        for _ in 0..128 {
+            adjusted -= direction * STEP;
+            if !collides(adjusted) {
+                break;
+            }
+        }
+
+        adjusted
+    }
+
     fn resolve_mob_world_collisions(
         chunks: &HashMap<ChunkPos, Chunk>,
         block_properties: &BlockPropertiesRegistry,
@@ -3396,6 +3764,39 @@ impl GameWorld {
         result_velocity.x = step_horizontal_velocity.x;
         result_velocity.z = step_horizontal_velocity.z;
         (step_offset, result_velocity)
+    }
+
+    fn apply_player_knockback_displacement(&mut self, knockback: glam::Vec3, max_horizontal: f32) {
+        if knockback.length_squared() <= 1.0e-8 {
+            return;
+        }
+        if self.player_state != PlayerState::Alive || self.player_health.is_dead() {
+            return;
+        }
+
+        let knockback = {
+            let horizontal = glam::Vec2::new(knockback.x, knockback.z);
+            let horizontal_len = horizontal.length();
+            if horizontal_len > max_horizontal && horizontal_len > 1.0e-8 {
+                let scale = max_horizontal / horizontal_len;
+                glam::Vec3::new(knockback.x * scale, knockback.y, knockback.z * scale)
+            } else {
+                knockback
+            }
+        };
+
+        let camera_pos = self.renderer.camera().position;
+        let current_aabb = self.player_physics.get_aabb(camera_pos);
+        let (offset, _) = Self::move_with_collision(
+            &self.chunks,
+            &self.block_properties,
+            &current_aabb,
+            knockback,
+            PlayerPhysics::STEP_HEIGHT,
+        );
+        if offset.length_squared() > 1.0e-8 {
+            self.renderer.camera_mut().position = camera_pos + offset;
+        }
     }
 
     fn determine_spawn_point(
@@ -4103,6 +4504,11 @@ impl GameWorld {
     fn apply_lightning_strike(&mut self, strike_pos: (f64, f64, f64)) {
         let (strike_x, strike_y, strike_z) = strike_pos;
         let hit_radius_sq = LIGHTNING_HIT_RADIUS_BLOCKS * LIGHTNING_HIT_RADIUS_BLOCKS;
+        let strike_block = IVec3::new(
+            strike_x.floor() as i32,
+            strike_y.floor() as i32,
+            strike_z.floor() as i32,
+        );
 
         let mut charged_creepers = 0usize;
         let mut hit_mobs = 0usize;
@@ -4136,11 +4542,35 @@ impl GameWorld {
             let dz = camera_pos.z as f64 - strike_z;
             if (dx * dx + dy * dy + dz * dz) <= hit_radius_sq {
                 self.player_health.ignite(LIGHTNING_FIRE_TICKS);
-                self.player_health.damage(LIGHTNING_DAMAGE);
+                let actual_damage = self
+                    .player_armor
+                    .take_damage(LIGHTNING_DAMAGE, DamageKind::Generic);
+                self.player_health.damage(actual_damage);
                 if self.player_health.is_dead() {
                     self.handle_death("Struck by lightning");
                 }
             }
+        }
+
+        let mix_i32 = |value: i32| u64::from(u32::from_le_bytes(value.to_le_bytes()));
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xD682_61A3_49FC_3F9F)
+            ^ 0x4C_4954_4649_5245_u64 // "LITFIRE"
+            ^ mix_i32(strike_block.x).wrapping_mul(0x9E37_79B1)
+            ^ mix_i32(strike_block.y).wrapping_mul(0x85EB_CA6B)
+            ^ mix_i32(strike_block.z).wrapping_mul(0xC2B2_AE35);
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let mut changed_positions = Vec::new();
+        let _ = self.try_place_fire_block(strike_block, &mut changed_positions);
+        for _ in 0..LIGHTNING_FIRE_ATTEMPTS {
+            let dx = rng.gen_range(-1..=1);
+            let dz = rng.gen_range(-1..=1);
+            let pos = strike_block + IVec3::new(dx, 0, dz);
+            let _ = self.try_place_fire_block(pos, &mut changed_positions);
+        }
+        if !changed_positions.is_empty() {
+            self.refresh_after_voxel_changes(&changed_positions);
         }
 
         if hit_mobs > 0 || charged_creepers > 0 {
@@ -4503,6 +4933,76 @@ impl GameWorld {
         melted_chunks
     }
 
+    fn tick_fire_extinguish(&mut self) -> std::collections::BTreeSet<ChunkPos> {
+        let mut dirty_chunks = std::collections::BTreeSet::new();
+
+        if self.active_dimension != DimensionId::Overworld {
+            return dirty_chunks;
+        }
+        if !self.weather.is_precipitating() {
+            return dirty_chunks;
+        }
+        if !self
+            .sim_tick
+            .0
+            .is_multiple_of(FIRE_EXTINGUISH_INTERVAL_TICKS)
+        {
+            return dirty_chunks;
+        }
+
+        let camera_pos = self.renderer.camera().position;
+        let base_x = camera_pos.x.floor() as i32;
+        let base_z = camera_pos.z.floor() as i32;
+
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0x6A5D_39E3_2C1B_8C71)
+            ^ 0x4649_5245_5845_545F_u64; // "FIREXET_"
+        let mut rng = StdRng::seed_from_u64(seed);
+        let biome_assigner = self.terrain_generator.biome_assigner();
+
+        for _attempt in 0..FIRE_EXTINGUISH_ATTEMPTS_PER_INTERVAL {
+            let x = base_x
+                + rng.gen_range(-FIRE_EXTINGUISH_RADIUS_BLOCKS..=FIRE_EXTINGUISH_RADIUS_BLOCKS);
+            let z = base_z
+                + rng.gen_range(-FIRE_EXTINGUISH_RADIUS_BLOCKS..=FIRE_EXTINGUISH_RADIUS_BLOCKS);
+
+            let Some(top_y) = self.column_highest_non_air_y(x, z) else {
+                continue;
+            };
+
+            let biome = biome_assigner.get_blended_biome(x, z, 2);
+            if biome.id == BiomeId::Desert {
+                continue;
+            }
+
+            let chunk_pos = ChunkPos::new(
+                x.div_euclid(CHUNK_SIZE_X as i32),
+                z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+                continue;
+            };
+            let Some(local_y) = world_y_to_local_y(top_y) else {
+                continue;
+            };
+            let local_x = x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+            if voxel.id != mdminecraft_world::BLOCK_FIRE {
+                continue;
+            }
+            if !Self::column_is_clear_to_sky(chunk, local_x, local_y, local_z) {
+                continue;
+            }
+
+            chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+            dirty_chunks.insert(chunk_pos);
+        }
+
+        dirty_chunks
+    }
+
     fn update_weather(&mut self, dt: f32) {
         if self.weather.is_precipitating()
             && self.active_dimension == DimensionId::Overworld
@@ -4653,6 +5153,9 @@ impl GameWorld {
                 }
             }
         }
+
+        // Repair equipped armor with Mending (vanilla-ish; simplified deterministic order).
+        remaining_xp = self.player_armor.repair_with_mending(remaining_xp);
 
         remaining_xp
     }
@@ -4866,6 +5369,18 @@ impl GameWorld {
         let mut camera_pos = camera_snapshot.position;
         let (forward_h, right_h) = Self::flat_directions(&camera_snapshot);
 
+        let (eye_fluid, feet_fluid) = self.camera_eye_and_feet_fluids(camera_pos);
+        let eye_in_water = eye_fluid == Some(FluidType::Water);
+        let in_water = eye_in_water || feet_fluid == Some(FluidType::Water);
+        let in_lava = eye_fluid == Some(FluidType::Lava) || feet_fluid == Some(FluidType::Lava);
+        let depth_strider_level = if in_water {
+            self.player_armor
+                .total_enchantment_level(EnchantmentType::DepthStrider)
+                .min(3)
+        } else {
+            0
+        };
+
         let mut fall_damage: Option<f32> = None;
 
         {
@@ -4902,6 +5417,24 @@ impl GameWorld {
                 } else {
                     physics.velocity.y = physics.velocity.y.clamp(-1.0, 0.0);
                 }
+            } else if in_water || in_lava {
+                let (swim_speed, gravity_multiplier, terminal_velocity, drag) = if in_lava {
+                    (2.0, 0.1, -2.0, 0.85)
+                } else {
+                    (4.0, 0.2, -4.0, 0.9)
+                };
+
+                // Vanilla-ish: fluids allow swimming up/down (simplified).
+                if actions.jump {
+                    physics.velocity.y = swim_speed;
+                } else if actions.crouch {
+                    physics.velocity.y = -swim_speed;
+                } else {
+                    physics.velocity.y += physics.gravity * gravity_multiplier * dt;
+                    physics.velocity.y = physics.velocity.y.max(terminal_velocity);
+                }
+
+                physics.velocity.y *= drag;
             } else {
                 // Apply gravity
                 let mut gravity = physics.gravity;
@@ -4930,6 +5463,13 @@ impl GameWorld {
                 move_speed *= 0.5;
             }
             move_speed *= self.status_effects.speed_multiplier();
+            if in_lava {
+                move_speed *= 0.3;
+            } else if in_water {
+                let base = 0.6;
+                let bonus = 0.13 * depth_strider_level as f32;
+                move_speed *= (base + bonus).min(1.0);
+            }
 
             // Build movement velocity vector
             let mut move_velocity = glam::Vec3::ZERO;
@@ -4987,7 +5527,7 @@ impl GameWorld {
                 physics.last_ground_y = physics.get_aabb(camera_pos).min.y;
             }
 
-            if actions.jump && physics.on_ground {
+            if actions.jump && physics.on_ground && !in_water && !in_lava {
                 let jump_boost = self
                     .status_effects
                     .amplifier(StatusEffectType::JumpBoost)
@@ -4999,7 +5539,12 @@ impl GameWorld {
         }
 
         if let Some(dist) = fall_damage {
-            if !self.status_effects.has(StatusEffectType::SlowFalling) {
+            let (eye_fluid, feet_fluid) = self.camera_eye_and_feet_fluids(camera_pos);
+            let in_water =
+                eye_fluid == Some(FluidType::Water) || feet_fluid == Some(FluidType::Water);
+            if in_water {
+                // Vanilla-ish: landing in water negates fall damage.
+            } else if !self.status_effects.has(StatusEffectType::SlowFalling) {
                 self.calculate_fall_damage(dist);
             }
         }
@@ -5145,6 +5690,7 @@ impl GameWorld {
         let mut dirty_weather_geometry_chunks = self.tick_ice_freezing();
         dirty_weather_geometry_chunks.extend(self.tick_snow_accumulation());
         dirty_weather_geometry_chunks.extend(self.tick_weather_melting());
+        dirty_weather_geometry_chunks.extend(self.tick_fire_extinguish());
 
         for chunk_pos in &dirty_weather_geometry_chunks {
             mesh_refresh.extend(self.recompute_skylight_local(*chunk_pos));
@@ -5247,32 +5793,7 @@ impl GameWorld {
         );
 
         let camera_pos = self.renderer.camera().position;
-        let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
-        let feet_sample = feet_pos + glam::Vec3::new(0.0, 0.1, 0.0);
-
-        let fluid_at = |pos: glam::Vec3| -> Option<FluidType> {
-            let voxel_pos = IVec3::new(
-                pos.x.floor() as i32,
-                pos.y.floor() as i32,
-                pos.z.floor() as i32,
-            );
-
-            let voxel = self.get_voxel_at(voxel_pos)?;
-            if let Some(ft) = get_fluid_type(voxel.id) {
-                return Some(ft);
-            }
-
-            if mdminecraft_world::block_supports_waterlogging(voxel.id)
-                && mdminecraft_world::is_waterlogged(voxel.state)
-            {
-                return Some(FluidType::Water);
-            }
-
-            None
-        };
-
-        let eye_fluid = fluid_at(camera_pos);
-        let feet_fluid = fluid_at(feet_sample);
+        let (eye_fluid, feet_fluid) = self.camera_eye_and_feet_fluids(camera_pos);
 
         let has_water_breathing = self.status_effects.has(StatusEffectType::WaterBreathing);
         let has_fire_resistance = self.status_effects.has(StatusEffectType::FireResistance);
@@ -5280,27 +5801,83 @@ impl GameWorld {
         let eye_in_water = eye_fluid == Some(FluidType::Water);
         let in_water = eye_in_water || feet_fluid == Some(FluidType::Water);
         let in_lava = eye_fluid == Some(FluidType::Lava) || feet_fluid == Some(FluidType::Lava);
+        let in_fire = {
+            let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
+            let feet_sample = feet_pos + glam::Vec3::new(0.0, 0.1, 0.0);
+            let eye_block = IVec3::new(
+                camera_pos.x.floor() as i32,
+                camera_pos.y.floor() as i32,
+                camera_pos.z.floor() as i32,
+            );
+            let feet_block = IVec3::new(
+                feet_sample.x.floor() as i32,
+                feet_sample.y.floor() as i32,
+                feet_sample.z.floor() as i32,
+            );
+            self.get_voxel_at(eye_block)
+                .is_some_and(|voxel| voxel.id == mdminecraft_world::BLOCK_FIRE)
+                || self
+                    .get_voxel_at(feet_block)
+                    .is_some_and(|voxel| voxel.id == mdminecraft_world::BLOCK_FIRE)
+        };
+        let mut in_precipitation = false;
+        if self.active_dimension == DimensionId::Overworld && self.weather.is_precipitating() {
+            let block_x = camera_pos.x.floor() as i32;
+            let block_y = camera_pos.y.floor() as i32;
+            let block_z = camera_pos.z.floor() as i32;
+            let chunk_pos = ChunkPos::new(
+                block_x.div_euclid(CHUNK_SIZE_X as i32),
+                block_z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            if let (Some(chunk), Some(local_y)) =
+                (self.chunks.get(&chunk_pos), world_y_to_local_y(block_y))
+            {
+                let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                let biome = self
+                    .terrain_generator
+                    .biome_assigner()
+                    .get_blended_biome(block_x, block_z, 2);
+                if biome.id != BiomeId::Desert
+                    && Self::column_is_clear_to_sky(chunk, local_x, local_y, local_z)
+                {
+                    in_precipitation = true;
+                }
+            }
+        }
 
         // Drowning (vanilla-ish): 15s air, then periodic damage while underwater.
+        let respiration_level = self
+            .player_armor
+            .total_enchantment_level(EnchantmentType::Respiration)
+            .min(3);
+        let max_air_ticks = 300u16.saturating_mul(1 + u16::from(respiration_level));
         if self
             .player_health
-            .tick_air(eye_in_water, has_water_breathing)
+            .tick_air(eye_in_water, max_air_ticks, has_water_breathing)
         {
             self.player_health.damage(2.0);
         }
 
         // Lava contact + ignition (vanilla-ish; simplified).
         if in_lava && !has_fire_resistance {
-            self.player_health.damage(4.0);
+            let damage = self.player_armor.reduce_damage(4.0, DamageKind::Fire);
+            self.player_health.damage(damage);
             self.player_health.ignite(300);
+        }
+
+        // Fire contact + ignition (vanilla-ish; simplified).
+        if in_fire && !has_fire_resistance {
+            self.player_health.ignite(LIGHTNING_FIRE_TICKS);
         }
 
         // Burning DOT.
         if self
             .player_health
-            .tick_burning(in_water, has_fire_resistance)
+            .tick_burning(in_water || in_precipitation, has_fire_resistance)
         {
-            self.player_health.damage(1.0);
+            let damage = self.player_armor.reduce_damage(1.0, DamageKind::Fire);
+            self.player_health.damage(damage);
         }
 
         // XP orbs (physics + collection).
@@ -6512,18 +7089,36 @@ impl GameWorld {
             } else if self.bow_drawing {
                 // Released - shoot arrow!
                 if self.bow_charge >= 0.1 {
-                    // Consume an arrow
-                    if self.player_consume_arrow() {
+                    let (power_level, punch_level, flame, infinity) =
+                        if let Some(item) = self.hotbar.selected_item() {
+                            (
+                                item.enchantment_level(EnchantmentType::Power),
+                                item.enchantment_level(EnchantmentType::Punch),
+                                item.enchantment_level(EnchantmentType::Flame) > 0,
+                                item.enchantment_level(EnchantmentType::Infinity) > 0,
+                            )
+                        } else {
+                            (0, 0, false, false)
+                        };
+
+                    // Consume an arrow unless Infinity is present (still requires at least one arrow).
+                    if infinity || self.player_consume_arrow() {
                         // Get camera position and direction
                         let camera = self.renderer.camera();
-                        let arrow = Projectile::shoot_arrow(
+                        let base_y = (camera.position.y - 1.5) as f64;
+
+                        let mut arrow = Projectile::shoot_arrow(
                             camera.position.x as f64,
-                            camera.position.y as f64,
+                            base_y,
                             camera.position.z as f64,
                             camera.yaw,
                             camera.pitch,
                             self.bow_charge,
                         );
+                        arrow.power_level = power_level;
+                        arrow.punch_level = punch_level;
+                        arrow.flame = flame;
+                        arrow.can_pick_up = !infinity;
                         self.projectiles.spawn(self.active_dimension, arrow);
                         tracing::debug!("Shot arrow with charge {:.2}", self.bow_charge);
                     }
@@ -6696,12 +7291,65 @@ impl GameWorld {
             return false;
         }
 
-        let Some(changed_positions) = try_activate_nether_portal(&mut self.chunks, ignite_pos)
-        else {
-            return false;
+        if let Some(changed_positions) = try_activate_nether_portal(&mut self.chunks, ignite_pos) {
+            self.refresh_after_voxel_changes(&changed_positions);
+            return true;
+        }
+
+        let mut changed_positions = Vec::new();
+        if self.try_place_fire_block(ignite_pos, &mut changed_positions) {
+            self.refresh_after_voxel_changes(&changed_positions);
+            return true;
+        }
+
+        false
+    }
+
+    fn try_place_fire_block(&mut self, pos: IVec3, changed_positions: &mut Vec<IVec3>) -> bool {
+        let local_y = match world_y_to_local_y(pos.y) {
+            Some(local_y) => local_y,
+            None => return false,
         };
 
-        self.refresh_after_voxel_changes(&changed_positions);
+        let support_pos = IVec3::new(pos.x, pos.y - 1, pos.z);
+        let Some(support_voxel) = self.get_voxel_at(support_pos) else {
+            return false;
+        };
+        if !self.block_properties.get(support_voxel.id).is_solid {
+            return false;
+        }
+
+        let chunk_pos = ChunkPos::new(
+            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let Some(chunk) = self.chunks.get_mut(&chunk_pos) else {
+            return false;
+        };
+        let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+        let voxel = chunk.voxel(local_x, local_y, local_z);
+
+        if voxel.id == mdminecraft_world::BLOCK_FIRE {
+            return true;
+        }
+
+        if voxel.id != BLOCK_AIR {
+            return false;
+        }
+
+        chunk.set_voxel(
+            local_x,
+            local_y,
+            local_z,
+            Voxel {
+                id: mdminecraft_world::BLOCK_FIRE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        changed_positions.push(pos);
         true
     }
 
@@ -6985,7 +7633,7 @@ impl GameWorld {
         };
 
         if damage > 0.0 {
-            let actual_damage = self.player_armor.take_damage(damage);
+            let actual_damage = self.player_armor.take_damage(damage, DamageKind::Blast);
             self.player_health.damage(actual_damage);
             if self.player_health.is_dead() {
                 self.handle_death("Intentional Game Design");
@@ -7020,7 +7668,7 @@ impl GameWorld {
         };
 
         if damage > 0.0 {
-            let actual_damage = self.player_armor.take_damage(damage);
+            let actual_damage = self.player_armor.take_damage(damage, DamageKind::Blast);
             self.player_health.damage(actual_damage);
             if self.player_health.is_dead() {
                 self.handle_death("Intentional Game Design");
@@ -7400,7 +8048,17 @@ impl GameWorld {
         if mining_new_block {
             // Calculate mining time based on tool and block properties
             let tool = self.hotbar.selected_tool();
-            let mut mining_time = block_props.calculate_mining_time(tool, false);
+            let (eye_fluid, feet_fluid) =
+                self.camera_eye_and_feet_fluids(self.renderer.camera().position);
+            let in_water =
+                eye_fluid == Some(FluidType::Water) || feet_fluid == Some(FluidType::Water);
+            let has_aqua_affinity = self
+                .player_armor
+                .total_enchantment_level(EnchantmentType::AquaAffinity)
+                > 0;
+            let apply_water_penalty = in_water && !has_aqua_affinity;
+
+            let mut mining_time = block_props.calculate_mining_time(tool, apply_water_penalty);
 
             // Apply Efficiency enchantment bonus
             // Each level of Efficiency adds 26% mining speed (Minecraft formula: (level^2 + 1) bonus)
@@ -9007,6 +9665,10 @@ impl GameWorld {
                         let support_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
                         !is_solid_at(chunks, support_pos)
                     }
+                    mdminecraft_world::BLOCK_FIRE => {
+                        let support_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                        !is_solid_at(chunks, support_pos)
+                    }
                     _ => false,
                 };
 
@@ -9851,12 +10513,13 @@ impl GameWorld {
         // Minecraft formula: damage = fall_distance - 3.0
         // Player takes damage for falls > 3 blocks
         if fall_distance > 3.0 {
-            let damage = (fall_distance - 3.0) * 1.0; // 1 damage per block fallen
-            self.player_health.damage(damage);
+            let raw_damage = (fall_distance - 3.0) * 1.0; // 1 damage per block fallen
+            let actual_damage = self.player_armor.take_damage(raw_damage, DamageKind::Fall);
+            self.player_health.damage(actual_damage);
             tracing::info!(
                 "Fell {:.1} blocks, took {:.1} fall damage",
                 fall_distance,
-                damage
+                actual_damage
             );
 
             // Check if this killed the player
@@ -10468,8 +11131,11 @@ impl GameWorld {
         // Get player position for hostile mob targeting
         let player_pos = self.renderer.camera().position;
         let player_x = player_pos.x as f64;
-        let player_y = player_pos.y as f64;
         let player_z = player_pos.z as f64;
+        let player_eye_y = player_pos.y as f64;
+        let player_feet_y = (player_pos.y - self.player_physics.eye_height) as f64;
+        let player_center_y = player_feet_y + (self.player_physics.player_height * 0.5) as f64;
+        let player_aabb = self.player_physics.get_aabb(player_pos);
         let player_block_x = player_x.floor() as i32;
         let player_block_z = player_z.floor() as i32;
         let visibility = if self.status_effects.has(StatusEffectType::Invisibility) {
@@ -10530,9 +11196,12 @@ impl GameWorld {
         let mut hostile_projectiles: Vec<Projectile> = Vec::new();
 
         // Update each mob and track damage to player
-        let mut total_damage = 0.0f32;
+        let mut melee_damage = 0.0f32;
+        let mut blast_damage = 0.0f32;
         let mut exploded_creeper = false;
         let mut explosion_positions: Vec<(f64, f64, f64, f32)> = Vec::new();
+        let mut creeper_explosions: Vec<(glam::Vec3, f32, f32)> = Vec::new();
+        let mut player_knockback = glam::Vec3::ZERO;
         for mob in &mut self.mobs {
             if mob.dimension != active_dimension {
                 continue;
@@ -10544,8 +11213,64 @@ impl GameWorld {
 
             let before_pos = (mob.x, mob.y, mob.z);
 
+            // Vanilla-ish: water + rain/snow extinguish burning mobs when exposed.
+            if mob.fire_ticks > 0 && mob.dimension == DimensionId::Overworld {
+                let mob_block_x = mob.x.floor() as i32;
+                let mob_block_y = mob.y.floor() as i32;
+                let mob_block_z = mob.z.floor() as i32;
+                let head_y = mob_block_y + 1;
+                let chunk_pos = ChunkPos::new(
+                    mob_block_x.div_euclid(CHUNK_SIZE_X as i32),
+                    mob_block_z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+
+                if let (Some(chunk), Some(local_head_y)) =
+                    (chunks.get(&chunk_pos), world_y_to_local_y(head_y))
+                {
+                    let local_x = mob_block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let local_z = mob_block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                    let head_voxel = chunk.voxel(local_x, local_head_y, local_z);
+
+                    let is_wet = get_fluid_type(head_voxel.id) == Some(FluidType::Water)
+                        || (mdminecraft_world::block_supports_waterlogging(head_voxel.id)
+                            && mdminecraft_world::is_waterlogged(head_voxel.state));
+
+                    if is_wet {
+                        mob.extinguish();
+                    } else if is_precipitating {
+                        let biome = biome_assigner.get_blended_biome(mob_block_x, mob_block_z, 2);
+                        if biome.id != BiomeId::Desert
+                            && Self::column_is_clear_to_sky(chunk, local_x, local_head_y, local_z)
+                        {
+                            mob.extinguish();
+                        }
+                    }
+                }
+            }
+
             // Update fire damage (from Fire Aspect enchantment)
             mob.update_fire();
+
+            // Fire contact + ignition (vanilla-ish; simplified).
+            {
+                let mob_block_x = mob.x.floor() as i32;
+                let mob_block_y = mob.y.floor() as i32;
+                let mob_block_z = mob.z.floor() as i32;
+                let chunk_pos = ChunkPos::new(
+                    mob_block_x.div_euclid(CHUNK_SIZE_X as i32),
+                    mob_block_z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                if let (Some(chunk), Some(local_y)) =
+                    (chunks.get(&chunk_pos), world_y_to_local_y(mob_block_y))
+                {
+                    let local_x = mob_block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                    let local_z = mob_block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                    let here = chunk.voxel(local_x, local_y, local_z);
+                    if here.id == mdminecraft_world::BLOCK_FIRE {
+                        mob.set_on_fire(u32::from(LIGHTNING_FIRE_TICKS));
+                    }
+                }
+            }
 
             // Vanilla-ish: zombies/skeletons burn in daylight when exposed to the sky,
             // and they are extinguished by water (and rain/snow).
@@ -10605,78 +11330,80 @@ impl GameWorld {
 
             // Spiders are only hostile at night, other hostile mobs always attack
             if mob.mob_type.is_hostile_at_time(is_night) {
-                let (target_x, target_z) = if matches!(
-                    mob.mob_type,
-                    MobType::Zombie | MobType::Skeleton | MobType::Spider
-                ) {
-                    let distance = mob.distance_to(player_x, player_y, player_z);
-                    let detection_range = (mob.mob_type.detection_range() as f64) * visibility;
-                    let attack_range = mob.mob_type.size() as f64 + 1.5;
+                let (target_x, target_z) =
+                    if matches!(mob.mob_type, MobType::Zombie | MobType::Spider) {
+                        let distance = mob.distance_to(player_x, player_center_y, player_z);
+                        let detection_range = (mob.mob_type.detection_range() as f64) * visibility;
+                        let attack_range = mob.mob_type.size() as f64 + 1.5;
 
-                    if distance > attack_range && distance <= detection_range {
-                        let start = mdminecraft_world::GridPos::new(
-                            mob.x.floor() as i32,
-                            mob.z.floor() as i32,
-                        );
-                        let goal = mdminecraft_world::GridPos::new(
-                            player_x.floor() as i32,
-                            player_z.floor() as i32,
-                        );
-                        let nav_y = mob.y.floor() as i32;
-                        let radius = mob.mob_type.detection_range().ceil() as i32 + 4;
+                        if distance > attack_range && distance <= detection_range {
+                            let start = mdminecraft_world::GridPos::new(
+                                mob.x.floor() as i32,
+                                mob.z.floor() as i32,
+                            );
+                            let goal = mdminecraft_world::GridPos::new(
+                                player_x.floor() as i32,
+                                player_z.floor() as i32,
+                            );
+                            let nav_y = mob.y.floor() as i32;
+                            let radius = mob.mob_type.detection_range().ceil() as i32 + 4;
 
-                        let path = mdminecraft_world::astar_path_4dir(
-                            start,
-                            goal,
-                            |p| {
-                                if (p.x - start.x).abs() > radius || (p.z - start.z).abs() > radius
-                                {
-                                    return false;
+                            let path = mdminecraft_world::astar_path_4dir(
+                                start,
+                                goal,
+                                |p| {
+                                    if (p.x - start.x).abs() > radius
+                                        || (p.z - start.z).abs() > radius
+                                    {
+                                        return false;
+                                    }
+
+                                    let chunk_x = p.x.div_euclid(CHUNK_SIZE_X as i32);
+                                    let chunk_z = p.z.div_euclid(CHUNK_SIZE_Z as i32);
+                                    let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
+                                    let Some(chunk) = chunks.get(&chunk_pos) else {
+                                        return false;
+                                    };
+
+                                    let local_x = p.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                                    let local_z = p.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+                                    let Some(local_y) = world_y_to_local_y(nav_y) else {
+                                        return false;
+                                    };
+                                    let Some(local_above_y) = world_y_to_local_y(nav_y + 1) else {
+                                        return false;
+                                    };
+                                    let Some(local_floor_y) = world_y_to_local_y(nav_y - 1) else {
+                                        return false;
+                                    };
+
+                                    let here = chunk.voxel(local_x, local_y, local_z);
+                                    if block_properties.get(here.id).is_solid {
+                                        return false;
+                                    }
+                                    let above = chunk.voxel(local_x, local_above_y, local_z);
+                                    if block_properties.get(above.id).is_solid {
+                                        return false;
+                                    }
+
+                                    let floor = chunk.voxel(local_x, local_floor_y, local_z);
+                                    let Some(top_offset) =
+                                        Self::voxel_collision_top_offset(block_properties, &floor)
+                                    else {
+                                        return false;
+                                    };
+                                    top_offset >= 1.0
+                                },
+                                4096,
+                            );
+
+                            if let Some(path) = path {
+                                if let Some(next) = path.get(1).copied() {
+                                    (next.x as f64 + 0.5, next.z as f64 + 0.5)
+                                } else {
+                                    (player_x, player_z)
                                 }
-
-                                let chunk_x = p.x.div_euclid(CHUNK_SIZE_X as i32);
-                                let chunk_z = p.z.div_euclid(CHUNK_SIZE_Z as i32);
-                                let chunk_pos = ChunkPos::new(chunk_x, chunk_z);
-                                let Some(chunk) = chunks.get(&chunk_pos) else {
-                                    return false;
-                                };
-
-                                let local_x = p.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-                                let local_z = p.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-
-                                let Some(local_y) = world_y_to_local_y(nav_y) else {
-                                    return false;
-                                };
-                                let Some(local_above_y) = world_y_to_local_y(nav_y + 1) else {
-                                    return false;
-                                };
-                                let Some(local_floor_y) = world_y_to_local_y(nav_y - 1) else {
-                                    return false;
-                                };
-
-                                let here = chunk.voxel(local_x, local_y, local_z);
-                                if block_properties.get(here.id).is_solid {
-                                    return false;
-                                }
-                                let above = chunk.voxel(local_x, local_above_y, local_z);
-                                if block_properties.get(above.id).is_solid {
-                                    return false;
-                                }
-
-                                let floor = chunk.voxel(local_x, local_floor_y, local_z);
-                                let Some(top_offset) =
-                                    Self::voxel_collision_top_offset(block_properties, &floor)
-                                else {
-                                    return false;
-                                };
-                                top_offset >= 1.0
-                            },
-                            4096,
-                        );
-
-                        if let Some(path) = path {
-                            if let Some(next) = path.get(1).copied() {
-                                (next.x as f64 + 0.5, next.z as f64 + 0.5)
                             } else {
                                 (player_x, player_z)
                             }
@@ -10685,13 +11412,15 @@ impl GameWorld {
                         }
                     } else {
                         (player_x, player_z)
-                    }
-                } else {
-                    (player_x, player_z)
-                };
+                    };
 
-                let dealt_damage = mob
-                    .update_with_target_visibility(tick, target_x, player_y, target_z, visibility);
+                let dealt_damage = mob.update_with_target_visibility(
+                    tick,
+                    target_x,
+                    player_center_y,
+                    target_z,
+                    visibility,
+                );
                 if dealt_damage {
                     // Check if this was a creeper explosion
                     if mob.mob_type.explodes() && mob.dead {
@@ -10703,53 +11432,166 @@ impl GameWorld {
                             explosion_radius *= 2.0;
                         }
 
-                        // Creeper explosion - high damage!
-                        total_damage += explosion_damage;
-                        exploded_creeper = true;
                         // Record explosion position for block destruction
                         explosion_positions.push((mob.x, mob.y, mob.z, explosion_radius));
+
+                        let explosion_center = glam::Vec3::new(
+                            mob.x as f32,
+                            (mob.y + mob.mob_type.size() as f64) as f32,
+                            mob.z as f32,
+                        );
+                        creeper_explosions.push((
+                            explosion_center,
+                            explosion_radius,
+                            explosion_damage,
+                        ));
+                        let player_center = glam::Vec3::new(
+                            player_x as f32,
+                            player_center_y as f32,
+                            player_z as f32,
+                        );
+                        let dist = (player_center - explosion_center).length();
+                        let falloff = (1.0 - dist / explosion_radius.max(0.1)).clamp(0.0, 1.0);
+                        let exposure = Self::explosion_exposure(
+                            chunks,
+                            block_properties,
+                            explosion_center,
+                            &player_aabb,
+                        );
+                        let effect = falloff * exposure;
+
+                        // Creeper explosion damage is distance + exposure based (simplified vanilla-ish).
+                        let damage = explosion_damage * effect;
+                        if damage > 0.0 {
+                            blast_damage += damage;
+                            exploded_creeper = true;
+                        }
+
+                        let dx = player_center.x - explosion_center.x;
+                        let dz = player_center.z - explosion_center.z;
+                        let dist_sq = dx * dx + dz * dz;
+                        if dist_sq > 1.0e-6 {
+                            let dist = dist_sq.sqrt();
+                            let strength = 1.2 * effect;
+                            player_knockback +=
+                                glam::Vec3::new(dx / dist, 0.0, dz / dist) * strength;
+                        }
                         tracing::info!("Creeper exploded!");
                     } else {
                         // Normal attack damage
-                        total_damage += mob.mob_type.attack_damage();
+                        let mob_radius = mob.mob_type.size() as f64;
+                        let mob_height = mob_radius * 2.0;
+                        let mob_center = glam::Vec3::new(
+                            mob.x as f32,
+                            (mob.y + mob_height * 0.5) as f32,
+                            mob.z as f32,
+                        );
+                        let player_center = glam::Vec3::new(
+                            player_x as f32,
+                            player_center_y as f32,
+                            player_z as f32,
+                        );
+                        if Self::line_of_sight_clear(
+                            chunks,
+                            block_properties,
+                            mob_center,
+                            player_center,
+                        ) {
+                            melee_damage += mob.mob_type.attack_damage();
+                            let dx = player_x - mob.x;
+                            let dz = player_z - mob.z;
+                            let dist_sq = dx * dx + dz * dz;
+                            if dist_sq > 1.0e-6 {
+                                let dist = dist_sq.sqrt();
+                                let strength = match mob.mob_type {
+                                    MobType::Spider => 0.5,
+                                    MobType::EnderDragon => 0.7,
+                                    _ => 0.4,
+                                };
+                                player_knockback +=
+                                    glam::Vec3::new((dx / dist) as f32, 0.0, (dz / dist) as f32)
+                                        * strength;
+                            }
+                        }
                     }
                 }
 
                 if can_fire_hostile_projectiles && dragon_fireballs_in_flight < 4 {
-                    if let Some(projectile) = mob
-                        .try_spawn_dragon_fireball(tick, player_x, player_y, player_z, visibility)
-                    {
-                        hostile_projectiles.push(projectile);
-                        dragon_fireballs_in_flight += 1;
+                    if let Some(projectile) = mob.try_spawn_dragon_fireball(
+                        tick,
+                        player_x,
+                        player_eye_y,
+                        player_z,
+                        visibility,
+                    ) {
+                        let origin = glam::Vec3::new(
+                            mob.x as f32,
+                            (mob.y + mob.mob_type.size() as f64) as f32,
+                            mob.z as f32,
+                        );
+                        if Self::line_of_sight_clear(chunks, block_properties, origin, player_pos) {
+                            hostile_projectiles.push(projectile);
+                            dragon_fireballs_in_flight += 1;
+                        }
                     }
                 }
 
                 if can_fire_hostile_projectiles && blaze_fireballs_in_flight < 8 {
-                    if let Some(projectile) =
-                        mob.try_spawn_blaze_fireball(tick, player_x, player_y, player_z, visibility)
-                    {
-                        hostile_projectiles.push(projectile);
-                        blaze_fireballs_in_flight += 1;
+                    if let Some(projectile) = mob.try_spawn_blaze_fireball(
+                        tick,
+                        player_x,
+                        player_eye_y,
+                        player_z,
+                        visibility,
+                    ) {
+                        let origin = glam::Vec3::new(
+                            mob.x as f32,
+                            (mob.y + mob.mob_type.size() as f64 * 0.8) as f32,
+                            mob.z as f32,
+                        );
+                        if Self::line_of_sight_clear(chunks, block_properties, origin, player_pos) {
+                            hostile_projectiles.push(projectile);
+                            blaze_fireballs_in_flight += 1;
+                        }
                     }
                 }
 
                 if can_fire_hostile_projectiles && ghast_fireballs_in_flight < 2 {
-                    if let Some(projectile) =
-                        mob.try_spawn_ghast_fireball(tick, player_x, player_y, player_z, visibility)
-                    {
-                        hostile_projectiles.push(projectile);
-                        ghast_fireballs_in_flight += 1;
+                    if let Some(projectile) = mob.try_spawn_ghast_fireball(
+                        tick,
+                        player_x,
+                        player_eye_y,
+                        player_z,
+                        visibility,
+                    ) {
+                        let origin = glam::Vec3::new(
+                            mob.x as f32,
+                            (mob.y + mob.mob_type.size() as f64 * 0.6) as f32,
+                            mob.z as f32,
+                        );
+                        if Self::line_of_sight_clear(chunks, block_properties, origin, player_pos) {
+                            hostile_projectiles.push(projectile);
+                            ghast_fireballs_in_flight += 1;
+                        }
                     }
                 }
 
                 if can_fire_hostile_projectiles
                     && arrows_in_flight < MAX_ARROW_PROJECTILES_IN_FLIGHT
                 {
-                    if let Some(projectile) =
-                        mob.try_spawn_skeleton_arrow(tick, player_x, player_y, player_z, visibility)
-                    {
-                        hostile_projectiles.push(projectile);
-                        arrows_in_flight += 1;
+                    if let Some(projectile) = mob.try_spawn_skeleton_arrow(
+                        tick,
+                        player_x,
+                        player_eye_y,
+                        player_z,
+                        visibility,
+                    ) {
+                        let origin =
+                            glam::Vec3::new(mob.x as f32, (mob.y + 1.4) as f32, mob.z as f32);
+                        if Self::line_of_sight_clear(chunks, block_properties, origin, player_pos) {
+                            hostile_projectiles.push(projectile);
+                            arrows_in_flight += 1;
+                        }
                     }
                 }
             } else {
@@ -10764,22 +11606,81 @@ impl GameWorld {
             self.projectiles.spawn(active_dimension, projectile);
         }
 
+        // Creeper explosions also damage/knock back nearby mobs (simplified vanilla-ish).
+        for (explosion_center, explosion_radius, explosion_damage) in creeper_explosions {
+            for mob in &mut self.mobs {
+                if mob.dimension != active_dimension || mob.dead {
+                    continue;
+                }
+
+                let mob_radius = mob.mob_type.size();
+                let mob_height = mob_radius * 2.0;
+                let mob_center =
+                    glam::Vec3::new(mob.x as f32, mob.y as f32 + mob_height * 0.5, mob.z as f32);
+                let dist = (mob_center - explosion_center).length();
+                if dist >= explosion_radius {
+                    continue;
+                }
+
+                let mob_aabb = AABB::from_center_size(
+                    mob_center,
+                    glam::Vec3::new(mob_radius * 2.0, mob_height, mob_radius * 2.0),
+                );
+                let falloff = (1.0 - dist / explosion_radius.max(0.1)).clamp(0.0, 1.0);
+                let exposure = Self::explosion_exposure(
+                    &self.chunks,
+                    &self.block_properties,
+                    explosion_center,
+                    &mob_aabb,
+                );
+                let effect = falloff * exposure;
+                let damage = explosion_damage * effect;
+                if damage <= 0.0 {
+                    continue;
+                }
+
+                mob.damage(damage);
+
+                let dx = mob_center.x - explosion_center.x;
+                let dz = mob_center.z - explosion_center.z;
+                let dist_sq = dx * dx + dz * dz;
+                if dist_sq > 1.0e-6 {
+                    let dist = dist_sq.sqrt();
+                    let strength = 0.9 * effect;
+                    mob.apply_knockback((dx / dist) as f64, (dz / dist) as f64, strength as f64);
+                }
+            }
+        }
+
         // Handle creeper explosion block destruction
         for (ex, ey, ez, radius) in explosion_positions {
             self.destroy_blocks_in_radius(ex, ey, ez, radius);
         }
 
+        self.apply_player_knockback_displacement(player_knockback, 1.2);
+
         // Apply accumulated damage to player (reduced by armor)
-        if total_damage > 0.0 && self.player_state == PlayerState::Alive {
-            // Armor reduces damage and takes durability hit
-            let actual_damage = self.player_armor.take_damage(total_damage);
+        let raw_damage = melee_damage + blast_damage;
+        if raw_damage > 0.0 && self.player_state == PlayerState::Alive {
+            // Armor reduces damage and takes durability hit (per damage kind).
+            let mut actual_damage = 0.0f32;
+            if melee_damage > 0.0 {
+                actual_damage += self
+                    .player_armor
+                    .take_damage(melee_damage, DamageKind::Generic);
+            }
+            if blast_damage > 0.0 {
+                actual_damage += self
+                    .player_armor
+                    .take_damage(blast_damage, DamageKind::Blast);
+            }
             self.player_health.damage(actual_damage);
 
             // Log armor reduction
-            if actual_damage < total_damage {
+            if actual_damage < raw_damage {
                 tracing::debug!(
                     "Armor reduced damage from {:.1} to {:.1}",
-                    total_damage,
+                    raw_damage,
                     actual_damage
                 );
             }
@@ -10940,6 +11841,23 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::Arrow,
                                     arrow_count,
+                                ));
+                            }
+
+                            // Vanilla-ish: small chance to drop a bow (deterministic).
+                            let pos_x = mob.x.floor() as i32;
+                            let pos_z = mob.z.floor() as i32;
+                            let roll = (tick as u32)
+                                .wrapping_add((pos_x as u32).wrapping_mul(29))
+                                .wrapping_add((pos_z as u32).wrapping_mul(53))
+                                % 100;
+                            if roll < 6 {
+                                loot_drops.push((
+                                    mob.x,
+                                    mob.y + 0.5,
+                                    mob.z,
+                                    DroppedItemType::Bow,
+                                    1,
                                 ));
                             }
                         }
@@ -11396,187 +12314,343 @@ impl GameWorld {
 
     /// Update all projectiles - physics, collisions, and damage
     fn update_projectiles(&mut self) {
+        #[derive(Clone, Copy)]
+        enum EntityHit {
+            Mob(usize),
+            Player,
+        }
+
         let active_dimension = self.active_dimension;
         let player_pos = self.renderer.camera().position;
-        let player_x = player_pos.x as f64;
-        let player_y = player_pos.y as f64;
-        let player_z = player_pos.z as f64;
         let has_fire_resistance = self.status_effects.has(StatusEffectType::FireResistance);
+        let mut arrow_pickups: Vec<(f64, f64, f64)> = Vec::new();
 
         // Update projectile physics
         self.projectiles.update(active_dimension);
 
-        // Check for block collisions (stick arrows)
+        let player_aabb = self.player_physics.get_aabb(player_pos);
+        let mut projectile_damage_generic_to_player = 0.0f32;
+        let mut projectile_damage_fire_to_player = 0.0f32;
+        let mut projectile_damage_projectile_to_player = 0.0f32;
+        let mut projectile_damage_source: Option<&'static str> = None;
+        let mut player_knockback = glam::Vec3::ZERO;
+
+        // Check for collisions (swept): entities before later block impacts.
         for projectile in &mut self.projectiles.projectiles {
             if projectile.dimension != active_dimension || projectile.stuck || projectile.dead {
                 continue;
             }
 
-            // Check if projectile is inside a solid block
-            let block_x = projectile.x.floor() as i32;
-            let block_y = projectile.y.floor() as i32;
-            let block_z = projectile.z.floor() as i32;
+            let from = (projectile.prev_x, projectile.prev_y, projectile.prev_z);
+            let to = (projectile.x, projectile.y, projectile.z);
+            let seg_dx = to.0 - from.0;
+            let seg_dy = to.1 - from.1;
+            let seg_dz = to.2 - from.2;
+            let seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy + seg_dz * seg_dz;
 
-            let Some(local_y) = world_y_to_local_y(block_y) else {
-                projectile.stick();
-                continue;
-            };
+            let block_hit = Self::projectile_first_block_hit_along_segment(
+                &self.chunks,
+                &self.block_properties,
+                from,
+                to,
+            );
 
-            let chunk_x = block_x.div_euclid(CHUNK_SIZE_X as i32);
-            let chunk_z = block_z.div_euclid(CHUNK_SIZE_Z as i32);
-            let local_x = block_x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-            let local_z = block_z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            let block_hit_t = block_hit.map(|hit| {
+                if seg_len_sq <= 1.0e-18 {
+                    0.0_f32
+                } else {
+                    let hx = hit.0 - from.0;
+                    let hy = hit.1 - from.1;
+                    let hz = hit.2 - from.2;
+                    let t =
+                        ((hx * seg_dx + hy * seg_dy + hz * seg_dz) / seg_len_sq).clamp(0.0, 1.0);
+                    t as f32
+                }
+            });
+            let max_t = block_hit_t.unwrap_or(1.0);
+            let projectile_hit_radius = projectile.projectile_type.hitbox_radius() as f32;
+            let segment_from = glam::Vec3::new(from.0 as f32, from.1 as f32, from.2 as f32);
+            let segment_to = glam::Vec3::new(to.0 as f32, to.1 as f32, to.2 as f32);
 
-            if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
-                let voxel = chunk.voxel(local_x, local_y, local_z);
-                if voxel.id != BLOCK_AIR {
-                    // Hit a block
-                    match projectile.projectile_type {
-                        mdminecraft_world::ProjectileType::Arrow => projectile.stick(),
-                        mdminecraft_world::ProjectileType::SplashPotion(_)
-                        | mdminecraft_world::ProjectileType::EnderPearl
-                        | mdminecraft_world::ProjectileType::DragonFireball
-                        | mdminecraft_world::ProjectileType::BlazeFireball
-                        | mdminecraft_world::ProjectileType::GhastFireball => projectile.hit(),
+            let mut best_mob_hit: Option<(usize, u64, f32)> = None;
+            {
+                for (mob_index, mob) in self.mobs.iter().enumerate() {
+                    if mob.dimension != active_dimension || mob.dead {
+                        continue;
+                    }
+
+                    let mob_radius = mob.mob_type.size();
+                    let mob_height = mob_radius * 2.0;
+                    let center = glam::Vec3::new(
+                        mob.x as f32,
+                        mob.y as f32 + mob_height * 0.5,
+                        mob.z as f32,
+                    );
+                    let size = glam::Vec3::new(mob_radius * 2.0, mob_height, mob_radius * 2.0);
+                    let mob_aabb =
+                        AABB::from_center_size(center, size).expand(projectile_hit_radius);
+
+                    let Some(t) = mob_aabb.segment_entry_fraction(segment_from, segment_to) else {
+                        continue;
+                    };
+
+                    if t > max_t + 1.0e-4 {
+                        continue;
+                    }
+
+                    match best_mob_hit {
+                        None => best_mob_hit = Some((mob_index, mob.id, t)),
+                        Some((_, best_id, best_t)) => {
+                            if t < best_t - 1.0e-4
+                                || ((t - best_t).abs() <= 1.0e-4
+                                    && mob.id != 0
+                                    && (best_id == 0 || mob.id < best_id))
+                            {
+                                best_mob_hit = Some((mob_index, mob.id, t));
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        // Check for mob collisions (arrows deal damage, splash potions trigger on hit)
-        for projectile in &mut self.projectiles.projectiles {
-            if projectile.dimension != active_dimension || projectile.stuck || projectile.dead {
-                continue;
+            let player_hit_t = match projectile.projectile_type {
+                mdminecraft_world::ProjectileType::Arrow
+                | mdminecraft_world::ProjectileType::DragonFireball
+                | mdminecraft_world::ProjectileType::BlazeFireball
+                | mdminecraft_world::ProjectileType::GhastFireball => {
+                    let player_hit_aabb = player_aabb.expand(projectile_hit_radius);
+                    player_hit_aabb
+                        .segment_entry_fraction(segment_from, segment_to)
+                        .filter(|t| *t <= max_t + 1.0e-4)
+                }
+                _ => None,
+            };
+
+            let mut entity_hit: Option<(EntityHit, f32)> =
+                best_mob_hit.map(|hit| (EntityHit::Mob(hit.0), hit.2));
+            if let Some(t) = player_hit_t {
+                let replace = match entity_hit {
+                    None => true,
+                    Some((EntityHit::Mob(_), best_t)) => t < best_t - 1.0e-4,
+                    Some((EntityHit::Player, best_t)) => t < best_t - 1.0e-4,
+                };
+                if replace {
+                    entity_hit = Some((EntityHit::Player, t));
+                }
             }
 
-            for mob in &mut self.mobs {
-                if mob.dimension != active_dimension || mob.dead {
-                    continue;
-                }
+            if let Some((hit, t)) = entity_hit {
+                projectile.x = from.0 + seg_dx * t as f64;
+                projectile.y = from.1 + seg_dy * t as f64;
+                projectile.z = from.2 + seg_dz * t as f64;
 
-                // Simple distance-based hit detection
-                let mob_radius = mob.mob_type.size() as f64;
-                let mob_height = mob_radius * 2.0;
+                match hit {
+                    EntityHit::Mob(mob_index) => {
+                        let mob = &mut self.mobs[mob_index];
+                        if mob.dimension != active_dimension || mob.dead {
+                            continue;
+                        }
 
-                // Check if projectile is within mob bounds
-                let dx = projectile.x - mob.x;
-                let dy = projectile.y - (mob.y + mob_height / 2.0);
-                let dz = projectile.z - mob.z;
+                        match projectile.projectile_type {
+                            mdminecraft_world::ProjectileType::Arrow => {
+                                // Arrow deals damage
+                                let damage = projectile.damage();
+                                mob.damage(damage);
+                                projectile.hit();
 
-                let horizontal_dist = (dx * dx + dz * dz).sqrt();
-                let vertical_dist = dy.abs();
+                                // Apply knockback from arrow direction
+                                let knock_dir_x = projectile.vel_x;
+                                let knock_dir_z = projectile.vel_z;
+                                let knock_len =
+                                    (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
+                                if knock_len > 0.001 {
+                                    let knockback_strength =
+                                        0.3 + 0.25 * (projectile.punch_level as f64);
+                                    mob.apply_knockback(
+                                        knock_dir_x / knock_len,
+                                        knock_dir_z / knock_len,
+                                        knockback_strength,
+                                    );
+                                }
 
-                if horizontal_dist < mob_radius + 0.3 && vertical_dist < mob_height / 2.0 + 0.3 {
-                    match projectile.projectile_type {
-                        mdminecraft_world::ProjectileType::Arrow => {
-                            // Arrow deals damage
-                            let damage = projectile.damage();
-                            mob.damage(damage);
-                            projectile.hit();
+                                if projectile.flame {
+                                    mob.set_on_fire(100);
+                                }
 
-                            // Apply knockback from arrow direction
-                            let knock_dir_x = projectile.vel_x;
-                            let knock_dir_z = projectile.vel_z;
-                            let knock_len =
-                                (knock_dir_x * knock_dir_x + knock_dir_z * knock_dir_z).sqrt();
-                            if knock_len > 0.001 {
-                                mob.apply_knockback(
-                                    knock_dir_x / knock_len,
-                                    knock_dir_z / knock_len,
-                                    0.3,
+                                tracing::debug!(
+                                    "Arrow hit {:?} for {:.1} damage",
+                                    mob.mob_type,
+                                    damage
                                 );
                             }
-
-                            tracing::debug!(
-                                "Arrow hit {:?} for {:.1} damage",
-                                mob.mob_type,
-                                damage
-                            );
-                        }
-                        mdminecraft_world::ProjectileType::SplashPotion(_)
-                        | mdminecraft_world::ProjectileType::EnderPearl => {
-                            projectile.hit();
-                            tracing::debug!(
-                                "{:?} hit {:?}",
-                                projectile.projectile_type,
-                                mob.mob_type
-                            );
-                        }
-                        mdminecraft_world::ProjectileType::DragonFireball => {
-                            if mob.mob_type != MobType::EnderDragon {
-                                let damage = projectile.damage();
-                                mob.damage(damage);
+                            mdminecraft_world::ProjectileType::SplashPotion(_)
+                            | mdminecraft_world::ProjectileType::EnderPearl => {
+                                projectile.hit();
+                                tracing::debug!(
+                                    "{:?} hit {:?}",
+                                    projectile.projectile_type,
+                                    mob.mob_type
+                                );
                             }
-                            projectile.hit();
-                        }
-                        mdminecraft_world::ProjectileType::BlazeFireball => {
-                            if mob.mob_type != MobType::Blaze {
-                                let damage = projectile.damage();
-                                mob.damage(damage);
-                                mob.set_on_fire(60);
+                            mdminecraft_world::ProjectileType::DragonFireball => {
+                                if mob.mob_type != MobType::EnderDragon {
+                                    let damage = projectile.damage();
+                                    mob.damage(damage);
+                                }
+                                projectile.hit();
                             }
-                            projectile.hit();
-                        }
-                        mdminecraft_world::ProjectileType::GhastFireball => {
-                            if mob.mob_type != MobType::Ghast {
-                                let damage = projectile.damage();
-                                mob.damage(damage);
-                                mob.set_on_fire(100);
+                            mdminecraft_world::ProjectileType::BlazeFireball => {
+                                if mob.mob_type != MobType::Blaze {
+                                    let damage = projectile.damage();
+                                    mob.damage(damage);
+                                    mob.set_on_fire(60);
+                                }
+                                projectile.hit();
                             }
-                            projectile.hit();
+                            mdminecraft_world::ProjectileType::GhastFireball => {
+                                projectile.hit();
+                            }
                         }
                     }
-                    break; // Only hit one mob per projectile
-                }
-            }
-        }
+                    EntityHit::Player => {
+                        if projectile.projectile_type
+                            == mdminecraft_world::ProjectileType::GhastFireball
+                        {
+                            // Ghast fireball damage/knockback is handled via the explosion AoE pass
+                            // so entities don't take a direct-hit double dip.
+                            projectile.hit();
+                            continue;
+                        }
 
-        // Check for player collisions (arrows + hostile mob fireballs).
-        let mut projectile_damage_to_player = 0.0f32;
-        let mut projectile_damage_source: Option<&'static str> = None;
-        for projectile in &mut self.projectiles.projectiles {
-            if projectile.dimension != active_dimension || projectile.stuck || projectile.dead {
+                        let (source, ignite_ticks, damage_kind) = match projectile.projectile_type {
+                            mdminecraft_world::ProjectileType::Arrow => {
+                                ("Arrow", None, DamageKind::Projectile)
+                            }
+                            mdminecraft_world::ProjectileType::DragonFireball => {
+                                ("Ender Dragon", None, DamageKind::Generic)
+                            }
+                            mdminecraft_world::ProjectileType::BlazeFireball => {
+                                ("Blaze", Some(100), DamageKind::Fire)
+                            }
+                            _ => continue,
+                        };
+
+                        let ignite_ticks = if projectile.projectile_type
+                            == mdminecraft_world::ProjectileType::Arrow
+                            && projectile.flame
+                        {
+                            Some(100)
+                        } else {
+                            ignite_ticks
+                        };
+
+                        let damage = projectile.damage();
+                        match damage_kind {
+                            DamageKind::Generic => projectile_damage_generic_to_player += damage,
+                            DamageKind::Fire => projectile_damage_fire_to_player += damage,
+                            DamageKind::Blast => projectile_damage_generic_to_player += damage,
+                            DamageKind::Projectile => {
+                                projectile_damage_projectile_to_player += damage
+                            }
+                            DamageKind::Fall => projectile_damage_generic_to_player += damage,
+                        }
+                        projectile.hit();
+                        projectile_damage_source.get_or_insert(source);
+
+                        let knockback_strength = match projectile.projectile_type {
+                            mdminecraft_world::ProjectileType::Arrow => {
+                                0.3 + 0.25 * (projectile.punch_level as f32)
+                            }
+                            mdminecraft_world::ProjectileType::DragonFireball => 0.4,
+                            mdminecraft_world::ProjectileType::BlazeFireball => 0.35,
+                            _ => 0.0,
+                        };
+                        if knockback_strength > 0.0 {
+                            let mut dir =
+                                glam::Vec2::new(projectile.vel_x as f32, projectile.vel_z as f32);
+                            if dir.length_squared() < 1.0e-8 {
+                                dir = glam::Vec2::new(seg_dx as f32, seg_dz as f32);
+                            }
+                            if dir.length_squared() > 1.0e-8 {
+                                let dir = dir.normalize();
+                                player_knockback +=
+                                    glam::Vec3::new(dir.x, 0.0, dir.y) * knockback_strength;
+                            }
+                        }
+
+                        if let Some(ticks) = ignite_ticks {
+                            if !has_fire_resistance {
+                                self.player_health.ignite(ticks);
+                            }
+                        }
+                    }
+                }
+
                 continue;
             }
 
-            let (source, ignite_ticks) = match projectile.projectile_type {
-                mdminecraft_world::ProjectileType::Arrow => ("Arrow", None),
-                mdminecraft_world::ProjectileType::DragonFireball => ("Ender Dragon", None),
-                mdminecraft_world::ProjectileType::BlazeFireball => ("Blaze", Some(100)),
-                mdminecraft_world::ProjectileType::GhastFireball => ("Ghast", Some(160)),
-                _ => continue,
+            let Some((hit_x, hit_y, hit_z)) = block_hit else {
+                continue;
             };
 
-            let dx = projectile.x - player_x;
-            let dy = projectile.y - player_y;
-            let dz = projectile.z - player_z;
-            let dist_sq = dx * dx + dy * dy + dz * dz;
-            let hit_radius = projectile.projectile_type.hitbox_radius() + 0.6;
+            projectile.x = hit_x;
+            projectile.y = hit_y;
+            projectile.z = hit_z;
 
-            if dist_sq <= hit_radius * hit_radius {
-                projectile_damage_to_player += projectile.damage();
-                projectile.hit();
-                projectile_damage_source.get_or_insert(source);
-
-                if let Some(ticks) = ignite_ticks {
-                    if !has_fire_resistance {
-                        self.player_health.ignite(ticks);
+            // Hit a block
+            match projectile.projectile_type {
+                mdminecraft_world::ProjectileType::Arrow => {
+                    projectile.stick();
+                    projectile.dead = true;
+                    if projectile.can_pick_up {
+                        arrow_pickups.push((projectile.x, projectile.y, projectile.z));
                     }
                 }
+                mdminecraft_world::ProjectileType::SplashPotion(_)
+                | mdminecraft_world::ProjectileType::EnderPearl
+                | mdminecraft_world::ProjectileType::DragonFireball
+                | mdminecraft_world::ProjectileType::BlazeFireball
+                | mdminecraft_world::ProjectileType::GhastFireball => projectile.hit(),
             }
         }
 
-        if projectile_damage_to_player > 0.0
+        for (x, y, z) in arrow_pickups {
+            self.item_manager
+                .spawn_item(active_dimension, x, y, z, DroppedItemType::Arrow, 1);
+        }
+
+        let raw_projectile_damage = projectile_damage_generic_to_player
+            + projectile_damage_fire_to_player
+            + projectile_damage_projectile_to_player;
+        if raw_projectile_damage > 0.0
             && self.player_state == PlayerState::Alive
             && !self.player_health.is_dead()
         {
-            let actual_damage = self.player_armor.take_damage(projectile_damage_to_player);
+            let mut actual_damage = 0.0f32;
+            if projectile_damage_generic_to_player > 0.0 {
+                actual_damage += self
+                    .player_armor
+                    .take_damage(projectile_damage_generic_to_player, DamageKind::Generic);
+            }
+            if projectile_damage_fire_to_player > 0.0 {
+                actual_damage += self
+                    .player_armor
+                    .take_damage(projectile_damage_fire_to_player, DamageKind::Fire);
+            }
+            if projectile_damage_projectile_to_player > 0.0 {
+                actual_damage += self.player_armor.take_damage(
+                    projectile_damage_projectile_to_player,
+                    DamageKind::Projectile,
+                );
+            }
             self.player_health.damage(actual_damage);
             if self.player_health.is_dead() {
                 let source = projectile_damage_source.unwrap_or("a projectile");
                 self.handle_death(&format!("Slain by {}", source));
             }
         }
+
+        self.apply_player_knockback_displacement(player_knockback, 1.0);
 
         // Handle ender pearl teleport for projectiles that just broke.
         let mut ender_pearl_impact: Option<(f64, f64, f64)> = None;
@@ -11603,7 +12677,8 @@ impl GameWorld {
                     self.player_physics.last_ground_y = feet.y;
 
                     // Vanilla-ish: ender pearls deal 5 damage (2.5 hearts).
-                    self.player_health.damage(5.0);
+                    let actual_damage = self.player_armor.take_damage(5.0, DamageKind::Fall);
+                    self.player_health.damage(actual_damage);
                     if self.player_health.is_dead() {
                         self.handle_death("Killed by Ender Pearl");
                     }
@@ -11703,9 +12778,11 @@ impl GameWorld {
             );
         }
 
-        // Ghast fireballs explode and can destroy blocks (vanilla-ish; simplified).
-        let ghast_fireball_radius = 2.0_f32;
-        let ghast_fireball_impacts: Vec<(f64, f64, f64)> = self
+        // Ghast fireballs explode (AoE damage + knockback + blocks).
+        let ghast_fireball_block_radius = 2.0_f32;
+        let ghast_fireball_effect_radius =
+            mdminecraft_world::ProjectileType::GhastFireball.effect_radius() as f32;
+        let ghast_fireball_impacts: Vec<(glam::Vec3, glam::Vec3, f32)> = self
             .projectiles
             .projectiles
             .iter()
@@ -11719,11 +12796,127 @@ impl GameWorld {
                 if projectile.projectile_type != mdminecraft_world::ProjectileType::GhastFireball {
                     return None;
                 }
-                Some((projectile.x, projectile.y, projectile.z))
+                Some((
+                    glam::Vec3::new(
+                        projectile.x as f32,
+                        projectile.y as f32,
+                        projectile.z as f32,
+                    ),
+                    glam::Vec3::new(
+                        projectile.vel_x as f32,
+                        projectile.vel_y as f32,
+                        projectile.vel_z as f32,
+                    ),
+                    projectile.damage(),
+                ))
             })
             .collect();
-        for (x, y, z) in ghast_fireball_impacts {
-            self.destroy_blocks_in_radius(x, y, z, ghast_fireball_radius);
+        for (impact_pos, impact_vel, base_damage) in ghast_fireball_impacts {
+            let explosion_center = Self::nudge_explosion_origin_out_of_collision(
+                &self.chunks,
+                &self.block_properties,
+                impact_pos,
+                impact_vel,
+            );
+
+            self.destroy_blocks_in_radius(
+                explosion_center.x as f64,
+                explosion_center.y as f64,
+                explosion_center.z as f64,
+                ghast_fireball_block_radius,
+            );
+
+            let player_pos = self.renderer.camera().position;
+            let player_aabb = self.player_physics.get_aabb(player_pos);
+            let player_center = (player_aabb.min + player_aabb.max) * 0.5;
+            let dist = (player_center - explosion_center).length();
+            if dist < ghast_fireball_effect_radius {
+                let falloff = (1.0 - dist / ghast_fireball_effect_radius.max(0.1)).clamp(0.0, 1.0);
+                let exposure = Self::explosion_exposure(
+                    &self.chunks,
+                    &self.block_properties,
+                    explosion_center,
+                    &player_aabb,
+                );
+                let effect = falloff * exposure;
+
+                let damage = base_damage * effect;
+                if damage > 0.0
+                    && self.player_state == PlayerState::Alive
+                    && !self.player_health.is_dead()
+                {
+                    let actual_damage = self.player_armor.take_damage(damage, DamageKind::Blast);
+                    self.player_health.damage(actual_damage);
+                    if self.player_health.is_dead() {
+                        self.handle_death("Blown up by Ghast");
+                    } else if !self.status_effects.has(StatusEffectType::FireResistance) {
+                        self.player_health.ignite(160);
+                    }
+                }
+
+                if effect > 0.0 {
+                    let dx = player_center.x - explosion_center.x;
+                    let dz = player_center.z - explosion_center.z;
+                    let dist_sq = dx * dx + dz * dz;
+                    if dist_sq > 1.0e-6 {
+                        let dist = dist_sq.sqrt();
+                        let strength = 1.1 * effect;
+                        self.apply_player_knockback_displacement(
+                            glam::Vec3::new(dx / dist, 0.0, dz / dist) * strength,
+                            1.4,
+                        );
+                    }
+                }
+            }
+
+            let chunks = &self.chunks;
+            let block_properties = &self.block_properties;
+            for mob in &mut self.mobs {
+                if mob.dimension != active_dimension || mob.dead || mob.mob_type == MobType::Ghast {
+                    continue;
+                }
+
+                let mob_radius = mob.mob_type.size();
+                let mob_height = mob_radius * 2.0;
+                let mob_center = glam::Vec3::new(
+                    mob.x as f32,
+                    (mob.y + mob_height as f64 * 0.5) as f32,
+                    mob.z as f32,
+                );
+                let dist = (mob_center - explosion_center).length();
+                if dist >= ghast_fireball_effect_radius {
+                    continue;
+                }
+
+                let mob_aabb = AABB::from_center_size(
+                    mob_center,
+                    glam::Vec3::new(mob_radius * 2.0, mob_height, mob_radius * 2.0),
+                );
+                let falloff = (1.0 - dist / ghast_fireball_effect_radius.max(0.1)).clamp(0.0, 1.0);
+                let exposure =
+                    Self::explosion_exposure(chunks, block_properties, explosion_center, &mob_aabb);
+                let effect = falloff * exposure;
+                let damage = base_damage * effect;
+                if damage <= 0.0 {
+                    continue;
+                }
+
+                mob.damage(damage);
+                mob.set_on_fire(100);
+
+                let dx = mob_center.x - explosion_center.x;
+                let dz = mob_center.z - explosion_center.z;
+                let dist_sq = dx * dx + dz * dz;
+                if dist_sq > 1.0e-6 {
+                    let dist = dist_sq.sqrt();
+                    let strength = 0.9 * effect;
+                    mob.apply_knockback(
+                        dx as f64 / dist as f64,
+                        dz as f64 / dist as f64,
+                        strength as f64,
+                    );
+                }
+            }
         }
 
         // Check for player picking up stuck arrows
@@ -11914,6 +13107,26 @@ impl GameWorld {
         // Attack reach (slightly more than block reach for mobs)
         const ATTACK_REACH: f32 = 4.0;
 
+        // Prevent attacking mobs through blocks: find the first solid collision along the attack ray.
+        let attack_end = origin + dir * ATTACK_REACH;
+        let blocking_distance = Self::projectile_first_block_hit_along_segment(
+            &self.chunks,
+            &self.block_properties,
+            (origin.x as f64, origin.y as f64, origin.z as f64),
+            (
+                attack_end.x as f64,
+                attack_end.y as f64,
+                attack_end.z as f64,
+            ),
+        )
+        .map(|hit| {
+            let dx = hit.0 as f32 - origin.x;
+            let dy = hit.1 as f32 - origin.y;
+            let dz = hit.2 as f32 - origin.z;
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        })
+        .unwrap_or(f32::INFINITY);
+
         // Check each mob to see if the ray hits it
         let mut closest_hit: Option<(usize, f32)> = None;
 
@@ -11940,6 +13153,7 @@ impl GameWorld {
             if let Some(t) = ray_aabb_intersect(origin, dir, mob_min, mob_max) {
                 if t > 0.0
                     && t < ATTACK_REACH
+                    && t < blocking_distance - 1.0e-4
                     && (closest_hit.is_none() || t < closest_hit.unwrap().1)
                 {
                     closest_hit = Some((idx, t));
@@ -13173,11 +14387,12 @@ impl GameWorld {
         let player_pos = camera.position;
         let yaw = camera.yaw;
         let pitch = camera.pitch;
+        let base_y = (player_pos.y - 1.5) as f64;
 
         // Create the splash potion projectile
         let projectile = Projectile::throw_splash_potion(
             player_pos.x as f64,
-            player_pos.y as f64,
+            base_y,
             player_pos.z as f64,
             yaw,
             pitch,
@@ -13196,9 +14411,10 @@ impl GameWorld {
         let camera = self.renderer.camera();
         let player_pos = camera.position;
 
+        let base_y = (player_pos.y - 1.5) as f64;
         let projectile = Projectile::throw_ender_pearl(
             player_pos.x as f64,
-            player_pos.y as f64,
+            base_y,
             player_pos.z as f64,
             camera.yaw,
             camera.pitch,
@@ -14283,7 +15499,10 @@ fn try_bucket_interaction(
                 return Some((CORE_ITEM_BUCKET, vec![place_pos]));
             }
 
-            if voxel.id != BLOCK_AIR && get_fluid_type(voxel.id).is_none() {
+            if voxel.id != BLOCK_AIR
+                && voxel.id != mdminecraft_world::BLOCK_FIRE
+                && get_fluid_type(voxel.id).is_none()
+            {
                 return None;
             }
 
@@ -16073,6 +17292,14 @@ fn enchantment_type_to_id(enchantment_type: EnchantmentType) -> u8 {
         EnchantmentType::ProjectileProtection => 10,
         EnchantmentType::Unbreaking => 11,
         EnchantmentType::Mending => 12,
+        EnchantmentType::FeatherFalling => 13,
+        EnchantmentType::Respiration => 14,
+        EnchantmentType::Power => 15,
+        EnchantmentType::Punch => 16,
+        EnchantmentType::Flame => 17,
+        EnchantmentType::Infinity => 18,
+        EnchantmentType::AquaAffinity => 19,
+        EnchantmentType::DepthStrider => 20,
     }
 }
 
@@ -16090,6 +17317,14 @@ fn enchantment_type_from_id(id: u8) -> Option<EnchantmentType> {
         10 => Some(EnchantmentType::ProjectileProtection),
         11 => Some(EnchantmentType::Unbreaking),
         12 => Some(EnchantmentType::Mending),
+        13 => Some(EnchantmentType::FeatherFalling),
+        14 => Some(EnchantmentType::Respiration),
+        15 => Some(EnchantmentType::Power),
+        16 => Some(EnchantmentType::Punch),
+        17 => Some(EnchantmentType::Flame),
+        18 => Some(EnchantmentType::Infinity),
+        19 => Some(EnchantmentType::AquaAffinity),
+        20 => Some(EnchantmentType::DepthStrider),
         _ => None,
     }
 }
@@ -23615,7 +24850,7 @@ fn render_enchanting_table(
                     );
                 } else {
                     ui.label(
-                        egui::RichText::new("Select an enchantable tool in your hotbar")
+                        egui::RichText::new("Select an enchantable item in your hotbar")
                             .color(egui::Color32::YELLOW),
                     );
                 }
@@ -23770,7 +25005,23 @@ fn core_item_to_enchanting_id(stack: &ItemStack) -> Option<u16> {
                     .saturating_add(material_index),
             )
         }
-        ItemType::Item(1) => Some(mdminecraft_world::BOW_ID),
+        ItemType::Item(id) => match id {
+            1 => Some(mdminecraft_world::BOW_ID),
+            // Armor core item IDs (see `armor_piece_from_core_stack` for the core id mapping).
+            10 => Some(mdminecraft_world::ARMOR_ID_START + 1), // iron_helmet
+            11 => Some(mdminecraft_world::ARMOR_ID_START + 5), // iron_chestplate
+            12 => Some(mdminecraft_world::ARMOR_ID_START + 9), // iron_leggings
+            13 => Some(mdminecraft_world::ARMOR_ID_START + 13), // iron_boots
+            20 => Some(mdminecraft_world::ARMOR_ID_START),     // leather_helmet
+            21 => Some(mdminecraft_world::ARMOR_ID_START + 4), // leather_chestplate
+            22 => Some(mdminecraft_world::ARMOR_ID_START + 8), // leather_leggings
+            23 => Some(mdminecraft_world::ARMOR_ID_START + 12), // leather_boots
+            30 => Some(mdminecraft_world::ARMOR_ID_START + 3), // diamond_helmet
+            31 => Some(mdminecraft_world::ARMOR_ID_START + 7), // diamond_chestplate
+            32 => Some(mdminecraft_world::ARMOR_ID_START + 11), // diamond_leggings
+            33 => Some(mdminecraft_world::ARMOR_ID_START + 15), // diamond_boots
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -26477,6 +27728,408 @@ mod tests {
     }
 
     #[test]
+    fn projectile_block_collision_respects_thin_and_tall_shapes() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::STONE_SLAB,
+                state: 0, // bottom slab
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::TRAPDOOR,
+                state: mdminecraft_world::set_trapdoor_open(0, true),
+                ..Default::default()
+            },
+        );
+        let door_state =
+            mdminecraft_world::set_door_open(mdminecraft_world::Facing::North.to_state(), true);
+        chunk.set_voxel(
+            2,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
+                state: door_state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            3,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_FENCE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        // Bottom slab occupies y..y+0.5, so projectiles above it should pass.
+        assert!(!GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            0.5,
+            64.75,
+            0.5,
+        ));
+        assert!(GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            0.5,
+            64.25,
+            0.5,
+        ));
+
+        // Open trapdoor becomes a thin vertical plane at the north edge (low Z, default facing).
+        assert!(GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            1.5,
+            64.5,
+            0.05,
+        ));
+        assert!(!GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            1.5,
+            64.5,
+            0.95,
+        ));
+
+        // Open north-facing door swings left (west edge, low X).
+        assert!(GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            2.05,
+            64.5,
+            0.5,
+        ));
+        assert!(!GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            2.95,
+            64.5,
+            0.5,
+        ));
+
+        // Fence collision extends to y+1.5, so points in the upper half of the next voxel collide.
+        assert!(GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            3.5,
+            65.4,
+            0.5,
+        ));
+        assert!(!GameWorld::projectile_point_collides_with_world(
+            &chunks,
+            &block_properties,
+            3.5,
+            65.6,
+            0.5,
+        ));
+    }
+
+    #[test]
+    fn projectile_segment_collision_detects_thin_door_planes() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        let door_state =
+            mdminecraft_world::set_door_open(mdminecraft_world::Facing::North.to_state(), true);
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER,
+                state: door_state,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let from = (0.9, 64.5, 0.5);
+        let to = (2.0, 64.5, 0.5);
+
+        assert!(
+            !GameWorld::projectile_point_collides_with_world(
+                &chunks,
+                &block_properties,
+                to.0,
+                to.1,
+                to.2
+            ),
+            "Point collision at the end of the tick should miss thin geometry"
+        );
+
+        let hit = GameWorld::projectile_first_block_hit_along_segment(
+            &chunks,
+            &block_properties,
+            from,
+            to,
+        )
+        .expect("Expected the swept segment to hit the door plane");
+        assert!(
+            (1.0..=1.25).contains(&hit.0),
+            "Expected hit x to be within the door plane, got {}",
+            hit.0
+        );
+        assert!((hit.1 - 64.5).abs() < 1.0e-6);
+        assert!((hit.2 - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn aabb_segment_entry_fraction_detects_tunneling() {
+        let aabb = AABB::from_center_size(glam::Vec3::ZERO, glam::Vec3::new(1.2, 1.2, 1.2));
+        let from = glam::Vec3::new(-2.0, 0.0, 0.0);
+        let to = glam::Vec3::new(2.0, 0.0, 0.0);
+        let t = aabb
+            .segment_entry_fraction(from, to)
+            .expect("Segment should hit the AABB");
+        assert!((t - 0.35).abs() < 1.0e-4, "Expected t≈0.35, got {}", t);
+    }
+
+    #[test]
+    fn line_of_sight_respects_collision_shapes() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let from = glam::Vec3::new(0.5, 64.8, 0.5);
+        let to = glam::Vec3::new(2.5, 64.8, 0.5);
+        assert!(
+            !GameWorld::line_of_sight_clear(&chunks, &block_properties, from, to),
+            "Full blocks should block line of sight"
+        );
+
+        // Replace the block with a bottom slab (0..0.5): the ray above the slab should pass.
+        chunks
+            .get_mut(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .set_voxel(
+                1,
+                local_y(64),
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::STONE_SLAB,
+                    state: 0,
+                    ..Default::default()
+                },
+            );
+
+        assert!(
+            GameWorld::line_of_sight_clear(&chunks, &block_properties, from, to),
+            "Rays above partial-height collision should not be blocked"
+        );
+
+        let low_from = glam::Vec3::new(0.5, 64.25, 0.5);
+        let low_to = glam::Vec3::new(2.5, 64.25, 0.5);
+        assert!(
+            !GameWorld::line_of_sight_clear(&chunks, &block_properties, low_from, low_to),
+            "Rays through partial-height collision should be blocked"
+        );
+
+        // Replace with a fence: collision extends to 1.5 blocks tall.
+        chunks
+            .get_mut(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .set_voxel(
+                1,
+                local_y(64),
+                0,
+                Voxel {
+                    id: mdminecraft_world::interactive_blocks::OAK_FENCE,
+                    ..Default::default()
+                },
+            );
+
+        let fence_from = glam::Vec3::new(0.5, 65.4, 0.5);
+        let fence_to = glam::Vec3::new(2.5, 65.4, 0.5);
+        assert!(
+            !GameWorld::line_of_sight_clear(&chunks, &block_properties, fence_from, fence_to),
+            "Tall collision should block line of sight above the base voxel"
+        );
+
+        let above_fence_from = glam::Vec3::new(0.5, 65.6, 0.5);
+        let above_fence_to = glam::Vec3::new(2.5, 65.6, 0.5);
+        assert!(
+            GameWorld::line_of_sight_clear(
+                &chunks,
+                &block_properties,
+                above_fence_from,
+                above_fence_to
+            ),
+            "Line of sight above tall collision should be clear"
+        );
+    }
+
+    #[test]
+    fn explosion_exposure_is_reduced_by_walls() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        // Two-block-high wall at x=1 blocks all rays from x=0.5 to x~2.5.
+        for world_y in [64, 65] {
+            chunk.set_voxel(
+                1,
+                local_y(world_y),
+                0,
+                Voxel {
+                    id: mdminecraft_world::BLOCK_STONE,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let explosion_center = glam::Vec3::new(0.5, 64.9, 0.5);
+        let player_aabb = AABB {
+            min: glam::Vec3::new(2.2, 64.0, 0.2),
+            max: glam::Vec3::new(2.8, 65.8, 0.8),
+        };
+
+        let blocked = GameWorld::explosion_exposure(
+            &chunks,
+            &block_properties,
+            explosion_center,
+            &player_aabb,
+        );
+        assert!(
+            blocked < 0.01,
+            "Expected near-zero exposure, got {}",
+            blocked
+        );
+
+        let clear = GameWorld::explosion_exposure(
+            &std::collections::HashMap::new(),
+            &block_properties,
+            explosion_center,
+            &player_aabb,
+        );
+        assert!(clear > 0.99, "Expected near-full exposure, got {}", clear);
+    }
+
+    #[test]
+    fn explosion_origin_is_nudged_out_of_solid_blocks() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let origin = glam::Vec3::new(1.5, 64.5, 0.5);
+        assert!(
+            GameWorld::projectile_point_collides_with_world(
+                &chunks,
+                &block_properties,
+                origin.x as f64,
+                origin.y as f64,
+                origin.z as f64
+            ),
+            "Precondition: origin should start inside collision"
+        );
+
+        let incoming_velocity = glam::Vec3::new(1.0, 0.0, 0.0);
+        let adjusted = GameWorld::nudge_explosion_origin_out_of_collision(
+            &chunks,
+            &block_properties,
+            origin,
+            incoming_velocity,
+        );
+        assert!(
+            !GameWorld::projectile_point_collides_with_world(
+                &chunks,
+                &block_properties,
+                adjusted.x as f64,
+                adjusted.y as f64,
+                adjusted.z as f64
+            ),
+            "Expected adjusted origin to be outside collision, got {:?}",
+            adjusted
+        );
+    }
+
+    #[test]
+    fn explosion_visibility_sampling_works_when_block_impact_point_is_inside_collision() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let inside_block = glam::Vec3::new(1.5, 64.5, 0.5);
+        let target_aabb = AABB {
+            min: glam::Vec3::new(0.2, 64.0, 0.2),
+            max: glam::Vec3::new(0.8, 65.8, 0.8),
+        };
+
+        let blocked =
+            GameWorld::explosion_exposure(&chunks, &block_properties, inside_block, &target_aabb);
+        assert!(
+            blocked < 0.01,
+            "Expected near-zero exposure from inside collision, got {}",
+            blocked
+        );
+
+        let incoming_velocity = glam::Vec3::new(1.0, 0.0, 0.0);
+        let nudged = GameWorld::nudge_explosion_origin_out_of_collision(
+            &chunks,
+            &block_properties,
+            inside_block,
+            incoming_velocity,
+        );
+        let clear = GameWorld::explosion_exposure(&chunks, &block_properties, nudged, &target_aabb);
+        assert!(
+            clear > 0.99,
+            "Expected near-full exposure after nudging out of collision, got {}",
+            clear
+        );
+    }
+
+    #[test]
     fn fence_collision_bounds_expand_when_connected() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -28163,20 +29816,35 @@ mod tests {
         let mut health = PlayerHealth::new();
 
         for _ in 0..300 {
-            assert!(!health.tick_air(true, false));
+            assert!(!health.tick_air(true, 300, false));
         }
         for _ in 0..19 {
-            assert!(!health.tick_air(true, false));
+            assert!(!health.tick_air(true, 300, false));
         }
-        assert!(health.tick_air(true, false));
+        assert!(health.tick_air(true, 300, false));
 
         // Leaving water regenerates air and clears drowning timer.
-        assert!(!health.tick_air(false, false));
+        assert!(!health.tick_air(false, 300, false));
         assert!(health.air_ticks > 0);
 
         // Water breathing keeps air full.
-        assert!(!health.tick_air(true, true));
+        assert!(!health.tick_air(true, 300, true));
         assert_eq!(health.air_ticks, 300);
+    }
+
+    #[test]
+    fn max_air_ticks_extends_drowning_time() {
+        let mut health = PlayerHealth::new();
+
+        // Simulate Respiration increasing max air to 600 ticks.
+        health.air_ticks = 600;
+        for _ in 0..600 {
+            assert!(!health.tick_air(true, 600, false));
+        }
+        for _ in 0..19 {
+            assert!(!health.tick_air(true, 600, false));
+        }
+        assert!(health.tick_air(true, 600, false));
     }
 
     #[test]
@@ -29036,6 +30704,59 @@ mod tests {
             1,
             Voxel {
                 id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut fluid_sim = FluidSimulator::new();
+
+        let hit = super::RaycastHit {
+            block_pos: glam::IVec3::new(1, 64, 1),
+            face_normal: glam::IVec3::new(1, 0, 0),
+            distance: 0.0,
+            hit_pos: glam::Vec3::ZERO,
+        };
+
+        let result = super::try_bucket_interaction(
+            DimensionId::Overworld,
+            CORE_ITEM_WATER_BUCKET,
+            hit,
+            &mut chunks,
+            &mut fluid_sim,
+        );
+        assert_eq!(
+            result,
+            Some((CORE_ITEM_BUCKET, vec![glam::IVec3::new(2, 64, 1)]))
+        );
+
+        let voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .unwrap()
+            .voxel(2, local_y(64), 1);
+        assert_eq!(voxel.id, FluidType::Water.source_block_id());
+        assert_eq!(fluid_sim.pending_count(), 1);
+    }
+
+    #[test]
+    fn water_bucket_extinguishes_fire_block() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            1,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            2,
+            local_y(64),
+            1,
+            Voxel {
+                id: mdminecraft_world::BLOCK_FIRE,
                 ..Default::default()
             },
         );
@@ -31284,6 +33005,18 @@ mod tests {
         assert_eq!(
             core_item_to_enchanting_id(&sword),
             Some(mdminecraft_world::TOOL_ID_START + 20 + ToolMaterial::Gold as u16)
+        );
+
+        let bow = ItemStack::new(ItemType::Item(1), 1);
+        assert_eq!(
+            core_item_to_enchanting_id(&bow),
+            Some(mdminecraft_world::BOW_ID)
+        );
+
+        let leather_boots = ItemStack::new(ItemType::Item(23), 1);
+        assert_eq!(
+            core_item_to_enchanting_id(&leather_boots),
+            Some(mdminecraft_world::ARMOR_ID_START + 12)
         );
     }
 

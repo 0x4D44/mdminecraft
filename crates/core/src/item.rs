@@ -451,7 +451,13 @@ impl ItemStack {
 
     /// Check if this item can be enchanted
     pub fn is_enchantable(&self) -> bool {
-        matches!(self.item_type, ItemType::Tool(_, _))
+        match self.item_type {
+            ItemType::Tool(_, _) => true,
+            ItemType::Item(1) => true, // Bow
+            // Armor core item IDs (engine-native registry; used by game/inventory layer).
+            ItemType::Item(10 | 11 | 12 | 13 | 20 | 21 | 22 | 23 | 30 | 31 | 32 | 33) => true,
+            _ => false,
+        }
     }
 
     /// Add an enchantment to this item

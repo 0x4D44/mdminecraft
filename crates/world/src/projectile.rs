@@ -115,6 +115,15 @@ pub struct Projectile {
     /// Dimension this projectile exists in.
     #[serde(default)]
     pub dimension: DimensionId,
+    /// Previous world X position (not persisted; used for per-tick collision sweep).
+    #[serde(skip)]
+    pub prev_x: f64,
+    /// Previous world Y position (not persisted; used for per-tick collision sweep).
+    #[serde(skip)]
+    pub prev_y: f64,
+    /// Previous world Z position (not persisted; used for per-tick collision sweep).
+    #[serde(skip)]
+    pub prev_z: f64,
     /// World X position
     pub x: f64,
     /// World Y position
@@ -137,8 +146,24 @@ pub struct Projectile {
     pub hit_entity: bool,
     /// Charge level when fired (0.0 to 1.0, affects damage and speed)
     pub charge: f32,
+    /// Bow enchantment: Power level applied to this arrow (0 when unenchanted).
+    #[serde(default)]
+    pub power_level: u8,
+    /// Bow enchantment: Punch level applied to this arrow (0 when unenchanted).
+    #[serde(default)]
+    pub punch_level: u8,
+    /// Bow enchantment: Flame applied to this arrow.
+    #[serde(default)]
+    pub flame: bool,
+    /// Whether this projectile should spawn an item pickup (e.g., arrow pickup) on block impact.
+    #[serde(default = "default_true")]
+    pub can_pick_up: bool,
     /// Whether the projectile should be removed
     pub dead: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Projectile {
@@ -156,6 +181,9 @@ impl Projectile {
     ) -> Self {
         Self {
             dimension: DimensionId::DEFAULT,
+            prev_x: x,
+            prev_y: y,
+            prev_z: z,
             x,
             y,
             z,
@@ -167,6 +195,10 @@ impl Projectile {
             stuck: false,
             hit_entity: false,
             charge: charge.clamp(0.1, 1.0),
+            power_level: 0,
+            punch_level: 0,
+            flame: false,
+            can_pick_up: true,
             dead: false,
         }
     }
@@ -414,6 +446,10 @@ impl Projectile {
             return true;
         }
 
+        self.prev_x = self.x;
+        self.prev_y = self.y;
+        self.prev_z = self.z;
+
         // If stuck, don't move
         if self.stuck {
             return false;
@@ -444,7 +480,15 @@ impl Projectile {
                 // charge ranges from 0.1 to 1.0
                 // Min damage at 0.1 charge: 1.0
                 // Max damage at 1.0 charge: 10.0
-                1.0 + self.charge * 9.0
+                let mut damage = 1.0 + self.charge * 9.0;
+
+                // Vanilla-ish: Power increases arrow damage. Approximated as a flat bonus.
+                let power_level = self.power_level.min(5);
+                if power_level > 0 {
+                    damage += 0.5 + 0.5 * (power_level as f32);
+                }
+
+                damage
             }
             _ => self.projectile_type.base_damage(),
         }
@@ -584,6 +628,14 @@ mod tests {
         // Min charge (clamped to 0.1): 1 + 0.1 * 9 = 1.9
         let arrow_min = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
         assert!((arrow_min.damage() - 1.9).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_arrow_damage_power_bonus() {
+        let mut arrow = Projectile::shoot_arrow(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        arrow.power_level = 3;
+        // Base 10.0 + (0.5 + 0.5*3) = 12.0
+        assert!((arrow.damage() - 12.0).abs() < 1e-6);
     }
 
     #[test]

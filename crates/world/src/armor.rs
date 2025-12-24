@@ -6,6 +6,15 @@ use crate::drop_item::ItemType;
 use mdminecraft_core::{Enchantment, EnchantmentType};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DamageKind {
+    Generic,
+    Fire,
+    Blast,
+    Projectile,
+    Fall,
+}
+
 /// Armor slot types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ArmorSlot {
@@ -84,10 +93,15 @@ impl ArmorPiece {
 
     /// Get the Protection enchantment level if present
     pub fn protection_level(&self) -> u8 {
+        self.enchantment_level(EnchantmentType::Protection)
+    }
+
+    pub fn enchantment_level(&self, enchantment_type: EnchantmentType) -> u8 {
         self.enchantments
             .iter()
-            .find(|e| e.enchantment_type == EnchantmentType::Protection)
+            .filter(|e| e.enchantment_type == enchantment_type)
             .map(|e| e.level)
+            .max()
             .unwrap_or(0)
     }
 
@@ -105,6 +119,23 @@ impl ArmorPiece {
             self.durability -= amount;
             false
         }
+    }
+
+    /// Damage the armor piece with Unbreaking consideration.
+    ///
+    /// Deterministic approximation of vanilla: durability loss is negated with probability
+    /// `unbreaking_level/(unbreaking_level+1)`. We avoid RNG by using a modulus check
+    /// against the current durability value.
+    pub fn damage_with_unbreaking(&mut self, amount: u32) -> bool {
+        let unbreaking_level = self.enchantment_level(EnchantmentType::Unbreaking);
+        if unbreaking_level > 0 {
+            let denominator = u32::from(unbreaking_level) + 1;
+            if denominator > 1 && !self.durability.is_multiple_of(denominator) {
+                return false;
+            }
+        }
+
+        self.damage(amount)
     }
 
     /// Check if the armor is broken
@@ -200,18 +231,22 @@ impl PlayerArmor {
 
     /// Get total Protection enchantment levels from all armor pieces
     pub fn total_protection(&self) -> u8 {
+        self.total_enchantment_level(EnchantmentType::Protection)
+    }
+
+    pub fn total_enchantment_level(&self, enchantment_type: EnchantmentType) -> u8 {
         let mut total: u8 = 0;
         if let Some(piece) = &self.helmet {
-            total = total.saturating_add(piece.protection_level());
+            total = total.saturating_add(piece.enchantment_level(enchantment_type));
         }
         if let Some(piece) = &self.chestplate {
-            total = total.saturating_add(piece.protection_level());
+            total = total.saturating_add(piece.enchantment_level(enchantment_type));
         }
         if let Some(piece) = &self.leggings {
-            total = total.saturating_add(piece.protection_level());
+            total = total.saturating_add(piece.enchantment_level(enchantment_type));
         }
         if let Some(piece) = &self.boots {
-            total = total.saturating_add(piece.protection_level());
+            total = total.saturating_add(piece.enchantment_level(enchantment_type));
         }
         total
     }
@@ -220,20 +255,53 @@ impl PlayerArmor {
     /// Returns the fraction of damage that gets through armor
     /// Formula: damage * (1 - defense/25) * (1 - protection*0.04)
     pub fn damage_multiplier(&self) -> f32 {
-        let defense = self.total_defense();
-        // Base armor reduction: 1 - defense/25
-        // Max defense is 10 (full diamond = 2+3+3+2 = 10), which reduces by 40%
-        let armor_reduction = (defense as f32 / 25.0).min(0.8);
-        let armor_multiplier = 1.0 - armor_reduction;
+        self.damage_multiplier_for(DamageKind::Generic)
+    }
+
+    pub fn damage_multiplier_for(&self, kind: DamageKind) -> f32 {
+        let armor_multiplier = match kind {
+            DamageKind::Fall => 1.0,
+            _ => {
+                let defense = self.total_defense();
+                // Base armor reduction: 1 - defense/25
+                // Max defense is 10 (full diamond = 2+3+3+2 = 10), which reduces by 40%
+                let armor_reduction = (defense as f32 / 25.0).min(0.8);
+                1.0 - armor_reduction
+            }
+        };
 
         // Protection enchantment: 4% reduction per level, max 16 levels (64% max)
         // In vanilla MC: EPF = sum of protection levels, damage_mult = 1 - EPF*0.04
-        let protection = self.total_protection();
+        let mut protection = self.total_enchantment_level(EnchantmentType::Protection);
+        protection = match kind {
+            DamageKind::Generic | DamageKind::Fall => protection,
+            DamageKind::Fire => protection
+                .saturating_add(self.total_enchantment_level(EnchantmentType::FireProtection)),
+            DamageKind::Blast => protection
+                .saturating_add(self.total_enchantment_level(EnchantmentType::BlastProtection)),
+            DamageKind::Projectile => protection.saturating_add(
+                self.total_enchantment_level(EnchantmentType::ProjectileProtection),
+            ),
+        };
+        protection = protection.min(16);
         let protection_reduction = (protection as f32 * 0.04).min(0.64);
         let protection_multiplier = 1.0 - protection_reduction;
 
-        // Combine both reductions multiplicatively
-        armor_multiplier * protection_multiplier
+        let extra_multiplier = match kind {
+            DamageKind::Fall => {
+                // Vanilla-ish: Feather Falling reduces fall damage (boots-only in vanilla).
+                // Approx: 12% per level, up to 48% at level IV.
+                let feather_level = self
+                    .total_enchantment_level(EnchantmentType::FeatherFalling)
+                    .min(4);
+                let reduction = (feather_level as f32 * 0.12).min(0.48);
+                1.0 - reduction
+            }
+            _ => 1.0,
+        };
+
+        // Combine reductions multiplicatively
+        armor_multiplier * protection_multiplier * extra_multiplier
     }
 
     /// Equip armor piece, returning the previously equipped piece if any
@@ -270,33 +338,81 @@ impl PlayerArmor {
 
     /// Damage all armor pieces when taking damage
     /// Returns the actual damage after armor reduction
-    pub fn take_damage(&mut self, raw_damage: f32) -> f32 {
-        let multiplier = self.damage_multiplier();
+    pub fn reduce_damage(&self, raw_damage: f32, kind: DamageKind) -> f32 {
+        raw_damage * self.damage_multiplier_for(kind)
+    }
+
+    pub fn take_damage(&mut self, raw_damage: f32, kind: DamageKind) -> f32 {
+        let multiplier = self.damage_multiplier_for(kind);
         let actual_damage = raw_damage * multiplier;
 
         // Damage each equipped piece (1 durability per hit)
         if let Some(piece) = &mut self.helmet {
-            if piece.damage(1) {
+            if piece.damage_with_unbreaking(1) {
                 self.helmet = None;
             }
         }
         if let Some(piece) = &mut self.chestplate {
-            if piece.damage(1) {
+            if piece.damage_with_unbreaking(1) {
                 self.chestplate = None;
             }
         }
         if let Some(piece) = &mut self.leggings {
-            if piece.damage(1) {
+            if piece.damage_with_unbreaking(1) {
                 self.leggings = None;
             }
         }
         if let Some(piece) = &mut self.boots {
-            if piece.damage(1) {
+            if piece.damage_with_unbreaking(1) {
                 self.boots = None;
             }
         }
 
         actual_damage
+    }
+
+    /// Apply Mending: use XP to repair equipped armor pieces with Mending.
+    ///
+    /// Returns the amount of XP that remains after repairs.
+    /// Vanilla-ish: 1 XP restores 2 durability.
+    pub fn repair_with_mending(&mut self, xp_amount: u32) -> u32 {
+        let mut remaining_xp = xp_amount;
+
+        fn repair_piece(piece: &mut Option<ArmorPiece>, remaining_xp: &mut u32) {
+            if *remaining_xp == 0 {
+                return;
+            }
+            let Some(piece) = piece.as_mut() else {
+                return;
+            };
+            if piece.is_broken() {
+                return;
+            }
+            if piece.enchantment_level(EnchantmentType::Mending) == 0 {
+                return;
+            }
+            if piece.durability >= piece.max_durability {
+                return;
+            }
+
+            let missing = piece.max_durability - piece.durability;
+            let xp_needed = missing.div_ceil(2);
+            let xp_to_use = (*remaining_xp).min(xp_needed);
+            if xp_to_use == 0 {
+                return;
+            }
+
+            piece.durability = (piece.durability + xp_to_use * 2).min(piece.max_durability);
+            *remaining_xp -= xp_to_use;
+        }
+
+        // Deterministic repair order: helmet -> chestplate -> leggings -> boots.
+        repair_piece(&mut self.helmet, &mut remaining_xp);
+        repair_piece(&mut self.chestplate, &mut remaining_xp);
+        repair_piece(&mut self.leggings, &mut remaining_xp);
+        repair_piece(&mut self.boots, &mut remaining_xp);
+
+        remaining_xp
     }
 }
 
@@ -377,7 +493,7 @@ mod tests {
 
         // Diamond chestplate gives 3 defense = 3/25 = 12% reduction
         let raw = 10.0;
-        let actual = armor.take_damage(raw);
+        let actual = armor.take_damage(raw, DamageKind::Generic);
         // multiplier = 1 - 3/25 = 0.88, so 10 * 0.88 = 8.8
         assert!((actual - 8.8).abs() < 0.01);
 
@@ -413,6 +529,73 @@ mod tests {
         assert_eq!(armor.total_protection(), 4);
         let multiplier = armor.damage_multiplier();
         assert!((multiplier - 0.7392).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_blast_protection_only_applies_to_blast_damage() {
+        let mut armor = PlayerArmor::new();
+        let blast = Enchantment::new(EnchantmentType::BlastProtection, 4);
+        armor.equip(
+            ArmorPiece::from_item_with_enchantments(ItemType::DiamondChestplate, vec![blast])
+                .unwrap(),
+        );
+
+        // No generic Protection enchant: generic damage is only reduced by armor.
+        assert!((armor.damage_multiplier_for(DamageKind::Generic) - 0.88).abs() < 0.01);
+
+        // Blast protection adds 16% more reduction.
+        let blast_multiplier = armor.damage_multiplier_for(DamageKind::Blast);
+        assert!((blast_multiplier - 0.7392).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_feather_falling_applies_only_to_fall_damage() {
+        let mut armor = PlayerArmor::new();
+        let feather = Enchantment::new(EnchantmentType::FeatherFalling, 4);
+        armor.equip(
+            ArmorPiece::from_item_with_enchantments(ItemType::DiamondBoots, vec![feather]).unwrap(),
+        );
+
+        // No base armor reduction for fall damage; Feather Falling IV reduces by 48%.
+        let fall_multiplier = armor.damage_multiplier_for(DamageKind::Fall);
+        assert!((fall_multiplier - 0.52).abs() < 0.01);
+
+        // Generic damage is reduced only by base armor points (diamond boots = 2 defense).
+        let generic_multiplier = armor.damage_multiplier_for(DamageKind::Generic);
+        assert!((generic_multiplier - 0.92).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_armor_piece_damage_with_unbreaking_is_deterministic() {
+        let unbreaking = Enchantment::new(EnchantmentType::Unbreaking, 3);
+        let mut piece =
+            ArmorPiece::from_item_with_enchantments(ItemType::DiamondBoots, vec![unbreaking])
+                .unwrap();
+
+        // When durability is not divisible by (level+1), damage is ignored.
+        piece.durability = 5;
+        assert!(!piece.damage_with_unbreaking(1));
+        assert_eq!(piece.durability, 5);
+
+        // When divisible, damage applies.
+        piece.durability = 4;
+        assert!(!piece.damage_with_unbreaking(1));
+        assert_eq!(piece.durability, 3);
+    }
+
+    #[test]
+    fn test_mending_repairs_armor_and_consumes_xp() {
+        let mut armor = PlayerArmor::new();
+        let mending = Enchantment::new(EnchantmentType::Mending, 1);
+        let mut boots =
+            ArmorPiece::from_item_with_enchantments(ItemType::DiamondBoots, vec![mending]).unwrap();
+        boots.durability = boots.max_durability.saturating_sub(10);
+        armor.equip(boots);
+
+        let remaining = armor.repair_with_mending(3);
+        assert_eq!(remaining, 0);
+        let boots = armor.boots.as_ref().unwrap();
+        assert_eq!(boots.durability, boots.max_durability.saturating_sub(4));
     }
 
     #[test]
@@ -647,7 +830,7 @@ mod tests {
         armor.helmet = Some(piece);
 
         // Take damage - should break the helmet
-        armor.take_damage(10.0);
+        armor.take_damage(10.0, DamageKind::Generic);
         assert!(armor.helmet.is_none());
     }
 
