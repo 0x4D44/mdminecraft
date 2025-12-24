@@ -22,6 +22,7 @@ const EXTRA_ALPHA_KIND_LAVA: u8 = 2 << EXTRA_TINT_SHIFT;
 const EXTRA_ALPHA_KIND_GLASS: u8 = 3 << EXTRA_TINT_SHIFT;
 const EXTRA_ALPHA_KIND_NETHER_PORTAL: u8 = 4 << EXTRA_TINT_SHIFT;
 const EXTRA_ALPHA_KIND_END_PORTAL: u8 = 5 << EXTRA_TINT_SHIFT;
+const EXTRA_ALPHA_KIND_FIRE: u8 = 6 << EXTRA_TINT_SHIFT;
 
 /// Hash of the combined vertex/index buffers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -809,6 +810,15 @@ fn render_alpha_portal_end_tag() -> &'static RegistryKey {
     })
 }
 
+fn render_alpha_fire_tag() -> &'static RegistryKey {
+    use std::sync::OnceLock;
+
+    static TAG: OnceLock<RegistryKey> = OnceLock::new();
+    TAG.get_or_init(|| {
+        RegistryKey::parse("mdm:render/alpha/fire").expect("valid render alpha fire tag")
+    })
+}
+
 fn render_tint_grass_tag() -> &'static RegistryKey {
     use std::sync::OnceLock;
 
@@ -860,6 +870,8 @@ fn alpha_kind_extra(block_id: BlockId, registry: &BlockRegistry) -> u8 {
 
     if registry.has_tag(block_id, render_alpha_glass_tag()) {
         EXTRA_ALPHA_KIND_GLASS
+    } else if registry.has_tag(block_id, render_alpha_fire_tag()) {
+        EXTRA_ALPHA_KIND_FIRE
     } else if registry.has_tag(block_id, render_alpha_portal_nether_tag()) {
         EXTRA_ALPHA_KIND_NETHER_PORTAL
     } else if registry.has_tag(block_id, render_alpha_portal_end_tag()) {
@@ -3598,6 +3610,43 @@ mod tests {
         BlockRegistry::new(descriptors)
     }
 
+    fn registry_with_fire() -> BlockRegistry {
+        let max_id = mdminecraft_world::BLOCK_FIRE as usize;
+        let mut descriptors = Vec::with_capacity(max_id + 1);
+
+        for id in 0..=max_id {
+            let id_u16 = id as u16;
+            let opaque = !matches!(id_u16, BLOCK_AIR | mdminecraft_world::BLOCK_FIRE);
+            let name = match id_u16 {
+                BLOCK_AIR => "air".to_string(),
+                mdminecraft_world::BLOCK_FIRE => "fire".to_string(),
+                _ => format!("block_{id}"),
+            };
+
+            if id_u16 == mdminecraft_world::BLOCK_FIRE {
+                descriptors.push(BlockDescriptor::from_definition(BlockDefinition {
+                    name,
+                    key: None,
+                    tags: vec![
+                        "render/translucent".to_string(),
+                        "render/alpha/fire".to_string(),
+                    ],
+                    opaque,
+                    light_opacity: None,
+                    light_emission: None,
+                    emissive: None,
+                    texture: None,
+                    textures: None,
+                    harvest_level: None,
+                }));
+            } else {
+                descriptors.push(BlockDescriptor::simple(&name, opaque));
+            }
+        }
+
+        BlockRegistry::new(descriptors)
+    }
+
     fn registry_with_end_portal() -> BlockRegistry {
         let max_id = mdminecraft_world::BLOCK_END_PORTAL as usize;
         let mut descriptors = Vec::with_capacity(max_id + 1);
@@ -3944,6 +3993,35 @@ mod tests {
                 assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
                 assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 3);
                 assert_eq!(v.extra & 0x0F, 0);
+            }
+        }
+
+        // Fire.
+        {
+            let registry = registry_with_fire();
+            let mut chunk = Chunk::new(pos);
+            chunk.set_voxel(
+                1,
+                1,
+                1,
+                Voxel {
+                    id: mdminecraft_world::BLOCK_FIRE,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+
+            let mesh = mesh_chunk(&chunk, &registry, None);
+            let vertices: Vec<_> = mesh
+                .vertices
+                .iter()
+                .filter(|v| v.block_id == mdminecraft_world::BLOCK_FIRE)
+                .collect();
+            assert!(!vertices.is_empty());
+            for v in vertices {
+                assert_ne!(v.extra & EXTRA_ALPHA_BIT, 0);
+                assert_eq!((v.extra >> EXTRA_TINT_SHIFT) & 0x7, 6);
             }
         }
 

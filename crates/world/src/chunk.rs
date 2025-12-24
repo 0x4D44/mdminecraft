@@ -253,6 +253,9 @@ pub const BLOCK_CRYING_OBSIDIAN: BlockId = 137;
 /// ID for respawn anchor (from blocks.json index).
 pub const BLOCK_RESPAWN_ANCHOR: BlockId = 138;
 
+/// ID for fire (from blocks.json index).
+pub const BLOCK_FIRE: BlockId = 139;
+
 /// Chunk-local position (X, Y, Z).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalPos {

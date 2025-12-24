@@ -15,6 +15,10 @@ pub const TOOL_ID_START: ItemId = 1000;
 pub const TOOL_ID_END: ItemId = 1024;
 /// Bow item ID
 pub const BOW_ID: ItemId = 1100;
+/// First armor item ID (leather helmet). IDs cover 4 slots × 4 materials = 16 items.
+pub const ARMOR_ID_START: ItemId = 1200;
+/// Last armor item ID (diamond boots).
+pub const ARMOR_ID_END: ItemId = ARMOR_ID_START + 15;
 /// Lapis Lazuli item ID
 pub const LAPIS_ID: ItemId = 400;
 
@@ -246,15 +250,20 @@ impl EnchantingTableState {
 /// Check if an item ID represents an enchantable item.
 pub fn is_enchantable_id(item_id: ItemId) -> bool {
     // Tools are in range TOOL_ID_START to TOOL_ID_END
-    (TOOL_ID_START..=TOOL_ID_END).contains(&item_id) || item_id == BOW_ID
+    (TOOL_ID_START..=TOOL_ID_END).contains(&item_id)
+        || item_id == BOW_ID
+        || (ARMOR_ID_START..=ARMOR_ID_END).contains(&item_id)
 }
 
 /// Get the tool category from an item ID.
-/// Returns: 0 = not a tool, 1 = mining tool, 2 = weapon
+/// Returns: 0 = not enchantable, 1 = mining tool, 2 = weapon, 3 = armor
 fn get_tool_category(item_id: ItemId) -> u8 {
     if !(TOOL_ID_START..=TOOL_ID_END).contains(&item_id) {
         if item_id == BOW_ID {
             return 2; // Bow is a weapon
+        }
+        if (ARMOR_ID_START..=ARMOR_ID_END).contains(&item_id) {
+            return 3; // Armor
         }
         return 0; // Not a tool
     }
@@ -288,13 +297,47 @@ pub fn get_valid_enchantments_for_id(item_id: ItemId) -> Vec<EnchantmentType> {
         }
         2 => {
             // Weapons (sword, bow)
-            vec![
-                EnchantmentType::Sharpness,
-                EnchantmentType::Knockback,
-                EnchantmentType::FireAspect,
+            if item_id == BOW_ID {
+                vec![
+                    EnchantmentType::Power,
+                    EnchantmentType::Punch,
+                    EnchantmentType::Flame,
+                    EnchantmentType::Infinity,
+                    EnchantmentType::Unbreaking,
+                    EnchantmentType::Mending,
+                ]
+            } else {
+                vec![
+                    EnchantmentType::Sharpness,
+                    EnchantmentType::Knockback,
+                    EnchantmentType::FireAspect,
+                    EnchantmentType::Unbreaking,
+                    EnchantmentType::Mending,
+                ]
+            }
+        }
+        3 => {
+            let mut enchants = vec![
+                EnchantmentType::Protection,
+                EnchantmentType::FireProtection,
+                EnchantmentType::BlastProtection,
+                EnchantmentType::ProjectileProtection,
                 EnchantmentType::Unbreaking,
                 EnchantmentType::Mending,
-            ]
+            ];
+
+            // Boots can roll Feather Falling.
+            let slot_index = (item_id - ARMOR_ID_START) / 4;
+            if slot_index == 0 {
+                enchants.push(EnchantmentType::Respiration);
+                enchants.push(EnchantmentType::AquaAffinity);
+            }
+            if slot_index == 3 {
+                enchants.push(EnchantmentType::FeatherFalling);
+                enchants.push(EnchantmentType::DepthStrider);
+            }
+
+            enchants
         }
         _ => vec![],
     }
@@ -316,6 +359,9 @@ mod tests {
     const TEST_PICKAXE_ID: ItemId = TOOL_ID_START; // First tool = pickaxe
     const TEST_SWORD_ID: ItemId = TOOL_ID_START + 20; // Sword range (4 * 5 = 20)
     const TEST_STONE_ID: ItemId = 1; // A block, not a tool
+    const TEST_LEATHER_BOOTS_ID: ItemId = ARMOR_ID_START + 12; // boots slot (slot_index=3)
+    const TEST_LEATHER_HELMET_ID: ItemId = ARMOR_ID_START; // helmet slot (slot_index=0)
+    const TEST_LEATHER_CHESTPLATE_ID: ItemId = ARMOR_ID_START + 4; // chestplate slot (slot_index=1)
 
     #[test]
     fn test_enchanting_table_new() {
@@ -425,6 +471,7 @@ mod tests {
         assert!(is_enchantable_id(TEST_PICKAXE_ID));
         assert!(is_enchantable_id(TEST_SWORD_ID));
         assert!(is_enchantable_id(BOW_ID));
+        assert!(is_enchantable_id(ARMOR_ID_START));
         assert!(!is_enchantable_id(TEST_STONE_ID));
         assert!(!is_enchantable_id(0)); // Air
     }
@@ -447,6 +494,41 @@ mod tests {
         assert!(enchants.contains(&EnchantmentType::SilkTouch));
         assert!(enchants.contains(&EnchantmentType::Fortune));
         assert!(!enchants.contains(&EnchantmentType::Sharpness)); // Not for pickaxes
+    }
+
+    #[test]
+    fn test_valid_enchantments_armor_boots_include_feather_falling() {
+        let enchants = get_valid_enchantments_for_id(TEST_LEATHER_BOOTS_ID);
+
+        assert!(enchants.contains(&EnchantmentType::Protection));
+        assert!(enchants.contains(&EnchantmentType::Unbreaking));
+        assert!(enchants.contains(&EnchantmentType::FeatherFalling));
+        assert!(enchants.contains(&EnchantmentType::DepthStrider));
+        assert!(!enchants.contains(&EnchantmentType::Efficiency));
+    }
+
+    #[test]
+    fn test_valid_enchantments_non_boots_armor_excludes_feather_falling() {
+        let enchants = get_valid_enchantments_for_id(TEST_LEATHER_HELMET_ID);
+
+        assert!(enchants.contains(&EnchantmentType::Protection));
+        assert!(enchants.contains(&EnchantmentType::Unbreaking));
+        assert!(!enchants.contains(&EnchantmentType::FeatherFalling));
+        assert!(!enchants.contains(&EnchantmentType::DepthStrider));
+    }
+
+    #[test]
+    fn test_valid_enchantments_armor_helmet_includes_respiration() {
+        let enchants = get_valid_enchantments_for_id(TEST_LEATHER_HELMET_ID);
+        assert!(enchants.contains(&EnchantmentType::Respiration));
+        assert!(enchants.contains(&EnchantmentType::AquaAffinity));
+    }
+
+    #[test]
+    fn test_valid_enchantments_non_helmet_armor_excludes_respiration() {
+        let enchants = get_valid_enchantments_for_id(TEST_LEATHER_CHESTPLATE_ID);
+        assert!(!enchants.contains(&EnchantmentType::Respiration));
+        assert!(!enchants.contains(&EnchantmentType::AquaAffinity));
     }
 
     #[test]
@@ -521,10 +603,14 @@ mod tests {
     fn test_valid_enchantments_bow() {
         let enchants = get_valid_enchantments_for_id(BOW_ID);
 
-        // Bow is a weapon, gets weapon enchantments
-        assert!(enchants.contains(&EnchantmentType::Sharpness));
-        assert!(enchants.contains(&EnchantmentType::Knockback));
+        // Bow gets bow-specific enchantments.
+        assert!(enchants.contains(&EnchantmentType::Power));
+        assert!(enchants.contains(&EnchantmentType::Punch));
+        assert!(enchants.contains(&EnchantmentType::Flame));
+        assert!(enchants.contains(&EnchantmentType::Infinity));
         assert!(enchants.contains(&EnchantmentType::Unbreaking));
+        assert!(enchants.contains(&EnchantmentType::Mending));
+        assert!(!enchants.contains(&EnchantmentType::Sharpness));
     }
 
     #[test]

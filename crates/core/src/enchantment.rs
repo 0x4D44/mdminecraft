@@ -18,6 +18,14 @@ pub enum EnchantmentType {
     Knockback,
     /// Sets targets on fire
     FireAspect,
+    /// Increases bow/arrow damage
+    Power,
+    /// Increases bow/arrow knockback
+    Punch,
+    /// Bow/arrow sets targets on fire
+    Flame,
+    /// Allows firing without consuming arrows (requires at least one arrow in inventory).
+    Infinity,
 
     // Armor enchantments
     /// Reduces damage from all sources
@@ -28,6 +36,14 @@ pub enum EnchantmentType {
     BlastProtection,
     /// Reduces projectile damage
     ProjectileProtection,
+    /// Reduces fall damage (boots)
+    FeatherFalling,
+    /// Extends underwater breathing (helmet)
+    Respiration,
+    /// Removes underwater mining speed penalty (helmet).
+    AquaAffinity,
+    /// Increases underwater movement speed (boots).
+    DepthStrider,
 
     // Universal enchantments
     /// Reduces durability loss
@@ -46,10 +62,18 @@ impl EnchantmentType {
             EnchantmentType::Sharpness => 5,
             EnchantmentType::Knockback => 2,
             EnchantmentType::FireAspect => 2,
+            EnchantmentType::Power => 5,
+            EnchantmentType::Punch => 2,
+            EnchantmentType::Flame => 1,
+            EnchantmentType::Infinity => 1,
             EnchantmentType::Protection => 4,
             EnchantmentType::FireProtection => 4,
             EnchantmentType::BlastProtection => 4,
             EnchantmentType::ProjectileProtection => 4,
+            EnchantmentType::FeatherFalling => 4,
+            EnchantmentType::Respiration => 3,
+            EnchantmentType::AquaAffinity => 1,
+            EnchantmentType::DepthStrider => 3,
             EnchantmentType::Unbreaking => 3,
             EnchantmentType::Mending => 1,
         }
@@ -75,6 +99,14 @@ impl EnchantmentType {
         ];
 
         if protection_types.contains(self) && protection_types.contains(other) && self != other {
+            return false;
+        }
+
+        // Infinity and Mending are incompatible (vanilla).
+        if matches!(self, EnchantmentType::Infinity) && matches!(other, EnchantmentType::Mending) {
+            return false;
+        }
+        if matches!(self, EnchantmentType::Mending) && matches!(other, EnchantmentType::Infinity) {
             return false;
         }
 
@@ -113,6 +145,8 @@ mod tests {
         assert_eq!(EnchantmentType::Efficiency.max_level(), 5);
         assert_eq!(EnchantmentType::SilkTouch.max_level(), 1);
         assert_eq!(EnchantmentType::Unbreaking.max_level(), 3);
+        assert_eq!(EnchantmentType::AquaAffinity.max_level(), 1);
+        assert_eq!(EnchantmentType::DepthStrider.max_level(), 3);
     }
 
     #[test]
@@ -120,6 +154,7 @@ mod tests {
         assert!(!EnchantmentType::SilkTouch.is_compatible_with(&EnchantmentType::Fortune));
         assert!(!EnchantmentType::Fortune.is_compatible_with(&EnchantmentType::SilkTouch));
         assert!(!EnchantmentType::Protection.is_compatible_with(&EnchantmentType::FireProtection));
+        assert!(!EnchantmentType::Infinity.is_compatible_with(&EnchantmentType::Mending));
     }
 
     #[test]

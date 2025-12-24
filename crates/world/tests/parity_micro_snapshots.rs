@@ -60,7 +60,8 @@ fn micro_end_boss_loop_snapshot() {
     run_micro_worldtest(
         MicroWorldtestConfig {
             name: "micro_end_boss_loop".to_string(),
-            ticks: 6,
+            // Needs enough time for mob hurt cooldown to expire between hits.
+            ticks: 40,
             snapshot_path: snapshot_path("micro_end_boss_loop.json"),
         },
         state,
@@ -77,13 +78,13 @@ fn micro_end_boss_loop_snapshot() {
                 0 => {
                     state.boss.damage(30.0);
                 }
-                1 => {
+                12 => {
                     state.boss.damage(50.0);
                 }
-                2 => {
+                24 => {
                     state.boss.damage(30.0);
                 }
-                3 => {
+                36 => {
                     state.boss.damage(200.0);
                 }
                 _ => {}

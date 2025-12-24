@@ -24,11 +24,231 @@
       "snapshot": {
         "boss_dead": false,
         "boss_enraged": false,
-        "boss_health": 120,
+        "boss_health": 170,
         "boss_state": "Chasing",
         "portal_blocks": 0
       },
       "tick": 2
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 3
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 4
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 5
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 6
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 7
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 8
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 9
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 10
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 11
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 170,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 12
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 13
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 14
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 15
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 16
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 17
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 18
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 19
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 20
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Attacking",
+        "portal_blocks": 0
+      },
+      "tick": 21
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 22
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 23
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": false,
+        "boss_health": 120,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 24
     },
     {
       "snapshot": {
@@ -38,7 +258,117 @@
         "boss_state": "Chasing",
         "portal_blocks": 0
       },
-      "tick": 3
+      "tick": 25
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 26
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 27
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 28
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 29
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 30
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 31
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 32
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 33
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 34
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 35
+    },
+    {
+      "snapshot": {
+        "boss_dead": false,
+        "boss_enraged": true,
+        "boss_health": 90,
+        "boss_state": "Chasing",
+        "portal_blocks": 0
+      },
+      "tick": 36
     },
     {
       "snapshot": {
@@ -48,7 +378,7 @@
         "boss_state": "Chasing",
         "portal_blocks": 9
       },
-      "tick": 4
+      "tick": 37
     },
     {
       "snapshot": {
@@ -58,7 +388,7 @@
         "boss_state": "Chasing",
         "portal_blocks": 9
       },
-      "tick": 5
+      "tick": 38
     },
     {
       "snapshot": {
@@ -68,7 +398,17 @@
         "boss_state": "Chasing",
         "portal_blocks": 9
       },
-      "tick": 6
+      "tick": 39
+    },
+    {
+      "snapshot": {
+        "boss_dead": true,
+        "boss_enraged": true,
+        "boss_health": -110,
+        "boss_state": "Chasing",
+        "portal_blocks": 9
+      },
+      "tick": 40
     }
   ],
   "name": "micro_end_boss_loop"
