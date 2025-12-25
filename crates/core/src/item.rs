@@ -20,6 +20,8 @@ pub enum ItemType {
     Item(u16),
 }
 
+const LEGACY_ITEM_BOW: u16 = 1;
+
 /// Potion IDs for ItemType::Potion variant
 #[allow(missing_docs)]
 pub mod potion_ids {
@@ -327,10 +329,19 @@ pub struct ItemStack {
 }
 
 impl ItemStack {
+    fn max_durability_for_item(item_id: u16) -> Option<u32> {
+        match item_id {
+            LEGACY_ITEM_BOW => Some(384),
+            client_item_ids::FLINT_AND_STEEL => Some(64),
+            _ => None,
+        }
+    }
+
     /// Create a new item stack
     pub fn new(item_type: ItemType, count: u32) -> Self {
         let durability = match item_type {
             ItemType::Tool(tool_type, material) => Some(material.durability(tool_type)),
+            ItemType::Item(item_id) => Self::max_durability_for_item(item_id),
             _ => None,
         };
 
@@ -350,9 +361,12 @@ impl ItemStack {
             ItemType::Food(_) => 64,
             ItemType::Potion(_) => 1,       // Potions don't stack
             ItemType::SplashPotion(_) => 1, // Splash potions don't stack
-            ItemType::Item(client_item_ids::ENDER_PEARL) => 16,
+            ItemType::Item(client_item_ids::ENDER_PEARL)
+            | ItemType::Item(client_item_ids::EYE_OF_ENDER)
+            | ItemType::Item(104) => 16,
             ItemType::Item(
-                client_item_ids::BUCKET
+                LEGACY_ITEM_BOW
+                | client_item_ids::BUCKET
                 | client_item_ids::WATER_BUCKET
                 | client_item_ids::LAVA_BUCKET
                 | client_item_ids::FLINT_AND_STEEL,
@@ -415,6 +429,7 @@ impl ItemStack {
     pub fn max_durability(&self) -> Option<u32> {
         match self.item_type {
             ItemType::Tool(tool_type, material) => Some(material.durability(tool_type)),
+            ItemType::Item(item_id) => Self::max_durability_for_item(item_id),
             _ => None,
         }
     }
@@ -593,8 +608,25 @@ mod tests {
         );
         assert_eq!(
             ItemStack::new(ItemType::Item(client_item_ids::EYE_OF_ENDER), 1).max_stack_size(),
-            64
+            16
         );
+        assert_eq!(ItemStack::new(ItemType::Item(104), 1).max_stack_size(), 16);
+    }
+
+    #[test]
+    fn bow_has_durability_and_does_not_stack() {
+        let bow = ItemStack::new(ItemType::Item(LEGACY_ITEM_BOW), 1);
+        assert_eq!(bow.max_stack_size(), 1);
+        assert_eq!(bow.durability, Some(384));
+        assert_eq!(bow.max_durability(), Some(384));
+    }
+
+    #[test]
+    fn flint_and_steel_has_durability_and_does_not_stack() {
+        let flint = ItemStack::new(ItemType::Item(client_item_ids::FLINT_AND_STEEL), 1);
+        assert_eq!(flint.max_stack_size(), 1);
+        assert_eq!(flint.durability, Some(64));
+        assert_eq!(flint.max_durability(), Some(64));
     }
 
     #[test]

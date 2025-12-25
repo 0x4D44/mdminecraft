@@ -12,7 +12,7 @@ use mdminecraft_assets::TextureAtlasMetadata;
 /// GPU rendering context.
 pub struct RenderContext {
     /// Window surface the renderer presents into.
-    pub surface: wgpu::Surface<'static>,
+    pub surface: Option<wgpu::Surface<'static>>,
     /// Logical GPU device used for issuing commands.
     pub device: wgpu::Device,
     /// Command queue for submitting work to the GPU.
@@ -21,6 +21,14 @@ pub struct RenderContext {
     pub config: wgpu::SurfaceConfiguration,
     /// Current backbuffer dimensions in pixels (width, height).
     pub size: (u32, u32),
+    /// Headless render target when no surface is available.
+    pub headless: Option<HeadlessTarget>,
+}
+
+/// Offscreen render target used for headless rendering.
+pub struct HeadlessTarget {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
 }
 
 impl RenderContext {
@@ -63,7 +71,7 @@ impl RenderContext {
             .unwrap_or(surface_caps.formats[0]);
 
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
             format: surface_format,
             width: size.width,
             height: size.height,
@@ -82,11 +90,86 @@ impl RenderContext {
         );
 
         Ok(Self {
-            surface,
+            surface: Some(surface),
             device,
             queue,
             config,
             size: (size.width, size.height),
+            headless: None,
+        })
+    }
+
+    /// Create a new headless render context with an offscreen render target.
+    pub async fn new_headless(size: (u32, u32), format: wgpu::TextureFormat) -> Result<Self> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await
+            .context("Failed to find suitable GPU adapter")?;
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("mdminecraft device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                },
+                None,
+            )
+            .await?;
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            format,
+            width: size.0,
+            height: size.1,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+
+        let headless_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Headless Render Target"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let headless_view = headless_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        tracing::info!(
+            width = size.0,
+            height = size.1,
+            format = ?format,
+            "GPU headless rendering context initialized"
+        );
+
+        Ok(Self {
+            surface: None,
+            device,
+            queue,
+            config,
+            size,
+            headless: Some(HeadlessTarget {
+                texture: headless_texture,
+                view: headless_view,
+            }),
         })
     }
 
@@ -96,7 +179,33 @@ impl RenderContext {
             self.size = new_size;
             self.config.width = new_size.0;
             self.config.height = new_size.1;
-            self.surface.configure(&self.device, &self.config);
+            if let Some(surface) = self.surface.as_ref() {
+                surface.configure(&self.device, &self.config);
+            }
+
+            if self.headless.is_some() {
+                let format = self.config.format;
+                let headless_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Headless Render Target"),
+                    size: wgpu::Extent3d {
+                        width: new_size.0,
+                        height: new_size.1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let headless_view =
+                    headless_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                self.headless = Some(HeadlessTarget {
+                    texture: headless_texture,
+                    view: headless_view,
+                });
+            }
         }
     }
 

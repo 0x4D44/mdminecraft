@@ -80,6 +80,36 @@ Additional samples live under `config/scripts/`:
 - `rotation_demo.json` – pure camera rotation showcase.
 - `walk_square.json` – walks a square path to stress movement transitions.
 
+### Headless Automation Harness (screenshots + remote input)
+
+Run a headless instance with a TCP automation server:
+
+```bash
+cargo run -- --headless --no-audio --no-save --world-seed 1 \
+  --automation-listen 127.0.0.1:4242 --automation-step \
+  --screenshot-dir target/harness/run1 --screenshot-every-ticks 1
+```
+
+The automation protocol is newline-delimited JSON (NDJSON). Example client using `nc`:
+
+```bash
+{ \
+  echo '{"op":"hello","id":1,"version":1}'; \
+  echo '{"op":"get_state","id":2}'; \
+  echo '{"op":"step","id":3,"ticks":10}'; \
+  echo '{"op":"screenshot","id":4,"tag":"overlook"}'; \
+  echo '{"op":"shutdown","id":5}'; \
+} | nc 127.0.0.1 4242
+```
+
+There is also a small reference client at `tools/harness_client/mdm_harness_client.py` for running NDJSON scripts.
+
+Notes:
+- `--automation-step` blocks until `step` requests (deterministic tick stepping).
+- `--no-render` runs simulation without a GPU; `screenshot` returns `unsupported`.
+- `--exit-when-script-finished` exits headless once `--command-script` completes.
+- On unix, you can use `--automation-uds /path/to/socket` instead of `--automation-listen`.
+
 **3D Viewer Controls:**
 - **WASD** - Move camera
 - **Mouse** - Look around (Tab to grab cursor)
@@ -109,6 +139,21 @@ cargo run --bin metrics-diff -- baseline.json current.json --format json
 ```
 
 See [Metrics Diff Tool Usage](wrk_docs/2025.11.15%20-%20DOC%20-%20Metrics%20Diff%20Tool%20Usage.md) for complete documentation.
+
+### Save Migration
+
+**save-upgrade** - Upgrade on-disk save data to the latest supported formats:
+
+```bash
+# Upgrade a save in place (creates a timestamped world.state.bak.* by default)
+cargo run --bin save-upgrade -- --world saves/default
+
+# Supply a seed when creating a missing world.meta
+cargo run --bin save-upgrade -- --world saves/default --seed 12345
+
+# Disable backups
+cargo run --bin save-upgrade -- --world saves/default --no-backup
+```
 
 ### World Generation Debugging
 

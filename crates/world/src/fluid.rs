@@ -142,8 +142,37 @@ fn voxel_is_waterlogged(voxel: Voxel) -> bool {
 
 /// Check if a block is flammable (can be set on fire by lava)
 pub fn is_flammable(block_id: BlockId) -> bool {
-    // Wood-like blocks
-    matches!(block_id, 11 | 12) // oak_log, oak_planks
+    use crate::trees::tree_blocks;
+
+    matches!(
+        block_id,
+        // Logs, planks, and wood-like stations.
+        crate::BLOCK_OAK_LOG
+            | crate::BLOCK_OAK_PLANKS
+            | crate::BLOCK_CRAFTING_TABLE
+            | crate::BLOCK_BOOKSHELF
+            // Leaves.
+            | tree_blocks::LEAVES
+            | tree_blocks::BIRCH_LEAVES
+            | tree_blocks::PINE_LEAVES
+            // Other logs.
+            | tree_blocks::BIRCH_LOG
+            | tree_blocks::PINE_LOG
+            // Common wood derivatives.
+            | crate::interactive_blocks::OAK_DOOR_LOWER
+            | crate::interactive_blocks::OAK_DOOR_UPPER
+            | crate::interactive_blocks::TRAPDOOR
+            | crate::interactive_blocks::LADDER
+            | crate::interactive_blocks::OAK_FENCE
+            | crate::interactive_blocks::OAK_FENCE_GATE
+            | crate::interactive_blocks::OAK_SLAB
+            | crate::interactive_blocks::OAK_STAIRS
+            | crate::interactive_blocks::BED_HEAD
+            | crate::interactive_blocks::BED_FOOT
+            | crate::interactive_blocks::CHEST
+            | crate::redstone_blocks::OAK_BUTTON
+            | crate::redstone_blocks::OAK_PRESSURE_PLATE
+    )
 }
 
 /// World position for fluid updates
@@ -734,8 +763,11 @@ mod tests {
 
     #[test]
     fn test_is_flammable() {
-        assert!(is_flammable(11)); // oak_log
-        assert!(is_flammable(12)); // oak_planks
+        assert!(is_flammable(crate::BLOCK_OAK_LOG));
+        assert!(is_flammable(crate::BLOCK_OAK_PLANKS));
+        assert!(is_flammable(crate::BLOCK_CRAFTING_TABLE));
+        assert!(is_flammable(crate::interactive_blocks::CHEST));
+        assert!(is_flammable(crate::trees::tree_blocks::LEAVES));
         assert!(!is_flammable(blocks::STONE));
         assert!(!is_flammable(blocks::DIRT));
     }

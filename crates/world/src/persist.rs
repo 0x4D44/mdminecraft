@@ -1369,13 +1369,17 @@ mod tests {
         };
 
         let mut dropped_items = ItemManager::new();
-        let dropped_id = dropped_items.spawn_item(
+        let dropped_enchantments = vec![Enchantment {
+            enchantment_type: EnchantmentType::Power,
+            level: 3,
+        }];
+        let dropped_id = dropped_items.spawn_item_with_metadata(
             DimensionId::Overworld,
-            1.0,
-            65.0,
-            2.0,
-            crate::ItemType::IronIngot,
-            3,
+            (1.0, 65.0, 2.0),
+            crate::ItemType::Bow,
+            1,
+            Some(42),
+            Some(dropped_enchantments.clone()),
         );
 
         let mut projectiles = ProjectileManager::new();
@@ -1383,6 +1387,9 @@ mod tests {
             DimensionId::Overworld,
             crate::Projectile::shoot_arrow(0.0, 70.0, 0.0, 0.0, 0.0, 1.0),
         );
+        let mut egg = crate::Projectile::throw_egg(0.0, 70.0, 0.0, 0.0, 0.0);
+        egg.egg_hatch_count = 4;
+        projectiles.spawn(DimensionId::Overworld, egg);
 
         let entities = WorldEntitiesState {
             mobs: vec![Mob::new(2.0, 65.0, 2.0, crate::MobType::Pig)],
@@ -1509,20 +1516,29 @@ mod tests {
 
             assert_eq!(loaded.entities.mobs.len(), 1);
             assert_eq!(loaded.entities.dropped_items.count(), 1);
-            assert_eq!(
-                loaded
-                    .entities
-                    .dropped_items
-                    .get(dropped_id)
-                    .expect("dropped item missing")
-                    .item_type,
-                crate::ItemType::IronIngot
-            );
-            assert_eq!(loaded.entities.projectiles.count(), 1);
+            let loaded_drop = loaded
+                .entities
+                .dropped_items
+                .get(dropped_id)
+                .expect("dropped item missing");
+            assert_eq!(loaded_drop.item_type, crate::ItemType::Bow);
+            assert_eq!(loaded_drop.count, 1);
+            assert_eq!(loaded_drop.durability, Some(42));
+            assert_eq!(loaded_drop.enchantments, Some(dropped_enchantments.clone()));
+            assert_eq!(loaded.entities.projectiles.count(), 2);
             assert_eq!(
                 loaded.entities.projectiles.projectiles[0].projectile_type,
                 crate::ProjectileType::Arrow
             );
+            assert_eq!(
+                loaded.entities.projectiles.projectiles[1].projectile_type,
+                crate::ProjectileType::Egg
+            );
+            assert_eq!(
+                loaded.entities.projectiles.projectiles[1].egg_hatch_count,
+                4
+            );
+            assert!(!loaded.entities.projectiles.projectiles[1].can_pick_up);
 
             assert_eq!(loaded.block_entities.furnaces.len(), 1);
             assert!(loaded.block_entities.furnaces.contains_key(&furnace_key));

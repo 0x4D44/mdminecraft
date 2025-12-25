@@ -256,6 +256,20 @@ pub fn set_snow_layers(state: BlockState, layers: u8) -> BlockState {
     (state & !SNOW_LAYERS_MASK) | ((layers - 1) as BlockState)
 }
 
+pub const FIRE_AGE_MAX: u8 = 15;
+const FIRE_AGE_MASK: BlockState = 0x0F;
+
+/// Get the fire age encoded in state (0..=15).
+pub fn fire_age(state: BlockState) -> u8 {
+    (state & FIRE_AGE_MASK) as u8
+}
+
+/// Set the fire age in the given state (clamped to 0..=15).
+pub fn set_fire_age(state: BlockState, age: u8) -> BlockState {
+    let age = age.min(FIRE_AGE_MAX);
+    (state & !FIRE_AGE_MASK) | (age as BlockState)
+}
+
 /// Check if block state indicates door is open
 pub fn is_door_open(state: BlockState) -> bool {
     (state & 0x08) != 0
@@ -1207,6 +1221,13 @@ mod tests {
         assert_eq!(snow_layers(set_snow_layers(0, 4)), 4);
         assert_eq!(snow_layers(set_snow_layers(0, 0)), 1);
         assert_eq!(snow_layers(set_snow_layers(0, 99)), 8);
+    }
+
+    #[test]
+    fn fire_age_roundtrip() {
+        assert_eq!(fire_age(0), 0);
+        assert_eq!(fire_age(set_fire_age(0, 7)), 7);
+        assert_eq!(fire_age(set_fire_age(0, 99)), FIRE_AGE_MAX);
     }
 
     #[test]

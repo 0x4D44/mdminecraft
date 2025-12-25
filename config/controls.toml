@@ -1,14 +1,15 @@
-# mdminecraft Controls Configuration
-
-mouse_sensitivity = 0.006
+mouse_sensitivity = 0.006000000052154064
 invert_y = false
+fov_degrees = 70.0
+render_distance = 8
+master_volume = 1.0
+music_volume = 0.5
+sfx_volume = 1.0
+ambient_volume = 0.699999988079071
+audio_muted = false
 
-# Key bindings can be customized below
 [bindings.base]
-# Example: toggle_cursor = ["Tab"]
 
 [bindings.gameplay]
-# Example: forward = ["W", "Up"]
 
 [bindings.ui]
-# Example: close = ["Escape"]
