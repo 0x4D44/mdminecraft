@@ -1,6 +1,8 @@
 //! Game world state - the actual 3D voxel game
 
 use crate::{
+    automation::controller::{AutomationEndpoint, AutomationMsg},
+    automation::protocol,
     command_script::CommandScriptPlayer,
     commands,
     config::{load_block_registry, ControlsConfig},
@@ -83,11 +85,19 @@ const WEATHER_ACCUMULATION_MAX_BLOCK_LIGHT: u8 = 11;
 const FIRE_EXTINGUISH_INTERVAL_TICKS: u64 = 20; // ~1s at 20 TPS
 const FIRE_EXTINGUISH_ATTEMPTS_PER_INTERVAL: u8 = 4;
 const FIRE_EXTINGUISH_RADIUS_BLOCKS: i32 = 32;
+const FIRE_TICK_INTERVAL_TICKS: u64 = 20; // ~1s at 20 TPS
+const FIRE_TICK_ATTEMPTS_PER_INTERVAL: u8 = 6;
+const FIRE_TICK_RADIUS_BLOCKS: i32 = 32;
+const FIRE_DECAY_AGE_THRESHOLD: u8 = 6;
+const FIRE_BURN_SUPPORT_AGE_THRESHOLD: u8 = 10;
+const FIRE_SPREAD_CHANCE_DENOMINATOR: u32 = 3;
 const WEATHER_MELT_INTERVAL_TICKS: u64 = 60; // ~3s at 20 TPS
 const WEATHER_MELT_ATTEMPTS_PER_INTERVAL: u8 = 3;
 const WEATHER_MELT_RADIUS_BLOCKS: i32 = 32;
 const UNDEAD_SUNLIGHT_MIN_SKY_LIGHT: u8 = 14;
 const UNDEAD_SUNLIGHT_FIRE_TICKS: u32 = 40; // ~2s at 20 TPS
+const CHICKEN_EGG_MIN_INTERVAL_TICKS: u64 = 6000; // 5 minutes at 20 TPS
+const CHICKEN_EGG_INTERVAL_RANGE_TICKS: u64 = 6000; // up to +5 minutes (vanilla-ish 5-10m)
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
 const NETHER_PORTAL_CHARGE_TICKS: u16 = 80;
@@ -501,6 +511,7 @@ impl Hotbar {
                     15 => "Lapis Lazuli".to_string(),
                     16 => "Bone".to_string(),
                     17 => "Emerald".to_string(),
+                    18 => "Bone Meal".to_string(),
                     // Leather armor
                     20 => "Leather Helmet".to_string(),
                     21 => "Leather Chestplate".to_string(),
@@ -1684,9 +1695,166 @@ impl PlayerPhysics {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+struct AutomationHeldInput {
+    move_x: f32,
+    move_y: f32,
+    move_z: f32,
+    sprint: bool,
+    crouch: bool,
+    jump_hold: bool,
+    attack_hold: bool,
+    use_hold: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+struct AutomationPulseInput {
+    jump_click: bool,
+    attack_click: bool,
+    use_click: bool,
+    hotbar_slot: Option<u8>,
+}
+
+struct AutomationRuntime {
+    rx: std::sync::mpsc::Receiver<AutomationMsg>,
+    connected: bool,
+    ever_connected: bool,
+    held: AutomationHeldInput,
+    pulses: AutomationPulseInput,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScreenshotConfig {
+    pub dir: PathBuf,
+    pub every_ticks: Option<u64>,
+    pub max: Option<u64>,
+}
+
+pub struct GameWorldOptions {
+    pub width: u32,
+    pub height: u32,
+    pub automation: Option<AutomationEndpoint>,
+    pub screenshot: Option<ScreenshotConfig>,
+}
+
+impl Default for GameWorldOptions {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 720,
+            automation: None,
+            screenshot: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ScreenshotJobKind {
+    Periodic,
+    PeriodicEvent {
+        respond_to: std::sync::mpsc::SyncSender<serde_json::Value>,
+    },
+    Manual {
+        id: Option<protocol::RequestId>,
+        respond_to: std::sync::mpsc::SyncSender<serde_json::Value>,
+    },
+}
+
+#[derive(Debug)]
+struct ScreenshotJob {
+    kind: ScreenshotJobKind,
+    tag: Option<String>,
+}
+
+struct ScreenshotRuntime {
+    cfg: ScreenshotConfig,
+    last_periodic_tick: Option<u64>,
+    periodic_captured: u64,
+    capture_texture: Option<wgpu::Texture>,
+    capture_view: Option<wgpu::TextureView>,
+    capture_size: (u32, u32),
+    pending: std::collections::VecDeque<ScreenshotJob>,
+}
+
+impl ScreenshotRuntime {
+    fn new(cfg: ScreenshotConfig, world_seed: u64, size: (u32, u32)) -> Result<Self> {
+        std::fs::create_dir_all(&cfg.dir)?;
+        let run_path = cfg.dir.join("run.json");
+        let run_file = std::fs::File::create(&run_path)?;
+        serde_json::to_writer_pretty(
+            run_file,
+            &serde_json::json!({
+                "version": 1,
+                "world_seed": world_seed,
+                "width": size.0,
+                "height": size.1,
+                "format": "png",
+                "screenshot_every_ticks": cfg.every_ticks,
+                "screenshot_max": cfg.max,
+            }),
+        )?;
+        Ok(Self {
+            cfg,
+            last_periodic_tick: None,
+            periodic_captured: 0,
+            capture_texture: None,
+            capture_view: None,
+            capture_size: (0, 0),
+            pending: std::collections::VecDeque::new(),
+        })
+    }
+
+    fn sanitize_tag(tag: &str) -> String {
+        let mut out = String::new();
+        for ch in tag.chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch.to_ascii_lowercase());
+            } else if ch == '-' || ch == '_' {
+                out.push(ch);
+            } else if ch.is_whitespace() {
+                out.push('_');
+            }
+        }
+        let out = out.trim_matches(&['-', '_'][..]).to_string();
+        if out.is_empty() {
+            "untagged".to_string()
+        } else if out.len() > 64 {
+            out.chars().take(64).collect()
+        } else {
+            out
+        }
+    }
+
+    fn path_for(&self, tick: u64, tag: Option<&str>) -> PathBuf {
+        let mut base = format!("tick_{tick:08}");
+        if let Some(tag) = tag {
+            base.push_str("_tag-");
+            base.push_str(&Self::sanitize_tag(tag));
+        }
+        base.push_str(".png");
+        let mut path = self.cfg.dir.join(base);
+        if path.exists() {
+            for idx in 1..=9999u32 {
+                let mut name = format!("tick_{tick:08}_n{idx:04}");
+                if let Some(tag) = tag {
+                    name.push_str("_tag-");
+                    name.push_str(&Self::sanitize_tag(tag));
+                }
+                name.push_str(".png");
+                let candidate = self.cfg.dir.join(name);
+                if !candidate.exists() {
+                    path = candidate;
+                    break;
+                }
+            }
+        }
+        path
+    }
+}
+
 /// The game world state
 pub struct GameWorld {
-    window: Arc<Window>,
+    window: Option<Arc<Window>>,
     renderer: Renderer,
     audio: AudioManager,
     chunk_manager: ChunkManager,
@@ -1714,6 +1882,9 @@ pub struct GameWorld {
     input_processor: InputProcessor,
     #[allow(dead_code)]
     actions: ActionState,
+    automation: Option<AutomationRuntime>,
+    screenshot: Option<ScreenshotRuntime>,
+    screenshot_periodic_event_sink: Option<std::sync::mpsc::SyncSender<serde_json::Value>>,
     scripted_input: Option<ScriptedInputPlayer>,
     command_script: Option<CommandScriptPlayer>,
     particle_emitter: ParticleEmitter,
@@ -1773,8 +1944,8 @@ pub struct GameWorld {
     sugar_cane_growth: SugarCaneGrowthSystem,
     /// Block interaction manager (doors/trapdoors/etc)
     interaction_manager: InteractionManager,
-    /// Pressure plate currently pressed by the player (if any)
-    pressed_pressure_plate: Option<RedstonePos>,
+    /// Pressure plates currently pressed by any entity.
+    pressed_pressure_plates: std::collections::BTreeSet<RedstonePos>,
     /// Simulation tick counter
     sim_tick: SimTick,
     /// Time accumulator for fixed timestep loop
@@ -1871,10 +2042,14 @@ pub struct GameWorld {
 
 struct DispenserTickContext<'a> {
     chunks: &'a mut HashMap<ChunkPos, Chunk>,
+    crop_growth: &'a mut CropGrowthSystem,
+    block_properties: &'a BlockPropertiesRegistry,
     redstone_sim: &'a mut RedstoneSimulator,
     item_manager: &'a mut ItemManager,
     fluid_sim: &'a mut FluidSimulator,
     projectiles: &'a mut ProjectileManager,
+    chests: &'a mut BTreeMap<BlockEntityKey, ChestState>,
+    hoppers: &'a mut BTreeMap<BlockEntityKey, HopperState>,
     dispensers: &'a mut BTreeMap<BlockEntityKey, DispenserState>,
     droppers: &'a mut BTreeMap<BlockEntityKey, DispenserState>,
 }
@@ -2124,14 +2299,22 @@ impl GameWorld {
         controls: Arc<ControlsConfig>,
         scripted_input_path: Option<PathBuf>,
         command_script_path: Option<PathBuf>,
+        options: GameWorldOptions,
     ) -> Result<Self> {
         tracing::info!("Initializing game world...");
+
+        let GameWorldOptions {
+            width,
+            height,
+            automation,
+            screenshot,
+        } = options;
 
         // Create window
         let window_config = WindowConfig {
             title: "mdminecraft - Game".to_string(),
-            width: 1280,
-            height: 720,
+            width,
+            height,
             vsync: true,
         };
 
@@ -2140,8 +2323,8 @@ impl GameWorld {
 
         // Create renderer
         let renderer_config = RendererConfig {
-            width: 1280,
-            height: 720,
+            width,
+            height,
             headless: false,
         };
         let mut renderer = Renderer::new(renderer_config);
@@ -2334,8 +2517,13 @@ impl GameWorld {
             .map(|path| CommandScriptPlayer::from_path(path))
             .transpose()?;
 
+        let screenshot = match screenshot {
+            Some(cfg) => Some(ScreenshotRuntime::new(cfg, world_seed, (width, height))?),
+            None => None,
+        };
+
         let mut world = Self {
-            window,
+            window: Some(window),
             renderer,
             audio,
             chunk_manager,
@@ -2362,6 +2550,15 @@ impl GameWorld {
             controls,
             input_processor,
             actions: ActionState::default(),
+            automation: automation.map(|AutomationEndpoint { rx }| AutomationRuntime {
+                rx,
+                connected: false,
+                ever_connected: false,
+                held: AutomationHeldInput::default(),
+                pulses: AutomationPulseInput::default(),
+            }),
+            screenshot,
+            screenshot_periodic_event_sink: None,
             scripted_input,
             command_script,
             particle_emitter: ParticleEmitter::new(),
@@ -2398,7 +2595,7 @@ impl GameWorld {
             crop_growth: CropGrowthSystem::new(world_seed),
             sugar_cane_growth: SugarCaneGrowthSystem::new(world_seed),
             interaction_manager: InteractionManager::new(),
-            pressed_pressure_plate: None,
+            pressed_pressure_plates: std::collections::BTreeSet::new(),
             sim_tick,
             accumulator: 0.0,
             crafting_open: false,
@@ -2545,9 +2742,876 @@ impl GameWorld {
             }
         }
 
-        let _ = world.input.enter_gameplay(&world.window);
+        if let Some(window) = world.window.as_ref() {
+            let _ = world.input.enter_gameplay(window);
+        } else {
+            world.input.context = InputContext::Gameplay;
+            world.input.cursor_captured = true;
+        }
 
         Ok(world)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_headless(
+        controls: Arc<ControlsConfig>,
+        scripted_input_path: Option<PathBuf>,
+        command_script_path: Option<PathBuf>,
+        options: GameWorldOptions,
+        save_path: PathBuf,
+        world_seed_override: Option<u64>,
+        no_render: bool,
+        no_audio: bool,
+    ) -> Result<Self> {
+        tracing::info!("Initializing headless game world...");
+
+        let GameWorldOptions {
+            width,
+            height,
+            automation,
+            screenshot,
+        } = options;
+
+        let renderer_config = RendererConfig {
+            width,
+            height,
+            headless: true,
+        };
+        let mut renderer = Renderer::new(renderer_config);
+        if !no_render {
+            pollster::block_on(renderer.initialize_gpu_headless())?;
+        }
+
+        #[cfg(feature = "ui3d_billboards")]
+        let billboard_renderer = None;
+
+        // Load block registry
+        let registry = load_block_registry();
+
+        // Setup persistence and generator
+        let region_store = RegionStore::new(&save_path).unwrap_or_else(|_| {
+            tracing::warn!("Failed to create region store, using memory-only world");
+            RegionStore::new(&save_path).expect("Failed to create region store")
+        });
+
+        let (world_seed, end_boss_defeated, loaded_state) = {
+            if region_store.world_meta_exists() {
+                let meta = match region_store.load_world_meta() {
+                    Ok(meta) => meta,
+                    Err(err) => {
+                        tracing::warn!(?err, "Failed to load world meta; starting fresh");
+                        WorldMeta {
+                            world_seed: world_seed_override.unwrap_or_else(rand::random),
+                            end_boss_defeated: false,
+                        }
+                    }
+                };
+
+                if let Some(expected_seed) = world_seed_override {
+                    if meta.world_seed != expected_seed {
+                        anyhow::bail!(
+                            "save dir seed mismatch: save has {}, requested {} (use --reset-world)",
+                            meta.world_seed,
+                            expected_seed
+                        );
+                    }
+                }
+
+                let state = if region_store.world_state_exists() {
+                    match region_store.load_world_state() {
+                        Ok(state) => Some(state),
+                        Err(err) => {
+                            tracing::warn!(?err, "Failed to load world state; starting fresh");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                (meta.world_seed, meta.end_boss_defeated, state)
+            } else {
+                let world_seed = world_seed_override
+                    .or_else(|| {
+                        std::env::var("MDM_WORLD_SEED")
+                            .ok()
+                            .and_then(|raw| raw.parse::<u64>().ok())
+                    })
+                    .unwrap_or_else(rand::random);
+
+                let meta = WorldMeta {
+                    world_seed,
+                    end_boss_defeated: false,
+                };
+                if let Err(err) = region_store.save_world_meta(&meta) {
+                    tracing::warn!(?err, "Failed to save world meta");
+                }
+
+                let state = if region_store.world_state_exists() {
+                    match region_store.load_world_state() {
+                        Ok(state) => Some(state),
+                        Err(err) => {
+                            tracing::warn!(?err, "Failed to load world state; starting fresh");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                (world_seed, meta.end_boss_defeated, state)
+            }
+        };
+
+        tracing::info!("World Seed: {}", world_seed);
+        let terrain_generator = TerrainGenerator::new(world_seed);
+        let render_distance = controls.render_distance.clamp(2, 16);
+
+        let chunk_manager = ChunkManager::new();
+        let chunks = HashMap::new();
+        let rng = StdRng::seed_from_u64(world_seed ^ 0x5eed_a11c);
+
+        let mut sim_tick = SimTick::ZERO;
+        let mut sim_time = SimTime::default();
+        let mut weather = WeatherToggle::new();
+        let mut loaded_player: Option<PlayerSave> = None;
+        let mut loaded_entities = WorldEntitiesState::default();
+        let mut loaded_block_entities = BlockEntitiesState::default();
+        let weather_next_change_tick = if let Some(state) = loaded_state {
+            sim_tick = state.tick;
+            sim_time = state.sim_time;
+            weather = state.weather;
+            loaded_player = state.player;
+            loaded_entities = state.entities;
+            loaded_block_entities = state.block_entities;
+            state.weather_next_change_tick
+        } else {
+            // Deterministic initial schedule (based on seed + tick).
+            let delay_ticks = Self::weather_delay_ticks(
+                world_seed,
+                sim_tick,
+                900..2400, // 45..120 seconds at 20 TPS
+                0xC0FFEE_u64,
+            );
+            sim_tick.advance(delay_ticks)
+        };
+
+        let initial_dimension = loaded_player
+            .as_ref()
+            .map(|player| player.transform.dimension)
+            .unwrap_or(DimensionId::DEFAULT);
+        let initial_spawn_dimension = loaded_player
+            .as_ref()
+            .map(|player| player.spawn_point.dimension)
+            .unwrap_or(DimensionId::DEFAULT);
+
+        if let Some(player) = &loaded_player {
+            renderer.camera_mut().position = glam::Vec3::new(
+                player.transform.x as f32,
+                player.transform.y as f32,
+                player.transform.z as f32,
+            );
+            renderer.camera_mut().yaw = player.transform.yaw;
+            renderer.camera_mut().pitch = player.transform.pitch;
+        } else {
+            renderer.camera_mut().position = glam::Vec3::new(0.0, 100.0, 0.0);
+            renderer.camera_mut().yaw = 0.0;
+            renderer.camera_mut().pitch = -0.3;
+        }
+
+        renderer.camera_mut().fov = controls.fov_degrees.clamp(30.0, 150.0).to_radians();
+
+        let mut audio = if no_audio {
+            AudioManager::stub()
+        } else {
+            match AudioManager::new() {
+                Ok(audio) => audio,
+                Err(err) => {
+                    tracing::warn!(%err, "Audio initialization failed; using stub");
+                    AudioManager::stub()
+                }
+            }
+        };
+        audio.update_settings(Self::audio_settings_from_controls(controls.as_ref()));
+        let camera_pos = renderer.camera().position;
+        audio.set_listener_position([camera_pos.x, camera_pos.y, camera_pos.z]);
+
+        let spawn_table = content_pack_spawns::load_mob_spawn_table_lenient(Path::new(
+            content_packs::CONTENT_PACKS_DIR,
+        ));
+        let loot_tables = content_pack_loot::load_loot_tables_lenient(
+            Path::new(content_packs::CONTENT_PACKS_DIR),
+            &registry,
+        );
+        let mob_spawner = MobSpawner::new_with_spawn_table(world_seed, spawn_table);
+        let WorldEntitiesState {
+            mobs,
+            dropped_items,
+            projectiles,
+        } = loaded_entities;
+        let mut mobs = mobs;
+        let mut next_mob_id = mobs
+            .iter()
+            .map(|mob| mob.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+            .max(1);
+        for mob in &mut mobs {
+            if mob.id == 0 {
+                mob.id = next_mob_id;
+                next_mob_id = next_mob_id.saturating_add(1).max(1);
+            }
+        }
+        let furnaces = loaded_block_entities.furnaces;
+        let enchanting_tables = loaded_block_entities.enchanting_tables;
+        let brewing_stands = loaded_block_entities.brewing_stands;
+        let chests = loaded_block_entities.chests;
+        let hoppers = loaded_block_entities.hoppers;
+        let dispensers = loaded_block_entities.dispensers;
+        let droppers = loaded_block_entities.droppers;
+
+        // Setup state
+        let debug_hud = DebugHud::new(); // Zeroed by default
+
+        let input = InputState::new();
+        let input_processor = InputProcessor::new(&controls);
+        let scripted_input = scripted_input_path
+            .as_ref()
+            .map(|path| ScriptedInputPlayer::from_path(path))
+            .transpose()?;
+        let command_script = command_script_path
+            .as_ref()
+            .map(|path| CommandScriptPlayer::from_path(path))
+            .transpose()?;
+
+        let screenshot = match screenshot {
+            Some(cfg) => Some(ScreenshotRuntime::new(cfg, world_seed, (width, height))?),
+            None => None,
+        };
+
+        let mut world = Self {
+            window: None,
+            renderer,
+            audio,
+            chunk_manager,
+            chunks,
+            registry,
+            block_properties: BlockPropertiesRegistry::new(),
+            input,
+            last_frame: Instant::now(),
+            debug_hud,
+            time_of_day: TimeOfDay::new(),
+            sim_time,
+            sim_time_paused: false,
+            selected_block: None,
+            hotbar: Hotbar::new(),
+            player_physics: PlayerPhysics::new(),
+            player_health: PlayerHealth::new(),
+            chunks_visible: 0,
+            mining_progress: None,
+            spawn_point: glam::Vec3::ZERO, // Temp
+            spawn_point_dimension: initial_spawn_dimension,
+            active_dimension: initial_dimension,
+            portal_charge_ticks: 0,
+            portal_cooldown_ticks: 0,
+            controls,
+            input_processor,
+            actions: ActionState::default(),
+            automation: automation.map(|AutomationEndpoint { rx }| AutomationRuntime {
+                rx,
+                connected: false,
+                ever_connected: false,
+                held: AutomationHeldInput::default(),
+                pulses: AutomationPulseInput::default(),
+            }),
+            screenshot,
+            screenshot_periodic_event_sink: None,
+            scripted_input,
+            command_script,
+            particle_emitter: ParticleEmitter::new(),
+            particles: Vec::new(),
+            weather,
+            weather_next_change_tick,
+            precipitation_accumulator: 0.0,
+            rng,
+            weather_blend: 0.0,
+            lightning_flash_ticks: 0,
+            frame_dt: 0.0,
+            player_state: PlayerState::Alive,
+            death_message: String::new(),
+            respawn_requested: false,
+            menu_requested: false,
+            #[cfg(feature = "ui3d_billboards")]
+            billboard_renderer,
+            #[cfg(feature = "ui3d_billboards")]
+            billboard_emitter: BillboardEmitter::default(),
+            item_manager: dropped_items,
+            loot_tables,
+            inventory_open: false,
+            villager_trade_open: false,
+            open_villager_trade_id: None,
+            selected_villager_trade_idx: 0,
+            ui_cursor_stack: None,
+            ui_drag_state: UiDragState::default(),
+            main_inventory: MainInventory::new(),
+            mob_spawner,
+            mobs,
+            next_mob_id,
+            fluid_sim: FluidSimulator::new(),
+            redstone_sim: RedstoneSimulator::new(),
+            crop_growth: CropGrowthSystem::new(world_seed),
+            sugar_cane_growth: SugarCaneGrowthSystem::new(world_seed),
+            interaction_manager: InteractionManager::new(),
+            pressed_pressure_plates: std::collections::BTreeSet::new(),
+            sim_tick,
+            accumulator: 0.0,
+            crafting_open: false,
+            crafting_grid: Default::default(),
+            personal_crafting_grid: Default::default(),
+            furnace_open: false,
+            open_furnace_pos: None,
+            furnaces,
+            enchanting_open: false,
+            open_enchanting_pos: None,
+            enchanting_tables,
+            player_armor: PlayerArmor::new(),
+            projectiles,
+            bow_charge: 0.0,
+            bow_drawing: false,
+            attack_cooldown: 0.0,
+            player_xp: PlayerXP::new(),
+            xp_orbs: Vec::new(),
+            status_effects: StatusEffects::new(),
+            regeneration_timer_ticks: 0,
+            poison_timer_ticks: 0,
+            brewing_stands,
+            brewing_open: false,
+            open_brewing_pos: None,
+            chests,
+            chest_open: false,
+            open_chest_pos: None,
+            hoppers,
+            hopper_open: false,
+            open_hopper_pos: None,
+            dispensers,
+            droppers,
+            dispenser_open: false,
+            open_dispenser_pos: None,
+            dropper_open: false,
+            open_dropper_pos: None,
+            pause_menu_open: false,
+            pause_menu_view: PauseMenuView::Main,
+            pause_controls_dirty: false,
+            pending_action: None,
+
+            command_open: false,
+            command_focus_next_frame: false,
+            command_input: String::new(),
+            command_log: std::collections::VecDeque::new(),
+
+            region_store,
+            world_seed,
+            end_boss_defeated,
+            terrain_generator,
+            render_distance,
+        };
+
+        world
+            .time_of_day
+            .set_time(world.sim_time.time_of_day() as f32);
+
+        // Initial chunk load (blocking, load all initial chunks)
+        world.update_chunks(usize::MAX);
+
+        let has_loaded_player = loaded_player.is_some();
+
+        // Spawn passive mobs only for brand-new worlds.
+        if !has_loaded_player && world.mobs.is_empty() {
+            let mut positions: Vec<_> = world.chunks.keys().copied().collect();
+            positions.sort();
+
+            for pos in positions {
+                let Some(chunk) = world.chunks.get(&pos) else {
+                    continue;
+                };
+                let chunk_center_x = pos.x * CHUNK_SIZE_X as i32 + CHUNK_SIZE_X as i32 / 2;
+                let chunk_center_z = pos.z * CHUNK_SIZE_Z as i32 + CHUNK_SIZE_Z as i32 / 2;
+                let biome = world
+                    .terrain_generator
+                    .biome_assigner()
+                    .get_biome(chunk_center_x, chunk_center_z);
+
+                let mut surface_heights = [[0i32; CHUNK_SIZE_X]; CHUNK_SIZE_Z];
+                for (local_z, row) in surface_heights.iter_mut().enumerate() {
+                    for (local_x, height) in row.iter_mut().enumerate() {
+                        for y in (0..CHUNK_SIZE_Y).rev() {
+                            let voxel = chunk.voxel(local_x, y, local_z);
+                            if voxel.id != BLOCK_AIR {
+                                *height = local_y_to_world_y(y);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                let mut new_mobs =
+                    world
+                        .mob_spawner
+                        .generate_spawns(pos.x, pos.z, biome, &surface_heights);
+                for mob in &mut new_mobs {
+                    mob.dimension = world.active_dimension;
+                }
+                world.assign_mob_ids(&mut new_mobs);
+                world.mobs.append(&mut new_mobs);
+            }
+        }
+
+        if let Some(save) = loaded_player {
+            world.apply_player_save(save);
+        } else {
+            // Determine spawn point
+            let spawn_feet = Self::determine_spawn_point(&world.chunks, &world.block_properties)
+                .unwrap_or_else(|| glam::Vec3::new(0.0, 100.0, 0.0));
+            world.spawn_point = spawn_feet;
+
+            // Setup camera
+            world.renderer.camera_mut().position =
+                spawn_feet + glam::Vec3::new(0.0, PlayerPhysics::new().eye_height, 0.0);
+            world.renderer.camera_mut().yaw = 0.0;
+            world.renderer.camera_mut().pitch = -0.3;
+            world.player_physics.last_ground_y = spawn_feet.y;
+        }
+
+        world.enter_gameplay();
+
+        Ok(world)
+    }
+
+    /// Advance the simulation by exactly one deterministic tick (20 TPS) using the current input
+    /// state (automation or scripted input).
+    ///
+    /// This is used by the headless automation harness and intentionally does not depend on
+    /// wall-clock time.
+    pub fn automation_tick(&mut self) {
+        let dt = TICK_RATE as f32;
+        self.frame_dt = dt;
+
+        self.apply_automation_input();
+        self.process_actions(dt);
+
+        // Update camera from input (only if alive)
+        if self.player_state == PlayerState::Alive {
+            self.update_camera(dt);
+        }
+
+        // Raycast for block selection (only if alive)
+        if self.input.cursor_captured && self.player_state == PlayerState::Alive {
+            let camera = self.renderer.camera();
+            let ray_origin = camera.position;
+            let ray_dir = camera.forward();
+
+            self.selected_block = raycast(ray_origin, ray_dir, 8.0, |block_pos| {
+                let chunk_x = block_pos.x.div_euclid(16);
+                let chunk_z = block_pos.z.div_euclid(16);
+                let local_x = block_pos.x.rem_euclid(16) as usize;
+                let Some(local_y) = world_y_to_local_y(block_pos.y) else {
+                    return false;
+                };
+                let local_z = block_pos.z.rem_euclid(16) as usize;
+
+                if let Some(chunk) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) {
+                    let voxel = chunk.voxel(local_x, local_y, local_z);
+                    voxel.id != BLOCK_AIR
+                } else {
+                    false
+                }
+            });
+
+            // Handle block breaking/placing
+            self.handle_block_interaction(dt);
+        } else {
+            self.selected_block = None;
+        }
+
+        // Advance deterministic sim state.
+        self.fixed_update();
+
+        // Sync visual time-of-day from deterministic simulation time for rendering/snapshots.
+        self.time_of_day
+            .set_time(self.sim_time.time_of_day() as f32);
+
+        // Update visual-only effects at a fixed rate so screenshots are stable.
+        self.update_weather(dt);
+        self.update_particles(dt);
+    }
+
+    pub fn run_headless_free(
+        &mut self,
+        max_ticks: Option<u64>,
+        exit_when_script_finished: bool,
+        exit_when_disconnected: bool,
+    ) -> Result<()> {
+        tracing::info!(
+            max_ticks = ?max_ticks,
+            exit_when_script_finished,
+            exit_when_disconnected,
+            "Starting headless free-run"
+        );
+
+        let script_was_loaded = self.command_script.is_some();
+        loop {
+            self.process_automation_messages();
+
+            if exit_when_script_finished && script_was_loaded && self.command_script.is_none() {
+                tracing::info!("Command script finished; exiting");
+                break;
+            }
+
+            if exit_when_disconnected
+                && self
+                    .automation
+                    .as_ref()
+                    .is_some_and(|rt| rt.ever_connected && !rt.connected)
+            {
+                tracing::info!("Automation controller disconnected; exiting");
+                break;
+            }
+
+            if let Some(max) = max_ticks {
+                if self.sim_tick.0 >= max {
+                    tracing::info!(tick = self.sim_tick.0, max_ticks = max, "Reached max ticks");
+                    break;
+                }
+            }
+
+            if let Some(action) = self.pending_action.take() {
+                if matches!(action, GameAction::Quit | GameAction::ReturnToMenu) {
+                    break;
+                }
+            }
+
+            self.automation_tick();
+
+            if self.headless_should_render() {
+                self.render();
+            }
+        }
+
+        self.persist_world();
+        Ok(())
+    }
+
+    pub fn run_headless_step(
+        &mut self,
+        max_ticks: Option<u64>,
+        exit_when_script_finished: bool,
+        exit_when_disconnected: bool,
+    ) -> Result<()> {
+        tracing::info!(
+            max_ticks = ?max_ticks,
+            exit_when_script_finished,
+            exit_when_disconnected,
+            "Starting headless step mode"
+        );
+
+        if self.automation.is_none() {
+            anyhow::bail!("headless step mode requires automation control (--automation-listen or --automation-uds)");
+        }
+
+        let script_was_loaded = self.command_script.is_some();
+        loop {
+            if exit_when_script_finished && script_was_loaded && self.command_script.is_none() {
+                tracing::info!("Command script finished; exiting");
+                break;
+            }
+
+            if exit_when_disconnected
+                && self
+                    .automation
+                    .as_ref()
+                    .is_some_and(|rt| rt.ever_connected && !rt.connected)
+            {
+                tracing::info!("Automation controller disconnected; exiting");
+                break;
+            }
+
+            if let Some(max) = max_ticks {
+                if self.sim_tick.0 >= max {
+                    tracing::info!(tick = self.sim_tick.0, max_ticks = max, "Reached max ticks");
+                    break;
+                }
+            }
+
+            if let Some(action) = self.pending_action.take() {
+                if matches!(action, GameAction::Quit | GameAction::ReturnToMenu) {
+                    break;
+                }
+            }
+
+            let msg = {
+                let runtime = self
+                    .automation
+                    .as_ref()
+                    .expect("checked automation presence");
+                runtime.rx.recv()
+            };
+
+            let msg = match msg {
+                Ok(msg) => msg,
+                Err(_) => {
+                    tracing::info!("Automation channel closed; exiting");
+                    break;
+                }
+            };
+
+            match msg {
+                AutomationMsg::Connected => {
+                    if let Some(runtime) = self.automation.as_mut() {
+                        runtime.connected = true;
+                        runtime.ever_connected = true;
+                        runtime.held = AutomationHeldInput::default();
+                        runtime.pulses = AutomationPulseInput::default();
+                    }
+                }
+                AutomationMsg::Disconnected => {
+                    if let Some(runtime) = self.automation.as_mut() {
+                        runtime.connected = false;
+                        runtime.held = AutomationHeldInput::default();
+                        runtime.pulses = AutomationPulseInput::default();
+                    }
+                }
+                AutomationMsg::Request {
+                    request,
+                    respond_to,
+                } => {
+                    self.handle_headless_automation_request(
+                        request,
+                        respond_to,
+                        max_ticks,
+                        exit_when_disconnected,
+                    )?;
+                }
+            }
+        }
+
+        self.persist_world();
+        Ok(())
+    }
+
+    fn headless_should_render(&self) -> bool {
+        if self.renderer.device().is_none() {
+            return false;
+        }
+
+        let Some(runtime) = self.screenshot.as_ref() else {
+            return false;
+        };
+
+        if !runtime.pending.is_empty() {
+            return true;
+        }
+
+        if let Some(every) = runtime.cfg.every_ticks {
+            let periodic_allowed = runtime
+                .cfg
+                .max
+                .map(|max| runtime.periodic_captured < max)
+                .unwrap_or(true);
+            if periodic_allowed
+                && every > 0
+                && self.sim_tick.0.is_multiple_of(every)
+                && runtime.last_periodic_tick != Some(self.sim_tick.0)
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn handle_headless_automation_request(
+        &mut self,
+        request: protocol::Request,
+        respond_to: std::sync::mpsc::SyncSender<serde_json::Value>,
+        max_ticks: Option<u64>,
+        exit_when_disconnected: bool,
+    ) -> Result<()> {
+        match request {
+            protocol::Request::SetActions(req) => {
+                if let Some(runtime) = self.automation.as_mut() {
+                    if let Some(value) = req.actions.move_x {
+                        runtime.held.move_x = value.clamp(-1.0, 1.0);
+                    }
+                    if let Some(value) = req.actions.move_y {
+                        runtime.held.move_y = value.clamp(-1.0, 1.0);
+                    }
+                    if let Some(value) = req.actions.move_z {
+                        runtime.held.move_z = value.clamp(-1.0, 1.0);
+                    }
+                    if let Some(value) = req.actions.sprint {
+                        runtime.held.sprint = value;
+                    }
+                    if let Some(value) = req.actions.crouch {
+                        runtime.held.crouch = value;
+                    }
+                    if let Some(value) = req.actions.jump_hold {
+                        runtime.held.jump_hold = value;
+                    }
+                    if let Some(value) = req.actions.attack_hold {
+                        runtime.held.attack_hold = value;
+                    }
+                    if let Some(value) = req.actions.use_hold {
+                        runtime.held.use_hold = value;
+                    }
+
+                    if let Some(slot) = req.actions.hotbar_slot {
+                        runtime.pulses.hotbar_slot = Some(slot.min(8));
+                    }
+                }
+
+                let _ = respond_to.send(protocol::event_ok(req.id));
+            }
+            protocol::Request::Pulse(req) => {
+                if let Some(runtime) = self.automation.as_mut() {
+                    runtime.pulses.jump_click |= req.actions.jump_click;
+                    runtime.pulses.attack_click |= req.actions.attack_click;
+                    runtime.pulses.use_click |= req.actions.use_click;
+                    if let Some(slot) = req.actions.hotbar_slot {
+                        runtime.pulses.hotbar_slot = Some(slot.min(8));
+                    }
+                }
+
+                let _ = respond_to.send(protocol::event_ok(req.id));
+            }
+            protocol::Request::SetView(req) => {
+                let pitch = (req.pitch).clamp(
+                    -std::f32::consts::FRAC_PI_2 + 0.001,
+                    std::f32::consts::FRAC_PI_2 - 0.001,
+                );
+                let camera = self.renderer.camera_mut();
+                camera.yaw = req.yaw;
+                camera.pitch = pitch;
+
+                let _ = respond_to.send(protocol::event_ok(req.id));
+            }
+            protocol::Request::Command(req) => {
+                let tick = self.sim_tick.0;
+                let (ok, lines) = match commands::parse_command(&req.line, &self.registry) {
+                    Ok(cmd) => {
+                        let out = commands::execute_command(self, cmd);
+                        (true, out.lines)
+                    }
+                    Err(err) => (false, vec![format!("Error: {err}")]),
+                };
+
+                let _ = respond_to.send(protocol::event_command_result(req.id, tick, ok, lines));
+            }
+            protocol::Request::GetState(req) => {
+                let tick = self.sim_tick.0;
+                let camera = self.renderer.camera();
+                let pos = [camera.position.x, camera.position.y, camera.position.z];
+                let _ = respond_to.send(protocol::event_state(
+                    req.id,
+                    tick,
+                    self.active_dimension.as_str(),
+                    pos,
+                    camera.yaw,
+                    camera.pitch,
+                    self.player_health.current,
+                    self.player_health.hunger,
+                ));
+            }
+            protocol::Request::Step(req) => {
+                self.handle_headless_step(req, respond_to, max_ticks, exit_when_disconnected)?;
+            }
+            protocol::Request::Screenshot(req) => {
+                if self.renderer.device().is_none() {
+                    let _ = respond_to.send(protocol::event_error(
+                        req.id,
+                        protocol::ErrorCode::Unsupported,
+                        "render disabled",
+                    ));
+                } else if let Some(runtime) = self.screenshot.as_mut() {
+                    runtime.pending.push_back(ScreenshotJob {
+                        kind: ScreenshotJobKind::Manual {
+                            id: req.id,
+                            respond_to,
+                        },
+                        tag: req.tag,
+                    });
+                    if self.headless_should_render() {
+                        self.render();
+                    }
+                } else {
+                    let _ = respond_to.send(protocol::event_error(
+                        req.id,
+                        protocol::ErrorCode::Unsupported,
+                        "screenshots disabled (set --screenshot-dir)",
+                    ));
+                }
+            }
+            protocol::Request::Shutdown(req) => {
+                self.pending_action = Some(GameAction::Quit);
+                let _ = respond_to.send(protocol::event_ok(req.id));
+            }
+            other => {
+                let _ = respond_to.send(protocol::event_error(
+                    other.request_id(),
+                    protocol::ErrorCode::Unsupported,
+                    "request not supported",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_headless_step(
+        &mut self,
+        req: protocol::StepRequest,
+        respond_to: std::sync::mpsc::SyncSender<serde_json::Value>,
+        max_ticks: Option<u64>,
+        exit_when_disconnected: bool,
+    ) -> Result<()> {
+        let prev_sink = self
+            .screenshot_periodic_event_sink
+            .replace(respond_to.clone());
+
+        for _ in 0..req.ticks {
+            if exit_when_disconnected
+                && self
+                    .automation
+                    .as_ref()
+                    .is_some_and(|rt| rt.ever_connected && !rt.connected)
+            {
+                break;
+            }
+
+            if let Some(max) = max_ticks {
+                if self.sim_tick.0 >= max {
+                    let _ = respond_to.send(protocol::event_error(
+                        req.id,
+                        protocol::ErrorCode::Internal,
+                        "max ticks reached",
+                    ));
+                    self.pending_action = Some(GameAction::Quit);
+                    self.screenshot_periodic_event_sink = prev_sink;
+                    return Ok(());
+                }
+            }
+
+            self.automation_tick();
+
+            if self.headless_should_render() {
+                self.render();
+            }
+        }
+
+        self.screenshot_periodic_event_sink = prev_sink;
+
+        let _ = respond_to.send(protocol::event_stepped(req.id, self.sim_tick.0));
+        Ok(())
     }
 
     fn column_ground_height(
@@ -3208,12 +4272,70 @@ impl GameWorld {
         y: f64,
         z: f64,
     ) -> bool {
+        Self::projectile_point_hits_world(chunks, block_properties, x, y, z).is_some()
+    }
+
+    fn button_projectile_aabb(block_x: i32, block_y: i32, block_z: i32, state: u16) -> AABB {
+        // Vanilla-ish button hitboxes (approximate): thin rectangles mounted to a face.
+        // This is only used for projectile collision, not general movement collision.
+        let thickness = 2.0_f32 / 16.0;
+        let inset_min = 5.0_f32 / 16.0;
+        let inset_max = 11.0_f32 / 16.0;
+        let wall_min_y = 6.0_f32 / 16.0;
+        let wall_max_y = 10.0_f32 / 16.0;
+
+        let mut min_x = block_x as f32 + inset_min;
+        let mut max_x = block_x as f32 + inset_max;
+        let mut min_y = block_y as f32;
+        let mut max_y = block_y as f32 + thickness;
+        let mut min_z = block_z as f32 + inset_min;
+        let mut max_z = block_z as f32 + inset_max;
+
+        if mdminecraft_world::is_wall_mounted(state) {
+            min_y = block_y as f32 + wall_min_y;
+            max_y = block_y as f32 + wall_max_y;
+            match mdminecraft_world::wall_mounted_facing(state) {
+                mdminecraft_world::Facing::North => {
+                    min_z = block_z as f32 + 1.0 - thickness;
+                    max_z = block_z as f32 + 1.0;
+                }
+                mdminecraft_world::Facing::South => {
+                    min_z = block_z as f32;
+                    max_z = block_z as f32 + thickness;
+                }
+                mdminecraft_world::Facing::East => {
+                    min_x = block_x as f32;
+                    max_x = block_x as f32 + thickness;
+                }
+                mdminecraft_world::Facing::West => {
+                    min_x = block_x as f32 + 1.0 - thickness;
+                    max_x = block_x as f32 + 1.0;
+                }
+            }
+        } else if mdminecraft_world::is_ceiling_mounted(state) {
+            min_y = block_y as f32 + 1.0 - thickness;
+            max_y = block_y as f32 + 1.0;
+        }
+
+        AABB {
+            min: glam::Vec3::new(min_x, min_y, min_z),
+            max: glam::Vec3::new(max_x, max_y, max_z),
+        }
+    }
+
+    fn projectile_point_hits_world(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> Option<glam::IVec3> {
         let block_x = x.floor() as i32;
         let block_y = y.floor() as i32;
         let block_z = z.floor() as i32;
 
         if world_y_to_local_y(block_y).is_none() {
-            return true;
+            return Some(glam::IVec3::new(block_x, block_y, block_z));
         }
 
         // Projectiles are treated as points for collision, but we use a tiny AABB to avoid
@@ -3230,28 +4352,49 @@ impl GameWorld {
             let block_aabbs = Self::block_collision_aabbs_at(chunks, block_properties, bx, by, bz);
             for block_aabb in block_aabbs.iter() {
                 if projectile_aabb.intersects(block_aabb) {
-                    return true;
+                    return Some(glam::IVec3::new(bx, by, bz));
+                }
+            }
+
+            let Some(local_y) = world_y_to_local_y(by) else {
+                continue;
+            };
+            let chunk_pos = ChunkPos::new(
+                bx.div_euclid(CHUNK_SIZE_X as i32),
+                bz.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let Some(chunk) = chunks.get(&chunk_pos) else {
+                continue;
+            };
+            let local_x = bx.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = bz.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            let voxel = chunk.voxel(local_x, local_y, local_z);
+
+            if matches!(
+                voxel.id,
+                mdminecraft_world::redstone_blocks::STONE_BUTTON
+                    | mdminecraft_world::redstone_blocks::OAK_BUTTON
+            ) {
+                let button_aabb = Self::button_projectile_aabb(bx, by, bz, voxel.state);
+                if projectile_aabb.intersects(&button_aabb) {
+                    return Some(glam::IVec3::new(bx, by, bz));
                 }
             }
         }
 
-        false
+        None
     }
 
-    fn projectile_first_block_hit_along_segment(
+    fn projectile_first_block_hit_along_segment_with_block(
         chunks: &HashMap<ChunkPos, Chunk>,
         block_properties: &BlockPropertiesRegistry,
         from: (f64, f64, f64),
         to: (f64, f64, f64),
-    ) -> Option<(f64, f64, f64)> {
-        if Self::projectile_point_collides_with_world(
-            chunks,
-            block_properties,
-            from.0,
-            from.1,
-            from.2,
-        ) {
-            return Some(from);
+    ) -> Option<((f64, f64, f64), glam::IVec3)> {
+        if let Some(block_pos) =
+            Self::projectile_point_hits_world(chunks, block_properties, from.0, from.1, from.2)
+        {
+            return Some((from, block_pos));
         }
 
         let dx = to.0 - from.0;
@@ -3269,12 +4412,73 @@ impl GameWorld {
             let y = from.1 + dy * t;
             let z = from.2 + dz * t;
 
-            if Self::projectile_point_collides_with_world(chunks, block_properties, x, y, z) {
-                return Some((x, y, z));
+            if let Some(block_pos) =
+                Self::projectile_point_hits_world(chunks, block_properties, x, y, z)
+            {
+                return Some(((x, y, z), block_pos));
             }
         }
 
         None
+    }
+
+    fn projectile_first_block_hit_along_segment(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        block_properties: &BlockPropertiesRegistry,
+        from: (f64, f64, f64),
+        to: (f64, f64, f64),
+    ) -> Option<(f64, f64, f64)> {
+        Self::projectile_first_block_hit_along_segment_with_block(
+            chunks,
+            block_properties,
+            from,
+            to,
+        )
+        .map(|(hit, _)| hit)
+    }
+
+    fn try_activate_button_from_projectile_hit(
+        projectile_type: mdminecraft_world::ProjectileType,
+        hit_block_pos: glam::IVec3,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+        redstone_sim: &mut mdminecraft_world::RedstoneSimulator,
+    ) -> bool {
+        if projectile_type != mdminecraft_world::ProjectileType::Arrow {
+            return false;
+        }
+
+        let Some(local_y) = world_y_to_local_y(hit_block_pos.y) else {
+            return false;
+        };
+
+        let chunk_pos = ChunkPos::new(
+            hit_block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            hit_block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let Some(chunk) = chunks.get(&chunk_pos) else {
+            return false;
+        };
+        let local_x = hit_block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = hit_block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+        let voxel = chunk.voxel(local_x, local_y, local_z);
+
+        if !matches!(
+            voxel.id,
+            mdminecraft_world::redstone_blocks::STONE_BUTTON
+                | mdminecraft_world::redstone_blocks::OAK_BUTTON
+        ) {
+            return false;
+        }
+
+        if mdminecraft_world::is_active(voxel.state) {
+            return false;
+        }
+
+        redstone_sim.activate_button(
+            RedstonePos::new(hit_block_pos.x, hit_block_pos.y, hit_block_pos.z),
+            chunks,
+        );
+        true
     }
 
     fn line_of_sight_clear(
@@ -4120,7 +5324,9 @@ impl GameWorld {
         // Let UI handle events first
         if let Event::WindowEvent { ref event, .. } = event {
             if let Some(mut ui) = self.renderer.ui_mut() {
-                ui.handle_event(&self.window, event);
+                if let Some(window) = self.window.as_ref() {
+                    ui.handle_event(window, event);
+                }
             }
             self.input.handle_event(event);
         }
@@ -4130,7 +5336,14 @@ impl GameWorld {
         }
 
         match event {
-            Event::WindowEvent { event, window_id } if *window_id == self.window.id() => {
+            Event::WindowEvent { event, window_id } => {
+                let Some(window) = self.window.as_ref() else {
+                    return GameAction::Continue;
+                };
+                if *window_id != window.id() {
+                    return GameAction::Continue;
+                }
+
                 match event {
                     WindowEvent::CloseRequested => {
                         self.persist_world();
@@ -4139,7 +5352,7 @@ impl GameWorld {
                     WindowEvent::Focused(focused) => {
                         if *focused {
                             // Regained focus - recapture cursor if we were in gameplay mode
-                            let _ = self.input.handle_focus_regained(&self.window);
+                            let _ = self.input.handle_focus_regained(window);
                         }
                     }
                     WindowEvent::KeyboardInput { event, .. } => {
@@ -4179,7 +5392,9 @@ impl GameWorld {
                 }
             }
             Event::AboutToWait => {
-                self.window.request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             _ => {}
         }
@@ -4289,8 +5504,271 @@ impl GameWorld {
         }
     }
 
+    fn process_automation_messages(&mut self) {
+        loop {
+            let msg = {
+                let Some(runtime) = self.automation.as_ref() else {
+                    return;
+                };
+                runtime.rx.try_recv()
+            };
+
+            match msg {
+                Ok(msg) => match msg {
+                    AutomationMsg::Connected => {
+                        if let Some(runtime) = self.automation.as_mut() {
+                            runtime.connected = true;
+                            runtime.ever_connected = true;
+                            runtime.held = AutomationHeldInput::default();
+                            runtime.pulses = AutomationPulseInput::default();
+                        }
+                    }
+                    AutomationMsg::Disconnected => {
+                        if let Some(runtime) = self.automation.as_mut() {
+                            runtime.connected = false;
+                            runtime.held = AutomationHeldInput::default();
+                            runtime.pulses = AutomationPulseInput::default();
+                        }
+                    }
+                    AutomationMsg::Request {
+                        request,
+                        respond_to,
+                    } => match request {
+                        protocol::Request::SetActions(req) => {
+                            if let Some(runtime) = self.automation.as_mut() {
+                                if let Some(value) = req.actions.move_x {
+                                    runtime.held.move_x = value.clamp(-1.0, 1.0);
+                                }
+                                if let Some(value) = req.actions.move_y {
+                                    runtime.held.move_y = value.clamp(-1.0, 1.0);
+                                }
+                                if let Some(value) = req.actions.move_z {
+                                    runtime.held.move_z = value.clamp(-1.0, 1.0);
+                                }
+                                if let Some(value) = req.actions.sprint {
+                                    runtime.held.sprint = value;
+                                }
+                                if let Some(value) = req.actions.crouch {
+                                    runtime.held.crouch = value;
+                                }
+                                if let Some(value) = req.actions.jump_hold {
+                                    runtime.held.jump_hold = value;
+                                }
+                                if let Some(value) = req.actions.attack_hold {
+                                    runtime.held.attack_hold = value;
+                                }
+                                if let Some(value) = req.actions.use_hold {
+                                    runtime.held.use_hold = value;
+                                }
+                                if let Some(slot) = req.actions.hotbar_slot {
+                                    runtime.pulses.hotbar_slot = Some(slot.min(8));
+                                }
+                            }
+
+                            let _ = respond_to.send(protocol::event_ok(req.id));
+                        }
+                        protocol::Request::Pulse(req) => {
+                            if let Some(runtime) = self.automation.as_mut() {
+                                runtime.pulses.jump_click |= req.actions.jump_click;
+                                runtime.pulses.attack_click |= req.actions.attack_click;
+                                runtime.pulses.use_click |= req.actions.use_click;
+                                if let Some(slot) = req.actions.hotbar_slot {
+                                    runtime.pulses.hotbar_slot = Some(slot.min(8));
+                                }
+                            }
+
+                            let _ = respond_to.send(protocol::event_ok(req.id));
+                        }
+                        protocol::Request::SetView(req) => {
+                            let pitch = (req.pitch).clamp(
+                                -std::f32::consts::FRAC_PI_2 + 0.001,
+                                std::f32::consts::FRAC_PI_2 - 0.001,
+                            );
+                            let camera = self.renderer.camera_mut();
+                            camera.yaw = req.yaw;
+                            camera.pitch = pitch;
+
+                            let _ = respond_to.send(protocol::event_ok(req.id));
+                        }
+                        protocol::Request::Command(req) => {
+                            let tick = self.sim_tick.0;
+                            let (ok, lines) =
+                                match commands::parse_command(&req.line, &self.registry) {
+                                    Ok(cmd) => {
+                                        let out = commands::execute_command(self, cmd);
+                                        (true, out.lines)
+                                    }
+                                    Err(err) => (false, vec![format!("Error: {err}")]),
+                                };
+
+                            let _ = respond_to
+                                .send(protocol::event_command_result(req.id, tick, ok, lines));
+                        }
+                        protocol::Request::GetState(req) => {
+                            let tick = self.sim_tick.0;
+                            let camera = self.renderer.camera();
+                            let pos = [camera.position.x, camera.position.y, camera.position.z];
+                            let _ = respond_to.send(protocol::event_state(
+                                req.id,
+                                tick,
+                                self.active_dimension.as_str(),
+                                pos,
+                                camera.yaw,
+                                camera.pitch,
+                                self.player_health.current,
+                                self.player_health.hunger,
+                            ));
+                        }
+                        protocol::Request::Step(req) => {
+                            let _ = respond_to.send(protocol::event_error(
+                                req.id,
+                                protocol::ErrorCode::Unsupported,
+                                "step is only available in headless step mode",
+                            ));
+                        }
+                        protocol::Request::Screenshot(req) => {
+                            if self.renderer.device().is_none() {
+                                let _ = respond_to.send(protocol::event_error(
+                                    req.id,
+                                    protocol::ErrorCode::Unsupported,
+                                    "render disabled",
+                                ));
+                            } else if let Some(runtime) = self.screenshot.as_mut() {
+                                runtime.pending.push_back(ScreenshotJob {
+                                    kind: ScreenshotJobKind::Manual {
+                                        id: req.id,
+                                        respond_to,
+                                    },
+                                    tag: req.tag,
+                                });
+                            } else {
+                                let _ = respond_to.send(protocol::event_error(
+                                    req.id,
+                                    protocol::ErrorCode::Unsupported,
+                                    "screenshots disabled (set --screenshot-dir)",
+                                ));
+                            }
+                        }
+                        protocol::Request::Shutdown(req) => {
+                            self.pending_action = Some(GameAction::Quit);
+                            let _ = respond_to.send(protocol::event_ok(req.id));
+                        }
+                        other => {
+                            let _ = respond_to.send(protocol::event_error(
+                                other.request_id(),
+                                protocol::ErrorCode::Unsupported,
+                                "request not supported",
+                            ));
+                        }
+                    },
+                },
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if let Some(runtime) = self.automation.as_mut() {
+                        runtime.connected = false;
+                        runtime.held = AutomationHeldInput::default();
+                        runtime.pulses = AutomationPulseInput::default();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    fn apply_automation_input(&mut self) {
+        let Some(runtime) = self.automation.as_mut() else {
+            return;
+        };
+        if !runtime.connected {
+            return;
+        }
+
+        use winit::keyboard::KeyCode;
+
+        self.input.context = InputContext::Gameplay;
+        self.input.cursor_captured = true;
+        self.input.keys_pressed.clear();
+        self.input.keys_just_pressed.clear();
+        self.input.mouse_buttons.clear();
+        self.input.mouse_clicks.clear();
+        self.input.mouse_delta = (0.0, 0.0);
+        self.input.raw_mouse_delta = (0.0, 0.0);
+        self.input.scroll_delta = 0.0;
+
+        if runtime.held.move_y > 0.5 {
+            self.input.keys_pressed.insert(KeyCode::KeyW);
+        } else if runtime.held.move_y < -0.5 {
+            self.input.keys_pressed.insert(KeyCode::KeyS);
+        }
+
+        if runtime.held.move_x > 0.5 {
+            self.input.keys_pressed.insert(KeyCode::KeyD);
+        } else if runtime.held.move_x < -0.5 {
+            self.input.keys_pressed.insert(KeyCode::KeyA);
+        }
+
+        if runtime.held.move_z > 0.5 {
+            self.input.keys_pressed.insert(KeyCode::Space);
+        } else if runtime.held.move_z < -0.5 {
+            self.input.keys_pressed.insert(KeyCode::ShiftLeft);
+        }
+
+        if runtime.held.sprint {
+            self.input.keys_pressed.insert(KeyCode::ControlLeft);
+        }
+        if runtime.held.crouch {
+            self.input.keys_pressed.insert(KeyCode::ShiftLeft);
+        }
+        if runtime.held.jump_hold {
+            self.input.keys_pressed.insert(KeyCode::Space);
+        }
+
+        if runtime.held.attack_hold {
+            self.input.mouse_buttons.insert(MouseButton::Left);
+        }
+        if runtime.held.use_hold {
+            self.input.mouse_buttons.insert(MouseButton::Right);
+        }
+
+        if runtime.pulses.jump_click {
+            self.input.keys_pressed.insert(KeyCode::Space);
+            self.input.keys_just_pressed.insert(KeyCode::Space);
+        }
+        if runtime.pulses.attack_click {
+            self.input.mouse_buttons.insert(MouseButton::Left);
+            self.input.mouse_clicks.insert(MouseButton::Left);
+        }
+        if runtime.pulses.use_click {
+            self.input.mouse_buttons.insert(MouseButton::Right);
+            self.input.mouse_clicks.insert(MouseButton::Right);
+        }
+        if let Some(slot) = runtime.pulses.hotbar_slot {
+            if let Some(key) = match slot {
+                0 => Some(KeyCode::Digit1),
+                1 => Some(KeyCode::Digit2),
+                2 => Some(KeyCode::Digit3),
+                3 => Some(KeyCode::Digit4),
+                4 => Some(KeyCode::Digit5),
+                5 => Some(KeyCode::Digit6),
+                6 => Some(KeyCode::Digit7),
+                7 => Some(KeyCode::Digit8),
+                8 => Some(KeyCode::Digit9),
+                _ => None,
+            } {
+                self.input.keys_pressed.insert(key);
+                self.input.keys_just_pressed.insert(key);
+            }
+        }
+
+        runtime.pulses = AutomationPulseInput::default();
+    }
+
     fn process_actions(&mut self, dt: f32) {
-        let actions = if let Some(player) = self.scripted_input.as_mut() {
+        let automation_connected = self.automation.as_ref().is_some_and(|rt| rt.connected);
+        let actions = if automation_connected {
+            let snapshot = self.input.snapshot_view();
+            self.input_processor.process(&snapshot)
+        } else if let Some(player) = self.scripted_input.as_mut() {
             player.advance(dt)
         } else {
             let snapshot = self.input.snapshot_view();
@@ -4303,9 +5781,9 @@ impl GameWorld {
     fn apply_actions(&mut self, actions: &ActionState) {
         if actions.toggle_cursor {
             if self.input.cursor_captured {
-                let _ = self.input.enter_ui_overlay(&self.window);
+                self.enter_ui_overlay();
             } else {
-                let _ = self.input.enter_gameplay(&self.window);
+                self.enter_gameplay();
             }
         }
 
@@ -4333,6 +5811,33 @@ impl GameWorld {
 
         if actions.drop_item {
             self.drop_selected_hotbar_item(actions.drop_stack);
+        }
+    }
+
+    fn enter_menu(&mut self) {
+        if let Some(window) = self.window.as_ref() {
+            let _ = self.input.enter_menu(window);
+        } else {
+            self.input.context = InputContext::Menu;
+            self.input.cursor_captured = false;
+        }
+    }
+
+    fn enter_gameplay(&mut self) {
+        if let Some(window) = self.window.as_ref() {
+            let _ = self.input.enter_gameplay(window);
+        } else {
+            self.input.context = InputContext::Gameplay;
+            self.input.cursor_captured = true;
+        }
+    }
+
+    fn enter_ui_overlay(&mut self) {
+        if let Some(window) = self.window.as_ref() {
+            let _ = self.input.enter_ui_overlay(window);
+        } else {
+            self.input.context = InputContext::UiOverlay;
+            self.input.cursor_captured = false;
         }
     }
 
@@ -4931,6 +6436,196 @@ impl GameWorld {
         }
 
         melted_chunks
+    }
+
+    fn tick_fire_decay_and_spread(&mut self) -> std::collections::BTreeSet<ChunkPos> {
+        let mut dirty_chunks = std::collections::BTreeSet::new();
+        let mut geometry_changes = Vec::new();
+
+        if !self.sim_tick.0.is_multiple_of(FIRE_TICK_INTERVAL_TICKS) {
+            return dirty_chunks;
+        }
+
+        // Vanilla-ish: rain generally prevents fire from spreading and tends to extinguish it.
+        // Block extinguish is handled by `tick_fire_extinguish`.
+        if self.active_dimension == DimensionId::Overworld && self.weather.is_precipitating() {
+            return dirty_chunks;
+        }
+
+        let camera_pos = self.renderer.camera().position;
+        let base_x = camera_pos.x.floor() as i32;
+        let base_z = camera_pos.z.floor() as i32;
+
+        let seed = self.world_seed
+            ^ self.sim_tick.0.wrapping_mul(0xA2B7_E2D3_6C04_19B1)
+            ^ 0x4649_5245_5449_434B_u64; // "FIRETICK"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let chunk_and_local = |pos: IVec3| -> Option<(ChunkPos, usize, usize, usize)> {
+            let local_y = world_y_to_local_y(pos.y)?;
+            let chunk_pos = ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+            Some((chunk_pos, local_x, local_y, local_z))
+        };
+
+        for _attempt in 0..FIRE_TICK_ATTEMPTS_PER_INTERVAL {
+            let x = base_x + rng.gen_range(-FIRE_TICK_RADIUS_BLOCKS..=FIRE_TICK_RADIUS_BLOCKS);
+            let z = base_z + rng.gen_range(-FIRE_TICK_RADIUS_BLOCKS..=FIRE_TICK_RADIUS_BLOCKS);
+
+            let Some(top_y) = self.column_highest_non_air_y(x, z) else {
+                continue;
+            };
+
+            let fire_pos = IVec3::new(x, top_y, z);
+            let Some((chunk_pos, local_x, local_y, local_z)) = chunk_and_local(fire_pos) else {
+                continue;
+            };
+
+            let Some(fire_voxel) = self
+                .chunks
+                .get(&chunk_pos)
+                .map(|chunk| chunk.voxel(local_x, local_y, local_z))
+            else {
+                continue;
+            };
+            if fire_voxel.id != mdminecraft_world::BLOCK_FIRE {
+                continue;
+            }
+
+            let support_pos = IVec3::new(fire_pos.x, fire_pos.y - 1, fire_pos.z);
+            let Some(support_voxel) = self.get_voxel_at(support_pos) else {
+                continue;
+            };
+            if !self.block_properties.get(support_voxel.id).is_solid {
+                // Should be rare due to support checks, but keep stable if it happens.
+                if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                }
+                geometry_changes.push(fire_pos);
+                dirty_chunks.insert(chunk_pos);
+                continue;
+            }
+
+            let mut has_fuel = mdminecraft_world::is_flammable(support_voxel.id);
+            if !has_fuel {
+                for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let neighbor_support =
+                        IVec3::new(fire_pos.x + dx, fire_pos.y - 1, fire_pos.z + dz);
+                    let Some(neighbor_voxel) = self.get_voxel_at(neighbor_support) else {
+                        continue;
+                    };
+                    if mdminecraft_world::is_flammable(neighbor_voxel.id) {
+                        has_fuel = true;
+                        break;
+                    }
+                }
+            }
+
+            let current_age = mdminecraft_world::fire_age(fire_voxel.state);
+            let next_age = current_age
+                .saturating_add(1)
+                .min(mdminecraft_world::FIRE_AGE_MAX);
+
+            if !has_fuel && next_age >= FIRE_DECAY_AGE_THRESHOLD {
+                if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                    chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
+                }
+                geometry_changes.push(fire_pos);
+                dirty_chunks.insert(chunk_pos);
+                continue;
+            }
+
+            let new_state = mdminecraft_world::set_fire_age(fire_voxel.state, next_age);
+            if new_state != fire_voxel.state {
+                if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
+                    chunk.set_voxel(
+                        local_x,
+                        local_y,
+                        local_z,
+                        Voxel {
+                            state: new_state,
+                            ..fire_voxel
+                        },
+                    );
+                }
+                dirty_chunks.insert(chunk_pos);
+            }
+
+            if mdminecraft_world::is_flammable(support_voxel.id)
+                && next_age >= FIRE_BURN_SUPPORT_AGE_THRESHOLD
+            {
+                let Some((support_chunk_pos, support_x, support_y, support_z)) =
+                    chunk_and_local(support_pos)
+                else {
+                    continue;
+                };
+                if let Some(chunk) = self.chunks.get_mut(&support_chunk_pos) {
+                    chunk.set_voxel(support_x, support_y, support_z, Voxel::default());
+                }
+                geometry_changes.push(support_pos);
+                dirty_chunks.insert(support_chunk_pos);
+                continue;
+            }
+
+            if !mdminecraft_world::is_flammable(support_voxel.id) {
+                continue;
+            }
+
+            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                if !rng.gen_ratio(1, FIRE_SPREAD_CHANCE_DENOMINATOR) {
+                    continue;
+                }
+
+                let target_pos = IVec3::new(fire_pos.x + dx, fire_pos.y, fire_pos.z + dz);
+                let target_support = IVec3::new(target_pos.x, target_pos.y - 1, target_pos.z);
+                let Some(target_support_voxel) = self.get_voxel_at(target_support) else {
+                    continue;
+                };
+                if !mdminecraft_world::is_flammable(target_support_voxel.id) {
+                    continue;
+                }
+
+                if self.try_place_fire_block(target_pos, &mut geometry_changes) {
+                    dirty_chunks.insert(ChunkPos::new(
+                        target_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                        target_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                    ));
+                }
+            }
+        }
+
+        if geometry_changes.is_empty() {
+            return dirty_chunks;
+        }
+
+        let removed_support = Self::remove_unsupported_blocks(
+            &mut self.chunks,
+            &self.block_properties,
+            geometry_changes.iter().copied(),
+        );
+
+        for (pos, removed_id) in removed_support {
+            dirty_chunks.insert(ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            ));
+            self.on_block_entity_removed(pos, removed_id);
+            self.schedule_redstone_updates_around(pos);
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+        }
+
+        for pos in geometry_changes {
+            self.schedule_redstone_updates_around(pos);
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+        }
+
+        dirty_chunks
     }
 
     fn tick_fire_extinguish(&mut self) -> std::collections::BTreeSet<ChunkPos> {
@@ -5690,6 +7385,7 @@ impl GameWorld {
         let mut dirty_weather_geometry_chunks = self.tick_ice_freezing();
         dirty_weather_geometry_chunks.extend(self.tick_snow_accumulation());
         dirty_weather_geometry_chunks.extend(self.tick_weather_melting());
+        dirty_weather_geometry_chunks.extend(self.tick_fire_decay_and_spread());
         dirty_weather_geometry_chunks.extend(self.tick_fire_extinguish());
 
         for chunk_pos in &dirty_weather_geometry_chunks {
@@ -5709,7 +7405,7 @@ impl GameWorld {
         }
 
         // Update redstone
-        self.update_player_pressure_plate();
+        self.update_pressure_plates();
         self.redstone_sim.tick(&mut self.chunks);
         let dirty_redstone_geometry_positions = self.redstone_sim.take_dirty_geometry_positions();
         let dirty_redstone_geometry_chunks = self.redstone_sim.take_dirty_geometry_chunks();
@@ -6941,6 +8637,10 @@ impl GameWorld {
 
         // Cap dt to avoid spiral of death
         let dt = dt.min(0.25);
+
+        self.process_automation_messages();
+        self.apply_automation_input();
+
         if self.pause_menu_open {
             // Prevent accumulator buildup while paused so unpausing doesn't "fast-forward".
             self.accumulator = 0.0;
@@ -7121,6 +8821,19 @@ impl GameWorld {
                         arrow.can_pick_up = !infinity;
                         self.projectiles.spawn(self.active_dimension, arrow);
                         tracing::debug!("Shot arrow with charge {:.2}", self.bow_charge);
+
+                        // Using a bow consumes durability (vanilla-ish).
+                        if let Some(item) = self.hotbar.selected_item_mut() {
+                            if matches!(item.item_type, ItemType::Item(1)) {
+                                if item.durability.is_none() {
+                                    item.durability = item.max_durability();
+                                }
+                                item.damage_durability(1);
+                                if item.is_broken() {
+                                    self.hotbar.slots[self.hotbar.selected] = None;
+                                }
+                            }
+                        }
                     }
                 }
                 self.bow_drawing = false;
@@ -7229,6 +8942,13 @@ impl GameWorld {
                 {
                     self.throw_ender_pearl();
                     self.hotbar.consume_selected();
+                } else if self
+                    .hotbar
+                    .selected_item()
+                    .is_some_and(|stack| stack.item_type == ItemType::Item(104))
+                {
+                    self.throw_egg();
+                    self.hotbar.consume_selected();
                 } else if self.try_use_bucket(hit) {
                     // Skip other interactions when using buckets
                 } else if self.try_use_flint_and_steel(hit) {
@@ -7292,12 +9012,38 @@ impl GameWorld {
         }
 
         if let Some(changed_positions) = try_activate_nether_portal(&mut self.chunks, ignite_pos) {
+            if !changed_positions.is_empty() {
+                if let Some(item) = self.hotbar.selected_item_mut() {
+                    if matches!(item.item_type, ItemType::Item(CORE_ITEM_FLINT_AND_STEEL)) {
+                        if item.durability.is_none() {
+                            item.durability = item.max_durability();
+                        }
+                        item.damage_durability(1);
+                        if item.is_broken() {
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                        }
+                    }
+                }
+            }
             self.refresh_after_voxel_changes(&changed_positions);
             return true;
         }
 
         let mut changed_positions = Vec::new();
         if self.try_place_fire_block(ignite_pos, &mut changed_positions) {
+            if !changed_positions.is_empty() {
+                if let Some(item) = self.hotbar.selected_item_mut() {
+                    if matches!(item.item_type, ItemType::Item(CORE_ITEM_FLINT_AND_STEEL)) {
+                        if item.durability.is_none() {
+                            item.durability = item.max_durability();
+                        }
+                        item.damage_durability(1);
+                        if item.is_broken() {
+                            self.hotbar.slots[self.hotbar.selected] = None;
+                        }
+                    }
+                }
+            }
             self.refresh_after_voxel_changes(&changed_positions);
             return true;
         }
@@ -7820,6 +9566,107 @@ impl GameWorld {
         true
     }
 
+    fn try_apply_bone_meal_to_crop(&mut self, block_pos: IVec3) -> bool {
+        let Some(stack) = self.hotbar.selected_item() else {
+            return false;
+        };
+        if stack.count == 0 {
+            return false;
+        }
+
+        // Item(18) = Bone Meal.
+        if stack.item_type != ItemType::Item(18) {
+            return false;
+        }
+
+        if !Self::apply_bone_meal_to_crop_at(
+            self.world_seed,
+            self.sim_tick.0,
+            block_pos,
+            &mut self.chunks,
+            &mut self.crop_growth,
+        ) {
+            return false;
+        }
+
+        let _ = self.hotbar.consume_selected();
+
+        let chunk_pos = ChunkPos::new(
+            block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        self.debug_hud.chunk_uploads_last_frame += self.upload_chunk_mesh_and_neighbors(chunk_pos);
+        true
+    }
+
+    fn apply_bone_meal_to_crop_at(
+        world_seed: u64,
+        tick: u64,
+        block_pos: IVec3,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+        crop_growth: &mut CropGrowthSystem,
+    ) -> bool {
+        let Some(local_y) = world_y_to_local_y(block_pos.y) else {
+            return false;
+        };
+
+        let chunk_pos = ChunkPos::new(
+            block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+            block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+        );
+        let local_x = block_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+        let local_z = block_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+        let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+            return false;
+        };
+        let voxel = chunk.voxel(local_x, local_y, local_z);
+
+        let Some((crop_type, stage)) = mdminecraft_world::CropType::from_block_id(voxel.id) else {
+            return false;
+        };
+        if stage >= crop_type.max_stage() {
+            return false;
+        }
+
+        let delta = Self::bone_meal_crop_growth_delta(
+            world_seed,
+            tick,
+            block_pos.x,
+            block_pos.y,
+            block_pos.z,
+            stage,
+        );
+        let new_stage = stage.saturating_add(delta).min(crop_type.max_stage());
+        let new_block_id = crop_type.block_id_at_stage(new_stage);
+
+        chunk.set_voxel(
+            local_x,
+            local_y,
+            local_z,
+            Voxel {
+                id: new_block_id,
+                state: 0,
+                light_sky: voxel.light_sky,
+                light_block: voxel.light_block,
+            },
+        );
+
+        let pos = CropPosition {
+            chunk: chunk_pos,
+            x: local_x as u8,
+            y: local_y as u8,
+            z: local_z as u8,
+        };
+        if new_stage >= crop_type.max_stage() {
+            crop_growth.unregister_crop(pos);
+        } else {
+            crop_growth.register_crop(pos);
+        }
+
+        true
+    }
+
     fn try_interact_with_target_block(&mut self, hit: RaycastHit) -> bool {
         let chunk_x = hit.block_pos.x.div_euclid(CHUNK_SIZE_X as i32);
         let chunk_z = hit.block_pos.z.div_euclid(CHUNK_SIZE_Z as i32);
@@ -7840,6 +9687,9 @@ impl GameWorld {
                 return true;
             }
             if self.try_plant_crop(id, chunk_pos, local_x, local_y, local_z) {
+                return true;
+            }
+            if self.try_apply_bone_meal_to_crop(hit.block_pos) {
                 return true;
             }
         }
@@ -9189,41 +11039,137 @@ impl GameWorld {
         }
     }
 
-    fn update_player_pressure_plate(&mut self) {
-        let mut new_plate = None;
-        if self.player_state == PlayerState::Alive {
-            let camera_pos = self.renderer.camera().position;
-            let feet_pos = camera_pos - glam::Vec3::new(0.0, self.player_physics.eye_height, 0.0);
-            let sample = feet_pos - glam::Vec3::new(0.0, 0.01, 0.0);
-            let x = sample.x.floor() as i32;
-            let y = sample.y.floor() as i32;
-            let z = sample.z.floor() as i32;
-            let pos = IVec3::new(x, y, z);
+    fn collect_pressed_pressure_plates(
+        chunks: &HashMap<ChunkPos, Chunk>,
+        active_dimension: DimensionId,
+        player: Option<(glam::Vec3, f32)>,
+        mobs: &[Mob],
+        item_manager: &ItemManager,
+    ) -> std::collections::BTreeSet<RedstonePos> {
+        fn block_id_at(chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3) -> Option<BlockId> {
+            let chunk_pos = ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            let chunk = chunks.get(&chunk_pos)?;
+
+            let local_y = world_y_to_local_y(pos.y)?;
+            let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+            let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+
+            Some(chunk.voxel(local_x, local_y, local_z).id)
+        }
+
+        // The player/mob feet Y often lands exactly on voxel boundaries. Sample slightly above to
+        // reliably detect top-mounted blocks like pressure plates.
+        const FOOT_EPS: f32 = 0.05;
+
+        let mut pressed = std::collections::BTreeSet::new();
+
+        if let Some((eye_pos, eye_height)) = player {
+            let feet_pos = eye_pos - glam::Vec3::new(0.0, eye_height, 0.0);
+            let sample = feet_pos + glam::Vec3::new(0.0, FOOT_EPS, 0.0);
+            let pos = IVec3::new(
+                sample.x.floor() as i32,
+                sample.y.floor() as i32,
+                sample.z.floor() as i32,
+            );
             if matches!(
-                self.get_block_at(pos),
+                block_id_at(chunks, pos),
                 Some(
                     mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
                         | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
                 )
             ) {
-                new_plate = Some(RedstonePos::new(x, y, z));
+                pressed.insert(RedstonePos::new(pos.x, pos.y, pos.z));
             }
         }
 
-        if new_plate == self.pressed_pressure_plate {
+        for mob in mobs {
+            if mob.dimension != active_dimension || mob.dead {
+                continue;
+            }
+
+            let sample_y = mob.y + FOOT_EPS as f64;
+            let pos = IVec3::new(
+                mob.x.floor() as i32,
+                sample_y.floor() as i32,
+                mob.z.floor() as i32,
+            );
+
+            if matches!(
+                block_id_at(chunks, pos),
+                Some(
+                    mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE
+                        | mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE
+                )
+            ) {
+                pressed.insert(RedstonePos::new(pos.x, pos.y, pos.z));
+            }
+        }
+
+        // Vanilla-ish: wooden plates trigger on dropped items; stone plates do not.
+        for item in item_manager.iter() {
+            if item.dimension != active_dimension || !item.on_ground {
+                continue;
+            }
+            let pos = IVec3::new(
+                item.x.floor() as i32,
+                item.y.floor() as i32,
+                item.z.floor() as i32,
+            );
+            if block_id_at(chunks, pos)
+                == Some(mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE)
+            {
+                pressed.insert(RedstonePos::new(pos.x, pos.y, pos.z));
+            }
+        }
+
+        pressed
+    }
+
+    fn apply_pressure_plate_transitions(
+        previous: &std::collections::BTreeSet<RedstonePos>,
+        next: &std::collections::BTreeSet<RedstonePos>,
+        redstone_sim: &mut RedstoneSimulator,
+        chunks: &mut HashMap<ChunkPos, Chunk>,
+    ) {
+        for pos in previous.difference(next) {
+            redstone_sim.update_pressure_plate(*pos, false, chunks);
+        }
+        for pos in next.difference(previous) {
+            redstone_sim.update_pressure_plate(*pos, true, chunks);
+        }
+    }
+
+    fn update_pressure_plates(&mut self) {
+        let player = (self.player_state == PlayerState::Alive).then(|| {
+            (
+                self.renderer.camera().position,
+                self.player_physics.eye_height,
+            )
+        });
+
+        let pressed = Self::collect_pressed_pressure_plates(
+            &self.chunks,
+            self.active_dimension,
+            player,
+            &self.mobs,
+            &self.item_manager,
+        );
+
+        if pressed == self.pressed_pressure_plates {
             return;
         }
 
-        if let Some(old) = self.pressed_pressure_plate {
-            self.redstone_sim
-                .update_pressure_plate(old, false, &mut self.chunks);
-        }
-        if let Some(new) = new_plate {
-            self.redstone_sim
-                .update_pressure_plate(new, true, &mut self.chunks);
-        }
+        Self::apply_pressure_plate_transitions(
+            &self.pressed_pressure_plates,
+            &pressed,
+            &mut self.redstone_sim,
+            &mut self.chunks,
+        );
 
-        self.pressed_pressure_plate = new_plate;
+        self.pressed_pressure_plates = pressed;
     }
 
     fn door_upper_id(lower_id: BlockId) -> Option<BlockId> {
@@ -9761,7 +11707,41 @@ impl GameWorld {
         let mut input_bindings_changed = false;
         let initial_controls = Arc::clone(&self.controls);
 
+        let tick = self.sim_tick.0;
+        let periodic_event_sink = self.screenshot_periodic_event_sink.clone();
+        let mut screenshot_jobs: Vec<ScreenshotJob> = Vec::new();
+        if let Some(runtime) = self.screenshot.as_mut() {
+            if let Some(every) = runtime.cfg.every_ticks {
+                let periodic_allowed = runtime
+                    .cfg
+                    .max
+                    .map(|max| runtime.periodic_captured < max)
+                    .unwrap_or(true);
+                if periodic_allowed
+                    && every > 0
+                    && tick.is_multiple_of(every)
+                    && runtime.last_periodic_tick != Some(tick)
+                {
+                    runtime.last_periodic_tick = Some(tick);
+                    screenshot_jobs.push(ScreenshotJob {
+                        kind: match periodic_event_sink.as_ref() {
+                            Some(sink) => ScreenshotJobKind::PeriodicEvent {
+                                respond_to: sink.clone(),
+                            },
+                            None => ScreenshotJobKind::Periodic,
+                        },
+                        tag: None,
+                    });
+                }
+            }
+
+            while let Some(job) = runtime.pending.pop_front() {
+                screenshot_jobs.push(job);
+            }
+        }
+
         if let Some(frame) = self.renderer.begin_frame() {
+            let screenshot_jobs = std::mem::take(&mut screenshot_jobs);
             let weather_intensity = self.weather_intensity();
             let night_vision_strength = self
                 .status_effects
@@ -9780,6 +11760,49 @@ impl GameWorld {
             self.populate_billboards();
 
             let resources = self.renderer.render_resources().unwrap();
+            let wants_capture = !screenshot_jobs.is_empty();
+            let render_size = (self.renderer.config().width, self.renderer.config().height);
+            let surface_format = self
+                .renderer
+                .surface_format()
+                .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+            let mut target_view: &wgpu::TextureView = &frame.view;
+            let mut capture_texture: Option<&wgpu::Texture> = None;
+            let mut screenshot_readback: Option<mdminecraft_render::TextureReadback> = None;
+
+            if wants_capture {
+                if let Some(runtime) = self.screenshot.as_mut() {
+                    if runtime.capture_texture.is_none() || runtime.capture_size != render_size {
+                        let texture = resources.device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some("Screenshot Capture Texture"),
+                            size: wgpu::Extent3d {
+                                width: render_size.0,
+                                height: render_size.1,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: surface_format,
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::COPY_SRC,
+                            view_formats: &[],
+                        });
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        runtime.capture_size = render_size;
+                        runtime.capture_texture = Some(texture);
+                        runtime.capture_view = Some(view);
+                    }
+                }
+
+                if let Some(runtime) = self.screenshot.as_ref() {
+                    target_view = runtime
+                        .capture_view
+                        .as_ref()
+                        .expect("screenshot capture view missing");
+                    capture_texture = runtime.capture_texture.as_ref();
+                }
+            }
             let particle_system = if self.particle_emitter.vertices.is_empty() {
                 None
             } else {
@@ -9894,7 +11917,7 @@ impl GameWorld {
             {
                 let mut render_pass = resources
                     .skybox_pipeline
-                    .begin_render_pass(&mut encoder, &frame.view);
+                    .begin_render_pass(&mut encoder, target_view);
                 render_pass.set_pipeline(resources.skybox_pipeline.pipeline());
                 render_pass.set_bind_group(0, resources.skybox_pipeline.time_bind_group(), &[]);
                 render_pass.draw(0..3, 0..1);
@@ -9909,7 +11932,7 @@ impl GameWorld {
             {
                 let mut render_pass = resources
                     .pipeline
-                    .begin_render_pass(&mut encoder, &frame.view);
+                    .begin_render_pass(&mut encoder, target_view);
 
                 render_pass.set_pipeline(resources.pipeline.pipeline());
                 render_pass.set_bind_group(0, resources.pipeline.camera_bind_group(), &[]);
@@ -9937,7 +11960,7 @@ impl GameWorld {
             {
                 let mut render_pass = resources
                     .pipeline
-                    .begin_fluid_render_pass(&mut encoder, &frame.view);
+                    .begin_fluid_render_pass(&mut encoder, target_view);
 
                 render_pass.set_pipeline(resources.pipeline.fluid_pipeline());
                 render_pass.set_bind_group(0, resources.pipeline.camera_bind_group(), &[]);
@@ -10009,7 +12032,7 @@ impl GameWorld {
                 let depth_view = resources.pipeline.depth_view();
                 let mut render_pass = resources.wireframe_pipeline.begin_render_pass(
                     &mut encoder,
-                    &frame.view,
+                    target_view,
                     depth_view,
                 );
 
@@ -10032,7 +12055,7 @@ impl GameWorld {
                     resources.device,
                     resources.queue,
                     &mut encoder,
-                    &frame.view,
+                    target_view,
                     depth_view,
                     resources.pipeline.camera_bind_group(),
                     &mut self.billboard_emitter,
@@ -10060,7 +12083,7 @@ impl GameWorld {
 
             if let Some(mut ui) = self.renderer.ui_mut() {
                 let screen_descriptor = egui_wgpu::ScreenDescriptor {
-                    size_in_pixels: [1280, 720],
+                    size_in_pixels: [render_size.0, render_size.1],
                     pixels_per_point: 1.0,
                 };
 
@@ -10069,10 +12092,10 @@ impl GameWorld {
                         device: resources.device,
                         queue: resources.queue,
                         encoder: &mut encoder,
-                        view: &frame.view,
+                        view: target_view,
                         screen: screen_descriptor,
                     },
-                    &self.window,
+                    self.window.as_ref().expect("window missing"),
                     |ctx| {
                         self.debug_hud.render(ctx);
                         render_hotbar(ctx, &self.hotbar, &self.registry);
@@ -10385,8 +12408,165 @@ impl GameWorld {
                 self.menu_requested = true;
             }
 
+            if wants_capture {
+                let capture_texture = capture_texture.expect("screenshot capture texture missing");
+                screenshot_readback = Some(mdminecraft_render::record_texture_readback(
+                    resources.device,
+                    &mut encoder,
+                    capture_texture,
+                    surface_format,
+                    render_size,
+                ));
+                if let Some(surface_texture) = frame.surface_texture() {
+                    encoder.copy_texture_to_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: capture_texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::ImageCopyTexture {
+                            texture: surface_texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        wgpu::Extent3d {
+                            width: render_size.0,
+                            height: render_size.1,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
+            }
+
             resources.queue.submit(std::iter::once(encoder.finish()));
             frame.present();
+
+            if let Some(readback) = screenshot_readback {
+                match readback.read_rgba8(resources.device) {
+                    Ok(rgba) => {
+                        let mut errors = Vec::new();
+                        if let Some(runtime) = self.screenshot.as_mut() {
+                            for job in screenshot_jobs {
+                                let tag = job.tag.as_deref();
+                                let path = runtime.path_for(tick, tag);
+                                match mdminecraft_render::write_png(&path, render_size, &rgba) {
+                                    Ok(()) => match job.kind {
+                                        ScreenshotJobKind::Periodic => {
+                                            runtime.periodic_captured =
+                                                runtime.periodic_captured.saturating_add(1);
+                                        }
+                                        ScreenshotJobKind::PeriodicEvent { respond_to } => {
+                                            runtime.periodic_captured =
+                                                runtime.periodic_captured.saturating_add(1);
+                                            let _ = respond_to.send(protocol::event_screenshot(
+                                                None,
+                                                tick,
+                                                path.display().to_string(),
+                                                render_size.0,
+                                                render_size.1,
+                                            ));
+                                        }
+                                        ScreenshotJobKind::Manual { id, respond_to } => {
+                                            let _ = respond_to.send(protocol::event_screenshot(
+                                                id,
+                                                tick,
+                                                path.display().to_string(),
+                                                render_size.0,
+                                                render_size.1,
+                                            ));
+                                        }
+                                    },
+                                    Err(err) => {
+                                        errors.push(err);
+                                        if let ScreenshotJobKind::Manual { id, respond_to } =
+                                            job.kind
+                                        {
+                                            let _ = respond_to.send(protocol::event_error(
+                                                id,
+                                                protocol::ErrorCode::Internal,
+                                                "failed to write screenshot",
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            for job in screenshot_jobs {
+                                if let ScreenshotJobKind::Manual { id, respond_to } = job.kind {
+                                    let _ = respond_to.send(protocol::event_error(
+                                        id,
+                                        protocol::ErrorCode::Internal,
+                                        "screenshots disabled",
+                                    ));
+                                }
+                            }
+                        }
+
+                        if let Some(err) = errors.into_iter().next() {
+                            tracing::warn!(?err, "Screenshot write failed");
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(?err, "Screenshot readback failed");
+                        for job in screenshot_jobs {
+                            if let ScreenshotJobKind::Manual { id, respond_to } = job.kind {
+                                let _ = respond_to.send(protocol::event_error(
+                                    id,
+                                    protocol::ErrorCode::Internal,
+                                    "failed to capture screenshot",
+                                ));
+                            }
+                        }
+                    }
+                }
+            } else {
+                for job in screenshot_jobs {
+                    if let ScreenshotJobKind::Manual { id, respond_to } = job.kind {
+                        let _ = respond_to.send(protocol::event_error(
+                            id,
+                            protocol::ErrorCode::Internal,
+                            "failed to capture screenshot",
+                        ));
+                    }
+                }
+            }
+        } else if !screenshot_jobs.is_empty() {
+            let render_disabled = self.renderer.device().is_none();
+            for job in screenshot_jobs {
+                match job.kind {
+                    ScreenshotJobKind::Periodic => {
+                        if render_disabled {
+                            tracing::warn!("Skipping screenshot capture: render disabled");
+                        } else {
+                            tracing::warn!("Skipping screenshot capture: render unavailable");
+                        }
+                    }
+                    ScreenshotJobKind::PeriodicEvent { .. } => {
+                        if render_disabled {
+                            tracing::warn!("Skipping screenshot capture: render disabled");
+                        } else {
+                            tracing::warn!("Skipping screenshot capture: render unavailable");
+                        }
+                    }
+                    ScreenshotJobKind::Manual { id, respond_to } => {
+                        let _ = respond_to.send(protocol::event_error(
+                            id,
+                            if render_disabled {
+                                protocol::ErrorCode::Unsupported
+                            } else {
+                                protocol::ErrorCode::Internal
+                            },
+                            if render_disabled {
+                                "render disabled"
+                            } else {
+                                "render unavailable"
+                            },
+                        ));
+                    }
+                }
+            }
         }
 
         // Handle inventory close (after frame render to avoid borrow issues)
@@ -10544,7 +12724,7 @@ impl GameWorld {
         self.menu_requested = false;
 
         // Release cursor so player can click UI buttons
-        let _ = self.input.enter_menu(&self.window);
+        self.enter_menu();
 
         // Stop player movement
         self.player_physics.velocity = glam::Vec3::ZERO;
@@ -10912,7 +13092,7 @@ impl GameWorld {
             }
 
             // Re-capture cursor for gameplay
-            let _ = self.input.enter_gameplay(&self.window);
+            self.enter_gameplay();
             return;
         }
 
@@ -10969,7 +13149,7 @@ impl GameWorld {
                 }
 
                 // Re-capture cursor for gameplay
-                let _ = self.input.enter_gameplay(&self.window);
+                self.enter_gameplay();
                 return;
             }
         }
@@ -10993,13 +13173,13 @@ impl GameWorld {
             let Some(anchor_pos) = anchor_pos_for_consume else {
                 tracing::warn!("Respawn anchor charge consumption expected but missing");
                 // Continue anyway; this is just a parity mechanic.
-                let _ = self.input.enter_gameplay(&self.window);
+                self.enter_gameplay();
                 return;
             };
             let chunk_pos = ChunkPos::new(anchor_pos.x.div_euclid(16), anchor_pos.z.div_euclid(16));
             let Some(local_y) = world_y_to_local_y(anchor_pos.y) else {
                 // Continue anyway; the player was already respawned.
-                let _ = self.input.enter_gameplay(&self.window);
+                self.enter_gameplay();
                 return;
             };
             if let Some(chunk) = self.chunks.get_mut(&chunk_pos) {
@@ -11028,7 +13208,7 @@ impl GameWorld {
         }
 
         // Re-capture cursor for gameplay
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
     }
 
     /// Check if player requested respawn from death screen
@@ -11082,9 +13262,15 @@ impl GameWorld {
         let mut played_pickup_sound = false;
 
         // Add picked up items to player storage (hotbar → main inventory)
-        for (drop_type, count) in picked_up {
+        for (drop_type, count, durability, enchantments) in picked_up {
             if let Some(core_item_type) = Self::convert_dropped_item_type(drop_type) {
-                let stack = ItemStack::new(core_item_type, count);
+                let mut stack = ItemStack::new(core_item_type, count);
+                if let Some(durability) = durability {
+                    stack.durability = Some(durability);
+                }
+                if let Some(enchantments) = enchantments {
+                    stack.enchantments = Some(enchantments);
+                }
                 if let Some(remainder) = self.try_add_stack_to_storage(stack) {
                     let inserted = count.saturating_sub(remainder.count);
                     if inserted > 0 && !played_pickup_sound {
@@ -11098,13 +13284,13 @@ impl GameWorld {
                     );
                     // `pickup_items` already removed the drop from the world; re-spawn any remainder
                     // just outside the pickup radius to avoid immediate re-pickup loops.
-                    self.item_manager.spawn_item(
+                    self.item_manager.spawn_item_with_metadata(
                         self.active_dimension,
-                        player_x + 2.0,
-                        player_y + 0.5,
-                        player_z,
+                        (player_x + 2.0, player_y + 0.5, player_z),
                         drop_type,
                         remainder.count,
+                        remainder.durability,
+                        remainder.enchantments.clone(),
                     );
                 } else {
                     if !played_pickup_sound {
@@ -11212,6 +13398,22 @@ impl GameWorld {
             }
 
             let before_pos = (mob.x, mob.y, mob.z);
+
+            // Vanilla-ish: chickens lay eggs periodically.
+            if mob.mob_type == MobType::Chicken && !mob.dead {
+                let pos_x = mob.x.floor() as i32;
+                let pos_z = mob.z.floor() as i32;
+                if Self::chicken_should_lay_egg(self.world_seed, tick, mob.id, pos_x, pos_z) {
+                    self.item_manager.spawn_item(
+                        active_dimension,
+                        mob.x,
+                        mob.y + 0.2,
+                        mob.z,
+                        DroppedItemType::Egg,
+                        1,
+                    );
+                }
+            }
 
             // Vanilla-ish: water + rain/snow extinguish burning mobs when exposed.
             if mob.fire_ticks > 0 && mob.dimension == DimensionId::Overworld {
@@ -11733,7 +13935,17 @@ impl GameWorld {
         }
 
         // Remove dead mobs and drop loot (and XP)
-        let mut loot_drops: Vec<(f64, f64, f64, DroppedItemType, u32)> = Vec::new();
+        type LootDrop = (
+            f64,
+            f64,
+            f64,
+            DroppedItemType,
+            u32,
+            Option<u32>,
+            Option<Vec<Enchantment>>,
+        );
+
+        let mut loot_drops: Vec<LootDrop> = Vec::new();
         let mut xp_orb_spawns: Vec<(f64, f64, f64, u32)> = Vec::new();
         let mut ender_dragon_defeated = false;
         let loot_tables = &self.loot_tables;
@@ -11776,7 +13988,7 @@ impl GameWorld {
                     };
 
                     for (drop_type, count) in table.roll(&mut rng) {
-                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, drop_type, count));
+                        loot_drops.push((mob.x, mob.y + 0.5, mob.z, drop_type, count, None, None));
                     }
                 } else {
                     // Drop loot based on mob type
@@ -11791,31 +14003,23 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::RottenFlesh,
                                     count,
+                                    None,
+                                    None,
                                 ));
                             }
 
-                            // Vanilla-ish: zombies can drop carrots/potatoes (deterministic).
+                            // Vanilla-ish: zombies can drop carrots/potatoes/iron ingots (deterministic).
                             let pos_x = mob.x.floor() as i32;
                             let pos_z = mob.z.floor() as i32;
-                            let roll = (tick as u32)
-                                .wrapping_add((pos_x as u32).wrapping_mul(31))
-                                .wrapping_add((pos_z as u32).wrapping_mul(131))
-                                % 100;
-                            if roll < 2 {
+                            if let Some(extra_drop) = Self::zombie_rare_drop(tick, pos_x, pos_z) {
                                 loot_drops.push((
                                     mob.x,
                                     mob.y + 0.5,
                                     mob.z,
-                                    DroppedItemType::Carrot,
+                                    extra_drop,
                                     1,
-                                ));
-                            } else if roll < 4 {
-                                loot_drops.push((
-                                    mob.x,
-                                    mob.y + 0.5,
-                                    mob.z,
-                                    DroppedItemType::Potato,
-                                    1,
+                                    None,
+                                    None,
                                 ));
                             }
                         }
@@ -11829,6 +14033,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::Bone,
                                     bone_count,
+                                    None,
+                                    None,
                                 ));
                             }
 
@@ -11841,6 +14047,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::Arrow,
                                     arrow_count,
+                                    None,
+                                    None,
                                 ));
                             }
 
@@ -11852,31 +14060,50 @@ impl GameWorld {
                                 .wrapping_add((pos_z as u32).wrapping_mul(53))
                                 % 100;
                             if roll < 6 {
+                                let (durability, enchantments) = Self::mob_bow_drop_metadata(
+                                    world_seed,
+                                    sim_tick,
+                                    mob.id,
+                                    (pos_x, mob.y.floor() as i32, pos_z),
+                                );
+
                                 loot_drops.push((
                                     mob.x,
                                     mob.y + 0.5,
                                     mob.z,
                                     DroppedItemType::Bow,
                                     1,
+                                    durability,
+                                    enchantments,
                                 ));
                             }
                         }
                         MobType::Pig => {
+                            let drop_type =
+                                Self::mob_meat_drop_type(mob.mob_type, mob.fire_ticks > 0)
+                                    .unwrap_or(DroppedItemType::RawPork);
                             loot_drops.push((
                                 mob.x,
                                 mob.y + 0.5,
                                 mob.z,
-                                DroppedItemType::RawPork,
+                                drop_type,
                                 1 + (tick % 3) as u32,
+                                None,
+                                None,
                             ));
                         }
                         MobType::Cow => {
+                            let drop_type =
+                                Self::mob_meat_drop_type(mob.mob_type, mob.fire_ticks > 0)
+                                    .unwrap_or(DroppedItemType::RawBeef);
                             loot_drops.push((
                                 mob.x,
                                 mob.y + 0.5,
                                 mob.z,
-                                DroppedItemType::RawBeef,
+                                drop_type,
                                 1 + (tick % 3) as u32,
+                                None,
+                                None,
                             ));
                             loot_drops.push((
                                 mob.x,
@@ -11884,10 +14111,20 @@ impl GameWorld {
                                 mob.z,
                                 DroppedItemType::Leather,
                                 (tick % 2) as u32 + 1,
+                                None,
+                                None,
                             ));
                         }
                         MobType::Sheep => {
-                            loot_drops.push((mob.x, mob.y + 0.5, mob.z, DroppedItemType::Wool, 1));
+                            loot_drops.push((
+                                mob.x,
+                                mob.y + 0.5,
+                                mob.z,
+                                DroppedItemType::Wool,
+                                1,
+                                None,
+                                None,
+                            ));
                         }
                         MobType::Chicken => {
                             loot_drops.push((
@@ -11896,6 +14133,8 @@ impl GameWorld {
                                 mob.z,
                                 DroppedItemType::Feather,
                                 1 + (tick % 2) as u32,
+                                None,
+                                None,
                             ));
                         }
                         MobType::Spider => {
@@ -11908,6 +14147,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::String,
                                     count,
+                                    None,
+                                    None,
                                 ));
                             }
 
@@ -11925,6 +14166,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::SpiderEye,
                                     1,
+                                    None,
+                                    None,
                                 ));
                             }
                         }
@@ -11938,6 +14181,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::Gunpowder,
                                     count,
+                                    None,
+                                    None,
                                 ));
                             }
                         }
@@ -11951,6 +14196,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::BlazePowder,
                                     count,
+                                    None,
+                                    None,
                                 ));
                             }
                         }
@@ -11967,6 +14214,8 @@ impl GameWorld {
                                     mob.z,
                                     DroppedItemType::GhastTear,
                                     1,
+                                    None,
+                                    None,
                                 ));
                             }
                         }
@@ -11993,10 +14242,16 @@ impl GameWorld {
         }
 
         // Spawn loot drops
-        for (x, y, z, item_type, count) in loot_drops {
+        for (x, y, z, item_type, count, durability, enchantments) in loot_drops {
             if count > 0 {
-                self.item_manager
-                    .spawn_item(active_dimension, x, y, z, item_type, count);
+                self.item_manager.spawn_item_with_metadata(
+                    active_dimension,
+                    (x, y, z),
+                    item_type,
+                    count,
+                    durability,
+                    enchantments,
+                );
             }
         }
 
@@ -12324,6 +14579,8 @@ impl GameWorld {
         let player_pos = self.renderer.camera().position;
         let has_fire_resistance = self.status_effects.has(StatusEffectType::FireResistance);
         let mut arrow_pickups: Vec<(f64, f64, f64)> = Vec::new();
+        let mut button_mesh_refresh: std::collections::BTreeSet<ChunkPos> =
+            std::collections::BTreeSet::new();
 
         // Update projectile physics
         self.projectiles.update(active_dimension);
@@ -12348,14 +14605,14 @@ impl GameWorld {
             let seg_dz = to.2 - from.2;
             let seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy + seg_dz * seg_dz;
 
-            let block_hit = Self::projectile_first_block_hit_along_segment(
+            let block_hit = Self::projectile_first_block_hit_along_segment_with_block(
                 &self.chunks,
                 &self.block_properties,
                 from,
                 to,
             );
 
-            let block_hit_t = block_hit.map(|hit| {
+            let block_hit_t = block_hit.map(|(hit, _)| {
                 if seg_len_sq <= 1.0e-18 {
                     0.0_f32
                 } else {
@@ -12484,7 +14741,8 @@ impl GameWorld {
                                 );
                             }
                             mdminecraft_world::ProjectileType::SplashPotion(_)
-                            | mdminecraft_world::ProjectileType::EnderPearl => {
+                            | mdminecraft_world::ProjectileType::EnderPearl
+                            | mdminecraft_world::ProjectileType::Egg => {
                                 projectile.hit();
                                 tracing::debug!(
                                     "{:?} hit {:?}",
@@ -12589,7 +14847,7 @@ impl GameWorld {
                 continue;
             }
 
-            let Some((hit_x, hit_y, hit_z)) = block_hit else {
+            let Some(((hit_x, hit_y, hit_z), hit_block_pos)) = block_hit else {
                 continue;
             };
 
@@ -12600,6 +14858,19 @@ impl GameWorld {
             // Hit a block
             match projectile.projectile_type {
                 mdminecraft_world::ProjectileType::Arrow => {
+                    if Self::try_activate_button_from_projectile_hit(
+                        projectile.projectile_type,
+                        hit_block_pos,
+                        &mut self.chunks,
+                        &mut self.redstone_sim,
+                    ) {
+                        let chunk_pos = ChunkPos::new(
+                            hit_block_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                            hit_block_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                        );
+                        button_mesh_refresh.insert(chunk_pos);
+                    }
+
                     projectile.stick();
                     projectile.dead = true;
                     if projectile.can_pick_up {
@@ -12610,13 +14881,19 @@ impl GameWorld {
                 | mdminecraft_world::ProjectileType::EnderPearl
                 | mdminecraft_world::ProjectileType::DragonFireball
                 | mdminecraft_world::ProjectileType::BlazeFireball
-                | mdminecraft_world::ProjectileType::GhastFireball => projectile.hit(),
+                | mdminecraft_world::ProjectileType::GhastFireball
+                | mdminecraft_world::ProjectileType::Egg => projectile.hit(),
             }
         }
 
         for (x, y, z) in arrow_pickups {
             self.item_manager
                 .spawn_item(active_dimension, x, y, z, DroppedItemType::Arrow, 1);
+        }
+
+        for chunk_pos in button_mesh_refresh {
+            self.debug_hud.chunk_uploads_last_frame +=
+                self.upload_chunk_mesh_and_neighbors(chunk_pos);
         }
 
         let raw_projectile_damage = projectile_damage_generic_to_player
@@ -12661,6 +14938,7 @@ impl GameWorld {
             if projectile.dead
                 && projectile.hit_entity
                 && projectile.projectile_type == mdminecraft_world::ProjectileType::EnderPearl
+                && projectile.owner == mdminecraft_world::ProjectileOwner::Player
             {
                 ender_pearl_impact = Some((projectile.x, projectile.y, projectile.z));
             }
@@ -12683,6 +14961,38 @@ impl GameWorld {
                         self.handle_death("Killed by Ender Pearl");
                     }
                 }
+            }
+        }
+
+        // Handle egg hatching for projectiles that just broke.
+        let mut egg_impacts: Vec<(f64, f64, f64, u8)> = Vec::new();
+        for projectile in &self.projectiles.projectiles {
+            if projectile.dimension != active_dimension {
+                continue;
+            }
+            if projectile.dead
+                && projectile.hit_entity
+                && projectile.projectile_type == mdminecraft_world::ProjectileType::Egg
+                && projectile.egg_hatch_count > 0
+            {
+                egg_impacts.push((
+                    projectile.x,
+                    projectile.y,
+                    projectile.z,
+                    projectile.egg_hatch_count,
+                ));
+            }
+        }
+
+        for (x, y, z, count) in egg_impacts {
+            // Vanilla-ish: thrown eggs have a small chance to hatch 1 or 4 chickens.
+            let offsets = [(0.0_f64, 0.0_f64), (0.2, 0.0), (-0.2, 0.0), (0.0, 0.2)];
+            for i in 0..count.min(4) {
+                let (dx, dz) = offsets[i as usize];
+                let mut mob = Mob::new(x + dx, y + 0.1, z + dz, MobType::Chicken);
+                mob.dimension = active_dimension;
+                self.assign_mob_id(&mut mob);
+                self.mobs.push(mob);
             }
         }
 
@@ -13416,8 +15726,14 @@ impl GameWorld {
         let y = (camera_pos.y - self.player_physics.eye_height) as f64 + 0.5;
         let z = camera_pos.z as f64;
 
-        self.item_manager
-            .spawn_item(self.active_dimension, x, y, z, dropped_type, stack.count);
+        self.item_manager.spawn_item_with_metadata(
+            self.active_dimension,
+            (x, y, z),
+            dropped_type,
+            stack.count,
+            stack.durability,
+            stack.enchantments.clone(),
+        );
     }
 
     fn drop_selected_hotbar_item(&mut self, drop_stack: bool) {
@@ -13478,8 +15794,14 @@ impl GameWorld {
         while remaining > 0 {
             let batch = remaining.min(max);
             remaining -= batch;
-            self.item_manager
-                .spawn_item(self.active_dimension, x, y, z, dropped_type, batch);
+            self.item_manager.spawn_item_with_metadata(
+                self.active_dimension,
+                (x, y, z),
+                dropped_type,
+                batch,
+                item.durability,
+                item.enchantments.clone(),
+            );
         }
     }
 
@@ -13490,7 +15812,7 @@ impl GameWorld {
         self.ui_drag_state.reset();
         if self.inventory_open {
             // Release cursor when inventory is open
-            let _ = self.input.enter_ui_overlay(&self.window);
+            self.enter_ui_overlay();
             self.audio.play_sfx(SoundId::InventoryOpen);
             tracing::info!("Inventory opened");
         } else {
@@ -13499,7 +15821,7 @@ impl GameWorld {
             }
 
             // Capture cursor when inventory is closed
-            let _ = self.input.enter_gameplay(&self.window);
+            self.enter_gameplay();
             self.audio.play_sfx(SoundId::InventoryClose);
             tracing::info!("Inventory closed");
         }
@@ -13527,7 +15849,7 @@ impl GameWorld {
         self.command_focus_next_frame = true;
         self.command_input.clear();
         self.command_input.push_str(initial_text);
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         tracing::info!("Command prompt opened");
     }
 
@@ -13538,7 +15860,7 @@ impl GameWorld {
         self.command_open = false;
         self.command_focus_next_frame = false;
         self.command_input.clear();
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         tracing::info!("Command prompt closed");
     }
 
@@ -13576,7 +15898,7 @@ impl GameWorld {
         self.inventory_open = false; // Close inventory when opening crafting
         self.ui_drag_state.reset();
         // Release cursor for UI interaction
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Crafting table opened");
     }
@@ -13603,7 +15925,7 @@ impl GameWorld {
             self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Crafting closed");
     }
@@ -13619,7 +15941,7 @@ impl GameWorld {
         // Create furnace state if it doesn't exist
         self.furnaces.entry(key).or_default();
         // Release cursor for UI interaction
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Furnace opened at {:?}", block_pos);
     }
@@ -13633,7 +15955,7 @@ impl GameWorld {
             self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Furnace closed");
     }
@@ -13653,7 +15975,7 @@ impl GameWorld {
         let table = self.enchanting_tables.entry(key).or_default();
         table.set_bookshelf_count(bookshelf_count);
         // Release cursor for UI interaction
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!(
             "Enchanting table opened at {:?} with {} bookshelves",
@@ -13671,7 +15993,7 @@ impl GameWorld {
             self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Enchanting table closed");
     }
@@ -13689,7 +16011,7 @@ impl GameWorld {
         // Create brewing stand state if it doesn't exist
         self.brewing_stands.entry(key).or_default();
         // Release cursor for UI interaction
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Brewing stand opened at {:?}", block_pos);
     }
@@ -13703,7 +16025,7 @@ impl GameWorld {
             self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Brewing stand closed");
     }
@@ -13722,7 +16044,7 @@ impl GameWorld {
         // Create chest state if it doesn't exist
         self.chests.entry(key).or_default();
         // Release cursor for UI interaction
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Chest opened at {:?}", block_pos);
     }
@@ -13736,7 +16058,7 @@ impl GameWorld {
             self.return_stack_to_storage_or_spill(stack);
         }
         // Capture cursor for gameplay
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Chest closed");
     }
@@ -13755,7 +16077,7 @@ impl GameWorld {
         self.dispenser_open = false;
         self.dropper_open = false;
         self.ui_drag_state.reset();
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!(villager_id, "Villager trade opened");
     }
@@ -13768,7 +16090,7 @@ impl GameWorld {
         if let Some(stack) = self.ui_cursor_stack.take() {
             self.return_stack_to_storage_or_spill(stack);
         }
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Villager trade closed");
     }
@@ -13788,7 +16110,7 @@ impl GameWorld {
         self.dropper_open = false;
         self.ui_drag_state.reset();
         self.hoppers.entry(key).or_default();
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Hopper opened at {:?}", block_pos);
     }
@@ -13801,7 +16123,7 @@ impl GameWorld {
         if let Some(stack) = self.ui_cursor_stack.take() {
             self.return_stack_to_storage_or_spill(stack);
         }
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Hopper closed");
     }
@@ -13821,7 +16143,7 @@ impl GameWorld {
         self.dropper_open = false;
         self.ui_drag_state.reset();
         self.dispensers.entry(key).or_default();
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Dispenser opened at {:?}", block_pos);
     }
@@ -13834,7 +16156,7 @@ impl GameWorld {
         if let Some(stack) = self.ui_cursor_stack.take() {
             self.return_stack_to_storage_or_spill(stack);
         }
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Dispenser closed");
     }
@@ -13854,7 +16176,7 @@ impl GameWorld {
         self.dispenser_open = false;
         self.ui_drag_state.reset();
         self.droppers.entry(key).or_default();
-        let _ = self.input.enter_ui_overlay(&self.window);
+        self.enter_ui_overlay();
         self.audio.play_sfx(SoundId::InventoryOpen);
         tracing::info!("Dropper opened at {:?}", block_pos);
     }
@@ -13867,7 +16189,7 @@ impl GameWorld {
         if let Some(stack) = self.ui_cursor_stack.take() {
             self.return_stack_to_storage_or_spill(stack);
         }
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         self.audio.play_sfx(SoundId::InventoryClose);
         tracing::info!("Dropper closed");
     }
@@ -13945,8 +16267,14 @@ impl GameWorld {
                         continue;
                     };
 
-                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
-                    else {
+                    if Self::spill_core_stack_to_world(
+                        &mut self.item_manager,
+                        key.dimension,
+                        drop_pos,
+                        &stack,
+                    )
+                    .is_none()
+                    {
                         tracing::warn!(
                             slot = slot_idx,
                             item = ?stack.item_type,
@@ -13954,15 +16282,6 @@ impl GameWorld {
                         );
                         continue;
                     };
-
-                    self.item_manager.spawn_item(
-                        key.dimension,
-                        drop_pos.0,
-                        drop_pos.1,
-                        drop_pos.2,
-                        drop_type,
-                        stack.count,
-                    );
                 }
             }
             mdminecraft_world::mechanical_blocks::HOPPER => {
@@ -13979,8 +16298,14 @@ impl GameWorld {
                         continue;
                     };
 
-                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
-                    else {
+                    if Self::spill_core_stack_to_world(
+                        &mut self.item_manager,
+                        key.dimension,
+                        drop_pos,
+                        &stack,
+                    )
+                    .is_none()
+                    {
                         tracing::warn!(
                             slot = slot_idx,
                             item = ?stack.item_type,
@@ -13988,15 +16313,6 @@ impl GameWorld {
                         );
                         continue;
                     };
-
-                    self.item_manager.spawn_item(
-                        key.dimension,
-                        drop_pos.0,
-                        drop_pos.1,
-                        drop_pos.2,
-                        drop_type,
-                        stack.count,
-                    );
                 }
             }
             mdminecraft_world::mechanical_blocks::DISPENSER => {
@@ -14013,8 +16329,14 @@ impl GameWorld {
                         continue;
                     };
 
-                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
-                    else {
+                    if Self::spill_core_stack_to_world(
+                        &mut self.item_manager,
+                        key.dimension,
+                        drop_pos,
+                        &stack,
+                    )
+                    .is_none()
+                    {
                         tracing::warn!(
                             slot = slot_idx,
                             item = ?stack.item_type,
@@ -14022,15 +16344,6 @@ impl GameWorld {
                         );
                         continue;
                     };
-
-                    self.item_manager.spawn_item(
-                        key.dimension,
-                        drop_pos.0,
-                        drop_pos.1,
-                        drop_pos.2,
-                        drop_type,
-                        stack.count,
-                    );
                 }
             }
             mdminecraft_world::mechanical_blocks::DROPPER => {
@@ -14047,8 +16360,14 @@ impl GameWorld {
                         continue;
                     };
 
-                    let Some(drop_type) = Self::convert_core_item_type_to_dropped(stack.item_type)
-                    else {
+                    if Self::spill_core_stack_to_world(
+                        &mut self.item_manager,
+                        key.dimension,
+                        drop_pos,
+                        &stack,
+                    )
+                    .is_none()
+                    {
                         tracing::warn!(
                             slot = slot_idx,
                             item = ?stack.item_type,
@@ -14056,15 +16375,6 @@ impl GameWorld {
                         );
                         continue;
                     };
-
-                    self.item_manager.spawn_item(
-                        key.dimension,
-                        drop_pos.0,
-                        drop_pos.1,
-                        drop_pos.2,
-                        drop_type,
-                        stack.count,
-                    );
                 }
             }
             BLOCK_FURNACE | BLOCK_FURNACE_LIT => {
@@ -14255,7 +16565,7 @@ impl GameWorld {
         self.pause_menu_open = true;
         self.pause_menu_view = PauseMenuView::Main;
         self.ui_drag_state.reset();
-        let _ = self.input.enter_menu(&self.window);
+        self.enter_menu();
         tracing::info!("Pause menu opened");
     }
 
@@ -14263,7 +16573,7 @@ impl GameWorld {
         self.pause_menu_open = false;
         self.pause_menu_view = PauseMenuView::Main;
         self.ui_drag_state.reset();
-        let _ = self.input.enter_gameplay(&self.window);
+        self.enter_gameplay();
         tracing::info!("Pause menu closed");
     }
 
@@ -14412,16 +16722,43 @@ impl GameWorld {
         let player_pos = camera.position;
 
         let base_y = (player_pos.y - 1.5) as f64;
-        let projectile = Projectile::throw_ender_pearl(
+        let mut projectile = Projectile::throw_ender_pearl(
             player_pos.x as f64,
             base_y,
             player_pos.z as f64,
             camera.yaw,
             camera.pitch,
         );
+        projectile.owner = mdminecraft_world::ProjectileOwner::Player;
 
         self.projectiles.spawn(self.active_dimension, projectile);
         tracing::info!("Threw ender pearl");
+    }
+
+    fn throw_egg(&mut self) {
+        use mdminecraft_world::Projectile;
+
+        let camera = self.renderer.camera();
+        let player_pos = camera.position;
+
+        let base_y = (player_pos.y - 1.5) as f64;
+        let throw_index = self.projectiles.projectiles.len() as u64;
+        let pos_x = player_pos.x.floor() as i32;
+        let pos_z = player_pos.z.floor() as i32;
+        let hatch_count =
+            Self::egg_hatch_count(self.world_seed, self.sim_tick.0, throw_index, pos_x, pos_z);
+
+        let mut projectile = Projectile::throw_egg(
+            player_pos.x as f64,
+            base_y,
+            player_pos.z as f64,
+            camera.yaw,
+            camera.pitch,
+        );
+        projectile.egg_hatch_count = hatch_count;
+
+        self.projectiles.spawn(self.active_dimension, projectile);
+        tracing::info!("Threw egg");
     }
 
     /// Apply splash potion effect to the player
@@ -14603,12 +16940,18 @@ impl GameWorld {
         let changed_positions = Self::tick_dispensers_and_droppers(
             DISPENSER_COOLDOWN_TICKS,
             self.active_dimension,
+            self.world_seed,
+            self.sim_tick,
             DispenserTickContext {
                 chunks: &mut self.chunks,
+                crop_growth: &mut self.crop_growth,
+                block_properties: &self.block_properties,
                 redstone_sim: &mut self.redstone_sim,
                 item_manager: &mut self.item_manager,
                 fluid_sim: &mut self.fluid_sim,
                 projectiles: &mut self.projectiles,
+                chests: &mut self.chests,
+                hoppers: &mut self.hoppers,
                 dispensers: &mut self.dispensers,
                 droppers: &mut self.droppers,
             },
@@ -14619,14 +16962,20 @@ impl GameWorld {
     fn tick_dispensers_and_droppers(
         cooldown_ticks: u8,
         active_dimension: DimensionId,
+        world_seed: u64,
+        sim_tick: SimTick,
         ctx: DispenserTickContext<'_>,
     ) -> Vec<IVec3> {
         let DispenserTickContext {
             chunks,
+            crop_growth,
+            block_properties,
             redstone_sim,
             item_manager,
             fluid_sim,
             projectiles,
+            chests,
+            hoppers,
             dispensers,
             droppers,
         } = ctx;
@@ -14645,6 +16994,8 @@ impl GameWorld {
 
         let mut changed_positions: Vec<IVec3> = Vec::new();
 
+        let mut chests_state = std::mem::take(chests);
+        let mut hoppers_state = std::mem::take(hoppers);
         let mut dispensers_state = std::mem::take(dispensers);
         let mut droppers_state = std::mem::take(droppers);
 
@@ -14683,6 +17034,7 @@ impl GameWorld {
                 let spawn_x = pos.x as f64 + 0.5 + dx as f64 * 0.7;
                 let spawn_y = pos.y as f64 + 0.5;
                 let spawn_z = pos.z as f64 + 0.5 + dz as f64 * 0.7;
+                let target_pos = IVec3::new(pos.x + dx, pos.y, pos.z + dz);
 
                 let Some((source_idx, one)) =
                     mdminecraft_world::take_one_from_core_slots(&mut dispenser.slots)
@@ -14690,6 +17042,135 @@ impl GameWorld {
                     dispensers_state.insert(key, dispenser);
                     continue;
                 };
+
+                if let Some(target_voxel) = voxel_at(chunks, target_pos) {
+                    let target_key = mdminecraft_world::BlockEntityKey {
+                        dimension: key.dimension,
+                        x: target_pos.x,
+                        y: target_pos.y,
+                        z: target_pos.z,
+                    };
+                    let target_pos = RedstonePos::new(target_pos.x, target_pos.y, target_pos.z);
+
+                    let inserted = match target_voxel.id {
+                        interactive_blocks::CHEST => {
+                            let chest = chests_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut chest.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &chest.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        mdminecraft_world::mechanical_blocks::HOPPER => {
+                            let hopper = hoppers_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut hopper.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &hopper.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        mdminecraft_world::mechanical_blocks::DISPENSER => {
+                            let target = dispensers_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut target.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &target.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        mdminecraft_world::mechanical_blocks::DROPPER => {
+                            let target = droppers_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut target.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &target.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+
+                    if inserted {
+                        dispenser.cooldown_ticks = cooldown_ticks;
+                        mdminecraft_world::update_container_signal(
+                            chunks,
+                            redstone_sim,
+                            RedstonePos::new(pos.x, pos.y, pos.z),
+                            &dispenser.slots,
+                        );
+                        dispensers_state.insert(key, dispenser);
+                        continue;
+                    }
+                }
+
+                // Vanilla-ish: dispensers can fill glass bottles when facing water.
+                if let ItemType::Item(item_id) = one.item_type {
+                    if item_id == CORE_ITEM_GLASS_BOTTLE {
+                        if let Some(target_voxel) = voxel_at(chunks, target_pos) {
+                            if target_voxel.id == BLOCK_WATER {
+                                let filled =
+                                    ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1);
+                                if !mdminecraft_world::insert_one_into_core_slots(
+                                    &mut dispenser.slots,
+                                    filled.clone(),
+                                ) {
+                                    item_manager.spawn_item_with_metadata(
+                                        key.dimension,
+                                        (spawn_x, spawn_y, spawn_z),
+                                        DroppedItemType::WaterBottle,
+                                        1,
+                                        filled.durability,
+                                        filled.enchantments.clone(),
+                                    );
+                                }
+
+                                dispenser.cooldown_ticks = cooldown_ticks;
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    RedstonePos::new(pos.x, pos.y, pos.z),
+                                    &dispenser.slots,
+                                );
+                                dispensers_state.insert(key, dispenser);
+                                continue;
+                            }
+                        }
+                    }
+                }
 
                 // Vanilla-ish: dispensers interact with water/lava via buckets instead of dropping them.
                 if let ItemType::Item(bucket_id) = one.item_type {
@@ -14744,6 +17225,27 @@ impl GameWorld {
                 }
 
                 match one.item_type {
+                    // Item(18) = Bone Meal.
+                    ItemType::Item(18) => {
+                        if Self::apply_bone_meal_to_crop_at(
+                            world_seed,
+                            sim_tick.0,
+                            target_pos,
+                            chunks,
+                            crop_growth,
+                        ) {
+                            changed_positions.push(target_pos);
+                        } else {
+                            item_manager.spawn_item_with_metadata(
+                                key.dimension,
+                                (spawn_x, spawn_y, spawn_z),
+                                DroppedItemType::BoneMeal,
+                                1,
+                                one.durability,
+                                one.enchantments.clone(),
+                            );
+                        }
+                    }
                     ItemType::Item(2) => {
                         let speed = 1.1;
                         let arrow = mdminecraft_world::Projectile::new(
@@ -14757,6 +17259,110 @@ impl GameWorld {
                             0.4,
                         );
                         projectiles.spawn(key.dimension, arrow);
+                    }
+                    ItemType::Item(CORE_ITEM_FLINT_AND_STEEL) => {
+                        let ignite_pos = IVec3::new(pos.x + dx, pos.y, pos.z + dz);
+                        let Some(local_y) = world_y_to_local_y(ignite_pos.y) else {
+                            restore_one_into_core_slot(&mut dispenser.slots, source_idx, one);
+                            dispensers_state.insert(key, dispenser);
+                            continue;
+                        };
+
+                        let mut fire_changed: Vec<IVec3> = Vec::new();
+                        let success = if let Some(mut portal_changed) =
+                            try_activate_nether_portal(chunks, ignite_pos)
+                        {
+                            fire_changed.append(&mut portal_changed);
+                            true
+                        } else {
+                            let support_pos =
+                                IVec3::new(ignite_pos.x, ignite_pos.y - 1, ignite_pos.z);
+                            if let Some(support_voxel) = voxel_at(chunks, support_pos) {
+                                if !block_properties.get(support_voxel.id).is_solid {
+                                    false
+                                } else {
+                                    let chunk_pos = ChunkPos::new(
+                                        ignite_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                                        ignite_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                                    );
+                                    if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+                                        let local_x =
+                                            ignite_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                                        let local_z =
+                                            ignite_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                                        let voxel = chunk.voxel(local_x, local_y, local_z);
+
+                                        if voxel.id == mdminecraft_world::BLOCK_FIRE {
+                                            true
+                                        } else if voxel.id != BLOCK_AIR {
+                                            false
+                                        } else {
+                                            chunk.set_voxel(
+                                                local_x,
+                                                local_y,
+                                                local_z,
+                                                Voxel {
+                                                    id: mdminecraft_world::BLOCK_FIRE,
+                                                    state: 0,
+                                                    light_sky: 0,
+                                                    light_block: 0,
+                                                },
+                                            );
+                                            fire_changed.push(ignite_pos);
+                                            true
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                }
+                            } else {
+                                false
+                            }
+                        };
+
+                        if !success {
+                            restore_one_into_core_slot(&mut dispenser.slots, source_idx, one);
+                            dispensers_state.insert(key, dispenser);
+                            continue;
+                        }
+
+                        let mut tool = one;
+                        if !fire_changed.is_empty() {
+                            if tool.durability.is_none() {
+                                tool.durability = tool.max_durability();
+                            }
+                            tool.damage_durability(1);
+                        }
+                        if !tool.is_broken() {
+                            restore_one_into_core_slot(&mut dispenser.slots, source_idx, tool);
+                        }
+
+                        changed_positions.append(&mut fire_changed);
+                    }
+                    ItemType::Item(104) => {
+                        let speed = 0.9;
+                        let throw_index = projectiles.projectiles.len() as u64;
+                        let hatch_count = Self::egg_hatch_count(
+                            world_seed,
+                            sim_tick.0,
+                            throw_index,
+                            pos.x,
+                            pos.z,
+                        );
+
+                        let mut projectile = mdminecraft_world::Projectile::new(
+                            spawn_x,
+                            spawn_y,
+                            spawn_z,
+                            dx as f64 * speed,
+                            0.2,
+                            dz as f64 * speed,
+                            mdminecraft_world::ProjectileType::Egg,
+                            1.0,
+                        );
+                        projectile.can_pick_up = false;
+                        projectile.egg_hatch_count = hatch_count;
+                        projectiles.spawn(key.dimension, projectile);
                     }
                     ItemType::SplashPotion(potion_id) => {
                         let speed = 0.8;
@@ -14772,19 +17378,86 @@ impl GameWorld {
                         );
                         projectiles.spawn(key.dimension, projectile);
                     }
+                    ItemType::Item(CORE_ITEM_ENDER_PEARL) => {
+                        let speed = 0.9;
+                        let mut projectile = mdminecraft_world::Projectile::new(
+                            spawn_x,
+                            spawn_y,
+                            spawn_z,
+                            dx as f64 * speed,
+                            0.2,
+                            dz as f64 * speed,
+                            mdminecraft_world::ProjectileType::EnderPearl,
+                            1.0,
+                        );
+                        projectile.can_pick_up = false;
+                        projectiles.spawn(key.dimension, projectile);
+                    }
+                    ItemType::Item(CORE_ITEM_EYE_OF_ENDER) => {
+                        let target_pos = IVec3::new(pos.x + dx, pos.y, pos.z + dz);
+                        let mut inserted = false;
+
+                        if key.dimension == DimensionId::Overworld {
+                            if let Some(local_y) = world_y_to_local_y(target_pos.y) {
+                                let chunk_pos = ChunkPos::new(
+                                    target_pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                                    target_pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                                );
+                                if let Some(chunk) = chunks.get_mut(&chunk_pos) {
+                                    let local_x =
+                                        target_pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                                    let local_z =
+                                        target_pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                                    let frame_voxel = chunk.voxel(local_x, local_y, local_z);
+                                    if frame_voxel.id == BLOCK_END_PORTAL_FRAME
+                                        && (frame_voxel.state & 0x01) == 0
+                                    {
+                                        chunk.set_voxel(
+                                            local_x,
+                                            local_y,
+                                            local_z,
+                                            Voxel {
+                                                state: frame_voxel.state | 0x01,
+                                                ..frame_voxel
+                                            },
+                                        );
+                                        changed_positions.push(target_pos);
+                                        inserted = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if inserted {
+                            if let Some(mut portal_positions) =
+                                try_activate_end_portal(chunks, target_pos)
+                            {
+                                changed_positions.append(&mut portal_positions);
+                            }
+                        } else {
+                            item_manager.spawn_item_with_metadata(
+                                key.dimension,
+                                (spawn_x, spawn_y, spawn_z),
+                                DroppedItemType::EyeOfEnder,
+                                1,
+                                one.durability,
+                                one.enchantments.clone(),
+                            );
+                        }
+                    }
                     other => {
                         let Some(drop_type) = Self::convert_core_item_type_to_dropped(other) else {
                             restore_one_into_core_slot(&mut dispenser.slots, source_idx, one);
                             dispensers_state.insert(key, dispenser);
                             continue;
                         };
-                        item_manager.spawn_item(
+                        item_manager.spawn_item_with_metadata(
                             key.dimension,
-                            spawn_x,
-                            spawn_y,
-                            spawn_z,
+                            (spawn_x, spawn_y, spawn_z),
                             drop_type,
                             1,
+                            one.durability,
+                            one.enchantments.clone(),
                         );
                     }
                 }
@@ -14836,6 +17509,7 @@ impl GameWorld {
                 let spawn_x = pos.x as f64 + 0.5 + dx as f64 * 0.7;
                 let spawn_y = pos.y as f64 + 0.5;
                 let spawn_z = pos.z as f64 + 0.5 + dz as f64 * 0.7;
+                let target_pos = IVec3::new(pos.x + dx, pos.y, pos.z + dz);
 
                 let Some((source_idx, one)) =
                     mdminecraft_world::take_one_from_core_slots(&mut dropper.slots)
@@ -14844,13 +17518,114 @@ impl GameWorld {
                     continue;
                 };
 
+                if let Some(target_voxel) = voxel_at(chunks, target_pos) {
+                    let target_key = mdminecraft_world::BlockEntityKey {
+                        dimension: key.dimension,
+                        x: target_pos.x,
+                        y: target_pos.y,
+                        z: target_pos.z,
+                    };
+                    let target_pos = RedstonePos::new(target_pos.x, target_pos.y, target_pos.z);
+
+                    let inserted = match target_voxel.id {
+                        interactive_blocks::CHEST => {
+                            let chest = chests_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut chest.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &chest.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        mdminecraft_world::mechanical_blocks::HOPPER => {
+                            let hopper = hoppers_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut hopper.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &hopper.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        mdminecraft_world::mechanical_blocks::DISPENSER => {
+                            let target = dispensers_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut target.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &target.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        mdminecraft_world::mechanical_blocks::DROPPER => {
+                            let target = droppers_state.entry(target_key).or_default();
+                            if mdminecraft_world::insert_one_into_core_slots(
+                                &mut target.slots,
+                                one.clone(),
+                            ) {
+                                mdminecraft_world::update_container_signal(
+                                    chunks,
+                                    redstone_sim,
+                                    target_pos,
+                                    &target.slots,
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+
+                    if inserted {
+                        dropper.cooldown_ticks = cooldown_ticks;
+                        mdminecraft_world::update_container_signal(
+                            chunks,
+                            redstone_sim,
+                            RedstonePos::new(pos.x, pos.y, pos.z),
+                            &dropper.slots,
+                        );
+                        droppers_state.insert(key, dropper);
+                        continue;
+                    }
+                }
+
                 let Some(drop_type) = Self::convert_core_item_type_to_dropped(one.item_type) else {
                     restore_one_into_core_slot(&mut dropper.slots, source_idx, one);
                     droppers_state.insert(key, dropper);
                     continue;
                 };
 
-                item_manager.spawn_item(key.dimension, spawn_x, spawn_y, spawn_z, drop_type, 1);
+                item_manager.spawn_item_with_metadata(
+                    key.dimension,
+                    (spawn_x, spawn_y, spawn_z),
+                    drop_type,
+                    1,
+                    one.durability,
+                    one.enchantments.clone(),
+                );
                 dropper.cooldown_ticks = cooldown_ticks;
                 mdminecraft_world::update_container_signal(
                     chunks,
@@ -14863,6 +17638,8 @@ impl GameWorld {
             droppers_state.insert(key, dropper);
         }
 
+        *chests = chests_state;
+        *hoppers = hoppers_state;
         *dispensers = dispensers_state;
         *droppers = droppers_state;
         changed_positions
@@ -14877,6 +17654,170 @@ impl GameWorld {
         for effect_type in expired {
             tracing::info!("Status effect {:?} expired", effect_type);
         }
+    }
+
+    fn mob_bow_drop_metadata(
+        world_seed: u64,
+        sim_tick: SimTick,
+        mob_id: u64,
+        pos: (i32, i32, i32),
+    ) -> (Option<u32>, Option<Vec<Enchantment>>) {
+        let max_durability = ItemStack::new(ItemType::Item(1), 1).durability;
+        let (pos_x, pos_y, pos_z) = pos;
+        let pos_seed =
+            (pos_x as u64) ^ ((pos_y as u64).rotate_left(21)) ^ ((pos_z as u64).rotate_left(42));
+        let seed = world_seed
+            ^ sim_tick.0.wrapping_mul(0xA24B_AED4_963E_E407)
+            ^ mob_id.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ pos_seed.wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            ^ 0x004D_4F42_424F_5744_u64; // "MOBBOWD"
+        let mut rng = StdRng::seed_from_u64(seed);
+
+        let durability = max_durability.map(|max| {
+            if max == 0 {
+                return 0;
+            }
+            let damage = rng.gen_range(0..max);
+            max - damage
+        });
+
+        // Vanilla-ish: rare enchanted equipment drops.
+        let mut enchantments: Vec<Enchantment> = Vec::new();
+        let enchant_roll: u32 = rng.gen_range(0..1000);
+        if enchant_roll < 120 {
+            // Baseline: small chance of Power I-II.
+            let power_level: u8 = if rng.gen_range(0..100) < 25 { 2 } else { 1 };
+            enchantments.push(Enchantment::new(EnchantmentType::Power, power_level));
+
+            // Occasional supporting enchants.
+            if rng.gen_range(0..100) < 18 {
+                enchantments.push(Enchantment::new(EnchantmentType::Punch, 1));
+            }
+            if rng.gen_range(0..1000) < 25 {
+                enchantments.push(Enchantment::new(EnchantmentType::Flame, 1));
+            }
+            if rng.gen_range(0..1000) < 10 {
+                enchantments.push(Enchantment::new(EnchantmentType::Infinity, 1));
+            }
+            if rng.gen_range(0..100) < 30 {
+                let level: u8 = if rng.gen_range(0..100) < 10 { 2 } else { 1 };
+                enchantments.push(Enchantment::new(EnchantmentType::Unbreaking, level));
+            }
+        }
+
+        let enchantments = if enchantments.is_empty() {
+            None
+        } else {
+            Some(enchantments)
+        };
+        (durability, enchantments)
+    }
+
+    fn mob_meat_drop_type(mob_type: MobType, burning: bool) -> Option<DroppedItemType> {
+        Some(match mob_type {
+            MobType::Pig => {
+                if burning {
+                    DroppedItemType::CookedPork
+                } else {
+                    DroppedItemType::RawPork
+                }
+            }
+            MobType::Cow => {
+                if burning {
+                    DroppedItemType::CookedBeef
+                } else {
+                    DroppedItemType::RawBeef
+                }
+            }
+            _ => return None,
+        })
+    }
+
+    fn zombie_rare_drop(tick: u64, pos_x: i32, pos_z: i32) -> Option<DroppedItemType> {
+        let roll = (tick as u32)
+            .wrapping_add((pos_x as u32).wrapping_mul(31))
+            .wrapping_add((pos_z as u32).wrapping_mul(131))
+            % 100;
+        match roll {
+            0..=1 => Some(DroppedItemType::Carrot),
+            2..=3 => Some(DroppedItemType::Potato),
+            4..=5 => Some(DroppedItemType::IronIngot),
+            _ => None,
+        }
+    }
+
+    fn chicken_should_lay_egg(
+        world_seed: u64,
+        tick: u64,
+        mob_id: u64,
+        pos_x: i32,
+        pos_z: i32,
+    ) -> bool {
+        let identity_seed = if mob_id != 0 {
+            mob_id
+        } else {
+            (pos_x as u64) ^ ((pos_z as u64).rotate_left(32))
+        };
+
+        let seed = world_seed
+            ^ identity_seed.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ 0x0045_4747_4C41_5900_u64; // "EGGLAY\0"
+        let interval = CHICKEN_EGG_MIN_INTERVAL_TICKS + (seed % CHICKEN_EGG_INTERVAL_RANGE_TICKS);
+        let offset = (seed.rotate_left(23)) % interval.max(1);
+
+        (tick.wrapping_add(offset)).is_multiple_of(interval)
+    }
+
+    fn egg_hatch_count(world_seed: u64, tick: u64, throw_index: u64, pos_x: i32, pos_z: i32) -> u8 {
+        let pos_seed = (pos_x as u64) ^ ((pos_z as u64).rotate_left(32));
+        let seed = world_seed
+            ^ tick.wrapping_mul(0xA24B_AED4_963E_E407)
+            ^ throw_index.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ pos_seed.wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            ^ 0x0045_4747_4854_4348_u64; // "EGGHTCH"
+
+        match (seed & 31) as u8 {
+            0 => 4,
+            1..=3 => 1,
+            _ => 0,
+        }
+    }
+
+    fn bone_meal_crop_growth_delta(
+        world_seed: u64,
+        tick: u64,
+        pos_x: i32,
+        pos_y: i32,
+        pos_z: i32,
+        stage: u8,
+    ) -> u8 {
+        let pos_seed =
+            (pos_x as u64) ^ ((pos_y as u64).rotate_left(21)) ^ ((pos_z as u64).rotate_left(42));
+        let seed = world_seed
+            ^ tick.wrapping_mul(0xA24B_AED4_963E_E407)
+            ^ pos_seed.wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            ^ (stage as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ 0x0042_4F4E_454D_4541_u64; // "BONEMEA"
+
+        (seed % 4) as u8 + 2
+    }
+
+    fn spill_core_stack_to_world(
+        item_manager: &mut ItemManager,
+        dimension: DimensionId,
+        drop_pos: (f64, f64, f64),
+        stack: &ItemStack,
+    ) -> Option<DroppedItemType> {
+        let drop_type = Self::convert_core_item_type_to_dropped(stack.item_type)?;
+        item_manager.spawn_item_with_metadata(
+            dimension,
+            drop_pos,
+            drop_type,
+            stack.count,
+            stack.durability,
+            stack.enchantments.clone(),
+        );
+        Some(drop_type)
     }
 
     /// Convert dropped item type to core item type
@@ -14913,6 +17854,7 @@ impl GameWorld {
             DroppedItemType::LapisLazuli => Some(ItemType::Item(15)),
             DroppedItemType::Bone => Some(ItemType::Item(16)),
             DroppedItemType::Emerald => Some(ItemType::Item(17)),
+            DroppedItemType::BoneMeal => Some(ItemType::Item(18)),
             DroppedItemType::Leather => Some(ItemType::Item(102)),
             DroppedItemType::Wool => Some(ItemType::Item(103)),
             DroppedItemType::Egg => Some(ItemType::Item(104)),
@@ -15214,6 +18156,7 @@ impl GameWorld {
                 15 => Some(DroppedItemType::LapisLazuli),
                 16 => Some(DroppedItemType::Bone),
                 17 => Some(DroppedItemType::Emerald),
+                18 => Some(DroppedItemType::BoneMeal),
                 102 => Some(DroppedItemType::Leather),
                 103 => Some(DroppedItemType::Wool),
                 104 => Some(DroppedItemType::Egg),
@@ -20040,6 +22983,16 @@ fn get_crafting_recipes() -> Vec<CraftingRecipe> {
             min_grid_size: CraftingGridSize::TwoByTwo,
             allow_extra_counts_of_required_types: false,
         }, // Item(3) = Stick
+        // Bone Meal: 1 bone → 3 bone meal
+        CraftingRecipe {
+            inputs: vec![(ItemType::Item(16).into(), 1)], // Item(16) = Bone
+            output: ItemType::Item(18),                   // Item(18) = Bone Meal
+            output_count: 3,
+            pattern: None,
+            allow_horizontal_mirror: false,
+            min_grid_size: CraftingGridSize::TwoByTwo,
+            allow_extra_counts_of_required_types: true,
+        },
         // Torches: 1 coal + 1 stick → 4 torches
         CraftingRecipe {
             inputs: vec![(ItemType::Item(8).into(), 1), (ItemType::Item(3).into(), 1)], // Item(8) = Coal
@@ -26376,20 +29329,21 @@ mod tests {
         try_shift_move_core_stack_into_furnace, ArmorPiece, ArmorSlot, BlockPropertiesRegistry,
         BrewingStandState, ChestState, Chunk, ChunkPos, CraftingGridSize, DispenserState,
         DroppedItemType, EnchantingTableState, Enchantment, EnchantmentType, FluidSimulator,
-        FluidType, FurnaceSlotKind, FurnaceState, GameWorld, HopperState, Hotbar, ItemStack,
-        ItemType, MainInventory, PlayerHealth, PlayerPhysics, StatusEffectType, StatusEffects,
-        ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_AIR, BLOCK_BOOKSHELF,
-        BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE, BLOCK_CRAFTING_TABLE,
-        BLOCK_CRYING_OBSIDIAN, BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL, BLOCK_END_PORTAL_FRAME,
-        BLOCK_FURNACE, BLOCK_GLOWSTONE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG, BLOCK_OAK_PLANKS,
-        BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SUGAR_CANE, CORE_ITEM_BLAZE_POWDER,
-        CORE_ITEM_BOOK, CORE_ITEM_BUCKET, CORE_ITEM_ENDER_PEARL, CORE_ITEM_EYE_OF_ENDER,
-        CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_FLINT_AND_STEEL, CORE_ITEM_GHAST_TEAR,
-        CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON, CORE_ITEM_GLOWSTONE_DUST,
-        CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET, CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ,
-        CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER, CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH,
-        CORE_ITEM_RABBIT_FOOT, CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR,
-        CORE_ITEM_WATER_BOTTLE, CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
+        FluidType, FurnaceSlotKind, FurnaceState, GameWorld, HopperState, Hotbar, ItemManager,
+        ItemStack, ItemType, MainInventory, MobType, PlayerHealth, PlayerPhysics, StatusEffectType,
+        StatusEffects, ToolMaterial, ToolType, UiCoreSlotId, UiSlotClick, Voxel, AABB, BLOCK_AIR,
+        BLOCK_BOOKSHELF, BLOCK_BREWING_STAND, BLOCK_BROWN_MUSHROOM, BLOCK_COBBLESTONE,
+        BLOCK_CRAFTING_TABLE, BLOCK_CRYING_OBSIDIAN, BLOCK_ENCHANTING_TABLE, BLOCK_END_PORTAL,
+        BLOCK_END_PORTAL_FRAME, BLOCK_FURNACE, BLOCK_GLOWSTONE, BLOCK_NETHER_PORTAL, BLOCK_OAK_LOG,
+        BLOCK_OAK_PLANKS, BLOCK_OBSIDIAN, BLOCK_RESPAWN_ANCHOR, BLOCK_SUGAR_CANE,
+        CORE_ITEM_BLAZE_POWDER, CORE_ITEM_BOOK, CORE_ITEM_BUCKET, CORE_ITEM_ENDER_PEARL,
+        CORE_ITEM_EYE_OF_ENDER, CORE_ITEM_FERMENTED_SPIDER_EYE, CORE_ITEM_FLINT_AND_STEEL,
+        CORE_ITEM_GHAST_TEAR, CORE_ITEM_GLASS_BOTTLE, CORE_ITEM_GLISTERING_MELON,
+        CORE_ITEM_GLOWSTONE_DUST, CORE_ITEM_GUNPOWDER, CORE_ITEM_LAVA_BUCKET,
+        CORE_ITEM_MAGMA_CREAM, CORE_ITEM_NETHER_QUARTZ, CORE_ITEM_NETHER_WART, CORE_ITEM_PAPER,
+        CORE_ITEM_PHANTOM_MEMBRANE, CORE_ITEM_PUFFERFISH, CORE_ITEM_RABBIT_FOOT,
+        CORE_ITEM_REDSTONE_DUST, CORE_ITEM_SPIDER_EYE, CORE_ITEM_SUGAR, CORE_ITEM_WATER_BOTTLE,
+        CORE_ITEM_WATER_BUCKET, CORE_ITEM_WHEAT, CORE_ITEM_WHEAT_SEEDS,
     };
     use crate::content_pack_loot;
     use mdminecraft_core::DimensionId;
@@ -26419,6 +29373,263 @@ mod tests {
         let height = GameWorld::column_ground_height(&chunks, &block_properties, 0.5, 0.5);
         let expected = mdminecraft_world::local_y_to_world_y(0) as f32 + 1.0;
         assert_eq!(height, expected);
+    }
+
+    #[test]
+    fn mob_bow_drop_metadata_is_deterministic_and_valid() {
+        let world_seed = 123_456_789;
+        let sim_tick = mdminecraft_core::SimTick(1_234_567);
+        let mob_id = 42;
+
+        let max_durability = ItemStack::new(ItemType::Item(1), 1)
+            .durability
+            .expect("bow should have durability");
+
+        let pos = (10, 64, -20);
+        let a = GameWorld::mob_bow_drop_metadata(world_seed, sim_tick, mob_id, pos);
+        let b = GameWorld::mob_bow_drop_metadata(world_seed, sim_tick, mob_id, pos);
+        assert_eq!(a, b);
+
+        let (durability, enchantments) = a;
+        let durability = durability.expect("bow drops should carry durability metadata");
+        assert!((1..=max_durability).contains(&durability));
+
+        // Ensure the enchantment path is exercised deterministically.
+        let mut scanned = None;
+        for x in 0..256 {
+            let (_, ench) =
+                GameWorld::mob_bow_drop_metadata(world_seed, sim_tick, mob_id, (x, 64, 0));
+            if ench.is_some() {
+                scanned = ench;
+                break;
+            }
+        }
+
+        if let Some(enchants) = scanned.or(enchantments) {
+            assert!(!enchants.is_empty());
+            for (idx, ench) in enchants.iter().enumerate() {
+                assert!(ench.level >= 1);
+                assert!(ench.level <= ench.enchantment_type.max_level());
+                for other in enchants.iter().skip(idx + 1) {
+                    assert!(
+                        ench.enchantment_type
+                            .is_compatible_with(&other.enchantment_type),
+                        "incompatible enchantments: {:?} vs {:?}",
+                        ench.enchantment_type,
+                        other.enchantment_type
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn spill_core_stack_to_world_preserves_metadata() {
+        let mut item_manager = ItemManager::new();
+
+        let mut bow = ItemStack::new(ItemType::Item(1), 1);
+        bow.durability = Some(42);
+        let enchantments = vec![Enchantment::new(EnchantmentType::Power, 3)];
+        bow.enchantments = Some(enchantments.clone());
+
+        let drop_pos = (0.5, 64.5, 0.5);
+        assert_eq!(
+            GameWorld::spill_core_stack_to_world(
+                &mut item_manager,
+                DimensionId::Overworld,
+                drop_pos,
+                &bow
+            ),
+            Some(DroppedItemType::Bow)
+        );
+
+        let items = item_manager.items();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DroppedItemType::Bow);
+        assert_eq!(items[0].count, 1);
+        assert_eq!(items[0].durability, Some(42));
+        assert_eq!(items[0].enchantments, Some(enchantments));
+    }
+
+    #[test]
+    fn mob_meat_drop_type_cooks_when_burning() {
+        assert_eq!(
+            GameWorld::mob_meat_drop_type(MobType::Pig, false),
+            Some(DroppedItemType::RawPork)
+        );
+        assert_eq!(
+            GameWorld::mob_meat_drop_type(MobType::Pig, true),
+            Some(DroppedItemType::CookedPork)
+        );
+
+        assert_eq!(
+            GameWorld::mob_meat_drop_type(MobType::Cow, false),
+            Some(DroppedItemType::RawBeef)
+        );
+        assert_eq!(
+            GameWorld::mob_meat_drop_type(MobType::Cow, true),
+            Some(DroppedItemType::CookedBeef)
+        );
+
+        assert_eq!(GameWorld::mob_meat_drop_type(MobType::Sheep, true), None);
+    }
+
+    #[test]
+    fn zombie_rare_drop_rolls_expected_items() {
+        assert_eq!(
+            GameWorld::zombie_rare_drop(0, 0, 0),
+            Some(DroppedItemType::Carrot)
+        );
+        assert_eq!(
+            GameWorld::zombie_rare_drop(2, 0, 0),
+            Some(DroppedItemType::Potato)
+        );
+        assert_eq!(
+            GameWorld::zombie_rare_drop(4, 0, 0),
+            Some(DroppedItemType::IronIngot)
+        );
+        assert_eq!(GameWorld::zombie_rare_drop(6, 0, 0), None);
+    }
+
+    #[test]
+    fn chicken_egg_laying_is_periodic_and_deterministic() {
+        let world_seed = 123_456;
+        let mob_id = 99;
+        let pos_x = 10;
+        let pos_z = -20;
+
+        let mut ticks = Vec::new();
+        for tick in 0..30_000 {
+            if GameWorld::chicken_should_lay_egg(world_seed, tick, mob_id, pos_x, pos_z) {
+                ticks.push(tick);
+            }
+        }
+
+        assert!(ticks.len() >= 2);
+        let interval = ticks[1] - ticks[0];
+        assert!(interval >= super::CHICKEN_EGG_MIN_INTERVAL_TICKS);
+        assert!(
+            interval
+                < super::CHICKEN_EGG_MIN_INTERVAL_TICKS + super::CHICKEN_EGG_INTERVAL_RANGE_TICKS
+        );
+        for window in ticks.windows(2) {
+            assert_eq!(window[1] - window[0], interval);
+        }
+
+        let mut ticks_2 = Vec::new();
+        for tick in 0..30_000 {
+            if GameWorld::chicken_should_lay_egg(world_seed, tick, mob_id, pos_x, pos_z) {
+                ticks_2.push(tick);
+            }
+        }
+        assert_eq!(ticks_2, ticks);
+    }
+
+    #[test]
+    fn egg_hatch_count_is_deterministic_and_vanillaish() {
+        let mut zero = 0u32;
+        let mut one = 0u32;
+        let mut four = 0u32;
+
+        for throw_index in 0_u64..32 {
+            match GameWorld::egg_hatch_count(0, 0, throw_index, 0, 0) {
+                0 => zero += 1,
+                1 => one += 1,
+                4 => four += 1,
+                other => panic!("Unexpected hatch count: {other}"),
+            }
+        }
+
+        // Vanilla: 1/8 hatch and 1/32 hatch 4 chicks.
+        assert_eq!(four, 1);
+        assert_eq!(one, 3);
+        assert_eq!(zero, 28);
+
+        let a = GameWorld::egg_hatch_count(123, 456, 7, 10, -20);
+        let b = GameWorld::egg_hatch_count(123, 456, 7, 10, -20);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn bone_meal_grows_crops_deterministically_and_unregisters_when_fully_grown() {
+        let world_seed = 123_456;
+        let tick = 42;
+        let chunk_pos = ChunkPos::new(0, 0);
+        let (world_x, world_y, world_z) = (1, 64, 1);
+        let (local_x, local_y, local_z) = (world_x as usize, local_y(world_y), world_z as usize);
+
+        let mut chunk = Chunk::new(chunk_pos);
+        chunk.set_voxel(
+            local_x,
+            local_y,
+            local_z,
+            Voxel {
+                id: mdminecraft_world::farming_blocks::WHEAT_0,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(chunk_pos, chunk);
+
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(world_seed);
+        crop_growth.register_crop(mdminecraft_world::CropPosition {
+            chunk: chunk_pos,
+            x: local_x as u8,
+            y: local_y as u8,
+            z: local_z as u8,
+        });
+
+        assert!(GameWorld::apply_bone_meal_to_crop_at(
+            world_seed,
+            tick,
+            glam::IVec3::new(world_x, world_y, world_z),
+            &mut chunks,
+            &mut crop_growth,
+        ));
+
+        let expected_delta =
+            GameWorld::bone_meal_crop_growth_delta(world_seed, tick, world_x, world_y, world_z, 0);
+        let expected_stage = expected_delta.min(mdminecraft_world::CropType::Wheat.max_stage());
+        let expected_id = mdminecraft_world::CropType::Wheat.block_id_at_stage(expected_stage);
+
+        let updated = chunks
+            .get(&chunk_pos)
+            .expect("chunk exists")
+            .voxel(local_x, local_y, local_z);
+        assert_eq!(updated.id, expected_id);
+        assert_eq!(crop_growth.crop_count(), 1);
+
+        // Apply bone meal near-full growth: should clamp and unregister.
+        chunks.get_mut(&chunk_pos).expect("chunk exists").set_voxel(
+            local_x,
+            local_y,
+            local_z,
+            Voxel {
+                id: mdminecraft_world::farming_blocks::WHEAT_6,
+                ..Default::default()
+            },
+        );
+        crop_growth.register_crop(mdminecraft_world::CropPosition {
+            chunk: chunk_pos,
+            x: local_x as u8,
+            y: local_y as u8,
+            z: local_z as u8,
+        });
+
+        assert!(GameWorld::apply_bone_meal_to_crop_at(
+            world_seed,
+            tick,
+            glam::IVec3::new(world_x, world_y, world_z),
+            &mut chunks,
+            &mut crop_growth,
+        ));
+        let updated = chunks
+            .get(&chunk_pos)
+            .expect("chunk exists")
+            .voxel(local_x, local_y, local_z);
+        assert_eq!(updated.id, mdminecraft_world::farming_blocks::WHEAT_7);
+        assert_eq!(crop_growth.crop_count(), 0);
     }
 
     #[test]
@@ -26994,6 +30205,136 @@ mod tests {
     }
 
     #[test]
+    fn pressure_plates_trigger_vanillaish_for_players_and_items() {
+        use mdminecraft_core::DimensionId;
+
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        // Support blocks.
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        // Plates sit in the voxel above the support.
+        chunk.set_voxel(
+            0,
+            local_y(65),
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::OAK_PRESSURE_PLATE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            local_y(65),
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::STONE_PRESSURE_PLATE,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let mut item_manager = ItemManager::new();
+        let oak_item = item_manager.spawn_item(
+            DimensionId::Overworld,
+            0.5,
+            65.25,
+            0.5,
+            DroppedItemType::Arrow,
+            1,
+        );
+        let stone_item = item_manager.spawn_item(
+            DimensionId::Overworld,
+            1.5,
+            65.25,
+            0.5,
+            DroppedItemType::Arrow,
+            1,
+        );
+        item_manager
+            .get_mut(oak_item)
+            .expect("oak item exists")
+            .on_ground = true;
+        item_manager
+            .get_mut(stone_item)
+            .expect("stone item exists")
+            .on_ground = true;
+
+        let items_only = GameWorld::collect_pressed_pressure_plates(
+            &chunks,
+            DimensionId::Overworld,
+            None,
+            &[],
+            &item_manager,
+        );
+        assert!(items_only.contains(&mdminecraft_world::RedstonePos::new(0, 65, 0)));
+        assert!(
+            !items_only.contains(&mdminecraft_world::RedstonePos::new(1, 65, 0)),
+            "Stone plates should not be triggered by dropped items"
+        );
+
+        let player_eye = glam::Vec3::new(1.5, 66.5, 0.5);
+        let with_player = GameWorld::collect_pressed_pressure_plates(
+            &chunks,
+            DimensionId::Overworld,
+            Some((player_eye, 1.5)),
+            &[],
+            &item_manager,
+        );
+        assert!(with_player.contains(&mdminecraft_world::RedstonePos::new(0, 65, 0)));
+        assert!(with_player.contains(&mdminecraft_world::RedstonePos::new(1, 65, 0)));
+
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let prev = std::collections::BTreeSet::new();
+        GameWorld::apply_pressure_plate_transitions(
+            &prev,
+            &with_player,
+            &mut redstone_sim,
+            &mut chunks,
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).expect("chunk exists");
+        assert!(mdminecraft_world::is_active(
+            chunk.voxel(0, local_y(65), 0).state
+        ));
+        assert!(mdminecraft_world::is_active(
+            chunk.voxel(1, local_y(65), 0).state
+        ));
+
+        let next = std::collections::BTreeSet::new();
+        GameWorld::apply_pressure_plate_transitions(
+            &with_player,
+            &next,
+            &mut redstone_sim,
+            &mut chunks,
+        );
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).expect("chunk exists");
+        assert!(!mdminecraft_world::is_active(
+            chunk.voxel(0, local_y(65), 0).state
+        ));
+        assert!(!mdminecraft_world::is_active(
+            chunk.voxel(1, local_y(65), 0).state
+        ));
+    }
+
+    #[test]
     fn ceiling_lever_breaks_when_support_removed() {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0));
         chunk.set_voxel(
@@ -27043,6 +30384,56 @@ mod tests {
             chunk.voxel(0, local_y(63), 0).id,
             mdminecraft_world::BLOCK_AIR,
             "Ceiling lever should be cleared when its support is removed"
+        );
+    }
+
+    #[test]
+    fn fire_breaks_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            local_y(65),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_FIRE,
+                state: mdminecraft_world::set_fire_age(0, 3),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        if let Some(chunk) = chunks.get_mut(&ChunkPos::new(0, 0)) {
+            chunk.set_voxel(0, local_y(64), 0, Voxel::default());
+        }
+
+        let removed = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 64, 0)],
+        );
+        assert!(
+            removed.contains(&(glam::IVec3::new(0, 65, 0), mdminecraft_world::BLOCK_FIRE)),
+            "Expected fire to be removed, got: {:?}",
+            removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(
+            chunk.voxel(0, local_y(65), 0).id,
+            mdminecraft_world::BLOCK_AIR,
+            "Fire should be cleared when its support is removed"
         );
     }
 
@@ -27889,6 +31280,127 @@ mod tests {
         );
         assert!((hit.1 - 64.5).abs() < 1.0e-6);
         assert!((hit.2 - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn projectile_collision_detects_wall_buttons() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::STONE_BUTTON,
+                state: mdminecraft_world::wall_mount_state(mdminecraft_world::Facing::East),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        assert!(
+            GameWorld::projectile_point_collides_with_world(
+                &chunks,
+                &block_properties,
+                1.05,
+                64.5,
+                0.5,
+            ),
+            "Expected projectile collision to detect the wall button hitbox"
+        );
+        assert!(
+            !GameWorld::projectile_point_collides_with_world(
+                &chunks,
+                &block_properties,
+                1.25,
+                64.5,
+                0.5,
+            ),
+            "Expected point outside the wall button thickness to be clear"
+        );
+
+        let from = (2.0, 64.5, 0.5);
+        let to = (1.0, 64.5, 0.5);
+        let hit = GameWorld::projectile_first_block_hit_along_segment_with_block(
+            &chunks,
+            &block_properties,
+            from,
+            to,
+        )
+        .expect("Expected swept segment to hit the wall button");
+        assert_eq!(
+            hit.1,
+            glam::IVec3::new(1, 64, 0),
+            "Expected button voxel to be reported as the hit block"
+        );
+        assert!(
+            (1.0..=1.2).contains(&hit.0 .0),
+            "Expected hit x near the button face, got {}",
+            hit.0 .0
+        );
+    }
+
+    #[test]
+    fn arrows_activate_buttons_on_hit() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            1,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::redstone_blocks::STONE_BUTTON,
+                state: mdminecraft_world::wall_mount_state(mdminecraft_world::Facing::East),
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+
+        let hit_block = glam::IVec3::new(1, 64, 0);
+        assert!(GameWorld::try_activate_button_from_projectile_hit(
+            mdminecraft_world::ProjectileType::Arrow,
+            hit_block,
+            &mut chunks,
+            &mut redstone_sim,
+        ));
+
+        let activated_voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .voxel(1, local_y(64), 0);
+        assert!(mdminecraft_world::is_active(activated_voxel.state));
+
+        assert!(
+            !GameWorld::try_activate_button_from_projectile_hit(
+                mdminecraft_world::ProjectileType::Arrow,
+                hit_block,
+                &mut chunks,
+                &mut redstone_sim,
+            ),
+            "Second activation should be a no-op while the button is already active"
+        );
     }
 
     #[test]
@@ -29190,22 +32702,32 @@ mod tests {
         dispensers.insert(key, dispenser);
 
         let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
         let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
         let mut item_manager = mdminecraft_world::ItemManager::new();
         let mut fluid_sim = FluidSimulator::new();
         let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
 
         let changed = GameWorld::tick_dispensers_and_droppers(
             4,
             DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
             super::DispenserTickContext {
                 chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
                 redstone_sim: &mut redstone_sim,
                 item_manager: &mut item_manager,
                 fluid_sim: &mut fluid_sim,
                 projectiles: &mut projectiles,
                 dispensers: &mut dispensers,
                 droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
             },
         );
         assert!(
@@ -29217,6 +32739,345 @@ mod tests {
         assert_eq!(item_manager.count(), 0);
 
         let dispenser = dispensers.get(&key).expect("dispenser state should remain");
+        assert_eq!(dispenser.cooldown_ticks, 4);
+        assert!(dispenser.slots.iter().all(|slot| slot.is_none()));
+    }
+
+    #[test]
+    fn dispenser_inserts_into_chests_before_dispensing_projectiles() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let dispenser_pos = glam::IVec3::new(1, 64, 1);
+        let chest_pos = glam::IVec3::new(2, 64, 1);
+
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state = mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::East);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            dispenser_pos.x as usize,
+            local_y(dispenser_pos.y),
+            dispenser_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            chest_pos.x as usize,
+            local_y(chest_pos.y),
+            chest_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::CHEST,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let dispenser_key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: dispenser_pos.x,
+            y: dispenser_pos.y,
+            z: dispenser_pos.z,
+        };
+        let chest_key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: chest_pos.x,
+            y: chest_pos.y,
+            z: chest_pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(2), 1));
+        dispensers.insert(dispenser_key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(
+            changed.is_empty(),
+            "Container insertion should not report voxel changes, changed={changed:?}"
+        );
+        assert_eq!(projectiles.count(), 0);
+        assert_eq!(item_manager.count(), 0);
+
+        let chest = chests
+            .get(&chest_key)
+            .expect("chest state should be created");
+        assert_eq!(
+            chest.slots[0],
+            Some(ItemStack::new(ItemType::Item(2), 1)),
+            "Expected arrow inserted into first chest slot"
+        );
+
+        let dispenser = dispensers
+            .get(&dispenser_key)
+            .expect("dispenser state should remain");
+        assert_eq!(dispenser.cooldown_ticks, 4);
+        assert!(dispenser.slots.iter().all(|slot| slot.is_none()));
+    }
+
+    #[test]
+    fn dispenser_fills_glass_bottles_from_water() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let dispenser_pos = glam::IVec3::new(1, 64, 1);
+        let water_pos = glam::IVec3::new(2, 64, 1);
+
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state = mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::East);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            dispenser_pos.x as usize,
+            local_y(dispenser_pos.y),
+            dispenser_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            water_pos.x as usize,
+            local_y(water_pos.y),
+            water_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::BLOCK_WATER,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let dispenser_key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: dispenser_pos.x,
+            y: dispenser_pos.y,
+            z: dispenser_pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_GLASS_BOTTLE), 1));
+        dispensers.insert(dispenser_key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(
+            changed.is_empty(),
+            "Bottle filling should not report voxel changes, changed={changed:?}"
+        );
+        assert_eq!(projectiles.count(), 0);
+        assert_eq!(item_manager.count(), 0);
+
+        let dispenser = dispensers
+            .get(&dispenser_key)
+            .expect("dispenser state should remain");
+        assert_eq!(dispenser.cooldown_ticks, 4);
+        assert_eq!(
+            dispenser.slots[0],
+            Some(ItemStack::new(ItemType::Item(CORE_ITEM_WATER_BOTTLE), 1))
+        );
+
+        let water = chunks
+            .get(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .voxel(
+                water_pos.x as usize,
+                local_y(water_pos.y),
+                water_pos.z as usize,
+            );
+        assert_eq!(
+            water.id,
+            mdminecraft_world::BLOCK_WATER,
+            "Dispenser bottle fill should not drain water"
+        );
+    }
+
+    #[test]
+    fn dispenser_uses_bone_meal_on_crops_in_front() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let dispenser_pos = glam::IVec3::new(1, 64, 1);
+        let crop_pos = glam::IVec3::new(2, 64, 1);
+
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state = mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::East);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            dispenser_pos.x as usize,
+            local_y(dispenser_pos.y),
+            dispenser_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+
+        let crop_type = mdminecraft_world::CropType::Wheat;
+        let initial_stage: u8 = 0;
+        chunk.set_voxel(
+            crop_pos.x as usize,
+            local_y(crop_pos.y),
+            crop_pos.z as usize,
+            Voxel {
+                id: crop_type.block_id_at_stage(initial_stage),
+                state: 0,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let dispenser_key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: dispenser_pos.x,
+            y: dispenser_pos.y,
+            z: dispenser_pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        // Item(18) = Bone Meal.
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(18), 1));
+        dispensers.insert(dispenser_key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+
+        let world_seed = 0;
+        let sim_tick = mdminecraft_core::SimTick::ZERO;
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(world_seed);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            world_seed,
+            sim_tick,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(changed.contains(&crop_pos));
+        assert_eq!(projectiles.count(), 0);
+        assert_eq!(
+            item_manager.count(),
+            0,
+            "Bone meal use should not drop items"
+        );
+
+        let delta = GameWorld::bone_meal_crop_growth_delta(
+            world_seed,
+            sim_tick.0,
+            crop_pos.x,
+            crop_pos.y,
+            crop_pos.z,
+            initial_stage,
+        );
+        let expected_stage = initial_stage
+            .saturating_add(delta)
+            .min(crop_type.max_stage());
+        let expected_id = crop_type.block_id_at_stage(expected_stage);
+
+        let crop = chunks
+            .get(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .voxel(
+                crop_pos.x as usize,
+                local_y(crop_pos.y),
+                crop_pos.z as usize,
+            );
+        assert_eq!(crop.id, expected_id);
+
+        let dispenser = dispensers
+            .get(&dispenser_key)
+            .expect("dispenser state should remain");
         assert_eq!(dispenser.cooldown_ticks, 4);
         assert!(dispenser.slots.iter().all(|slot| slot.is_none()));
     }
@@ -29262,22 +33123,32 @@ mod tests {
         dispensers.insert(key, dispenser);
 
         let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
         let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
         let mut item_manager = mdminecraft_world::ItemManager::new();
         let mut fluid_sim = FluidSimulator::new();
         let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
 
         let changed = GameWorld::tick_dispensers_and_droppers(
             4,
             DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
             super::DispenserTickContext {
                 chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
                 redstone_sim: &mut redstone_sim,
                 item_manager: &mut item_manager,
                 fluid_sim: &mut fluid_sim,
                 projectiles: &mut projectiles,
                 dispensers: &mut dispensers,
                 droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
             },
         );
         assert!(changed.is_empty());
@@ -29291,6 +33162,485 @@ mod tests {
             "Expected a splash potion projectile, got: {:?}",
             projectiles.projectiles[0].projectile_type
         );
+    }
+
+    #[test]
+    fn dispenser_throws_eggs_as_projectiles() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let pos = glam::IVec3::new(2, 64, 2);
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state =
+            mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::North);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            pos.x as usize,
+            local_y(pos.y),
+            pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(104), 1));
+        dispensers.insert(key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+
+        let world_seed = 123;
+        let mut tick = 0_u64;
+        let (sim_tick, expected_hatch_count) = loop {
+            let hatch_count = GameWorld::egg_hatch_count(world_seed, tick, 0, pos.x, pos.z);
+            if hatch_count > 0 {
+                break (mdminecraft_core::SimTick(tick), hatch_count);
+            }
+            tick += 1;
+            assert!(tick < 10_000, "Failed to find a non-zero hatch count");
+        };
+
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(world_seed);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            world_seed,
+            sim_tick,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(changed.is_empty());
+        assert_eq!(projectiles.count(), 1);
+        assert_eq!(item_manager.count(), 0);
+
+        assert_eq!(
+            projectiles.projectiles[0].projectile_type,
+            mdminecraft_world::ProjectileType::Egg
+        );
+        assert_eq!(
+            projectiles.projectiles[0].egg_hatch_count,
+            expected_hatch_count
+        );
+        assert!(!projectiles.projectiles[0].can_pick_up);
+    }
+
+    #[test]
+    fn dispenser_throws_ender_pearls_as_projectiles_without_owner() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let pos = glam::IVec3::new(1, 64, 1);
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state =
+            mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::North);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            pos.x as usize,
+            local_y(pos.y),
+            pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_ENDER_PEARL), 1));
+        dispensers.insert(key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(changed.is_empty());
+        assert_eq!(projectiles.count(), 1);
+        assert_eq!(item_manager.count(), 0);
+
+        assert_eq!(
+            projectiles.projectiles[0].projectile_type,
+            mdminecraft_world::ProjectileType::EnderPearl
+        );
+        assert_eq!(
+            projectiles.projectiles[0].owner,
+            mdminecraft_world::ProjectileOwner::None
+        );
+        assert!(!projectiles.projectiles[0].can_pick_up);
+    }
+
+    #[test]
+    fn dispenser_inserts_eye_of_ender_into_end_portal_frames() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let pos = glam::IVec3::new(1, 64, 1);
+        let frame_pos = glam::IVec3::new(2, 64, 1);
+
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state = mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::East);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            pos.x as usize,
+            local_y(pos.y),
+            pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            frame_pos.x as usize,
+            local_y(frame_pos.y),
+            frame_pos.z as usize,
+            Voxel {
+                id: BLOCK_END_PORTAL_FRAME,
+                state: 0,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_EYE_OF_ENDER), 1));
+        dispensers.insert(key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(changed.contains(&frame_pos));
+        assert_eq!(projectiles.count(), 0);
+        assert_eq!(item_manager.count(), 0);
+
+        let frame = chunks
+            .get(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .voxel(
+                frame_pos.x as usize,
+                local_y(frame_pos.y),
+                frame_pos.z as usize,
+            );
+        assert_eq!(frame.id, BLOCK_END_PORTAL_FRAME);
+        assert_ne!(frame.state & 0x01, 0, "Expected inserted eye bit");
+
+        let dispenser = dispensers.get(&key).expect("dispenser exists");
+        assert!(dispenser.slots[0].is_none(), "Eye should be consumed");
+    }
+
+    #[test]
+    fn dispenser_uses_flint_and_steel_to_place_fire() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let pos = glam::IVec3::new(1, 64, 1);
+        let ignite_pos = glam::IVec3::new(2, 64, 1);
+        let support_pos = glam::IVec3::new(2, 63, 1);
+
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state = mdminecraft_world::set_dispenser_facing(0, mdminecraft_world::Facing::East);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            pos.x as usize,
+            local_y(pos.y),
+            pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            support_pos.x as usize,
+            local_y(support_pos.y),
+            support_pos.z as usize,
+            Voxel {
+                id: BLOCK_COBBLESTONE,
+                ..Default::default()
+            },
+        );
+
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: pos.x,
+            y: pos.y,
+            z: pos.z,
+        };
+
+        let mut dispensers = BTreeMap::new();
+        let mut dispenser = DispenserState::default();
+        dispenser.slots[0] = Some(ItemStack::new(ItemType::Item(CORE_ITEM_FLINT_AND_STEEL), 1));
+        dispensers.insert(key, dispenser);
+
+        let mut droppers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert_eq!(projectiles.count(), 0);
+        assert_eq!(item_manager.count(), 0);
+        assert!(changed.contains(&ignite_pos));
+
+        let fire_voxel = chunks
+            .get(&ChunkPos::new(0, 0))
+            .expect("chunk exists")
+            .voxel(
+                ignite_pos.x as usize,
+                local_y(ignite_pos.y),
+                ignite_pos.z as usize,
+            );
+        assert_eq!(fire_voxel.id, mdminecraft_world::BLOCK_FIRE);
+
+        let dispenser = dispensers.get(&key).expect("dispenser state remains");
+        assert_eq!(dispenser.cooldown_ticks, 4);
+        let flint = dispenser.slots[0].as_ref().expect("flint remains");
+        assert_eq!(flint.item_type, ItemType::Item(CORE_ITEM_FLINT_AND_STEEL));
+        assert_eq!(flint.durability, Some(63));
+    }
+
+    #[test]
+    fn dropper_inserts_into_chests_before_dropping_items() {
+        use mdminecraft_core::DimensionId;
+        use std::collections::{BTreeMap, HashMap};
+
+        let dropper_pos = glam::IVec3::new(3, 64, 3);
+        let chest_pos = glam::IVec3::new(2, 64, 3);
+
+        let mut chunks = HashMap::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+
+        let mut state = mdminecraft_world::set_dropper_facing(0, mdminecraft_world::Facing::West);
+        state = mdminecraft_world::set_active(state, true);
+
+        chunk.set_voxel(
+            dropper_pos.x as usize,
+            local_y(dropper_pos.y),
+            dropper_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DROPPER,
+                state,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            chest_pos.x as usize,
+            local_y(chest_pos.y),
+            chest_pos.z as usize,
+            Voxel {
+                id: mdminecraft_world::interactive_blocks::CHEST,
+                ..Default::default()
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let dropper_key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: dropper_pos.x,
+            y: dropper_pos.y,
+            z: dropper_pos.z,
+        };
+        let chest_key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: chest_pos.x,
+            y: chest_pos.y,
+            z: chest_pos.z,
+        };
+
+        let mut droppers = BTreeMap::new();
+        let mut dropper = DispenserState::default();
+        dropper.slots[0] = Some(ItemStack::new(ItemType::Item(2), 1));
+        droppers.insert(dropper_key, dropper);
+
+        let mut dispensers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+
+        let changed = GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        assert!(
+            changed.is_empty(),
+            "Container insertion should not report voxel changes, changed={changed:?}"
+        );
+        assert_eq!(projectiles.count(), 0);
+        assert_eq!(item_manager.count(), 0);
+
+        let chest = chests
+            .get(&chest_key)
+            .expect("chest state should be created");
+        assert_eq!(
+            chest.slots[0],
+            Some(ItemStack::new(ItemType::Item(2), 1)),
+            "Expected arrow inserted into first chest slot"
+        );
+
+        let dropper = droppers
+            .get(&dropper_key)
+            .expect("dropper state should remain");
+        assert_eq!(dropper.cooldown_ticks, 4);
+        assert!(dropper.slots.iter().all(|slot| slot.is_none()));
     }
 
     #[test]
@@ -29330,22 +33680,32 @@ mod tests {
         droppers.insert(key, dropper);
 
         let mut dispensers = BTreeMap::new();
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        let block_properties = BlockPropertiesRegistry::new();
         let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
         let mut item_manager = mdminecraft_world::ItemManager::new();
         let mut fluid_sim = FluidSimulator::new();
         let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
 
         let changed = GameWorld::tick_dispensers_and_droppers(
             4,
             DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
             super::DispenserTickContext {
                 chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
                 redstone_sim: &mut redstone_sim,
                 item_manager: &mut item_manager,
                 fluid_sim: &mut fluid_sim,
                 projectiles: &mut projectiles,
                 dispensers: &mut dispensers,
                 droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
             },
         );
         assert!(changed.is_empty());
@@ -31830,6 +36190,16 @@ mod tests {
     }
 
     #[test]
+    fn crafting_bone_to_bone_meal() {
+        let bone_stack = ItemStack::new(ItemType::Item(16), 5);
+
+        let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
+        grid[0][0] = Some(bone_stack);
+
+        assert_eq!(check_crafting_recipe(&grid), Some((ItemType::Item(18), 3)));
+    }
+
+    #[test]
     fn crafting_nether_wart_block_to_nether_wart_items() {
         let mut grid: [[Option<ItemStack>; 3]; 3] = Default::default();
         grid[0][0] = Some(ItemStack::new(
@@ -32220,6 +36590,18 @@ mod tests {
         assert_eq!(
             GameWorld::convert_core_item_type_to_dropped(ItemType::Item(16)),
             Some(DroppedItemType::Bone)
+        );
+    }
+
+    #[test]
+    fn bone_meal_converts_between_dropped_and_core_item_ids() {
+        assert_eq!(
+            GameWorld::convert_dropped_item_type(DroppedItemType::BoneMeal),
+            Some(ItemType::Item(18))
+        );
+        assert_eq!(
+            GameWorld::convert_core_item_type_to_dropped(ItemType::Item(18)),
+            Some(DroppedItemType::BoneMeal)
         );
     }
 
@@ -33074,5 +37456,157 @@ mod tests {
             let chest = chunk.voxel(2, local_y(64), 1);
             assert_eq!(mdminecraft_world::get_power_level(chest.state), desired);
         }
+    }
+
+    #[test]
+    fn dispenser_drops_preserve_durability_metadata() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        let mut state = 0;
+        state = mdminecraft_world::set_active(state, true);
+        state = mdminecraft_world::set_dispenser_facing(state, mdminecraft_world::Facing::North);
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DISPENSER,
+                state,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: 0,
+            y: 64,
+            z: 0,
+        };
+
+        let mut dispensers = std::collections::BTreeMap::new();
+        let mut dispenser = DispenserState::new();
+        let mut bow = ItemStack::new(ItemType::Item(1), 1);
+        bow.durability = Some(42);
+        let enchantments = vec![Enchantment {
+            enchantment_type: EnchantmentType::Power,
+            level: 4,
+        }];
+        bow.enchantments = Some(enchantments.clone());
+        dispenser.slots[0] = Some(bow);
+        dispensers.insert(key, dispenser);
+
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+        let mut droppers = std::collections::BTreeMap::new();
+        let mut chests = std::collections::BTreeMap::new();
+        let mut hoppers = std::collections::BTreeMap::new();
+
+        GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        let items = item_manager.items();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DroppedItemType::Bow);
+        assert_eq!(items[0].durability, Some(42));
+        assert_eq!(items[0].enchantments, Some(enchantments));
+    }
+
+    #[test]
+    fn dropper_drops_preserve_durability_metadata() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        let mut state = 0;
+        state = mdminecraft_world::set_active(state, true);
+        state = mdminecraft_world::set_dropper_facing(state, mdminecraft_world::Facing::North);
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::mechanical_blocks::DROPPER,
+                state,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let key = mdminecraft_world::BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: 0,
+            y: 64,
+            z: 0,
+        };
+
+        let mut droppers = std::collections::BTreeMap::new();
+        let mut dropper = DispenserState::new();
+        let mut bow = ItemStack::new(ItemType::Item(1), 1);
+        bow.durability = Some(7);
+        let enchantments = vec![Enchantment {
+            enchantment_type: EnchantmentType::Punch,
+            level: 2,
+        }];
+        bow.enchantments = Some(enchantments.clone());
+        dropper.slots[0] = Some(bow);
+        droppers.insert(key, dropper);
+
+        let mut item_manager = mdminecraft_world::ItemManager::new();
+        let block_properties = BlockPropertiesRegistry::new();
+        let mut redstone_sim = mdminecraft_world::RedstoneSimulator::new();
+        let mut fluid_sim = FluidSimulator::new();
+        let mut projectiles = mdminecraft_world::ProjectileManager::new();
+        let mut crop_growth = mdminecraft_world::CropGrowthSystem::new(0);
+        let mut dispensers = std::collections::BTreeMap::new();
+        let mut chests = std::collections::BTreeMap::new();
+        let mut hoppers = std::collections::BTreeMap::new();
+
+        GameWorld::tick_dispensers_and_droppers(
+            4,
+            DimensionId::Overworld,
+            0,
+            mdminecraft_core::SimTick::ZERO,
+            super::DispenserTickContext {
+                chunks: &mut chunks,
+                crop_growth: &mut crop_growth,
+                block_properties: &block_properties,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                fluid_sim: &mut fluid_sim,
+                projectiles: &mut projectiles,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+            },
+        );
+
+        let items = item_manager.items();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DroppedItemType::Bow);
+        assert_eq!(items[0].durability, Some(7));
+        assert_eq!(items[0].enchantments, Some(enchantments));
     }
 }

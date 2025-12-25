@@ -398,11 +398,17 @@ where
                 },
             );
 
-            if let Some((drop_type, _count)) = taken {
-                let Some(stack) = convert_dropped(drop_type) else {
+            if let Some((drop_type, _count, durability, enchantments)) = taken {
+                let Some(mut stack) = convert_dropped(drop_type) else {
                     hoppers.insert(key, hopper);
                     continue;
                 };
+                if let Some(durability) = durability {
+                    stack.durability = Some(durability);
+                }
+                if let Some(enchantments) = enchantments {
+                    stack.enchantments = Some(enchantments);
+                }
 
                 if insert_one_into_core_slots(&mut hopper.slots, stack) {
                     moved_any = true;
@@ -416,5 +422,88 @@ where
         }
 
         hoppers.insert(key, hopper);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hopper_pickup_preserves_dropped_item_metadata() {
+        use crate::chunk::{Chunk, ChunkPos, Voxel};
+        use crate::persist::BlockEntityKey;
+        use crate::redstone::{mechanical_blocks, RedstoneSimulator};
+        use mdminecraft_core::{
+            Enchantment, EnchantmentType, ItemStack as CoreItemStack, ItemType as CoreItemType,
+        };
+
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            crate::world_y_to_local_y(64).expect("y in bounds"),
+            0,
+            Voxel {
+                id: mechanical_blocks::HOPPER,
+                state: 0,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        let mut redstone_sim = RedstoneSimulator::new();
+        let mut item_manager = ItemManager::new();
+        let enchantments = vec![Enchantment {
+            enchantment_type: EnchantmentType::Power,
+            level: 3,
+        }];
+        item_manager.spawn_item_with_metadata(
+            DimensionId::Overworld,
+            (0.5, 65.0, 0.5),
+            ItemType::Bow,
+            1,
+            Some(42),
+            Some(enchantments.clone()),
+        );
+
+        let key = BlockEntityKey {
+            dimension: DimensionId::Overworld,
+            x: 0,
+            y: 64,
+            z: 0,
+        };
+
+        let mut chests = BTreeMap::new();
+        let mut hoppers = BTreeMap::new();
+        hoppers.insert(key, HopperState::new());
+        let mut dispensers = BTreeMap::new();
+        let mut droppers = BTreeMap::new();
+
+        tick_hoppers(
+            HopperTickContext {
+                chunks: &mut chunks,
+                redstone_sim: &mut redstone_sim,
+                item_manager: &mut item_manager,
+                chests: &mut chests,
+                hoppers: &mut hoppers,
+                dispensers: &mut dispensers,
+                droppers: &mut droppers,
+            },
+            |drop_type| match drop_type {
+                ItemType::Bow => Some(CoreItemStack::new(CoreItemType::Item(1), 1)),
+                _ => None,
+            },
+        );
+
+        let hopper = hoppers.get(&key).expect("hopper exists");
+        let stack = hopper.slots[0].as_ref().expect("hopper took item");
+        assert_eq!(stack.item_type, CoreItemType::Item(1));
+        assert_eq!(stack.count, 1);
+        assert_eq!(stack.durability, Some(42));
+        assert_eq!(stack.enchantments, Some(enchantments));
+
+        assert_eq!(item_manager.count(), 0);
     }
 }

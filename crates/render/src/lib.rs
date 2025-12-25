@@ -11,6 +11,7 @@ mod mesh;
 mod particles;
 mod pipeline;
 mod raycast;
+mod screenshot;
 mod texture_atlas;
 mod time;
 mod ui;
@@ -28,6 +29,7 @@ pub use pipeline::{
     SkyboxPipeline, VoxelPipeline, WireframePipeline,
 };
 pub use raycast::{raycast, RaycastHit};
+pub use screenshot::{record_texture_readback, write_png, TextureReadback};
 pub use texture_atlas::{atlas_exists, warn_missing_atlas};
 pub use time::{TimeOfDay, TimeUniform};
 pub use ui::{ControlMode, DebugHud, UiManager, UiRenderContext};
@@ -112,6 +114,33 @@ impl Renderer {
         Ok(())
     }
 
+    /// Initialize GPU resources for headless/offscreen rendering (async).
+    pub async fn initialize_gpu_headless(&mut self) -> anyhow::Result<()> {
+        let context = RenderContext::new_headless(
+            (self.config.width, self.config.height),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+        .await?;
+
+        let pipeline = VoxelPipeline::new(&context)?;
+        let skybox_pipeline = SkyboxPipeline::new(&context)?;
+        let wireframe_pipeline =
+            WireframePipeline::new(&context, pipeline.camera_bind_group_layout())?;
+        let particle_pipeline =
+            ParticlePipeline::new(&context, pipeline.camera_bind_group_layout())?;
+
+        self.camera.set_aspect(context.aspect_ratio());
+
+        self.context = Some(context);
+        self.pipeline = Some(pipeline);
+        self.skybox_pipeline = Some(skybox_pipeline);
+        self.wireframe_pipeline = Some(wireframe_pipeline);
+        self.particle_pipeline = Some(particle_pipeline);
+        self.ui = None;
+
+        Ok(())
+    }
+
     /// Get mutable reference to UI manager via RefCell.
     pub fn ui_mut(&self) -> Option<std::cell::RefMut<'_, UiManager>> {
         self.ui.as_ref().map(|cell| cell.borrow_mut())
@@ -163,10 +192,19 @@ impl Renderer {
         let context = self.context.as_ref()?;
         let pipeline = self.pipeline.as_ref()?;
 
-        let output = context.surface.get_current_texture().ok()?;
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let (output, view) = if let Some(surface) = context.surface.as_ref() {
+            let output = surface.get_current_texture().ok()?;
+            let view = output
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            (Some(output), view)
+        } else {
+            let headless = context.headless.as_ref()?;
+            let view = headless
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            (None, view)
+        };
 
         // Update camera uniform
         pipeline.update_camera(&context.queue, &self.camera);
@@ -205,15 +243,22 @@ impl Renderer {
 
 /// Frame rendering context.
 pub struct FrameContext {
-    output: wgpu::SurfaceTexture,
+    output: Option<wgpu::SurfaceTexture>,
     /// The texture view for this frame.
     pub view: wgpu::TextureView,
 }
 
 impl FrameContext {
+    /// Access the underlying surface texture for this frame (windowed only).
+    pub fn surface_texture(&self) -> Option<&wgpu::Texture> {
+        self.output.as_ref().map(|output| &output.texture)
+    }
+
     /// Finish the frame and present.
     pub fn present(self) {
-        self.output.present();
+        if let Some(output) = self.output {
+            output.present();
+        }
     }
 }
 

@@ -3,7 +3,7 @@
 //! Items can be dropped from breaking blocks or defeating mobs.
 //! They have physics (gravity, collision), a pickup radius, and despawn after 5 minutes.
 
-use mdminecraft_core::DimensionId;
+use mdminecraft_core::{DimensionId, Enchantment};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -352,6 +352,9 @@ pub enum ItemType {
     Glowstone,
     CryingObsidian,
     RespawnAnchor,
+
+    // Farming utility (appended to preserve stable IDs)
+    BoneMeal,
 }
 
 const ALL_ITEM_TYPES: &[ItemType] = &[
@@ -594,6 +597,7 @@ const ALL_ITEM_TYPES: &[ItemType] = &[
     ItemType::Glowstone,
     ItemType::CryingObsidian,
     ItemType::RespawnAnchor,
+    ItemType::BoneMeal,
 ];
 
 impl ItemType {
@@ -713,6 +717,7 @@ impl ItemType {
             | ItemType::Glowstone
             | ItemType::CryingObsidian
             | ItemType::RespawnAnchor
+            | ItemType::BoneMeal
             | ItemType::FermentedSpiderEye => 64,
             ItemType::MagmaCream
             | ItemType::GhastTear
@@ -1391,6 +1396,9 @@ impl ItemType {
     }
 }
 
+/// Metadata-bearing dropped item stack returned by pickup/take APIs.
+pub type DroppedItemStack = (ItemType, u32, Option<u32>, Option<Vec<Enchantment>>);
+
 /// A dropped item entity in the world.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DroppedItem {
@@ -1415,6 +1423,12 @@ pub struct DroppedItem {
     pub item_type: ItemType,
     /// Count/stack size.
     pub count: u32,
+    /// Durability for damaged/non-stackable items (None for most items).
+    #[serde(default)]
+    pub durability: Option<u32>,
+    /// Enchantments for dropped items that carry enchantment metadata.
+    #[serde(default)]
+    pub enchantments: Option<Vec<Enchantment>>,
     /// Ticks remaining before despawn.
     pub lifetime_ticks: u32,
     /// Whether the item is on the ground (no longer falling).
@@ -1441,6 +1455,35 @@ impl DroppedItem {
         item_type: ItemType,
         count: u32,
     ) -> Self {
+        Self::new_with_metadata(id, dimension, (x, y, z), item_type, count, None, None)
+    }
+
+    /// Create a new dropped item with explicit durability metadata.
+    ///
+    /// This is used to preserve durability for damaged tools/weapons when dropped.
+    pub fn new_with_durability(
+        id: u64,
+        dimension: DimensionId,
+        position: (f64, f64, f64),
+        item_type: ItemType,
+        count: u32,
+        durability: Option<u32>,
+    ) -> Self {
+        Self::new_with_metadata(id, dimension, position, item_type, count, durability, None)
+    }
+
+    /// Create a new dropped item with explicit durability and enchantment metadata.
+    pub fn new_with_metadata(
+        id: u64,
+        dimension: DimensionId,
+        position: (f64, f64, f64),
+        item_type: ItemType,
+        count: u32,
+        durability: Option<u32>,
+        enchantments: Option<Vec<Enchantment>>,
+    ) -> Self {
+        let (x, y, z) = position;
+
         // Simple pseudo-random velocity based on ID
         let vel_x = ((id % 100) as f64 - 50.0) / 200.0; // -0.25 to 0.25
         let vel_z = (((id / 100) % 100) as f64 - 50.0) / 200.0;
@@ -1457,6 +1500,8 @@ impl DroppedItem {
             vel_z,
             item_type,
             count,
+            durability,
+            enchantments,
             lifetime_ticks: ITEM_DESPAWN_TICKS,
             on_ground: false,
         }
@@ -1539,6 +1584,12 @@ impl DroppedItem {
         if self.item_type != other.item_type {
             return 0; // Can't merge different item types
         }
+        if self.durability != other.durability {
+            return 0; // Don't merge items with different durability metadata
+        }
+        if self.enchantments != other.enchantments {
+            return 0; // Don't merge items with different enchantment metadata
+        }
 
         let max_stack = self.item_type.max_stack_size();
         let available_space = max_stack.saturating_sub(self.count);
@@ -1592,6 +1643,44 @@ impl ItemManager {
         id
     }
 
+    /// Spawn a new dropped item with explicit durability metadata.
+    pub fn spawn_item_with_durability(
+        &mut self,
+        dimension: DimensionId,
+        position: (f64, f64, f64),
+        item_type: ItemType,
+        count: u32,
+        durability: Option<u32>,
+    ) -> u64 {
+        self.spawn_item_with_metadata(dimension, position, item_type, count, durability, None)
+    }
+
+    /// Spawn a new dropped item with explicit durability and enchantment metadata.
+    pub fn spawn_item_with_metadata(
+        &mut self,
+        dimension: DimensionId,
+        position: (f64, f64, f64),
+        item_type: ItemType,
+        count: u32,
+        durability: Option<u32>,
+        enchantments: Option<Vec<Enchantment>>,
+    ) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let item = DroppedItem::new_with_metadata(
+            id,
+            dimension,
+            position,
+            item_type,
+            count,
+            durability,
+            enchantments,
+        );
+        self.items.insert(id, item);
+        id
+    }
+
     /// Update all items (physics and lifetime).
     ///
     /// # Arguments
@@ -1629,14 +1718,14 @@ impl ItemManager {
     /// * `x, y, z` - Position of the player/mob
     ///
     /// # Returns
-    /// List of (item_type, count) tuples that were picked up.
+    /// List of (item_type, count, durability, enchantments) tuples that were picked up.
     pub fn pickup_items(
         &mut self,
         dimension: DimensionId,
         x: f64,
         y: f64,
         z: f64,
-    ) -> Vec<(ItemType, u32)> {
+    ) -> Vec<DroppedItemStack> {
         let mut picked_up = Vec::new();
         let mut to_remove = Vec::new();
 
@@ -1645,7 +1734,12 @@ impl ItemManager {
                 continue;
             }
             if item.can_pickup(x, y, z) {
-                picked_up.push((item.item_type, item.count));
+                picked_up.push((
+                    item.item_type,
+                    item.count,
+                    item.durability,
+                    item.enchantments.clone(),
+                ));
                 to_remove.push(*id);
             }
         }
@@ -1668,7 +1762,7 @@ impl ItemManager {
         y: f64,
         z: f64,
         radius: f64,
-    ) -> Option<(ItemType, u32)> {
+    ) -> Option<DroppedItemStack> {
         self.take_one_near_if(dimension, x, y, z, radius, |_| true)
     }
 
@@ -1685,7 +1779,7 @@ impl ItemManager {
         z: f64,
         radius: f64,
         predicate: F,
-    ) -> Option<(ItemType, u32)>
+    ) -> Option<DroppedItemStack>
     where
         F: Fn(ItemType) -> bool,
     {
@@ -1709,21 +1803,21 @@ impl ItemManager {
 
         let id = picked_id?;
         let mut remove = false;
-        let item_type = {
+        let (item_type, durability, enchantments) = {
             let item = self.items.get_mut(&id)?;
             if item.count > 1 {
                 item.count -= 1;
             } else {
                 remove = true;
             }
-            item.item_type
+            (item.item_type, item.durability, item.enchantments.clone())
         };
 
         if remove {
             self.items.remove(&id);
         }
 
-        Some((item_type, 1))
+        Some((item_type, 1, durability, enchantments))
     }
 
     /// Get the number of active dropped items.
@@ -1744,6 +1838,11 @@ impl ItemManager {
     /// Get all items as a slice.
     pub fn items(&self) -> Vec<&DroppedItem> {
         self.items.values().collect()
+    }
+
+    /// Iterate over all dropped items in deterministic ID order.
+    pub fn iter(&self) -> impl Iterator<Item = &DroppedItem> + '_ {
+        self.items.values()
     }
 
     /// Merge nearby items of the same type.
@@ -1823,7 +1922,7 @@ mod tests {
 
     #[test]
     fn item_type_from_id_roundtrips() {
-        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::RespawnAnchor as usize + 1);
+        assert_eq!(ALL_ITEM_TYPES.len(), ItemType::BoneMeal as usize + 1);
 
         for (idx, item_type) in ALL_ITEM_TYPES.iter().copied().enumerate() {
             assert_eq!(item_type.id(), idx as u16);
@@ -1863,6 +1962,7 @@ mod tests {
         assert_eq!(ItemType::Glowstone.max_stack_size(), 64);
         assert_eq!(ItemType::CryingObsidian.max_stack_size(), 64);
         assert_eq!(ItemType::RespawnAnchor.max_stack_size(), 64);
+        assert_eq!(ItemType::BoneMeal.max_stack_size(), 64);
         assert_eq!(ItemType::Carrot.max_stack_size(), 64);
         assert_eq!(ItemType::Potato.max_stack_size(), 64);
         assert_eq!(ItemType::BakedPotato.max_stack_size(), 64);
@@ -2302,7 +2402,7 @@ mod tests {
         // Pickup near first item
         let picked_up = manager.pickup_items(DIM, 10.0, 64.0, 20.0);
         assert_eq!(picked_up.len(), 1);
-        assert_eq!(picked_up[0], (ItemType::Stone, 5));
+        assert_eq!(picked_up[0], (ItemType::Stone, 5, None, None));
         assert_eq!(manager.count(), 1);
     }
 
@@ -2315,13 +2415,93 @@ mod tests {
             manager.spawn_item(DimensionId::Nether, 10.0, 64.0, 20.0, ItemType::Dirt, 1);
 
         let picked_up = manager.pickup_items(DimensionId::Overworld, 10.0, 64.0, 20.0);
-        assert_eq!(picked_up, vec![(ItemType::Stone, 1)]);
+        assert_eq!(picked_up, vec![(ItemType::Stone, 1, None, None)]);
         assert!(manager.get(overworld_id).is_none());
         assert!(manager.get(nether_id).is_some());
 
         let picked_up = manager.pickup_items(DimensionId::Nether, 10.0, 64.0, 20.0);
-        assert_eq!(picked_up, vec![(ItemType::Dirt, 1)]);
+        assert_eq!(picked_up, vec![(ItemType::Dirt, 1, None, None)]);
         assert!(manager.get(nether_id).is_none());
+    }
+
+    #[test]
+    fn test_item_manager_pickup_preserves_durability_metadata() {
+        let mut manager = ItemManager::new();
+        manager.spawn_item_with_durability(DIM, (10.0, 64.0, 20.0), ItemType::Bow, 1, Some(123));
+
+        let picked_up = manager.pickup_items(DIM, 10.0, 64.0, 20.0);
+        assert_eq!(picked_up, vec![(ItemType::Bow, 1, Some(123), None)]);
+        assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_item_manager_pickup_preserves_enchantments_metadata() {
+        use mdminecraft_core::{Enchantment, EnchantmentType};
+
+        let mut manager = ItemManager::new();
+        let enchantments = vec![Enchantment {
+            enchantment_type: EnchantmentType::Power,
+            level: 2,
+        }];
+        manager.spawn_item_with_metadata(
+            DIM,
+            (10.0, 64.0, 20.0),
+            ItemType::Bow,
+            1,
+            None,
+            Some(enchantments.clone()),
+        );
+
+        let picked_up = manager.pickup_items(DIM, 10.0, 64.0, 20.0);
+        assert_eq!(
+            picked_up,
+            vec![(ItemType::Bow, 1, None, Some(enchantments))]
+        );
+        assert_eq!(manager.count(), 0);
+    }
+
+    #[test]
+    fn test_merge_nearby_items_respects_durability_metadata() {
+        let mut manager = ItemManager::new();
+        manager.spawn_item_with_durability(DIM, (10.0, 64.0, 20.0), ItemType::Stone, 10, Some(1));
+        manager.spawn_item_with_durability(DIM, (10.5, 64.0, 20.5), ItemType::Stone, 5, Some(2));
+
+        let merged = manager.merge_nearby_items(DIM);
+        assert_eq!(merged, 0);
+        assert_eq!(manager.count(), 2);
+    }
+
+    #[test]
+    fn test_merge_nearby_items_respects_enchantments_metadata() {
+        use mdminecraft_core::{Enchantment, EnchantmentType};
+
+        let mut manager = ItemManager::new();
+        manager.spawn_item_with_metadata(
+            DIM,
+            (10.0, 64.0, 20.0),
+            ItemType::Stone,
+            10,
+            None,
+            Some(vec![Enchantment {
+                enchantment_type: EnchantmentType::Unbreaking,
+                level: 1,
+            }]),
+        );
+        manager.spawn_item_with_metadata(
+            DIM,
+            (10.5, 64.0, 20.5),
+            ItemType::Stone,
+            5,
+            None,
+            Some(vec![Enchantment {
+                enchantment_type: EnchantmentType::Mending,
+                level: 1,
+            }]),
+        );
+
+        let merged = manager.merge_nearby_items(DIM);
+        assert_eq!(merged, 0);
+        assert_eq!(manager.count(), 2);
     }
 
     #[test]
@@ -2379,15 +2559,15 @@ mod tests {
         manager.spawn_item(DIM, 10.0, 64.0, 20.0, ItemType::Dirt, 2);
 
         let first = manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.01);
-        assert_eq!(first, Some((ItemType::Stone, 1)));
+        assert_eq!(first, Some((ItemType::Stone, 1, None, None)));
         assert_eq!(manager.get(1).unwrap().count, 1);
 
         let second = manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.01);
-        assert_eq!(second, Some((ItemType::Stone, 1)));
+        assert_eq!(second, Some((ItemType::Stone, 1, None, None)));
         assert!(manager.get(1).is_none());
 
         let third = manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.01);
-        assert_eq!(third, Some((ItemType::Dirt, 1)));
+        assert_eq!(third, Some((ItemType::Dirt, 1, None, None)));
         assert_eq!(manager.get(2).unwrap().count, 1);
     }
 
@@ -2399,12 +2579,12 @@ mod tests {
 
         assert_eq!(
             manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.5),
-            Some((ItemType::Stone, 1))
+            Some((ItemType::Stone, 1, None, None))
         );
         assert_eq!(manager.take_one_near(DIM, 10.0, 64.0, 20.0, 0.5), None);
         assert_eq!(
             manager.take_one_near(DIM, 12.0, 64.0, 20.0, 0.5),
-            Some((ItemType::Dirt, 1))
+            Some((ItemType::Dirt, 1, None, None))
         );
     }
 
@@ -2726,6 +2906,8 @@ mod tests {
         assert_eq!(deserialized.id, 1);
         assert_eq!(deserialized.item_type, ItemType::Diamond);
         assert_eq!(deserialized.count, 5);
+        assert_eq!(deserialized.durability, None);
+        assert_eq!(deserialized.enchantments, None);
     }
 
     #[test]

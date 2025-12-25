@@ -1049,6 +1049,7 @@ fn parse_vanilla_item(token: &str) -> Option<ItemType> {
         "diamond" => Some(14),
         "lapis_lazuli" | "lapis" => Some(15),
         "bone" => Some(16),
+        "bone_meal" | "bonemeal" => Some(18),
         "emerald" => Some(17),
         "leather_helmet" => Some(20),
         "leather_chestplate" => Some(21),

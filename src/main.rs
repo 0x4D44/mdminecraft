@@ -2,6 +2,7 @@
 //!
 //! Main executable with graphical menu system
 
+mod automation;
 mod command_script;
 mod commands;
 mod config;
@@ -9,14 +10,16 @@ mod content_pack_loot;
 mod content_pack_spawns;
 mod content_packs;
 mod game;
+mod headless;
 mod input;
 mod menu;
 mod scripted_input;
 
 use anyhow::Result;
 use config::ControlsConfig;
-use game::GameWorld;
+use game::{GameWorld, GameWorldOptions, ScreenshotConfig};
 use menu::MenuState;
+use std::net::SocketAddr;
 use std::{env, path::PathBuf, sync::Arc};
 use tracing::info;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -45,17 +48,128 @@ fn main() -> Result<()> {
     let controls = Arc::new(ControlsConfig::load());
     let cli = CliOptions::parse(env::args().skip(1));
 
+    let screenshot = match cli.screenshot_dir.clone() {
+        Some(dir) => Some(ScreenshotConfig {
+            dir,
+            every_ticks: cli.screenshot_every_ticks,
+            max: cli.screenshot_max,
+        }),
+        None => {
+            if cli.screenshot_every_ticks.is_some() || cli.screenshot_max.is_some() {
+                tracing::error!(
+                    "--screenshot-every-ticks/--screenshot-max require --screenshot-dir"
+                );
+            }
+            None
+        }
+    };
+
+    if cli.automation_listen.is_some() && cli.automation_uds.is_some() {
+        anyhow::bail!("--automation-listen and --automation-uds are mutually exclusive");
+    }
+
+    let mut automation_endpoint = None;
+    if let Some(addr) = cli.automation_listen {
+        match automation::server::AutomationServer::start(
+            addr,
+            cli.automation_token.clone(),
+            cli.automation_log.clone(),
+        ) {
+            Ok(handle) => {
+                automation_endpoint = Some(handle.endpoint);
+            }
+            Err(err) => {
+                if cli.headless {
+                    return Err(err);
+                }
+                tracing::error!(%err, "Failed to start automation server");
+            }
+        }
+    } else if let Some(path) = cli.automation_uds.clone() {
+        #[cfg(unix)]
+        {
+            match automation::server::AutomationServer::start_uds(
+                path,
+                cli.automation_token.clone(),
+                cli.automation_log.clone(),
+            ) {
+                Ok(handle) => {
+                    automation_endpoint = Some(handle.endpoint);
+                }
+                Err(err) => {
+                    if cli.headless {
+                        return Err(err);
+                    }
+                    tracing::error!(%err, "Failed to start automation server");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            anyhow::bail!("--automation-uds is only supported on unix");
+        }
+    }
+
+    if cli.headless {
+        if cli.automation_exit_when_disconnected
+            && cli.automation_listen.is_none()
+            && cli.automation_uds.is_none()
+        {
+            tracing::warn!(
+                "--automation-exit-when-disconnected has no effect without automation control"
+            );
+        }
+        if cli.automation_step && cli.automation_listen.is_none() && cli.automation_uds.is_none() {
+            anyhow::bail!("--automation-step requires --automation-listen or --automation-uds");
+        }
+        if cli.exit_when_script_finished && cli.command_script.is_none() {
+            tracing::warn!("--exit-when-script-finished has no effect without --command-script");
+        }
+        if cli.scripted_input.is_some()
+            && (cli.automation_listen.is_some() || cli.automation_uds.is_some())
+        {
+            anyhow::bail!("--scripted-input is not supported with automation control");
+        }
+
+        return headless::run(headless::HeadlessConfig {
+            controls,
+            scripted_input: cli.scripted_input.clone(),
+            command_script: cli.command_script.clone(),
+            width: cli.resolution.0,
+            height: cli.resolution.1,
+            screenshot,
+            automation: automation_endpoint,
+            save_dir: cli.save_dir.clone(),
+            no_save: cli.no_save,
+            reset_world: cli.reset_world,
+            world_seed: cli.world_seed,
+            no_render: cli.no_render,
+            no_audio: cli.no_audio,
+            max_ticks: cli.max_ticks,
+            exit_when_script_finished: cli.exit_when_script_finished,
+            automation_step: cli.automation_step,
+            automation_exit_when_disconnected: cli.automation_exit_when_disconnected,
+        });
+    }
+
     // Create event loop
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
     // Start with menu unless auto-play is requested
     let mut app_state = if cli.auto_play {
+        let options = GameWorldOptions {
+            width: cli.resolution.0,
+            height: cli.resolution.1,
+            automation: automation_endpoint,
+            screenshot: screenshot.clone(),
+        };
         match GameWorld::new(
             &event_loop,
             controls.clone(),
             cli.scripted_input.clone(),
             cli.command_script.clone(),
+            options,
         ) {
             Ok(game) => AppState::InGame(Box::new(game)),
             Err(err) => {
@@ -80,11 +194,18 @@ fn main() -> Result<()> {
                         // Transition to game
                         // Reload controls so menu changes take effect immediately.
                         let controls = Arc::new(ControlsConfig::load());
+                        let options = GameWorldOptions {
+                            width: cli.resolution.0,
+                            height: cli.resolution.1,
+                            automation: None,
+                            screenshot: screenshot.clone(),
+                        };
                         match GameWorld::new(
                             elwt,
                             controls,
                             cli.scripted_input.clone(),
                             cli.command_script.clone(),
+                            options,
                         ) {
                             Ok(game) => {
                                 app_state = AppState::InGame(Box::new(game));
@@ -139,21 +260,115 @@ fn main() -> Result<()> {
 #[derive(Clone)]
 struct CliOptions {
     auto_play: bool,
+    headless: bool,
+    no_render: bool,
+    no_audio: bool,
+    save_dir: Option<PathBuf>,
+    no_save: bool,
+    reset_world: bool,
+    world_seed: Option<u64>,
+    max_ticks: Option<u64>,
+    exit_when_script_finished: bool,
     scripted_input: Option<PathBuf>,
     command_script: Option<PathBuf>,
+    resolution: (u32, u32),
+    screenshot_dir: Option<PathBuf>,
+    screenshot_every_ticks: Option<u64>,
+    screenshot_max: Option<u64>,
+    automation_listen: Option<SocketAddr>,
+    automation_uds: Option<PathBuf>,
+    automation_token: Option<String>,
+    automation_log: Option<PathBuf>,
+    automation_step: bool,
+    automation_exit_when_disconnected: bool,
 }
 
 impl CliOptions {
     fn parse<I: Iterator<Item = String>>(mut args: I) -> Self {
         let mut opts = CliOptions {
             auto_play: false,
+            headless: false,
+            no_render: false,
+            no_audio: false,
+            save_dir: None,
+            no_save: false,
+            reset_world: false,
+            world_seed: None,
+            max_ticks: None,
+            exit_when_script_finished: false,
             scripted_input: None,
             command_script: None,
+            resolution: (1280, 720),
+            screenshot_dir: None,
+            screenshot_every_ticks: None,
+            screenshot_max: None,
+            automation_listen: None,
+            automation_uds: None,
+            automation_token: None,
+            automation_log: None,
+            automation_step: false,
+            automation_exit_when_disconnected: false,
         };
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--auto-play" => opts.auto_play = true,
+                "--headless" => opts.headless = true,
+                "--no-render" => opts.no_render = true,
+                "--no-audio" => opts.no_audio = true,
+                "--save-dir" => {
+                    if let Some(path) = args.next() {
+                        opts.save_dir = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--save-dir requires a directory path");
+                    }
+                }
+                "--no-save" => opts.no_save = true,
+                "--reset-world" => opts.reset_world = true,
+                "--world-seed" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u64>() {
+                            Ok(value) => opts.world_seed = Some(value),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--world-seed must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--world-seed requires an integer");
+                    }
+                }
+                "--max-ticks" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u64>() {
+                            Ok(value) => opts.max_ticks = Some(value),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--max-ticks must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--max-ticks requires an integer");
+                    }
+                }
+                "--exit-when-script-finished" => opts.exit_when_script_finished = true,
+                "--resolution" => {
+                    if let Some(raw) = args.next() {
+                        match raw.split_once('x') {
+                            Some((w, h)) => match (w.parse::<u32>(), h.parse::<u32>()) {
+                                (Ok(width), Ok(height)) if width > 0 && height > 0 => {
+                                    opts.resolution = (width, height);
+                                }
+                                _ => {
+                                    tracing::error!(value = %raw, "--resolution must be like 1280x720");
+                                }
+                            },
+                            None => {
+                                tracing::error!(value = %raw, "--resolution must be like 1280x720");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--resolution requires a value like 1280x720");
+                    }
+                }
                 "--scripted-input" => {
                     if let Some(path) = args.next() {
                         opts.auto_play = true;
@@ -168,6 +383,80 @@ impl CliOptions {
                     } else {
                         tracing::error!("--command-script requires a file path");
                     }
+                }
+                "--screenshot-dir" => {
+                    if let Some(path) = args.next() {
+                        opts.screenshot_dir = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--screenshot-dir requires a directory path");
+                    }
+                }
+                "--screenshot-every-ticks" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u64>() {
+                            Ok(value) => opts.screenshot_every_ticks = Some(value.max(1)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--screenshot-every-ticks must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--screenshot-every-ticks requires an integer");
+                    }
+                }
+                "--screenshot-max" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u64>() {
+                            Ok(value) => opts.screenshot_max = Some(value),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--screenshot-max must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--screenshot-max requires an integer");
+                    }
+                }
+                "--automation-listen" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<SocketAddr>() {
+                            Ok(addr) => {
+                                opts.auto_play = true;
+                                opts.automation_listen = Some(addr);
+                            }
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--automation-listen must be a socket address");
+                            }
+                        }
+                    } else {
+                        tracing::error!(
+                            "--automation-listen requires an address like 127.0.0.1:4242"
+                        );
+                    }
+                }
+                "--automation-uds" => {
+                    if let Some(path) = args.next() {
+                        opts.auto_play = true;
+                        opts.automation_uds = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--automation-uds requires a socket path");
+                    }
+                }
+                "--automation-token" => {
+                    if let Some(token) = args.next() {
+                        opts.automation_token = Some(token);
+                    } else {
+                        tracing::error!("--automation-token requires a token string");
+                    }
+                }
+                "--automation-log" => {
+                    if let Some(path) = args.next() {
+                        opts.automation_log = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--automation-log requires a file path");
+                    }
+                }
+                "--automation-step" => opts.automation_step = true,
+                "--automation-exit-when-disconnected" => {
+                    opts.automation_exit_when_disconnected = true;
                 }
                 _ => {}
             }

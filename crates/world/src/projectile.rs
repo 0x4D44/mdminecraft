@@ -5,6 +5,16 @@
 use mdminecraft_core::DimensionId;
 use serde::{Deserialize, Serialize};
 
+/// Ownership information for projectiles that have thrower-dependent behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum ProjectileOwner {
+    /// No owning entity (e.g., dispenser-thrown ender pearls).
+    #[default]
+    None,
+    /// The player (singleplayer/local simulation).
+    Player,
+}
+
 /// Types of projectiles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProjectileType {
@@ -20,6 +30,8 @@ pub enum ProjectileType {
     BlazeFireball,
     /// Ghast fireball - fired by Ghasts (handled by the game layer).
     GhastFireball,
+    /// Thrown egg - breaks on impact and may hatch (handled by game layer).
+    Egg,
 }
 
 impl ProjectileType {
@@ -32,6 +44,7 @@ impl ProjectileType {
             ProjectileType::DragonFireball => 6.0,
             ProjectileType::BlazeFireball => 4.0,
             ProjectileType::GhastFireball => 8.0,
+            ProjectileType::Egg => 0.0,
         }
     }
 
@@ -44,6 +57,7 @@ impl ProjectileType {
             ProjectileType::DragonFireball => 0.0,
             ProjectileType::BlazeFireball => 0.0,
             ProjectileType::GhastFireball => 0.0,
+            ProjectileType::Egg => 0.06,
         }
     }
 
@@ -56,6 +70,7 @@ impl ProjectileType {
             ProjectileType::DragonFireball => 0.99,
             ProjectileType::BlazeFireball => 0.99,
             ProjectileType::GhastFireball => 0.99,
+            ProjectileType::Egg => 0.98,
         }
     }
 
@@ -68,6 +83,7 @@ impl ProjectileType {
             ProjectileType::DragonFireball => 0.6,
             ProjectileType::BlazeFireball => 0.35,
             ProjectileType::GhastFireball => 0.9,
+            ProjectileType::Egg => 0.25,
         }
     }
 
@@ -80,6 +96,7 @@ impl ProjectileType {
             ProjectileType::DragonFireball => 200,
             ProjectileType::BlazeFireball => 160,
             ProjectileType::GhastFireball => 240,
+            ProjectileType::Egg => 600,
         }
     }
 
@@ -105,6 +122,7 @@ impl ProjectileType {
             ProjectileType::DragonFireball => 2.5,
             ProjectileType::BlazeFireball => 1.5,
             ProjectileType::GhastFireball => 3.0,
+            ProjectileType::Egg => 0.0,
         }
     }
 }
@@ -115,6 +133,9 @@ pub struct Projectile {
     /// Dimension this projectile exists in.
     #[serde(default)]
     pub dimension: DimensionId,
+    /// Owning entity (used for behaviors like ender pearl teleport).
+    #[serde(default)]
+    pub owner: ProjectileOwner,
     /// Previous world X position (not persisted; used for per-tick collision sweep).
     #[serde(skip)]
     pub prev_x: f64,
@@ -158,6 +179,9 @@ pub struct Projectile {
     /// Whether this projectile should spawn an item pickup (e.g., arrow pickup) on block impact.
     #[serde(default = "default_true")]
     pub can_pick_up: bool,
+    /// Precomputed hatch count for thrown eggs (0/1/4) to keep impact deterministic across saves.
+    #[serde(default)]
+    pub egg_hatch_count: u8,
     /// Whether the projectile should be removed
     pub dead: bool,
 }
@@ -181,6 +205,7 @@ impl Projectile {
     ) -> Self {
         Self {
             dimension: DimensionId::DEFAULT,
+            owner: ProjectileOwner::None,
             prev_x: x,
             prev_y: y,
             prev_z: z,
@@ -199,6 +224,7 @@ impl Projectile {
             punch_level: 0,
             flame: false,
             can_pick_up: true,
+            egg_hatch_count: 0,
             dead: false,
         }
     }
@@ -329,6 +355,44 @@ impl Projectile {
             ProjectileType::EnderPearl,
             1.0,
         )
+    }
+
+    /// Create a thrown egg from player position and look direction.
+    pub fn throw_egg(player_x: f64, player_y: f64, player_z: f64, yaw: f32, pitch: f32) -> Self {
+        // Calculate direction from yaw/pitch
+        let pitch_rad = pitch as f64;
+        let yaw_rad = yaw as f64;
+
+        let cos_pitch = pitch_rad.cos();
+        let sin_pitch = pitch_rad.sin();
+        let cos_yaw = yaw_rad.cos();
+        let sin_yaw = yaw_rad.sin();
+
+        // Direction vector (looking direction)
+        let dir_x = cos_pitch * cos_yaw;
+        let dir_y = -sin_pitch;
+        let dir_z = cos_pitch * sin_yaw;
+
+        // Similar feel to ender pearls/splash potions: fixed throw speed with a slight upward arc.
+        let speed = 0.9;
+
+        // Spawn slightly in front of player and at eye level
+        let spawn_x = player_x + dir_x * 0.5;
+        let spawn_y = player_y + 1.5 + dir_y * 0.5; // Eye level
+        let spawn_z = player_z + dir_z * 0.5;
+
+        let mut projectile = Self::new(
+            spawn_x,
+            spawn_y,
+            spawn_z,
+            dir_x * speed,
+            dir_y * speed + 0.2,
+            dir_z * speed,
+            ProjectileType::Egg,
+            1.0,
+        );
+        projectile.can_pick_up = false;
+        projectile
     }
 
     /// Create a dragon fireball from a mob position toward a target point.
@@ -704,6 +768,16 @@ mod tests {
         assert!(!ProjectileType::DragonFireball.is_splash_potion());
         assert_eq!(ProjectileType::DragonFireball.potion_id(), None);
         assert_eq!(ProjectileType::DragonFireball.effect_radius(), 2.5);
+
+        // Egg properties
+        assert_eq!(ProjectileType::Egg.base_damage(), 0.0);
+        assert_eq!(ProjectileType::Egg.gravity(), 0.06);
+        assert_eq!(ProjectileType::Egg.drag(), 0.98);
+        assert_eq!(ProjectileType::Egg.hitbox_radius(), 0.25);
+        assert_eq!(ProjectileType::Egg.lifetime_ticks(), 600);
+        assert!(!ProjectileType::Egg.is_splash_potion());
+        assert_eq!(ProjectileType::Egg.potion_id(), None);
+        assert_eq!(ProjectileType::Egg.effect_radius(), 0.0);
     }
 
     #[test]
@@ -735,6 +809,17 @@ mod tests {
         assert!(pearl.speed() > 0.0);
         assert!(!pearl.stuck);
         assert!(!pearl.dead);
+    }
+
+    #[test]
+    fn test_egg_creation() {
+        let egg = Projectile::throw_egg(0.0, 0.0, 0.0, 0.0, 0.0);
+        assert_eq!(egg.projectile_type, ProjectileType::Egg);
+        assert!(egg.speed() > 0.0);
+        assert!(!egg.stuck);
+        assert!(!egg.dead);
+        assert!(!egg.can_pick_up);
+        assert_eq!(egg.egg_hatch_count, 0);
     }
 
     #[test]
