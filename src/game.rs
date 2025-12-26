@@ -3515,6 +3515,21 @@ impl GameWorld {
                 let tick = self.sim_tick.0;
                 let camera = self.renderer.camera();
                 let pos = [camera.position.x, camera.position.y, camera.position.z];
+                let mut mobs_active = 0u32;
+                let mut mobs_nearby = 0u32;
+                let nearby_radius_sq = 64.0_f32 * 64.0_f32;
+                for mob in &self.mobs {
+                    if mob.dead || mob.dimension != self.active_dimension {
+                        continue;
+                    }
+                    mobs_active += 1;
+                    let dx = mob.x as f32 - camera.position.x;
+                    let dy = mob.y as f32 - camera.position.y;
+                    let dz = mob.z as f32 - camera.position.z;
+                    if dx * dx + dy * dy + dz * dz <= nearby_radius_sq {
+                        mobs_nearby += 1;
+                    }
+                }
                 let _ = respond_to.send(protocol::event_state(
                     req.id,
                     tick,
@@ -3524,6 +3539,9 @@ impl GameWorld {
                     camera.pitch,
                     self.player_health.current,
                     self.player_health.hunger,
+                    self.mobs.len() as u32,
+                    mobs_active,
+                    mobs_nearby,
                 ));
             }
             protocol::Request::Step(req) => {
@@ -5612,6 +5630,21 @@ impl GameWorld {
                             let tick = self.sim_tick.0;
                             let camera = self.renderer.camera();
                             let pos = [camera.position.x, camera.position.y, camera.position.z];
+                            let mut mobs_active = 0u32;
+                            let mut mobs_nearby = 0u32;
+                            let nearby_radius_sq = 64.0_f32 * 64.0_f32;
+                            for mob in &self.mobs {
+                                if mob.dead || mob.dimension != self.active_dimension {
+                                    continue;
+                                }
+                                mobs_active += 1;
+                                let dx = mob.x as f32 - camera.position.x;
+                                let dy = mob.y as f32 - camera.position.y;
+                                let dz = mob.z as f32 - camera.position.z;
+                                if dx * dx + dy * dy + dz * dz <= nearby_radius_sq {
+                                    mobs_nearby += 1;
+                                }
+                            }
                             let _ = respond_to.send(protocol::event_state(
                                 req.id,
                                 tick,
@@ -5621,6 +5654,9 @@ impl GameWorld {
                                 camera.pitch,
                                 self.player_health.current,
                                 self.player_health.hunger,
+                                self.mobs.len() as u32,
+                                mobs_active,
+                                mobs_nearby,
                             ));
                         }
                         protocol::Request::Step(req) => {
@@ -6932,6 +6968,93 @@ impl GameWorld {
                 continue;
             }
             self.particle_emitter.spawn(particle.to_vertex());
+        }
+
+        // Headless-only: render simple mob markers via particles so screenshots have an
+        // observable "something is there" signal even when billboard rendering is disabled.
+        //
+        // Note: the particle pipeline uses point rendering, and WGSL doesn't allow controlling
+        // point size on all backends. To keep markers visible, we draw a small column + ring of
+        // points per mob.
+        if self.window.is_none() {
+            let mut remaining = MAX_PARTICLES.saturating_sub(self.particle_emitter.vertices.len());
+            for mob in &self.mobs {
+                if mob.dimension != self.active_dimension || mob.dead {
+                    continue;
+                }
+
+                let height: f32 = match mob.mob_type {
+                    MobType::Chicken | MobType::Spider => 0.5,
+                    MobType::Ghast => 4.0,
+                    MobType::EnderDragon => 6.0,
+                    _ => 1.8,
+                };
+
+                let color = match mob.mob_type {
+                    MobType::Zombie => glam::Vec4::new(0.0, 0.5, 0.0, 0.9),
+                    MobType::Skeleton => glam::Vec4::new(0.8, 0.8, 0.8, 0.9),
+                    MobType::Creeper => {
+                        if mob.charged {
+                            glam::Vec4::new(0.2, 0.8, 1.0, 0.95)
+                        } else {
+                            glam::Vec4::new(0.0, 0.8, 0.0, 0.9)
+                        }
+                    }
+                    MobType::Spider => glam::Vec4::new(0.1, 0.1, 0.1, 0.9),
+                    MobType::Pig => glam::Vec4::new(1.0, 0.6, 0.6, 0.9),
+                    MobType::Cow => glam::Vec4::new(0.3, 0.2, 0.1, 0.9),
+                    MobType::Sheep => glam::Vec4::new(0.9, 0.9, 0.9, 0.9),
+                    MobType::Chicken => glam::Vec4::new(1.0, 1.0, 1.0, 0.9),
+                    MobType::Villager => glam::Vec4::new(0.7, 0.6, 0.4, 0.9),
+                    MobType::EnderDragon => glam::Vec4::new(0.5, 0.0, 0.7, 0.95),
+                    MobType::Blaze => glam::Vec4::new(1.0, 0.6, 0.0, 0.95),
+                    MobType::Ghast => glam::Vec4::new(0.9, 0.9, 0.95, 0.9),
+                };
+
+                const COLUMN_POINTS: usize = 18;
+                const RING_POINTS: usize = 12;
+                const POINTS_PER_MOB: usize = COLUMN_POINTS + RING_POINTS;
+                if remaining < POINTS_PER_MOB {
+                    break;
+                }
+                remaining -= POINTS_PER_MOB;
+
+                let mob_x = mob.x as f32;
+                let mob_y = mob.y as f32;
+                let mob_z = mob.z as f32;
+
+                for i in 0..COLUMN_POINTS {
+                    let t = if COLUMN_POINTS <= 1 {
+                        0.0
+                    } else {
+                        i as f32 / (COLUMN_POINTS as f32 - 1.0)
+                    };
+                    let pos = glam::Vec3::new(mob_x, mob_y + t * height.max(0.5), mob_z);
+                    self.particle_emitter.spawn(mdminecraft_render::ParticleVertex {
+                        position: pos.to_array(),
+                        color: color.to_array(),
+                        lifetime: 1.0,
+                        scale: 1.0,
+                    });
+                }
+
+                let ring_y = mob_y + height * 0.6;
+                let radius = 0.45;
+                for i in 0..RING_POINTS {
+                    let angle = i as f32 * std::f32::consts::TAU / (RING_POINTS as f32);
+                    let pos = glam::Vec3::new(
+                        mob_x + angle.cos() * radius,
+                        ring_y,
+                        mob_z + angle.sin() * radius,
+                    );
+                    self.particle_emitter.spawn(mdminecraft_render::ParticleVertex {
+                        position: pos.to_array(),
+                        color: color.to_array(),
+                        lifetime: 1.0,
+                        scale: 1.0,
+                    });
+                }
+            }
         }
         self.debug_hud.particle_count = self.particle_emitter.vertices.len();
         self.debug_hud.particle_budget = MAX_PARTICLES;
@@ -12011,7 +12134,7 @@ impl GameWorld {
                 let depth_view = resources.pipeline.depth_view();
                 let mut render_pass = resources.particle_pipeline.begin_render_pass(
                     &mut encoder,
-                    &frame.view,
+                    target_view,
                     depth_view,
                 );
                 render_pass.set_pipeline(resources.particle_pipeline.pipeline());
@@ -29950,10 +30073,11 @@ mod tests {
 
     #[test]
     fn effective_spawn_light_level_scales_skylight_and_respects_block_light() {
+        // `SimTime` uses Minecraft-style tick semantics:
+        // - tick 6000 = noon
+        // - tick 18000 = midnight
         let mut noon = mdminecraft_world::SimTime::new(24000);
-        for _ in 0..12000 {
-            noon.advance();
-        }
+        noon.tick = mdminecraft_core::SimTick(6000);
 
         let voxel = Voxel {
             id: BLOCK_AIR,
@@ -29963,7 +30087,8 @@ mod tests {
         };
         assert_eq!(GameWorld::effective_spawn_light_level(voxel, &noon), 15);
 
-        let midnight = mdminecraft_world::SimTime::new(24000);
+        let mut midnight = mdminecraft_world::SimTime::new(24000);
+        midnight.tick = mdminecraft_core::SimTick(18000);
         assert_eq!(GameWorld::effective_spawn_light_level(voxel, &midnight), 3);
 
         let torchlit = Voxel {
