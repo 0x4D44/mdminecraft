@@ -183,17 +183,15 @@ impl TerrainGenerator {
 
                     // 2. 3D Noise: Adds variation/overhangs
                     let noise_val = self.density_noise.sample_3d(
-                        world_x as f64 * 0.02,
-                        world_y as f64 * 0.02,
-                        world_z as f64 * 0.02,
+                        world_x as f64,
+                        world_y as f64,
+                        world_z as f64,
                     );
 
                     // 3. Cave Noise: Subtracts density (but not below y=5 to preserve bedrock area)
-                    let cave_val = self.cave_noise.sample_3d(
-                        world_x as f64 * 0.04,
-                        world_y as f64 * 0.04,
-                        world_z as f64 * 0.04,
-                    );
+                    let cave_val =
+                        self.cave_noise
+                            .sample_3d(world_x as f64, world_y as f64, world_z as f64);
                     // Use absolute value for cave tunnels (worm-like), but don't carve below y=5
                     let cave_modifier = if local_y >= 5 && cave_val.abs() < 0.15 {
                         -10.0
@@ -965,6 +963,38 @@ mod tests {
 
         // Should have created a chunk at correct position
         assert_eq!(chunk.position(), ChunkPos::new(0, 0));
+    }
+
+    #[test]
+    fn overworld_generation_has_surface_above_void_floor() {
+        let gen = TerrainGenerator::new(123);
+        let chunk = gen.generate_chunk_in_dimension(DimensionId::Overworld, ChunkPos::new(0, 0));
+
+        let mut highest_non_air = None;
+        for y in (0..CHUNK_SIZE_Y).rev() {
+            for z in 0..CHUNK_SIZE_Z {
+                for x in 0..CHUNK_SIZE_X {
+                    if chunk.voxel(x, y, z).id != blocks::AIR {
+                        highest_non_air = Some(y);
+                        break;
+                    }
+                }
+                if highest_non_air.is_some() {
+                    break;
+                }
+            }
+            if highest_non_air.is_some() {
+                break;
+            }
+        }
+
+        let highest_non_air = highest_non_air.expect("expected terrain above air");
+        let highest_world_y = local_y_to_world_y(highest_non_air);
+        assert!(
+            highest_world_y > 0,
+            "expected overworld chunk (0,0) to have terrain above y=0, got {}",
+            highest_world_y
+        );
     }
 
     #[test]
