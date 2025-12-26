@@ -430,6 +430,9 @@ pub fn event_state(
     pitch: f32,
     health: f32,
     hunger: f32,
+    mobs_total: u32,
+    mobs_active: u32,
+    mobs_nearby: u32,
 ) -> Value {
     fn float(value: f64) -> Value {
         if !value.is_finite() {
@@ -458,6 +461,18 @@ pub fn event_state(
         Value::String(dimension.to_string()),
     );
     obj.insert("player".to_string(), Value::Object(player));
+    obj.insert(
+        "mobs_total".to_string(),
+        Value::Number((mobs_total as u64).into()),
+    );
+    obj.insert(
+        "mobs_active".to_string(),
+        Value::Number((mobs_active as u64).into()),
+    );
+    obj.insert(
+        "mobs_nearby".to_string(),
+        Value::Number((mobs_nearby as u64).into()),
+    );
     if let Some(id) = id {
         obj.insert("id".to_string(), id.into_value());
     }
