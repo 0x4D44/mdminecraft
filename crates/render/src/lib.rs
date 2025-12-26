@@ -184,6 +184,9 @@ impl Renderer {
             if let Some(pipeline) = &mut self.pipeline {
                 pipeline.resize(&context.device, new_size);
             }
+            if let Some(particle_pipeline) = self.particle_pipeline.as_ref() {
+                particle_pipeline.update_viewport(&context.queue, new_size);
+            }
         }
     }
 
@@ -191,6 +194,7 @@ impl Renderer {
     pub fn begin_frame(&mut self) -> Option<FrameContext> {
         let context = self.context.as_ref()?;
         let pipeline = self.pipeline.as_ref()?;
+        let skybox_pipeline = self.skybox_pipeline.as_ref()?;
 
         let (output, view) = if let Some(surface) = context.surface.as_ref() {
             let output = surface.get_current_texture().ok()?;
@@ -208,6 +212,7 @@ impl Renderer {
 
         // Update camera uniform
         pipeline.update_camera(&context.queue, &self.camera);
+        skybox_pipeline.update_camera(&context.queue, &self.camera);
 
         Some(FrameContext { output, view })
     }

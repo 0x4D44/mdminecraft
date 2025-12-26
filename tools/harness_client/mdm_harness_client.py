@@ -106,7 +106,7 @@ def main() -> int:
     parser.add_argument(
         "--timeout-seconds",
         type=float,
-        default=10.0,
+        default=60.0,
         help="connect/read timeout (seconds)",
     )
     parser.add_argument(
@@ -194,4 +194,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

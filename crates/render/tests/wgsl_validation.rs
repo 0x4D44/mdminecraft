@@ -23,3 +23,8 @@ fn voxel_shader_is_valid_wgsl() {
 fn skybox_shader_is_valid_wgsl() {
     validate_wgsl(include_str!("../src/shaders/skybox.wgsl")).unwrap();
 }
+
+#[test]
+fn particles_shader_is_valid_wgsl() {
+    validate_wgsl(include_str!("../src/shaders/particles.wgsl")).unwrap();
+}
