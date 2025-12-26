@@ -495,8 +495,12 @@ fn completion_event_for_request(request: &Request) -> &'static str {
 
 fn timeout_for_request(request: &Request) -> Duration {
     match request {
-        Request::Step(_) => Duration::from_secs(60),
-        _ => Duration::from_secs(10),
+        // These operations can legitimately take a while on slower machines (eg. software GPU
+        // readback for screenshots, or large command-driven edits).
+        Request::Step(_) => Duration::from_secs(120),
+        Request::Screenshot(_) => Duration::from_secs(120),
+        Request::Command(_) => Duration::from_secs(60),
+        _ => Duration::from_secs(30),
     }
 }
 

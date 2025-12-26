@@ -31,9 +31,17 @@ impl SimTime {
     }
 
     /// Get the current time of day as a fraction (0.0 = midnight, 0.5 = noon, 1.0 = next midnight).
+    ///
+    /// This applies a +¼-day phase shift so that our tick values match Minecraft-style tick
+    /// semantics:
+    /// - tick 0 = sunrise (≈ 0.25)
+    /// - tick 6000 = noon (≈ 0.50)
+    /// - tick 18000 = midnight (≈ 0.00)
     pub fn time_of_day(&self) -> f64 {
         let tick_in_day = self.tick.0 % self.ticks_per_day;
-        tick_in_day as f64 / self.ticks_per_day as f64
+        let phase_shift = self.ticks_per_day / 4;
+        let shifted = (tick_in_day + phase_shift) % self.ticks_per_day;
+        shifted as f64 / self.ticks_per_day as f64
     }
 
     /// Compute sun elevation angle in radians (-π/2 to π/2).
@@ -79,29 +87,28 @@ mod tests {
     #[test]
     fn time_of_day_wraps_at_day_boundary() {
         let mut time = SimTime::new(100);
-        assert_eq!(time.time_of_day(), 0.0);
+        // tick 0 is sunrise due to +¼-day phase shift.
+        assert!((time.time_of_day() - 0.25).abs() < 0.001);
 
-        // Advance halfway through day.
-        for _ in 0..50 {
-            time.advance();
-        }
-        assert!((time.time_of_day() - 0.5).abs() < 0.01);
+        // Noon is at +¼ day.
+        time.tick = SimTick(25);
+        assert!((time.time_of_day() - 0.5).abs() < 0.001);
 
-        // Advance to end of day.
-        for _ in 0..50 {
-            time.advance();
-        }
-        assert!((time.time_of_day() - 0.0).abs() < 0.01);
+        // Midnight is at +¾ day.
+        time.tick = SimTick(75);
+        assert!((time.time_of_day() - 0.0).abs() < 0.001);
+
+        // Wrap at day boundary.
+        time.tick = SimTick(100);
+        assert!((time.time_of_day() - 0.25).abs() < 0.001);
     }
 
     #[test]
     fn sun_elevation_peaks_at_noon() {
         let mut time = SimTime::new(24000);
 
-        // Advance to noon (tick 6000 = 0.25 of day).
-        for _ in 0..12000 {
-            time.advance();
-        }
+        // Minecraft tick 6000 is noon.
+        time.tick = SimTick(6000);
 
         let elevation = time.sun_elevation();
         // At noon (time_of_day = 0.5), elevation should be near π/2.
@@ -110,10 +117,12 @@ mod tests {
 
     #[test]
     fn skylight_scalar_has_minimum_at_midnight() {
-        let time = SimTime::new(24000);
+        let mut time = SimTime::new(24000);
+        // Minecraft tick 18000 is midnight.
+        time.tick = SimTick(18000);
         let scalar = time.skylight_scalar();
 
-        // At midnight (tick 0), scalar should be near minimum (0.2).
+        // At midnight, scalar should be near minimum (0.2).
         assert!((scalar - 0.2).abs() < 0.05);
     }
 
@@ -121,10 +130,7 @@ mod tests {
     fn skylight_scalar_maximizes_at_noon() {
         let mut time = SimTime::new(24000);
 
-        // Advance to noon.
-        for _ in 0..12000 {
-            time.advance();
-        }
+        time.tick = SimTick(6000);
 
         let scalar = time.skylight_scalar();
         // At noon, scalar should be near 1.0.
@@ -136,13 +142,12 @@ mod tests {
         let mut time = SimTime::new(24000);
 
         // Midnight: minimum light.
+        time.tick = SimTick(18000);
         let midnight_light = time.effective_skylight();
         assert!((3..=4).contains(&midnight_light)); // ~20% of 15
 
         // Noon: maximum light.
-        for _ in 0..12000 {
-            time.advance();
-        }
+        time.tick = SimTick(6000);
         let noon_light = time.effective_skylight();
         assert_eq!(noon_light, 15);
     }

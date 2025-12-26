@@ -2,6 +2,7 @@
 //!
 //! Validates deterministic weather transitions and time-of-day progression.
 
+use mdminecraft_core::SimTick;
 use mdminecraft_world::{SimTime, WeatherChanged, WeatherState, WeatherToggle};
 
 #[test]
@@ -10,7 +11,10 @@ fn weather_cycle_is_deterministic() {
     let mut weather = WeatherToggle::new();
 
     // Initial state verification.
-    assert_eq!(time.time_of_day(), 0.0, "Should start at midnight");
+    assert!(
+        (time.time_of_day() - 0.25).abs() < 0.001,
+        "Should start at sunrise (Minecraft tick 0)"
+    );
     assert_eq!(weather.state, WeatherState::Clear);
 
     // Advance through one game day (24000 ticks).
@@ -18,9 +22,9 @@ fn weather_cycle_is_deterministic() {
         time.advance();
     }
 
-    // Verify time wraps back to midnight.
+    // Verify time wraps back to sunrise.
     assert!(
-        (time.time_of_day() - 0.0).abs() < 0.001,
+        (time.time_of_day() - 0.25).abs() < 0.001,
         "Time should wrap at day boundary"
     );
 
@@ -34,15 +38,15 @@ fn weather_cycle_is_deterministic() {
     assert_eq!(weather.state, WeatherState::Precipitation);
     assert!(weather.is_precipitating());
 
-    // Advance to noon (half day = 12000 ticks).
-    for _ in 0..12000 {
+    // Advance to noon from sunrise (tick 6000).
+    for _ in 0..6000 {
         time.advance();
     }
 
     // Verify noon time.
     assert!(
         (time.time_of_day() - 0.5).abs() < 0.01,
-        "Should be noon after 12000 additional ticks"
+        "Should be noon after 6000 additional ticks"
     );
 
     // Toggle weather back to clear.
@@ -62,6 +66,7 @@ fn skylight_varies_with_time_and_weather() {
     let mut weather = WeatherToggle::new();
 
     // Midnight, clear: minimum skylight.
+    time.tick = SimTick(18000);
     let midnight_clear = time.effective_skylight();
     assert!(
         (3..=4).contains(&midnight_clear),

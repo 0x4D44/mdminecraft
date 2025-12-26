@@ -2654,8 +2654,10 @@ impl GameWorld {
             .time_of_day
             .set_time(world.sim_time.time_of_day() as f32);
 
-        // Initial chunk load (blocking, load all initial chunks)
-        world.update_chunks(usize::MAX);
+        // Initial chunk load (bounded): keep startup responsive for automation.
+        // Further chunk loading continues during ticks via `fixed_update()` (which calls
+        // `update_chunks(1)`).
+        world.update_chunks(8);
 
         let has_loaded_player = loaded_player.is_some();
         let spawn_test_mobs = std::env::var("MDM_DEBUG_SPAWN_TEST_MOBS")
@@ -3121,8 +3123,10 @@ impl GameWorld {
             .time_of_day
             .set_time(world.sim_time.time_of_day() as f32);
 
-        // Initial chunk load (blocking, load all initial chunks)
-        world.update_chunks(usize::MAX);
+        // Initial chunk load (bounded): keep startup responsive for automation.
+        // Further chunk loading continues during ticks via `fixed_update()` (which calls
+        // `update_chunks(1)`).
+        world.update_chunks(8);
 
         let has_loaded_player = loaded_player.is_some();
 
@@ -28569,8 +28573,9 @@ impl commands::CommandContext for GameWorld {
         self.player_physics.velocity = glam::Vec3::ZERO;
         self.player_physics.on_ground = false;
 
-        // Force-load chunks around the new position so teleporting isn't a black screen.
-        self.update_chunks(usize::MAX);
+        // Preload a bounded number of chunks around the new position so teleporting isn't a black
+        // screen, without stalling on slower GPUs or defeating headless step control.
+        self.update_chunks(1);
         Ok(())
     }
 
