@@ -7030,12 +7030,13 @@ impl GameWorld {
                         i as f32 / (COLUMN_POINTS as f32 - 1.0)
                     };
                     let pos = glam::Vec3::new(mob_x, mob_y + t * height.max(0.5), mob_z);
-                    self.particle_emitter.spawn(mdminecraft_render::ParticleVertex {
-                        position: pos.to_array(),
-                        color: color.to_array(),
-                        lifetime: 1.0,
-                        scale: 1.0,
-                    });
+                    self.particle_emitter
+                        .spawn(mdminecraft_render::ParticleVertex {
+                            position: pos.to_array(),
+                            color: color.to_array(),
+                            lifetime: 1.0,
+                            scale: 14.0,
+                        });
                 }
 
                 let ring_y = mob_y + height * 0.6;
@@ -7047,12 +7048,13 @@ impl GameWorld {
                         ring_y,
                         mob_z + angle.sin() * radius,
                     );
-                    self.particle_emitter.spawn(mdminecraft_render::ParticleVertex {
-                        position: pos.to_array(),
-                        color: color.to_array(),
-                        lifetime: 1.0,
-                        scale: 1.0,
-                    });
+                    self.particle_emitter
+                        .spawn(mdminecraft_render::ParticleVertex {
+                            position: pos.to_array(),
+                            color: color.to_array(),
+                            lifetime: 1.0,
+                            scale: 14.0,
+                        });
                 }
             }
         }
@@ -12047,6 +12049,7 @@ impl GameWorld {
                     .begin_render_pass(&mut encoder, target_view);
                 render_pass.set_pipeline(resources.skybox_pipeline.pipeline());
                 render_pass.set_bind_group(0, resources.skybox_pipeline.time_bind_group(), &[]);
+                render_pass.set_bind_group(1, resources.skybox_pipeline.camera_bind_group(), &[]);
                 render_pass.draw(0..3, 0..1);
             }
 
@@ -12139,7 +12142,15 @@ impl GameWorld {
                 );
                 render_pass.set_pipeline(resources.particle_pipeline.pipeline());
                 render_pass.set_bind_group(0, resources.pipeline.camera_bind_group(), &[]);
-                system.render(&mut render_pass);
+                render_pass.set_bind_group(
+                    1,
+                    resources.particle_pipeline.globals_bind_group(),
+                    &[],
+                );
+                system.render(
+                    &mut render_pass,
+                    resources.particle_pipeline.quad_vertex_buffer(),
+                );
             }
 
             // Render wireframe highlight (if block selected)

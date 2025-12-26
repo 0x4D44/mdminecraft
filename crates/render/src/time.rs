@@ -75,23 +75,20 @@ impl TimeOfDay {
     /// Get sun direction based on time.
     ///
     /// Returns a normalized direction vector pointing toward the sun.
-    /// - 0.0 (midnight): Below horizon (west)
+    /// - 0.0 (midnight): Below horizon
     /// - 0.25 (dawn): Rising (east)
     /// - 0.5 (noon): Overhead
     /// - 0.75 (dusk): Setting (west)
     pub fn sun_direction(&self) -> [f32; 3] {
-        // Sun rotates around Y axis
-        // At noon (0.5), sun is overhead
-        // At midnight (0.0/1.0), sun is below horizon
+        let angle = self.time * std::f32::consts::TAU;
 
-        let angle = self.time * std::f32::consts::PI * 2.0;
-
-        // Sun position on unit sphere
-        let x = angle.sin() * 0.5; // East-West movement
-        let y = (-angle.cos() * 0.5) + 0.5; // Height (0 at horizon, 1 at zenith)
+        // Use a circular orbit so the sun is above the horizon (y>0) during day
+        // and below the horizon (y<0) at night.
+        let x = angle.sin(); // East-West movement
+        let y = -angle.cos(); // Height
         let z = 0.3; // Slight north offset
 
-        // Normalize
+        // Normalize (the z offset makes the vector non-unit).
         let length = (x * x + y * y + z * z).sqrt();
         [x / length, y / length, z / length]
     }

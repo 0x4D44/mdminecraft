@@ -1075,11 +1075,24 @@ impl VoxelPipeline {
     }
 }
 
+/// GPU uniform for skybox camera ray reconstruction.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct SkyboxCameraUniform {
+    forward: [f32; 4],
+    right: [f32; 4],
+    up: [f32; 4],
+    // x: tan_half_fov, y: aspect, z/w: reserved
+    params: [f32; 4],
+}
+
 /// Skybox rendering pipeline.
 pub struct SkyboxPipeline {
     render_pipeline: wgpu::RenderPipeline,
     time_buffer: wgpu::Buffer,
     time_bind_group: wgpu::BindGroup,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 impl SkyboxPipeline {
@@ -1120,6 +1133,37 @@ impl SkyboxPipeline {
             }],
         });
 
+        let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Skybox Camera Buffer"),
+            size: std::mem::size_of::<SkyboxCameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Skybox Camera Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Skybox Camera Bind Group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
         // Load skybox shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Skybox Shader"),
@@ -1129,7 +1173,7 @@ impl SkyboxPipeline {
         // Create render pipeline layout with time bind group
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Skybox Pipeline Layout"),
-            bind_group_layouts: &[&time_bind_group_layout],
+            bind_group_layouts: &[&time_bind_group_layout, &camera_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -1173,6 +1217,8 @@ impl SkyboxPipeline {
             render_pipeline,
             time_buffer,
             time_bind_group,
+            camera_buffer,
+            camera_bind_group,
         })
     }
 
@@ -1197,6 +1243,28 @@ impl SkyboxPipeline {
     /// Get the time bind group.
     pub fn time_bind_group(&self) -> &wgpu::BindGroup {
         &self.time_bind_group
+    }
+
+    /// Get the camera bind group.
+    pub fn camera_bind_group(&self) -> &wgpu::BindGroup {
+        &self.camera_bind_group
+    }
+
+    /// Update the skybox camera uniform buffer.
+    pub fn update_camera(&self, queue: &wgpu::Queue, camera: &crate::Camera) {
+        let forward = camera.forward();
+        let right = camera.right();
+        let up = camera.up();
+        let tan_half_fov = (camera.fov * 0.5).tan();
+
+        let uniform = SkyboxCameraUniform {
+            forward: [forward.x, forward.y, forward.z, 0.0],
+            right: [right.x, right.y, right.z, 0.0],
+            up: [up.x, up.y, up.z, 0.0],
+            params: [tan_half_fov, camera.aspect, 0.0, 0.0],
+        };
+
+        queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
     /// Begin a skybox render pass.
@@ -1282,6 +1350,9 @@ pub struct WireframePipeline {
 /// Particle billboard rendering pipeline.
 pub struct ParticlePipeline {
     render_pipeline: wgpu::RenderPipeline,
+    quad_vertex_buffer: wgpu::Buffer,
+    globals_buffer: wgpu::Buffer,
+    globals_bind_group: wgpu::BindGroup,
 }
 
 impl ParticlePipeline {
@@ -1296,16 +1367,96 @@ impl ParticlePipeline {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/particles.wgsl").into()),
         });
 
+        #[repr(C)]
+        #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct ParticleGlobalsUniform {
+            viewport_size: [f32; 2],
+            _padding: [f32; 2],
+        }
+
+        let globals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Particle Globals Buffer"),
+            contents: bytemuck::bytes_of(&ParticleGlobalsUniform {
+                viewport_size: [ctx.config.width as f32, ctx.config.height as f32],
+                _padding: [0.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let globals_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Particle Globals Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Particle Globals Bind Group"),
+            layout: &globals_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals_buffer.as_entire_binding(),
+            }],
+        });
+
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Particle Pipeline Layout"),
-            bind_group_layouts: &[camera_bind_group_layout],
+            bind_group_layouts: &[camera_bind_group_layout, &globals_bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        let vertex_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<crate::particles::ParticleVertex>() as u64,
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+        struct ParticleQuadVertex {
+            corner: [f32; 2],
+        }
+
+        let quad_vertices = [
+            ParticleQuadVertex {
+                corner: [-1.0, -1.0],
+            },
+            ParticleQuadVertex {
+                corner: [1.0, -1.0],
+            },
+            ParticleQuadVertex { corner: [1.0, 1.0] },
+            ParticleQuadVertex {
+                corner: [-1.0, -1.0],
+            },
+            ParticleQuadVertex { corner: [1.0, 1.0] },
+            ParticleQuadVertex {
+                corner: [-1.0, 1.0],
+            },
+        ];
+
+        let quad_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Particle Quad Vertex Buffer"),
+            contents: bytemuck::cast_slice(&quad_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let quad_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<ParticleQuadVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4, 2 => Float32, 3 => Float32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+        };
+
+        let instance_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<crate::particles::ParticleVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                1 => Float32x3,
+                2 => Float32x4,
+                3 => Float32,
+                4 => Float32
+            ],
         };
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1314,7 +1465,7 @@ impl ParticlePipeline {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[vertex_layout],
+                buffers: &[quad_vertex_layout, instance_layout],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -1326,7 +1477,7 @@ impl ParticlePipeline {
                 })],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -1349,12 +1500,43 @@ impl ParticlePipeline {
             multiview: None,
         });
 
-        Ok(Self { render_pipeline })
+        Ok(Self {
+            render_pipeline,
+            quad_vertex_buffer,
+            globals_buffer,
+            globals_bind_group,
+        })
     }
 
     /// Access the underlying `wgpu::RenderPipeline` for particles.
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.render_pipeline
+    }
+
+    /// Access the particle globals bind group (viewport size).
+    pub fn globals_bind_group(&self) -> &wgpu::BindGroup {
+        &self.globals_bind_group
+    }
+
+    /// Access the static quad vertex buffer used for instanced particle billboards.
+    pub fn quad_vertex_buffer(&self) -> &wgpu::Buffer {
+        &self.quad_vertex_buffer
+    }
+
+    /// Update the viewport size used for screen-space particle billboards.
+    pub fn update_viewport(&self, queue: &wgpu::Queue, new_size: (u32, u32)) {
+        #[repr(C)]
+        #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+        struct ParticleGlobalsUniform {
+            viewport_size: [f32; 2],
+            _padding: [f32; 2],
+        }
+
+        let uniform = ParticleGlobalsUniform {
+            viewport_size: [new_size.0 as f32, new_size.1 as f32],
+            _padding: [0.0, 0.0],
+        };
+        queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
     /// Begin a particle render pass that reuses the voxel depth buffer so billboards depth test correctly.

@@ -42,31 +42,36 @@ impl ParticleEmitter {
 
 /// GPU upload containing the current frame’s particles.
 pub struct ParticleSystem {
-    vertex_buffer: wgpu::Buffer,
-    vertex_count: u32,
+    instance_buffer: wgpu::Buffer,
+    instance_count: u32,
 }
 
 impl ParticleSystem {
     /// Create a GPU buffer from the emitter contents.
     pub fn from_emitter(device: &wgpu::Device, emitter: &ParticleEmitter) -> Self {
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Particle Vertex Buffer"),
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Particle Instance Buffer"),
             contents: bytemuck::cast_slice(&emitter.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
         Self {
-            vertex_buffer,
-            vertex_count: emitter.vertices.len() as u32,
+            instance_buffer,
+            instance_count: emitter.vertices.len() as u32,
         }
     }
 
-    /// Draw the particles as point sprites.
-    pub fn render<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
-        if self.vertex_count == 0 {
+    /// Draw particle billboards as instanced quads.
+    pub fn render<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        quad_vertex_buffer: &'a wgpu::Buffer,
+    ) {
+        if self.instance_count == 0 {
             return;
         }
-        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        pass.draw(0..self.vertex_count, 0..1);
+        pass.set_vertex_buffer(0, quad_vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        pass.draw(0..6, 0..self.instance_count);
     }
 }
