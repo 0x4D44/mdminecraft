@@ -11671,6 +11671,7 @@ impl GameWorld {
         };
 
         let neighbor_offsets = [
+            IVec3::ZERO,
             IVec3::new(0, 1, 0),
             IVec3::new(0, -1, 0),
             IVec3::new(1, 0, 0),
