@@ -310,31 +310,31 @@ impl FluidSimulator {
 
         // Try to flow down first
         let down_pos = FluidPos::new(pos.x, pos.y - 1, pos.z);
-        if let Some(down_voxel) = self.get_voxel(down_pos, chunks) {
-            let should_flow_down = if is_fluid(down_voxel.id) {
-                get_fluid_type(down_voxel.id) == Some(fluid_type)
-            } else {
-                can_fluid_replace(down_voxel.id)
-            };
-
-            if should_flow_down {
-                // Flow down
-                let new_level = if is_source {
-                    FLUID_LEVEL_SOURCE
+        let down_voxel = self.get_voxel(down_pos, chunks);
+        if let Some(down_voxel) = down_voxel {
+            if is_fluid(down_voxel.id) {
+                let down_type = get_fluid_type(down_voxel.id);
+                if down_type != Some(fluid_type) {
+                    if let Some(interaction) = self.check_fluid_interaction(
+                        down_pos,
+                        fluid_type,
+                        is_source,
+                        chunks,
+                    ) {
+                        self.set_voxel(down_pos, interaction, chunks);
+                    }
                 } else {
-                    current_level
-                };
-                let flowing_id = match fluid_type {
-                    FluidType::Water => BLOCK_WATER_FLOWING,
-                    FluidType::Lava => BLOCK_LAVA_FLOWING,
-                };
+                    // Flow down into same fluid type.
+                    let new_level = if is_source {
+                        FLUID_LEVEL_SOURCE
+                    } else {
+                        current_level
+                    };
+                    let flowing_id = match fluid_type {
+                        FluidType::Water => BLOCK_WATER_FLOWING,
+                        FluidType::Lava => BLOCK_LAVA_FLOWING,
+                    };
 
-                // Check for water + lava interaction
-                if let Some(interaction) =
-                    self.check_fluid_interaction(down_pos, fluid_type, chunks)
-                {
-                    self.set_voxel(down_pos, interaction, chunks);
-                } else {
                     let new_state = set_falling(set_fluid_level(0, new_level), true);
                     self.set_voxel(
                         down_pos,
@@ -348,6 +348,47 @@ impl FluidSimulator {
                     );
                     self.schedule_update(down_pos, fluid_type.flow_speed());
                 }
+            } else if can_fluid_replace(down_voxel.id) {
+                // Flow down into replaceable blocks.
+                let new_level = if is_source {
+                    FLUID_LEVEL_SOURCE
+                } else {
+                    current_level
+                };
+                let flowing_id = match fluid_type {
+                    FluidType::Water => BLOCK_WATER_FLOWING,
+                    FluidType::Lava => BLOCK_LAVA_FLOWING,
+                };
+
+                let new_state = set_falling(set_fluid_level(0, new_level), true);
+                self.set_voxel(
+                    down_pos,
+                    Voxel {
+                        id: flowing_id,
+                        state: new_state,
+                        light_sky: 0,
+                        light_block: fluid_type.light_level(),
+                    },
+                    chunks,
+                );
+                self.schedule_update(down_pos, fluid_type.flow_speed());
+            }
+        }
+
+        if fluid_type == FluidType::Water && !is_source && !is_falling(voxel.state) {
+            if self.check_infinite_water(pos, chunks) {
+                self.set_voxel(
+                    pos,
+                    Voxel {
+                        id: blocks::WATER,
+                        state: 0,
+                        light_sky: 0,
+                        light_block: 0,
+                    },
+                    chunks,
+                );
+                self.schedule_update(pos, fluid_type.flow_speed());
+                return;
             }
         }
 
@@ -364,25 +405,35 @@ impl FluidSimulator {
                     if let Some(neighbor_voxel) = self.get_voxel(neighbor, chunks) {
                         // Check if we can flow to this neighbor
                         let should_flow = if is_fluid(neighbor_voxel.id) {
-                            // Only flow if we have higher level
-                            let neighbor_level = if is_source_fluid(neighbor_voxel.id) {
-                                FLUID_LEVEL_SOURCE
+                            let neighbor_type = get_fluid_type(neighbor_voxel.id);
+                            if neighbor_type != Some(fluid_type) {
+                                true
                             } else {
-                                get_fluid_level(neighbor_voxel.state)
-                            };
-                            new_level > neighbor_level
-                                && get_fluid_type(neighbor_voxel.id) == Some(fluid_type)
+                                // Only flow if we have higher level
+                                let neighbor_level = if is_source_fluid(neighbor_voxel.id) {
+                                    FLUID_LEVEL_SOURCE
+                                } else {
+                                    get_fluid_level(neighbor_voxel.state)
+                                };
+                                new_level > neighbor_level
+                            }
                         } else {
                             can_fluid_replace(neighbor_voxel.id)
                         };
 
                         if should_flow {
                             // Check for water + lava interaction
-                            if let Some(interaction) =
-                                self.check_fluid_interaction(neighbor, fluid_type, chunks)
+                            if let Some(interaction) = self.check_fluid_interaction(
+                                neighbor,
+                                fluid_type,
+                                is_source,
+                                chunks,
+                            )
                             {
                                 self.set_voxel(neighbor, interaction, chunks);
-                            } else {
+                            } else if !is_fluid(neighbor_voxel.id)
+                                || get_fluid_type(neighbor_voxel.id) == Some(fluid_type)
+                            {
                                 let flowing_id = match fluid_type {
                                     FluidType::Water => BLOCK_WATER_FLOWING,
                                     FluidType::Lava => BLOCK_LAVA_FLOWING,
@@ -443,6 +494,7 @@ impl FluidSimulator {
         &self,
         pos: FluidPos,
         incoming_type: FluidType,
+        incoming_is_source: bool,
         chunks: &HashMap<ChunkPos, Chunk>,
     ) -> Option<Voxel> {
         let existing_voxel = self.get_voxel(pos, chunks)?;
@@ -452,15 +504,16 @@ impl FluidSimulator {
         if incoming_type != existing_type {
             // Lava source + water = obsidian
             // Flowing lava + water = cobblestone
-            // Water + lava source = stone (lava becomes obsidian)
-            // Water + flowing lava = stone (lava becomes cobblestone)
+            let lava_is_source = if incoming_type == FluidType::Lava {
+                incoming_is_source
+            } else {
+                is_source_fluid(existing_voxel.id)
+            };
 
-            let result_id = if is_source_fluid(existing_voxel.id) {
-                // Existing is source
+            let result_id = if lava_is_source {
                 BLOCK_OBSIDIAN
             } else {
-                // Existing is flowing
-                blocks::STONE
+                crate::BLOCK_COBBLESTONE
             };
 
             return Some(Voxel {
@@ -1066,6 +1119,254 @@ mod tests {
         // Water should have spread horizontally
         assert_eq!(adjacent.id, BLOCK_WATER_FLOWING);
         assert_eq!(get_fluid_level(adjacent.state), 7); // max_flow_distance for water
+    }
+
+    #[test]
+    fn test_water_lava_interaction_horizontal() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place water and lava sources next to each other on solid ground.
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: BLOCK_LAVA,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let converted = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(converted.id, BLOCK_OBSIDIAN);
+    }
+
+    #[test]
+    fn test_water_flowing_lava_interaction_horizontal() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place water next to a flowing lava block.
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: BLOCK_LAVA_FLOWING,
+                state: set_fluid_level(0, 3),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let converted = chunk.voxel(6, local_y(64), 5);
+        assert_eq!(converted.id, crate::BLOCK_COBBLESTONE);
+    }
+
+    #[test]
+    fn test_lava_flowing_water_interaction_horizontal() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Place flowing lava next to a water source.
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: BLOCK_LAVA_FLOWING,
+                state: set_fluid_level(0, 3),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(63),
+            5,
+            Voxel {
+                id: blocks::STONE,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(6, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let converted = chunk.voxel(5, local_y(64), 5);
+        assert_eq!(converted.id, crate::BLOCK_COBBLESTONE);
+    }
+
+    #[test]
+    fn test_infinite_water_creates_source() {
+        let mut sim = FluidSimulator::new();
+        let mut chunks = HashMap::new();
+        let mut chunk = create_test_chunk();
+
+        // Solid ground under the water.
+        for x in 4..=6 {
+            chunk.set_voxel(
+                x,
+                local_y(63),
+                5,
+                Voxel {
+                    id: blocks::STONE,
+                    state: 0,
+                    light_sky: 0,
+                    light_block: 0,
+                },
+            );
+        }
+
+        // Two sources with a flowing water block between them.
+        chunk.set_voxel(
+            4,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            6,
+            local_y(64),
+            5,
+            Voxel {
+                id: blocks::WATER,
+                state: 0,
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunk.set_voxel(
+            5,
+            local_y(64),
+            5,
+            Voxel {
+                id: BLOCK_WATER_FLOWING,
+                state: set_fluid_level(0, 1),
+                light_sky: 0,
+                light_block: 0,
+            },
+        );
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+
+        sim.schedule_update(FluidPos::new(5, 64, 5), 0);
+        sim.tick(&mut chunks);
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        let mid = chunk.voxel(5, local_y(64), 5);
+        assert_eq!(mid.id, blocks::WATER);
     }
 
     #[test]

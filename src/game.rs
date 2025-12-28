@@ -105,6 +105,11 @@ const NETHER_PORTAL_COOLDOWN_TICKS: u16 = 100;
 const NETHER_PORTAL_SEARCH_RADIUS: i32 = 16;
 const WORLDGEN_CHEST_LOOT_SALT: u64 = 0x0043_4845_5354_4C4F_u64; // "CHESTLO"
 
+struct UnsupportedBlockChanges {
+    removed: Vec<(IVec3, BlockId)>,
+    moved: Vec<IVec3>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum WorldgenChestLootTable {
     Generic,
@@ -6642,18 +6647,27 @@ impl GameWorld {
             return dirty_chunks;
         }
 
-        let removed_support = Self::remove_unsupported_blocks(
+        let support_changes = Self::remove_unsupported_blocks(
             &mut self.chunks,
             &self.block_properties,
             geometry_changes.iter().copied(),
         );
 
-        for (pos, removed_id) in removed_support {
+        for (pos, removed_id) in support_changes.removed {
             dirty_chunks.insert(ChunkPos::new(
                 pos.x.div_euclid(CHUNK_SIZE_X as i32),
                 pos.z.div_euclid(CHUNK_SIZE_Z as i32),
             ));
             self.on_block_entity_removed(pos, removed_id);
+            self.schedule_redstone_updates_around(pos);
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+        }
+        for pos in support_changes.moved {
+            dirty_chunks.insert(ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            ));
             self.schedule_redstone_updates_around(pos);
             self.fluid_sim
                 .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
@@ -6977,6 +6991,12 @@ impl GameWorld {
         // point size on all backends. To keep markers visible, we draw a small column + ring of
         // points per mob.
         if self.window.is_none() {
+            const HEADLESS_MOB_MARKER_SCALE: f32 = 2.5;
+            const HEADLESS_MOB_MARKER_MIN_SCALE: f32 = 1.5;
+            const HEADLESS_MOB_MARKER_MAX_SCALE: f32 = 5.0;
+            const HEADLESS_MOB_MARKER_REF_DIST: f32 = 48.0;
+            const HEADLESS_MOB_MARKER_MAX_DIST: f32 = 128.0;
+            let camera_pos = self.renderer.camera().position;
             let mut remaining = MAX_PARTICLES.saturating_sub(self.particle_emitter.vertices.len());
             for mob in &self.mobs {
                 if mob.dimension != self.active_dimension || mob.dead {
@@ -7022,6 +7042,13 @@ impl GameWorld {
                 let mob_x = mob.x as f32;
                 let mob_y = mob.y as f32;
                 let mob_z = mob.z as f32;
+                let mob_pos = glam::Vec3::new(mob_x, mob_y, mob_z);
+                let dist = (mob_pos - camera_pos).length().max(1.0);
+                if dist > HEADLESS_MOB_MARKER_MAX_DIST {
+                    continue;
+                }
+                let marker_scale = (HEADLESS_MOB_MARKER_SCALE * (HEADLESS_MOB_MARKER_REF_DIST / dist))
+                    .clamp(HEADLESS_MOB_MARKER_MIN_SCALE, HEADLESS_MOB_MARKER_MAX_SCALE);
 
                 for i in 0..COLUMN_POINTS {
                     let t = if COLUMN_POINTS <= 1 {
@@ -7035,7 +7062,7 @@ impl GameWorld {
                             position: pos.to_array(),
                             color: color.to_array(),
                             lifetime: 1.0,
-                            scale: 14.0,
+                            scale: marker_scale,
                         });
                 }
 
@@ -7053,7 +7080,7 @@ impl GameWorld {
                             position: pos.to_array(),
                             color: color.to_array(),
                             lifetime: 1.0,
-                            scale: 14.0,
+                            scale: marker_scale,
                         });
                 }
             }
@@ -8187,10 +8214,6 @@ impl GameWorld {
         // Apply limit
         if chunks_to_load.len() > max_load {
             chunks_to_load.truncate(max_load);
-        }
-
-        if self.renderer.render_resources().is_none() {
-            return;
         }
 
         // Load limited number per frame to avoid lag (e.g. 2 chunks)
@@ -10230,13 +10253,13 @@ impl GameWorld {
                         changed_positions.push(extra);
                     }
 
-                    let removed_support = Self::remove_unsupported_blocks(
+                    let support_changes = Self::remove_unsupported_blocks(
                         &mut self.chunks,
                         &self.block_properties,
                         changed_positions,
                     );
 
-                    for (pos, removed_block_id) in &removed_support {
+                    for (pos, removed_block_id) in &support_changes.removed {
                         if !mdminecraft_world::CropType::is_crop(*removed_block_id) {
                             continue;
                         }
@@ -10258,7 +10281,10 @@ impl GameWorld {
                     if let Some(extra) = removed_extra {
                         self.schedule_redstone_updates_around(extra);
                     }
-                    for (pos, _) in &removed_support {
+                    for (pos, _) in &support_changes.removed {
+                        self.schedule_redstone_updates_around(*pos);
+                    }
+                    for pos in &support_changes.moved {
                         self.schedule_redstone_updates_around(*pos);
                     }
 
@@ -10270,7 +10296,7 @@ impl GameWorld {
                             extra.z.div_euclid(CHUNK_SIZE_Z as i32),
                         ));
                     }
-                    for (pos, removed_block_id) in &removed_support {
+                    for (pos, removed_block_id) in &support_changes.removed {
                         self.on_block_entity_removed(*pos, *removed_block_id);
 
                         affected_chunks.insert(ChunkPos::new(
@@ -10283,7 +10309,7 @@ impl GameWorld {
 
                         let should_drop = if mdminecraft_world::is_door_upper(*removed_block_id) {
                             let lower_pos = IVec3::new(pos.x, pos.y - 1, pos.z);
-                            !removed_support.iter().any(|(other_pos, other_id)| {
+                            !support_changes.removed.iter().any(|(other_pos, other_id)| {
                                 *other_pos == lower_pos
                                     && mdminecraft_world::is_door_lower(*other_id)
                             })
@@ -10331,6 +10357,15 @@ impl GameWorld {
                                 );
                             }
                         }
+                    }
+
+                    for pos in &support_changes.moved {
+                        affected_chunks.insert(ChunkPos::new(
+                            pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                            pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                        ));
+                        self.fluid_sim
+                            .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
                     }
 
                     let mut mesh_refresh = std::collections::BTreeSet::new();
@@ -11585,9 +11620,10 @@ impl GameWorld {
         chunks: &mut HashMap<ChunkPos, Chunk>,
         block_properties: &BlockPropertiesRegistry,
         changed_positions: impl IntoIterator<Item = IVec3>,
-    ) -> Vec<(IVec3, BlockId)> {
+    ) -> UnsupportedBlockChanges {
         let mut queue: std::collections::VecDeque<IVec3> = changed_positions.into_iter().collect();
         let mut removed = Vec::new();
+        let mut moved = Vec::new();
 
         let voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> Option<Voxel> {
             let local_y = world_y_to_local_y(pos.y)?;
@@ -11604,6 +11640,34 @@ impl GameWorld {
 
         let is_solid_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> bool {
             voxel_at(chunks, pos).is_some_and(|voxel| block_properties.get(voxel.id).is_solid)
+        };
+
+        let set_voxel_at =
+            |chunks: &mut HashMap<ChunkPos, Chunk>, pos: IVec3, voxel: Voxel| -> bool {
+                let Some(local_y) = world_y_to_local_y(pos.y) else {
+                    return false;
+                };
+                let chunk_pos = ChunkPos::new(
+                    pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                    pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+                );
+                let Some(chunk) = chunks.get_mut(&chunk_pos) else {
+                    return false;
+                };
+                let local_x = pos.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
+                let local_z = pos.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
+                chunk.set_voxel(local_x, local_y, local_z, voxel);
+                true
+            };
+        let can_set_voxel_at = |chunks: &HashMap<ChunkPos, Chunk>, pos: IVec3| -> bool {
+            if world_y_to_local_y(pos.y).is_none() {
+                return false;
+            }
+            let chunk_pos = ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            );
+            chunks.contains_key(&chunk_pos)
         };
 
         let neighbor_offsets = [
@@ -11623,6 +11687,45 @@ impl GameWorld {
                 };
                 if voxel.id == BLOCK_AIR {
                     continue;
+                }
+
+                if matches!(
+                    voxel.id,
+                    mdminecraft_world::BLOCK_SAND | mdminecraft_world::BLOCK_GRAVEL
+                ) {
+                    let below_pos = IVec3::new(candidate.x, candidate.y - 1, candidate.z);
+                    if !is_solid_at(chunks, below_pos) {
+                        let mut fall_y = candidate.y - 1;
+                        while fall_y >= WORLD_MIN_Y {
+                            let check_pos = IVec3::new(candidate.x, fall_y, candidate.z);
+                            if is_solid_at(chunks, check_pos) {
+                                break;
+                            }
+                            fall_y -= 1;
+                        }
+
+                        if fall_y < WORLD_MIN_Y {
+                            if set_voxel_at(chunks, candidate, Voxel::default()) {
+                                removed.push((candidate, voxel.id));
+                                queue.push_back(candidate);
+                            }
+                            continue;
+                        }
+
+                        let target_pos = IVec3::new(candidate.x, fall_y + 1, candidate.z);
+                        if target_pos != candidate
+                            && can_set_voxel_at(chunks, candidate)
+                            && can_set_voxel_at(chunks, target_pos)
+                            && set_voxel_at(chunks, candidate, Voxel::default())
+                            && set_voxel_at(chunks, target_pos, voxel)
+                        {
+                            moved.push(candidate);
+                            moved.push(target_pos);
+                            queue.push_back(candidate);
+                            queue.push_back(target_pos);
+                        }
+                        continue;
+                    }
                 }
 
                 let unsupported = match voxel.id {
@@ -11751,26 +11854,14 @@ impl GameWorld {
                     continue;
                 }
 
-                let chunk_pos = ChunkPos::new(
-                    candidate.x.div_euclid(CHUNK_SIZE_X as i32),
-                    candidate.z.div_euclid(CHUNK_SIZE_Z as i32),
-                );
-                let Some(chunk) = chunks.get_mut(&chunk_pos) else {
-                    continue;
-                };
-                let local_x = candidate.x.rem_euclid(CHUNK_SIZE_X as i32) as usize;
-                let local_z = candidate.z.rem_euclid(CHUNK_SIZE_Z as i32) as usize;
-                let Some(local_y) = world_y_to_local_y(candidate.y) else {
-                    continue;
-                };
-
-                chunk.set_voxel(local_x, local_y, local_z, Voxel::default());
-                removed.push((candidate, voxel.id));
-                queue.push_back(candidate);
+                if set_voxel_at(chunks, candidate, Voxel::default()) {
+                    removed.push((candidate, voxel.id));
+                    queue.push_back(candidate);
+                }
             }
         }
 
-        removed
+        UnsupportedBlockChanges { removed, moved }
     }
 
     /// Initialize skylight for a chunk and stitch across neighboring seams.
@@ -13080,7 +13171,9 @@ impl GameWorld {
         self.active_dimension = target;
 
         // Load/generate destination chunks, then snap to a safe nearby location.
-        self.update_chunks(usize::MAX);
+        // Keep headless automation responsive by bounding the initial load.
+        let load_limit = if self.window.is_none() { 8 } else { usize::MAX };
+        self.update_chunks(load_limit);
         let camera_pos = self.renderer.camera().position;
         if let Some(feet) = self.find_safe_spawn_near(camera_pos.x, camera_pos.z) {
             let camera = self.renderer.camera_mut();
@@ -13220,7 +13313,8 @@ impl GameWorld {
             self.player_physics.velocity = glam::Vec3::ZERO;
             self.player_physics.on_ground = false;
 
-            self.update_chunks(usize::MAX);
+            let load_limit = if self.window.is_none() { 8 } else { usize::MAX };
+            self.update_chunks(load_limit);
             if let Some(feet) = self.find_safe_spawn_near(0.0, 0.0) {
                 let camera = self.renderer.camera_mut();
                 camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
@@ -13241,7 +13335,8 @@ impl GameWorld {
         self.player_physics.velocity = glam::Vec3::ZERO;
         self.player_physics.on_ground = false;
 
-        self.update_chunks(usize::MAX);
+        let load_limit = if self.window.is_none() { 8 } else { usize::MAX };
+        self.update_chunks(load_limit);
 
         // Vanilla-ish: respawn anchors control respawn in the Nether/End.
         // If the anchor is missing or uncharged, respawn at the Overworld world spawn (near origin).
@@ -13277,7 +13372,8 @@ impl GameWorld {
                 self.player_physics.velocity = glam::Vec3::ZERO;
                 self.player_physics.on_ground = false;
 
-                self.update_chunks(usize::MAX);
+                let load_limit = if self.window.is_none() { 8 } else { usize::MAX };
+                self.update_chunks(load_limit);
                 if let Some(feet) = self.find_safe_spawn_near(0.0, 0.0) {
                     let camera = self.renderer.camera_mut();
                     camera.position = feet + glam::Vec3::new(0.0, eye_height, 0.0);
@@ -15505,13 +15601,22 @@ impl GameWorld {
             self.schedule_redstone_updates_around(*pos);
         }
 
-        let removed_support = Self::remove_unsupported_blocks(
+        let support_changes = Self::remove_unsupported_blocks(
             &mut self.chunks,
             &self.block_properties,
             removed_blocks.iter().map(|(pos, _, _)| *pos),
         );
-        for (pos, removed_block_id) in removed_support {
+        for (pos, removed_block_id) in support_changes.removed {
             self.on_block_entity_removed(pos, removed_block_id);
+            affected_chunks.insert(ChunkPos::new(
+                pos.x.div_euclid(CHUNK_SIZE_X as i32),
+                pos.z.div_euclid(CHUNK_SIZE_Z as i32),
+            ));
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(pos.x, pos.y, pos.z), &self.chunks);
+            self.schedule_redstone_updates_around(pos);
+        }
+        for pos in support_changes.moved {
             affected_chunks.insert(ChunkPos::new(
                 pos.x.div_euclid(CHUNK_SIZE_X as i32),
                 pos.z.div_euclid(CHUNK_SIZE_Z as i32),
@@ -28789,6 +28894,15 @@ impl commands::CommandContext for GameWorld {
         Ok(())
     }
 
+    fn respawn_player(&mut self) -> anyhow::Result<()> {
+        if self.player_state != PlayerState::Dead {
+            anyhow::bail!("Player is not dead");
+        }
+
+        self.respawn();
+        Ok(())
+    }
+
     fn destroy_blocks(&mut self, blocks: &[(i32, i32, i32)]) -> anyhow::Result<()> {
         if blocks.is_empty() {
             return Ok(());
@@ -28936,12 +29050,12 @@ impl commands::CommandContext for GameWorld {
             return Ok(());
         }
 
-        let removed_support = Self::remove_unsupported_blocks(
+        let support_changes = Self::remove_unsupported_blocks(
             &mut self.chunks,
             &self.block_properties,
             changed_positions.iter().copied(),
         );
-        for &(removed_pos, removed_block_id) in &removed_support {
+        for &(removed_pos, removed_block_id) in &support_changes.removed {
             if mdminecraft_world::CropType::is_crop(removed_block_id) {
                 let removed_chunk = ChunkPos::new(
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -28963,8 +29077,18 @@ impl commands::CommandContext for GameWorld {
                 &self.chunks,
             );
             self.schedule_redstone_updates_around(removed_pos);
-            self.spawn_support_removed_block_drop(&removed_support, removed_pos, removed_block_id);
+            self.spawn_support_removed_block_drop(
+                &support_changes.removed,
+                removed_pos,
+                removed_block_id,
+            );
             changed_positions.push(removed_pos);
+        }
+        for &moved_pos in &support_changes.moved {
+            self.fluid_sim
+                .on_fluid_removed(FluidPos::new(moved_pos.x, moved_pos.y, moved_pos.z), &self.chunks);
+            self.schedule_redstone_updates_around(moved_pos);
+            changed_positions.push(moved_pos);
         }
 
         self.refresh_after_voxel_changes(&changed_positions);
@@ -29261,12 +29385,21 @@ impl commands::CommandContext for GameWorld {
         // Wake sims.
         self.fluid_sim
             .on_fluid_removed(FluidPos::new(x, y, z), &self.chunks);
+        if let Some(fluid_type) = get_fluid_type(block_id) {
+            self.fluid_sim
+                .on_fluid_placed(FluidPos::new(x, y, z), fluid_type);
+        } else if mdminecraft_world::block_supports_waterlogging(block_id)
+            && mdminecraft_world::is_waterlogged(state)
+        {
+            self.fluid_sim
+                .on_fluid_placed(FluidPos::new(x, y, z), FluidType::Water);
+        }
         self.schedule_redstone_updates_around(pos);
 
         let mut changed_positions = vec![pos];
-        let removed_support =
+        let support_changes =
             Self::remove_unsupported_blocks(&mut self.chunks, &self.block_properties, [pos]);
-        for &(removed_pos, removed_block_id) in &removed_support {
+        for &(removed_pos, removed_block_id) in &support_changes.removed {
             if mdminecraft_world::CropType::is_crop(removed_block_id) {
                 let removed_chunk = ChunkPos::new(
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -29288,8 +29421,20 @@ impl commands::CommandContext for GameWorld {
                 &self.chunks,
             );
             self.schedule_redstone_updates_around(removed_pos);
-            self.spawn_support_removed_block_drop(&removed_support, removed_pos, removed_block_id);
+            self.spawn_support_removed_block_drop(
+                &support_changes.removed,
+                removed_pos,
+                removed_block_id,
+            );
             changed_positions.push(removed_pos);
+        }
+        for &moved_pos in &support_changes.moved {
+            self.fluid_sim.on_fluid_removed(
+                FluidPos::new(moved_pos.x, moved_pos.y, moved_pos.z),
+                &self.chunks,
+            );
+            self.schedule_redstone_updates_around(moved_pos);
+            changed_positions.push(moved_pos);
         }
 
         self.refresh_after_voxel_changes(&changed_positions);
@@ -29402,17 +29547,26 @@ impl commands::CommandContext for GameWorld {
             // Wake sims.
             self.fluid_sim
                 .on_fluid_removed(FluidPos::new(x, y, z), &self.chunks);
+            if let Some(fluid_type) = get_fluid_type(block_id) {
+                self.fluid_sim
+                    .on_fluid_placed(FluidPos::new(x, y, z), fluid_type);
+            } else if mdminecraft_world::block_supports_waterlogging(block_id)
+                && mdminecraft_world::is_waterlogged(state)
+            {
+                self.fluid_sim
+                    .on_fluid_placed(FluidPos::new(x, y, z), FluidType::Water);
+            }
             self.schedule_redstone_updates_around(pos);
 
             changed_positions.push(pos);
         }
 
-        let removed_support = Self::remove_unsupported_blocks(
+        let support_changes = Self::remove_unsupported_blocks(
             &mut self.chunks,
             &self.block_properties,
             changed_positions.iter().copied(),
         );
-        for &(removed_pos, removed_block_id) in &removed_support {
+        for &(removed_pos, removed_block_id) in &support_changes.removed {
             if mdminecraft_world::CropType::is_crop(removed_block_id) {
                 let removed_chunk = ChunkPos::new(
                     removed_pos.x.div_euclid(CHUNK_SIZE_X as i32),
@@ -29434,8 +29588,20 @@ impl commands::CommandContext for GameWorld {
                 &self.chunks,
             );
             self.schedule_redstone_updates_around(removed_pos);
-            self.spawn_support_removed_block_drop(&removed_support, removed_pos, removed_block_id);
+            self.spawn_support_removed_block_drop(
+                &support_changes.removed,
+                removed_pos,
+                removed_block_id,
+            );
             changed_positions.push(removed_pos);
+        }
+        for &moved_pos in &support_changes.moved {
+            self.fluid_sim.on_fluid_removed(
+                FluidPos::new(moved_pos.x, moved_pos.y, moved_pos.z),
+                &self.chunks,
+            );
+            self.schedule_redstone_updates_around(moved_pos);
+            changed_positions.push(moved_pos);
         }
 
         self.refresh_after_voxel_changes(&changed_positions);
@@ -30217,18 +30383,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(0, 65, 0),
                 mdminecraft_world::interactive_blocks::TORCH
             )),
             "Expected torch to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30270,18 +30436,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(1, 64, 0),
                 mdminecraft_world::interactive_blocks::TORCH
             )),
             "Expected wall torch to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30323,18 +30489,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(1, 64, 0),
                 mdminecraft_world::redstone_blocks::STONE_BUTTON
             )),
             "Expected wall button to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30506,18 +30672,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(0, 63, 0),
                 mdminecraft_world::redstone_blocks::LEVER
             )),
             "Expected ceiling lever to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30559,15 +30725,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(glam::IVec3::new(0, 65, 0), mdminecraft_world::BLOCK_FIRE)),
+            support_changes.removed.contains(&(
+                glam::IVec3::new(0, 65, 0),
+                mdminecraft_world::BLOCK_FIRE
+            )),
             "Expected fire to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30609,18 +30778,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(1, 64, 0),
                 mdminecraft_world::interactive_blocks::LADDER
             )),
             "Expected ladder to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30662,18 +30831,18 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(0, 65, 0),
                 mdminecraft_world::redstone_blocks::REDSTONE_WIRE
             )),
             "Expected redstone wire to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30682,6 +30851,49 @@ mod tests {
             mdminecraft_world::BLOCK_AIR,
             "Redstone wire should be cleared when its support is removed"
         );
+    }
+
+    #[test]
+    fn sand_falls_when_support_removed() {
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0));
+        chunk.set_voxel(
+            0,
+            local_y(64),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_STONE,
+                ..Default::default()
+            },
+        );
+        chunk.set_voxel(
+            0,
+            local_y(66),
+            0,
+            Voxel {
+                id: mdminecraft_world::BLOCK_SAND,
+                ..Default::default()
+            },
+        );
+
+        let mut chunks = std::collections::HashMap::new();
+        chunks.insert(ChunkPos::new(0, 0), chunk);
+        let block_properties = BlockPropertiesRegistry::new();
+
+        let support_changes = GameWorld::remove_unsupported_blocks(
+            &mut chunks,
+            &block_properties,
+            [glam::IVec3::new(0, 65, 0)],
+        );
+
+        assert!(
+            support_changes.removed.is_empty(),
+            "Expected sand to fall instead of being removed, got: {:?}",
+            support_changes.removed
+        );
+
+        let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(chunk.voxel(0, local_y(65), 0).id, mdminecraft_world::BLOCK_SAND);
+        assert_eq!(chunk.voxel(0, local_y(66), 0).id, mdminecraft_world::BLOCK_AIR);
     }
 
     #[test]
@@ -30723,21 +30935,25 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
 
         assert!(
-            removed.contains(&(glam::IVec3::new(0, 65, 0), BLOCK_SUGAR_CANE)),
+            support_changes
+                .removed
+                .contains(&(glam::IVec3::new(0, 65, 0), BLOCK_SUGAR_CANE)),
             "Expected sugar cane base to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
         assert!(
-            removed.contains(&(glam::IVec3::new(0, 66, 0), BLOCK_SUGAR_CANE)),
+            support_changes
+                .removed
+                .contains(&(glam::IVec3::new(0, 66, 0), BLOCK_SUGAR_CANE)),
             "Expected sugar cane above to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30794,26 +31010,26 @@ mod tests {
             chunk.set_voxel(0, local_y(64), 0, Voxel::default());
         }
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(0, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(0, 65, 0),
                 mdminecraft_world::interactive_blocks::OAK_DOOR_LOWER
             )),
             "Expected door lower to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(0, 66, 0),
                 mdminecraft_world::interactive_blocks::OAK_DOOR_UPPER
             )),
             "Expected door upper to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();
@@ -30933,26 +31149,26 @@ mod tests {
             .expect("chunk exists")
             .set_voxel(1, local_y(64), 0, Voxel::default());
 
-        let removed = GameWorld::remove_unsupported_blocks(
+        let support_changes = GameWorld::remove_unsupported_blocks(
             &mut chunks,
             &block_properties,
             [glam::IVec3::new(1, 64, 0)],
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(0, 65, 0),
                 mdminecraft_world::interactive_blocks::BED_FOOT
             )),
             "Expected bed foot to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
         assert!(
-            removed.contains(&(
+            support_changes.removed.contains(&(
                 glam::IVec3::new(1, 65, 0),
                 mdminecraft_world::interactive_blocks::BED_HEAD
             )),
             "Expected bed head to be removed, got: {:?}",
-            removed
+            support_changes.removed
         );
 
         let chunk = chunks.get(&ChunkPos::new(0, 0)).unwrap();

@@ -106,6 +106,7 @@ There is also a small reference client at `tools/harness_client/mdm_harness_clie
 
 Notes:
 - `--automation-step` blocks until `step` requests (deterministic tick stepping).
+- `set_view` expects yaw/pitch in radians (yaw=0 looks toward +X; positive pitch looks up; pitch is clamped to just under ±π/2).
 - `--no-render` runs simulation without a GPU; `screenshot` returns `unsupported`.
 - `--exit-when-script-finished` exits headless once `--command-script` completes.
 - On unix, you can use `--automation-uds /path/to/socket` instead of `--automation-listen`.
