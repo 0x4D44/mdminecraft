@@ -135,6 +135,7 @@ pub enum GameCommand {
         max_count: Option<u32>,
     },
     Kill,
+    Respawn,
     Tp {
         x: CoordArg,
         y: CoordArg,
@@ -245,6 +246,7 @@ pub trait CommandContext {
     fn clear_items(&mut self, item: Option<ItemType>, max_count: Option<u32>) -> u32;
 
     fn kill_player(&mut self) -> anyhow::Result<()>;
+    fn respawn_player(&mut self) -> anyhow::Result<()>;
 
     fn destroy_block(&mut self, x: i32, y: i32, z: i32) -> anyhow::Result<()>;
 
@@ -328,6 +330,10 @@ pub fn execute_command(ctx: &mut impl CommandContext, cmd: GameCommand) -> Comma
         }
         GameCommand::Kill => match ctx.kill_player() {
             Ok(()) => out.lines.push("Killed player".to_string()),
+            Err(err) => out.lines.push(format!("Error: {err:#}")),
+        },
+        GameCommand::Respawn => match ctx.respawn_player() {
+            Ok(()) => out.lines.push("Respawned".to_string()),
             Err(err) => out.lines.push(format!("Error: {err:#}")),
         },
         GameCommand::Tp { x, y, z } => {
@@ -835,6 +841,12 @@ pub fn parse_command(input: &str, blocks: &BlockRegistry) -> Result<GameCommand,
             }
             Ok(GameCommand::Kill)
         }
+        "respawn" => {
+            if !args.is_empty() {
+                return Err(CommandError::new("Usage: /respawn"));
+            }
+            Ok(GameCommand::Respawn)
+        }
         "tp" | "teleport" => {
             let args = if args.len() == 4 {
                 strip_optional_self_target(&args)?
@@ -911,11 +923,19 @@ fn parse_coord(s: &str) -> Result<CoordArg, CommandError> {
         let delta = rest
             .parse::<f64>()
             .map_err(|_| CommandError::new(format!("Invalid relative coordinate: {s}")))?;
+        if !delta.is_finite() {
+            return Err(CommandError::new(format!(
+                "Invalid relative coordinate: {s}"
+            )));
+        }
         return Ok(CoordArg::Relative(delta));
     }
     let value = s
         .parse::<f64>()
         .map_err(|_| CommandError::new(format!("Invalid coordinate: {s}")))?;
+    if !value.is_finite() {
+        return Err(CommandError::new(format!("Invalid coordinate: {s}")));
+    }
     Ok(CoordArg::Absolute(value))
 }
 
@@ -988,6 +1008,11 @@ fn parse_item(token: &str, blocks: &BlockRegistry) -> Result<ItemType, CommandEr
     }
 
     if let Some(item) = mdminecraft_assets::parse_item_type_with_blocks(token, Some(blocks)) {
+        if let ItemType::Block(block_id) = item {
+            if blocks.descriptor(block_id).is_none() {
+                return Err(CommandError::new("Unknown block id"));
+            }
+        }
         return Ok(item);
     }
 
@@ -1471,6 +1496,10 @@ fn parse_block_and_state(
             .ok_or_else(|| CommandError::new("Unknown block name"))?
     };
 
+    if blocks.descriptor(block_id).is_none() {
+        return Err(CommandError::new("Unknown block id"));
+    }
+
     if let Some(token) = explicit_state {
         let state = token
             .parse::<u16>()
@@ -1532,13 +1561,14 @@ fn parse_block_state_properties(
 
     let mut state: u16 = 0;
     for (k, v) in pairs {
-        state = apply_block_state_property(state, block_key, &k, &v)?;
+        state = apply_block_state_property(state, block_id, block_key, &k, &v)?;
     }
     Ok(state)
 }
 
 fn apply_block_state_property(
     state: u16,
+    block_id: u16,
     block_key: &RegistryKey,
     key: &str,
     value: &str,
@@ -1552,6 +1582,14 @@ fn apply_block_state_property(
         return Err(CommandError::new(
             "Blockstate properties are only supported for built-in blocks (mdm:*). Use numeric state instead.",
         ));
+    }
+
+    if key == "waterlogged" {
+        if mdminecraft_world::block_supports_waterlogging(block_id) {
+            state = mdminecraft_world::set_waterlogged(state, parse_bool(value)?);
+            return Ok(state);
+        }
+        return Err(CommandError::new("Block does not support waterlogging"));
     }
 
     match path {
@@ -1809,6 +1847,10 @@ fn parse_fill_filter(
             .ok_or_else(|| CommandError::new("Unknown block name"))?
     };
 
+    if blocks.descriptor(block_id).is_none() {
+        return Err(CommandError::new("Unknown block id"));
+    }
+
     let state = if let Some(props) = props {
         Some(parse_block_state_properties(block_id, blocks, props)?)
     } else {
@@ -1883,13 +1925,14 @@ fn help_lines() -> Vec<String> {
         "  /say <message...>".to_string(),
         "  /clear [@s/@p/@a/@r] [item] [maxCount]".to_string(),
         "  /kill [@s/@p/@a/@r]".to_string(),
+        "  /respawn".to_string(),
         "  /tp [@s/@p/@a/@r] <x> <y> <z>  (supports ~offset)".to_string(),
         "  /dimension <overworld|nether|end>".to_string(),
         "  /give [@s/@p/@a/@r] <item> [count]  item = minecraft:<name> | block:<name> | item:<id> | tool:<type>:<material>"
             .to_string(),
         "  /time set <tick|day|noon|night|midnight>".to_string(),
         "  /time add <delta>".to_string(),
-        "  /weather <clear|rain>".to_string(),
+        "  /weather <clear|rain|thunder>".to_string(),
         "  /gamemode <survival|creative> [@s/@p/@a/@r]".to_string(),
         "  /effect give [@s/@p/@a/@r] <effect> [seconds] [amplifier]".to_string(),
         "  /effect clear [@s/@p/@a/@r] [effect]".to_string(),
@@ -1987,6 +2030,11 @@ mod tests {
 
         fn kill_player(&mut self) -> anyhow::Result<()> {
             self.killed = true;
+            Ok(())
+        }
+
+        fn respawn_player(&mut self) -> anyhow::Result<()> {
+            self.killed = false;
             Ok(())
         }
 
@@ -2089,6 +2137,7 @@ mod tests {
             BlockDescriptor::simple("stone", true),
             BlockDescriptor::simple("dirt", true),
             BlockDescriptor::simple("dispenser", true),
+            BlockDescriptor::simple("stone_slab", true),
         ])
     }
 
@@ -2132,6 +2181,13 @@ mod tests {
                 z: CoordArg::Relative(-2.0),
             }
         );
+    }
+
+    #[test]
+    fn tp_rejects_non_finite_coords() {
+        let blocks = test_blocks();
+        let err = parse_command("/tp nan 0 0", &blocks).unwrap_err();
+        assert_eq!(err.to_string(), "Invalid coordinate: nan");
     }
 
     #[test]
@@ -2343,6 +2399,20 @@ mod tests {
     }
 
     #[test]
+    fn give_rejects_unknown_block_id() {
+        let blocks = test_blocks();
+        let err = parse_command("/give block:9999 1", &blocks).unwrap_err();
+        assert_eq!(err.to_string(), "Unknown block id");
+    }
+
+    #[test]
+    fn clear_rejects_unknown_block_id() {
+        let blocks = test_blocks();
+        let err = parse_command("/clear block:9999 0", &blocks).unwrap_err();
+        assert_eq!(err.to_string(), "Unknown block id");
+    }
+
+    #[test]
     fn parses_setblock_with_minecraft_namespace() {
         let blocks = test_blocks();
         let cmd = parse_command("/setblock 10 64 10 minecraft:stone", &blocks).unwrap();
@@ -2357,6 +2427,13 @@ mod tests {
                 mode: SetblockMode::Replace,
             }
         );
+    }
+
+    #[test]
+    fn setblock_rejects_unknown_numeric_block_id() {
+        let blocks = test_blocks();
+        let err = parse_command("/setblock 0 64 0 9999", &blocks).unwrap_err();
+        assert_eq!(err.to_string(), "Unknown block id");
     }
 
     #[test]
@@ -2404,6 +2481,32 @@ mod tests {
                 mode: SetblockMode::Replace,
             }
         );
+    }
+
+    #[test]
+    fn parses_setblock_with_waterlogged_property() {
+        let blocks = crate::config::load_block_registry();
+        let cmd = parse_command("/setblock 10 64 10 stone_slab[waterlogged=true]", &blocks).unwrap();
+        assert_eq!(
+            cmd,
+            GameCommand::Setblock {
+                x: BlockCoordArg::Absolute(10),
+                y: BlockCoordArg::Absolute(64),
+                z: BlockCoordArg::Absolute(10),
+                block_id: mdminecraft_world::interactive_blocks::STONE_SLAB,
+                state: mdminecraft_world::set_waterlogged(0, true),
+                mode: SetblockMode::Replace,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_waterlogged_property_for_non_waterloggable_block() {
+        let blocks = crate::config::load_block_registry();
+        let err = parse_command("/setblock 10 64 10 stone[waterlogged=true]", &blocks)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "Block does not support waterlogging");
     }
 
     #[test]
@@ -2487,6 +2590,20 @@ mod tests {
                 assert_eq!(ctx.blocks.get(&(x, 64, z)).copied(), Some((1, 0)));
             }
         }
+    }
+
+    #[test]
+    fn fill_rejects_unknown_numeric_block_id() {
+        let blocks = test_blocks();
+        let err = parse_command("/fill 0 0 0 1 1 1 9999", &blocks).unwrap_err();
+        assert_eq!(err.to_string(), "Unknown block id");
+    }
+
+    #[test]
+    fn fill_rejects_unknown_filter_block_id() {
+        let blocks = test_blocks();
+        let err = parse_command("/fill 0 0 0 1 1 1 stone replace 9999", &blocks).unwrap_err();
+        assert_eq!(err.to_string(), "Unknown block id");
     }
 
     #[test]
