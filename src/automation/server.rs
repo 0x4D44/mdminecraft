@@ -252,7 +252,7 @@ fn handle_connection<S: AutomationStream>(
 
     let mut authed = false;
     let mut line = String::new();
-    'read_loop: loop {
+    loop {
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => break, // disconnect
@@ -460,7 +460,7 @@ fn handle_connection<S: AutomationStream>(
                                 cfg.log.as_ref(),
                                 &peer,
                             );
-                            break 'read_loop;
+                            break;
                         }
                     }
                 }
