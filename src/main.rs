@@ -3,6 +3,7 @@
 //! Main executable with graphical menu system
 
 mod automation;
+mod commentary;
 mod command_script;
 mod commands;
 mod config;
@@ -16,8 +17,9 @@ mod menu;
 mod scripted_input;
 
 use anyhow::Result;
+use commentary::{CommentaryConfig, CommentaryStyle};
 use config::ControlsConfig;
-use game::{GameWorld, GameWorldOptions, ScreenshotConfig};
+use game::{GameWorld, GameWorldOptions, RecordConfig, ScreenshotConfig};
 use menu::MenuState;
 use std::net::SocketAddr;
 use std::{env, path::PathBuf, sync::Arc};
@@ -45,8 +47,16 @@ fn main() -> Result<()> {
 
     info!("Starting mdminecraft v{}", env!("CARGO_PKG_VERSION"));
 
-    let controls = Arc::new(ControlsConfig::load());
     let cli = CliOptions::parse(env::args().skip(1));
+    let mut controls = ControlsConfig::load();
+    if cli.headless {
+        if let Some(value) = cli.headless_render_distance {
+            controls.render_distance = value.clamp(2, 16);
+        }
+    } else if cli.headless_render_distance.is_some() {
+        tracing::warn!("--headless-render-distance has no effect without --headless");
+    }
+    let controls = Arc::new(controls);
 
     let screenshot = match cli.screenshot_dir.clone() {
         Some(dir) => Some(ScreenshotConfig {
@@ -63,6 +73,84 @@ fn main() -> Result<()> {
             None
         }
     };
+
+    let record_resolution = match (cli.record_width, cli.record_height) {
+        (Some(width), Some(height)) => Some((width, height)),
+        (Some(_), None) | (None, Some(_)) => {
+            tracing::error!("--record-width and --record-height must be set together");
+            None
+        }
+        _ => None,
+    };
+    let resolution = record_resolution.unwrap_or(cli.resolution);
+
+    let record = match cli.record_dir.clone() {
+        Some(dir) => {
+            if !cli.headless {
+                anyhow::bail!("--record-dir requires --headless");
+            }
+            if cli.no_render {
+                anyhow::bail!("--record-dir requires rendering (do not use --no-render)");
+            }
+            let requested_fps = cli.record_fps.unwrap_or(20).max(1);
+            let fps = requested_fps.min(20);
+            if requested_fps != fps {
+                tracing::warn!(requested_fps, fps, "--record-fps clamped for headless capture");
+            }
+            let duration_seconds = cli.record_duration_seconds.unwrap_or(30).max(1);
+            Some(RecordConfig {
+                dir,
+                fps,
+                duration_seconds,
+            })
+        }
+        None => {
+            if cli.record_fps.is_some()
+                || cli.record_duration_seconds.is_some()
+                || cli.record_width.is_some()
+                || cli.record_height.is_some()
+            {
+                tracing::error!("--record-* flags require --record-dir");
+            }
+            None
+        }
+    };
+
+    let default_commentary_log = record
+        .as_ref()
+        .map(|cfg| cfg.dir.join("commentary.jsonl"));
+    let commentary_log = cli.commentary_log.clone().or(default_commentary_log);
+    let commentary = match commentary_log {
+        Some(path) => {
+            let style = cli
+                .commentary_style
+                .as_deref()
+                .and_then(CommentaryStyle::parse)
+                .unwrap_or(CommentaryStyle::Teen);
+            let min_interval_ms = cli.commentary_min_interval_ms.unwrap_or(2000);
+            let max_interval_ms = cli.commentary_max_interval_ms.unwrap_or(5000);
+            let (min_interval_ms, max_interval_ms) = if min_interval_ms > max_interval_ms {
+                (max_interval_ms, min_interval_ms)
+            } else {
+                (min_interval_ms, max_interval_ms)
+            };
+            Some(CommentaryConfig {
+                log_path: path,
+                style,
+                min_interval_ms,
+                max_interval_ms,
+            })
+        }
+        None => None,
+    };
+
+    if commentary.is_none()
+        && (cli.commentary_style.is_some()
+            || cli.commentary_min_interval_ms.is_some()
+            || cli.commentary_max_interval_ms.is_some())
+    {
+        tracing::error!("--commentary-* flags require --commentary-log or --record-dir");
+    }
 
     if cli.automation_listen.is_some() && cli.automation_uds.is_some() {
         anyhow::bail!("--automation-listen and --automation-uds are mutually exclusive");
@@ -111,6 +199,15 @@ fn main() -> Result<()> {
     }
 
     if cli.headless {
+        let record_max_ticks = record
+            .as_ref()
+            .map(|cfg| cfg.duration_seconds as u64 * 20);
+        let max_ticks = match (cli.max_ticks, record_max_ticks) {
+            (Some(user), Some(record_ticks)) => Some(user.min(record_ticks)),
+            (None, Some(record_ticks)) => Some(record_ticks),
+            (Some(user), None) => Some(user),
+            (None, None) => None,
+        };
         if cli.automation_exit_when_disconnected
             && cli.automation_listen.is_none()
             && cli.automation_uds.is_none()
@@ -135,9 +232,11 @@ fn main() -> Result<()> {
             controls,
             scripted_input: cli.scripted_input.clone(),
             command_script: cli.command_script.clone(),
-            width: cli.resolution.0,
-            height: cli.resolution.1,
+            width: resolution.0,
+            height: resolution.1,
             screenshot,
+            record,
+            commentary,
             automation: automation_endpoint,
             save_dir: cli.save_dir.clone(),
             no_save: cli.no_save,
@@ -145,7 +244,7 @@ fn main() -> Result<()> {
             world_seed: cli.world_seed,
             no_render: cli.no_render,
             no_audio: cli.no_audio,
-            max_ticks: cli.max_ticks,
+            max_ticks,
             exit_when_script_finished: cli.exit_when_script_finished,
             automation_step: cli.automation_step,
             automation_exit_when_disconnected: cli.automation_exit_when_disconnected,
@@ -159,10 +258,12 @@ fn main() -> Result<()> {
     // Start with menu unless auto-play is requested
     let mut app_state = if cli.auto_play {
         let options = GameWorldOptions {
-            width: cli.resolution.0,
-            height: cli.resolution.1,
+            width: resolution.0,
+            height: resolution.1,
             automation: automation_endpoint,
             screenshot: screenshot.clone(),
+            record: record.clone(),
+            commentary: commentary.clone(),
         };
         match GameWorld::new(
             &event_loop,
@@ -195,10 +296,12 @@ fn main() -> Result<()> {
                         // Reload controls so menu changes take effect immediately.
                         let controls = Arc::new(ControlsConfig::load());
                         let options = GameWorldOptions {
-                            width: cli.resolution.0,
-                            height: cli.resolution.1,
+                            width: resolution.0,
+                            height: resolution.1,
                             automation: None,
                             screenshot: screenshot.clone(),
+                            record: record.clone(),
+                            commentary: commentary.clone(),
                         };
                         match GameWorld::new(
                             elwt,
@@ -275,12 +378,22 @@ struct CliOptions {
     screenshot_dir: Option<PathBuf>,
     screenshot_every_ticks: Option<u64>,
     screenshot_max: Option<u64>,
+    record_dir: Option<PathBuf>,
+    record_fps: Option<u32>,
+    record_duration_seconds: Option<u32>,
+    record_width: Option<u32>,
+    record_height: Option<u32>,
     automation_listen: Option<SocketAddr>,
     automation_uds: Option<PathBuf>,
     automation_token: Option<String>,
     automation_log: Option<PathBuf>,
     automation_step: bool,
     automation_exit_when_disconnected: bool,
+    commentary_log: Option<PathBuf>,
+    commentary_style: Option<String>,
+    commentary_min_interval_ms: Option<u64>,
+    commentary_max_interval_ms: Option<u64>,
+    headless_render_distance: Option<i32>,
 }
 
 impl CliOptions {
@@ -302,12 +415,22 @@ impl CliOptions {
             screenshot_dir: None,
             screenshot_every_ticks: None,
             screenshot_max: None,
+            record_dir: None,
+            record_fps: None,
+            record_duration_seconds: None,
+            record_width: None,
+            record_height: None,
             automation_listen: None,
             automation_uds: None,
             automation_token: None,
             automation_log: None,
             automation_step: false,
             automation_exit_when_disconnected: false,
+            commentary_log: None,
+            commentary_style: None,
+            commentary_min_interval_ms: None,
+            commentary_max_interval_ms: None,
+            headless_render_distance: None,
         };
 
         while let Some(arg) = args.next() {
@@ -347,6 +470,22 @@ impl CliOptions {
                         }
                     } else {
                         tracing::error!("--max-ticks requires an integer");
+                    }
+                }
+                "--headless-render-distance" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<i32>() {
+                            Ok(value) => opts.headless_render_distance = Some(value),
+                            Err(err) => {
+                                tracing::error!(
+                                    %err,
+                                    value = %raw,
+                                    "--headless-render-distance must be an integer"
+                                );
+                            }
+                        }
+                    } else {
+                        tracing::error!("--headless-render-distance requires an integer");
                     }
                 }
                 "--exit-when-script-finished" => opts.exit_when_script_finished = true,
@@ -415,6 +554,61 @@ impl CliOptions {
                         tracing::error!("--screenshot-max requires an integer");
                     }
                 }
+                "--record-dir" => {
+                    if let Some(path) = args.next() {
+                        opts.record_dir = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--record-dir requires a directory path");
+                    }
+                }
+                "--record-fps" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u32>() {
+                            Ok(value) => opts.record_fps = Some(value.max(1)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--record-fps must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--record-fps requires an integer");
+                    }
+                }
+                "--record-duration-seconds" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u32>() {
+                            Ok(value) => opts.record_duration_seconds = Some(value.max(1)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--record-duration-seconds must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--record-duration-seconds requires an integer");
+                    }
+                }
+                "--record-width" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u32>() {
+                            Ok(value) => opts.record_width = Some(value.max(1)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--record-width must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--record-width requires an integer");
+                    }
+                }
+                "--record-height" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u32>() {
+                            Ok(value) => opts.record_height = Some(value.max(1)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--record-height must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--record-height requires an integer");
+                    }
+                }
                 "--automation-listen" => {
                     if let Some(raw) = args.next() {
                         match raw.parse::<SocketAddr>() {
@@ -457,6 +651,44 @@ impl CliOptions {
                 "--automation-step" => opts.automation_step = true,
                 "--automation-exit-when-disconnected" => {
                     opts.automation_exit_when_disconnected = true;
+                }
+                "--commentary-log" => {
+                    if let Some(path) = args.next() {
+                        opts.commentary_log = Some(PathBuf::from(path));
+                    } else {
+                        tracing::error!("--commentary-log requires a file path");
+                    }
+                }
+                "--commentary-style" => {
+                    if let Some(style) = args.next() {
+                        opts.commentary_style = Some(style);
+                    } else {
+                        tracing::error!("--commentary-style requires a style string");
+                    }
+                }
+                "--commentary-min-interval-ms" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u64>() {
+                            Ok(value) => opts.commentary_min_interval_ms = Some(value.max(250)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--commentary-min-interval-ms must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--commentary-min-interval-ms requires an integer");
+                    }
+                }
+                "--commentary-max-interval-ms" => {
+                    if let Some(raw) = args.next() {
+                        match raw.parse::<u64>() {
+                            Ok(value) => opts.commentary_max_interval_ms = Some(value.max(250)),
+                            Err(err) => {
+                                tracing::error!(%err, value = %raw, "--commentary-max-interval-ms must be an integer");
+                            }
+                        }
+                    } else {
+                        tracing::error!("--commentary-max-interval-ms requires an integer");
+                    }
                 }
                 _ => {}
             }

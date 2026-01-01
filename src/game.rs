@@ -100,6 +100,7 @@ const CHICKEN_EGG_MIN_INTERVAL_TICKS: u64 = 6000; // 5 minutes at 20 TPS
 const CHICKEN_EGG_INTERVAL_RANGE_TICKS: u64 = 6000; // up to +5 minutes (vanilla-ish 5-10m)
 /// Fixed simulation tick rate (20 TPS).
 const TICK_RATE: f64 = 1.0 / 20.0;
+const TICKS_PER_SECOND: u64 = 20;
 const NETHER_PORTAL_CHARGE_TICKS: u16 = 80;
 const NETHER_PORTAL_COOLDOWN_TICKS: u16 = 100;
 const NETHER_PORTAL_SEARCH_RADIUS: i32 = 16;
@@ -1735,11 +1736,20 @@ pub struct ScreenshotConfig {
     pub max: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RecordConfig {
+    pub dir: PathBuf,
+    pub fps: u32,
+    pub duration_seconds: u32,
+}
+
 pub struct GameWorldOptions {
     pub width: u32,
     pub height: u32,
     pub automation: Option<AutomationEndpoint>,
     pub screenshot: Option<ScreenshotConfig>,
+    pub record: Option<RecordConfig>,
+    pub commentary: Option<crate::commentary::CommentaryConfig>,
 }
 
 impl Default for GameWorldOptions {
@@ -1749,6 +1759,8 @@ impl Default for GameWorldOptions {
             height: 720,
             automation: None,
             screenshot: None,
+            record: None,
+            commentary: None,
         }
     }
 }
@@ -1779,6 +1791,25 @@ struct ScreenshotRuntime {
     capture_view: Option<wgpu::TextureView>,
     capture_size: (u32, u32),
     pending: std::collections::VecDeque<ScreenshotJob>,
+}
+
+struct RecordRuntime {
+    cfg: RecordConfig,
+    frames_dir: PathBuf,
+    frame_index: u64,
+    frames_total: u64,
+    capture_texture: Option<wgpu::Texture>,
+    capture_view: Option<wgpu::TextureView>,
+    capture_size: (u32, u32),
+    encode_tx: Option<std::sync::mpsc::SyncSender<RecordEncodeJob>>,
+    encode_handle: Option<std::thread::JoinHandle<()>>,
+    dropped_frames: u64,
+}
+
+struct RecordEncodeJob {
+    path: PathBuf,
+    size: (u32, u32),
+    rgba: Vec<u8>,
 }
 
 impl ScreenshotRuntime {
@@ -1857,6 +1888,106 @@ impl ScreenshotRuntime {
     }
 }
 
+impl RecordRuntime {
+    fn new(cfg: RecordConfig, world_seed: u64, size: (u32, u32)) -> Result<Self> {
+        std::fs::create_dir_all(&cfg.dir)?;
+        let frames_dir = cfg.dir.join("frames");
+        std::fs::create_dir_all(&frames_dir)?;
+
+        let run_path = cfg.dir.join("run.json");
+        let run_file = std::fs::File::create(&run_path)?;
+        serde_json::to_writer_pretty(
+            run_file,
+            &serde_json::json!({
+                "version": 1,
+                "world_seed": world_seed,
+                "width": size.0,
+                "height": size.1,
+                "format": "png",
+                "fps": cfg.fps,
+                "duration_seconds": cfg.duration_seconds,
+            }),
+        )?;
+
+        let (tx, rx) = std::sync::mpsc::sync_channel::<RecordEncodeJob>(4);
+        let encode_handle = std::thread::spawn(move || {
+            while let Ok(job) = rx.recv() {
+                if let Err(err) = mdminecraft_render::write_png(&job.path, job.size, &job.rgba) {
+                    tracing::warn!(?err, path = %job.path.display(), "record frame write failed");
+                }
+            }
+        });
+
+        let frames_total = cfg.fps as u64 * cfg.duration_seconds as u64;
+
+        Ok(Self {
+            cfg,
+            frames_dir,
+            frame_index: 0,
+            frames_total,
+            capture_texture: None,
+            capture_view: None,
+            capture_size: (0, 0),
+            encode_tx: Some(tx),
+            encode_handle: Some(encode_handle),
+            dropped_frames: 0,
+        })
+    }
+
+    fn should_capture(&self, tick: u64) -> bool {
+        if self.frame_index >= self.frames_total {
+            return false;
+        }
+        let desired = (tick.saturating_mul(self.cfg.fps as u64)) / TICKS_PER_SECOND;
+        desired > self.frame_index
+    }
+
+    fn next_frame_path(&mut self) -> Option<(u64, PathBuf)> {
+        if self.frame_index >= self.frames_total {
+            return None;
+        }
+        let frame_number = self.frame_index + 1;
+        self.frame_index = self.frame_index.saturating_add(1);
+        let path = self
+            .frames_dir
+            .join(format!("frame_{frame_number:06}.png"));
+        Some((frame_number, path))
+    }
+
+    fn enqueue_frame(&mut self, path: PathBuf, size: (u32, u32), rgba: Vec<u8>) {
+        let Some(tx) = self.encode_tx.as_ref() else {
+            self.dropped_frames = self.dropped_frames.saturating_add(1);
+            tracing::warn!(
+                dropped_frames = self.dropped_frames,
+                "Record frame dropped (encode channel missing)"
+            );
+            return;
+        };
+        if let Err(err) = tx.send(RecordEncodeJob { path, size, rgba }) {
+            self.dropped_frames = self.dropped_frames.saturating_add(1);
+            tracing::warn!(
+                dropped_frames = self.dropped_frames,
+                ?err,
+                "Record frame dropped (encode thread unavailable)"
+            );
+        }
+    }
+
+    fn note_failed_capture(&mut self) {
+        self.dropped_frames = self.dropped_frames.saturating_add(1);
+    }
+}
+
+impl Drop for RecordRuntime {
+    fn drop(&mut self) {
+        // Drop sender to close channel and join the encoder thread.
+        let _ = self.encode_tx.take();
+        if let Some(handle) = self.encode_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 /// The game world state
 pub struct GameWorld {
     window: Option<Arc<Window>>,
@@ -1889,6 +2020,10 @@ pub struct GameWorld {
     actions: ActionState,
     automation: Option<AutomationRuntime>,
     screenshot: Option<ScreenshotRuntime>,
+    record: Option<RecordRuntime>,
+    commentary: Option<crate::commentary::CommentaryRuntime>,
+    last_visual_tags: Option<crate::commentary::VisualTags>,
+    last_visual_tick: Option<u64>,
     screenshot_periodic_event_sink: Option<std::sync::mpsc::SyncSender<serde_json::Value>>,
     scripted_input: Option<ScriptedInputPlayer>,
     command_script: Option<CommandScriptPlayer>,
@@ -2313,6 +2448,8 @@ impl GameWorld {
             height,
             automation,
             screenshot,
+            record,
+            commentary,
         } = options;
 
         // Create window
@@ -2526,6 +2663,14 @@ impl GameWorld {
             Some(cfg) => Some(ScreenshotRuntime::new(cfg, world_seed, (width, height))?),
             None => None,
         };
+        let record = match record {
+            Some(cfg) => Some(RecordRuntime::new(cfg, world_seed, (width, height))?),
+            None => None,
+        };
+        let commentary = match commentary {
+            Some(cfg) => Some(crate::commentary::CommentaryRuntime::new(cfg, world_seed)?),
+            None => None,
+        };
 
         let mut world = Self {
             window: Some(window),
@@ -2563,6 +2708,10 @@ impl GameWorld {
                 pulses: AutomationPulseInput::default(),
             }),
             screenshot,
+            record,
+            commentary,
+            last_visual_tags: None,
+            last_visual_tick: None,
             screenshot_periodic_event_sink: None,
             scripted_input,
             command_script,
@@ -2777,6 +2926,8 @@ impl GameWorld {
             height,
             automation,
             screenshot,
+            record,
+            commentary,
         } = options;
 
         let renderer_config = RendererConfig {
@@ -2996,6 +3147,14 @@ impl GameWorld {
             Some(cfg) => Some(ScreenshotRuntime::new(cfg, world_seed, (width, height))?),
             None => None,
         };
+        let record = match record {
+            Some(cfg) => Some(RecordRuntime::new(cfg, world_seed, (width, height))?),
+            None => None,
+        };
+        let commentary = match commentary {
+            Some(cfg) => Some(crate::commentary::CommentaryRuntime::new(cfg, world_seed)?),
+            None => None,
+        };
 
         let mut world = Self {
             window: None,
@@ -3033,6 +3192,10 @@ impl GameWorld {
                 pulses: AutomationPulseInput::default(),
             }),
             screenshot,
+            record,
+            commentary,
+            last_visual_tags: None,
+            last_visual_tick: None,
             screenshot_periodic_event_sink: None,
             scripted_input,
             command_script,
@@ -3253,6 +3416,53 @@ impl GameWorld {
         // Update visual-only effects at a fixed rate so screenshots are stable.
         self.update_weather(dt);
         self.update_particles(dt);
+
+        self.commentary_tick();
+    }
+
+    fn commentary_tick(&mut self) {
+        let Some(runtime) = self.commentary.as_mut() else {
+            return;
+        };
+        let camera = self.renderer.camera();
+        let pos = [camera.position.x, camera.position.y, camera.position.z];
+
+        let mut mobs_nearby = 0u32;
+        let mut nearby_mob = None;
+        let nearby_radius_sq = 48.0_f32 * 48.0_f32;
+        for mob in &self.mobs {
+            if mob.dead || mob.dimension != self.active_dimension {
+                continue;
+            }
+            let dx = mob.x as f32 - camera.position.x;
+            let dy = mob.y as f32 - camera.position.y;
+            let dz = mob.z as f32 - camera.position.z;
+            if dx * dx + dy * dy + dz * dz <= nearby_radius_sq {
+                mobs_nearby += 1;
+                if nearby_mob.is_none() {
+                    nearby_mob = Some(mob.mob_type);
+                }
+            }
+        }
+
+        let sample = crate::commentary::CommentarySample {
+            tick: self.sim_tick.0,
+            time_of_day: self.sim_time.time_of_day() as f32,
+            weather: self.weather.state,
+            mobs_nearby,
+            nearby_mob,
+            pos,
+            visual: self
+                .last_visual_tick
+                .and_then(|last_tick| {
+                    if self.sim_tick.0.saturating_sub(last_tick) <= 2 {
+                        self.last_visual_tags
+                    } else {
+                        None
+                    }
+                }),
+        };
+        runtime.tick(sample);
     }
 
     pub fn run_headless_free(
@@ -3413,26 +3623,30 @@ impl GameWorld {
             return false;
         }
 
-        let Some(runtime) = self.screenshot.as_ref() else {
-            return false;
-        };
-
-        if !runtime.pending.is_empty() {
-            return true;
+        if let Some(runtime) = self.record.as_ref() {
+            if runtime.should_capture(self.sim_tick.0) {
+                return true;
+            }
         }
 
-        if let Some(every) = runtime.cfg.every_ticks {
-            let periodic_allowed = runtime
-                .cfg
-                .max
-                .map(|max| runtime.periodic_captured < max)
-                .unwrap_or(true);
-            if periodic_allowed
-                && every > 0
-                && self.sim_tick.0.is_multiple_of(every)
-                && runtime.last_periodic_tick != Some(self.sim_tick.0)
-            {
+        if let Some(runtime) = self.screenshot.as_ref() {
+            if !runtime.pending.is_empty() {
                 return true;
+            }
+
+            if let Some(every) = runtime.cfg.every_ticks {
+                let periodic_allowed = runtime
+                    .cfg
+                    .max
+                    .map(|max| runtime.periodic_captured < max)
+                    .unwrap_or(true);
+                if periodic_allowed
+                    && every > 0
+                    && self.sim_tick.0.is_multiple_of(every)
+                    && runtime.last_periodic_tick != Some(self.sim_tick.0)
+                {
+                    return true;
+                }
             }
         }
 
@@ -8801,6 +9015,7 @@ impl GameWorld {
 
             while self.accumulator >= TICK_RATE {
                 self.fixed_update();
+                self.commentary_tick();
                 self.accumulator -= TICK_RATE;
             }
         }
@@ -11961,6 +12176,17 @@ impl GameWorld {
             }
         }
 
+        let record_should_capture = self
+            .record
+            .as_ref()
+            .is_some_and(|runtime| runtime.should_capture(tick));
+        let mut record_frame: Option<(u64, PathBuf)> = None;
+        if record_should_capture {
+            if let Some(runtime) = self.record.as_mut() {
+                record_frame = runtime.next_frame_path();
+            }
+        }
+
         if let Some(frame) = self.renderer.begin_frame() {
             let screenshot_jobs = std::mem::take(&mut screenshot_jobs);
             let weather_intensity = self.weather_intensity();
@@ -11981,7 +12207,7 @@ impl GameWorld {
             self.populate_billboards();
 
             let resources = self.renderer.render_resources().unwrap();
-            let wants_capture = !screenshot_jobs.is_empty();
+            let wants_capture = !screenshot_jobs.is_empty() || record_frame.is_some();
             let render_size = (self.renderer.config().width, self.renderer.config().height);
             let surface_format = self
                 .renderer
@@ -12016,11 +12242,43 @@ impl GameWorld {
                     }
                 }
 
+                if self.screenshot.is_none() {
+                    if let Some(runtime) = self.record.as_mut() {
+                        if runtime.capture_texture.is_none() || runtime.capture_size != render_size {
+                            let texture = resources.device.create_texture(&wgpu::TextureDescriptor {
+                                label: Some("Record Capture Texture"),
+                                size: wgpu::Extent3d {
+                                    width: render_size.0,
+                                    height: render_size.1,
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: surface_format,
+                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                    | wgpu::TextureUsages::COPY_SRC,
+                                view_formats: &[],
+                            });
+                            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                            runtime.capture_size = render_size;
+                            runtime.capture_texture = Some(texture);
+                            runtime.capture_view = Some(view);
+                        }
+                    }
+                }
+
                 if let Some(runtime) = self.screenshot.as_ref() {
                     target_view = runtime
                         .capture_view
                         .as_ref()
                         .expect("screenshot capture view missing");
+                    capture_texture = runtime.capture_texture.as_ref();
+                } else if let Some(runtime) = self.record.as_ref() {
+                    target_view = runtime
+                        .capture_view
+                        .as_ref()
+                        .expect("record capture view missing");
                     capture_texture = runtime.capture_texture.as_ref();
                 }
             }
@@ -12673,9 +12931,15 @@ impl GameWorld {
             resources.queue.submit(std::iter::once(encoder.finish()));
             frame.present();
 
+            let record_requested = record_frame.is_some();
             if let Some(readback) = screenshot_readback {
                 match readback.read_rgba8(resources.device) {
                     Ok(rgba) => {
+                        let visual_tags =
+                            crate::commentary::analyze_visuals(render_size, &rgba);
+                        self.last_visual_tags = Some(visual_tags);
+                        self.last_visual_tick = Some(tick);
+
                         let mut errors = Vec::new();
                         if let Some(runtime) = self.screenshot.as_mut() {
                             for job in screenshot_jobs {
@@ -12737,6 +13001,12 @@ impl GameWorld {
                         if let Some(err) = errors.into_iter().next() {
                             tracing::warn!(?err, "Screenshot write failed");
                         }
+
+                        if let Some((_frame_number, path)) = record_frame.take() {
+                            if let Some(runtime) = self.record.as_mut() {
+                                runtime.enqueue_frame(path, render_size, rgba.clone());
+                            }
+                        }
                     }
                     Err(err) => {
                         tracing::warn!(?err, "Screenshot readback failed");
@@ -12747,6 +13017,11 @@ impl GameWorld {
                                     protocol::ErrorCode::Internal,
                                     "failed to capture screenshot",
                                 ));
+                            }
+                        }
+                        if record_requested {
+                            if let Some(runtime) = self.record.as_mut() {
+                                runtime.note_failed_capture();
                             }
                         }
                     }
@@ -12761,8 +13036,13 @@ impl GameWorld {
                         ));
                     }
                 }
+                if record_requested {
+                    if let Some(runtime) = self.record.as_mut() {
+                        runtime.note_failed_capture();
+                    }
+                }
             }
-        } else if !screenshot_jobs.is_empty() {
+        } else if !screenshot_jobs.is_empty() || record_frame.is_some() {
             let render_disabled = self.renderer.device().is_none();
             for job in screenshot_jobs {
                 match job.kind {
@@ -12795,6 +13075,16 @@ impl GameWorld {
                             },
                         ));
                     }
+                }
+            }
+            if record_frame.is_some() {
+                if let Some(runtime) = self.record.as_mut() {
+                    runtime.note_failed_capture();
+                }
+                if render_disabled {
+                    tracing::warn!("Skipping record capture: render disabled");
+                } else {
+                    tracing::warn!("Skipping record capture: render unavailable");
                 }
             }
         }

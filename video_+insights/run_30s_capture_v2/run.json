@@ -1,0 +1,9 @@
+{
+  "duration_seconds": 30,
+  "format": "png",
+  "fps": 10,
+  "height": 360,
+  "version": 1,
+  "width": 640,
+  "world_seed": 1
+}

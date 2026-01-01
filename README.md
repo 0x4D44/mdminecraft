@@ -111,6 +111,28 @@ Notes:
 - `--exit-when-script-finished` exits headless once `--command-script` completes.
 - On unix, you can use `--automation-uds /path/to/socket` instead of `--automation-listen`.
 
+### Headless Recording (frames + commentary)
+
+Record a deterministic 30s capture (frames + teen-style commentary):
+
+```bash
+cargo run -- --headless --no-audio --no-save --world-seed 1 \
+  --record-dir video_+insights/run_capture \
+  --record-duration-seconds 30 \
+  --commentary-log video_+insights/run_capture/commentary.jsonl
+```
+
+Postprocess to MP4 + TTS (WSL + Windows SAPI + ffmpeg):
+
+```bash
+tools/record_postprocess.py video_+insights/run_capture
+```
+
+Notes:
+- Recording is tied to simulation ticks (20 TPS), so `--record-fps` is clamped to 20.
+- Use `--record-width/--record-height` together to override resolution.
+- Commentary is generated during the run and logged to JSONL with timestamps.
+
 **3D Viewer Controls:**
 - **WASD** - Move camera
 - **Mouse** - Look around (Tab to grab cursor)

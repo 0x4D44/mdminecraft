@@ -1,6 +1,7 @@
 use crate::automation::controller::AutomationEndpoint;
 use crate::config::ControlsConfig;
-use crate::game::{GameWorld, GameWorldOptions, ScreenshotConfig};
+use crate::commentary::CommentaryConfig;
+use crate::game::{GameWorld, GameWorldOptions, RecordConfig, ScreenshotConfig};
 use anyhow::{Context, Result};
 use rand::RngCore;
 use std::path::PathBuf;
@@ -13,6 +14,8 @@ pub struct HeadlessConfig {
     pub width: u32,
     pub height: u32,
     pub screenshot: Option<ScreenshotConfig>,
+    pub record: Option<RecordConfig>,
+    pub commentary: Option<CommentaryConfig>,
     pub automation: Option<AutomationEndpoint>,
     pub save_dir: Option<PathBuf>,
     pub no_save: bool,
@@ -35,6 +38,8 @@ pub fn run(cfg: HeadlessConfig) -> Result<()> {
         height: cfg.height,
         automation: cfg.automation,
         screenshot: cfg.screenshot,
+        record: cfg.record,
+        commentary: cfg.commentary,
     };
 
     let mut world = GameWorld::new_headless(
