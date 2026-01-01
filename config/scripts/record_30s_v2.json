@@ -1,0 +1,16 @@
+{
+  "steps": [
+    { "duration": 2.5, "move_y": 1.0, "look_x": 8.0, "look_y": -2.0 },
+    { "duration": 2.5, "move_y": 1.0, "sprint": true, "look_x": -6.0 },
+    { "duration": 2.5, "move_x": 0.7, "move_y": 0.6, "look_x": 5.0 },
+    { "duration": 2.5, "move_y": 1.0, "jump": true, "look_y": -2.0 },
+    { "duration": 2.5, "move_x": -0.7, "move_y": 0.4, "look_x": -5.0 },
+    { "duration": 2.5, "move_y": 1.0, "sprint": true, "look_x": 7.0 },
+    { "duration": 2.5, "move_x": 0.8, "look_x": -8.0, "look_y": 1.0 },
+    { "duration": 2.5, "move_y": 0.8, "crouch": true, "look_x": 4.0 },
+    { "duration": 2.5, "move_y": -0.6, "move_x": 0.5, "look_x": 6.0 },
+    { "duration": 2.5, "move_y": 1.0, "jump": true, "look_x": -4.0 },
+    { "duration": 2.5, "move_x": -0.6, "move_y": 0.7, "look_y": 1.5, "look_x": 5.0 },
+    { "duration": 2.5, "move_y": 1.0, "sprint": true, "look_x": -6.0 }
+  ]
+}

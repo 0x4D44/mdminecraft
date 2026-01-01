@@ -1,0 +1,7 @@
+The skybox shader is handling that gradient.
+Stone textures are in focus; voxel meshing is showing through.
+Stone-heavy terrain; the chunk mesh is mostly rock right now.
+Wood blocks in view; those are part of the chunk mesh too.
+Rocky blocks dominate; this is the chunk renderer at work.
+Wood textures stand out; they ride the same voxel pipeline.
+Stone textures are in focus; voxel meshing is showing through.

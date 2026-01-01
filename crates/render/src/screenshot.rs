@@ -1,4 +1,7 @@
 use anyhow::{Context, Result};
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::ColorType;
+use image::ImageEncoder;
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -119,10 +122,10 @@ pub fn record_texture_readback(
 /// Write an RGBA8 image to disk as a PNG.
 pub fn write_png(path: &Path, size: (u32, u32), rgba: &[u8]) -> Result<()> {
     let (width, height) = size;
-    let image = image::RgbaImage::from_raw(width, height, rgba.to_vec())
-        .context("failed to build screenshot image")?;
-    image::DynamicImage::ImageRgba8(image)
-        .save_with_format(path, image::ImageFormat::Png)
+    let file = std::fs::File::create(path).context("failed to create screenshot png")?;
+    let encoder = PngEncoder::new_with_quality(file, CompressionType::Fast, FilterType::NoFilter);
+    encoder
+        .write_image(rgba, width, height, ColorType::Rgba8.into())
         .context("failed to write screenshot png")?;
     Ok(())
 }
