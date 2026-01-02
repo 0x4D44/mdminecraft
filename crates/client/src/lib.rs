@@ -24,3 +24,14 @@ impl Client {
         self.server.tick()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn singleplayer_frame_runs() {
+        let mut client = Client::singleplayer();
+        client.frame().expect("frame succeeds");
+    }
+}

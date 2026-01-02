@@ -41,3 +41,16 @@ impl Default for Server {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tick_advances_sim_tick() {
+        let mut server = Server::new();
+        assert_eq!(server.current_tick, SimTick::ZERO);
+        server.tick().expect("tick succeeds");
+        assert_eq!(server.current_tick, SimTick::ZERO.advance(1));
+    }
+}

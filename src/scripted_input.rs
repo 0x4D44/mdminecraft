@@ -96,3 +96,47 @@ impl ScriptedStep {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(label: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("mdm-scripted-input-{label}-{nanos}.json"));
+        path
+    }
+
+    #[test]
+    fn from_path_rejects_empty_steps() {
+        let path = temp_path("empty");
+        std::fs::write(&path, r#"{"steps":[]}"#).expect("write");
+        assert!(ScriptedInputPlayer::from_path(&path).is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn advance_moves_through_steps() {
+        let path = temp_path("advance");
+        let json = r#"{"steps":[{"duration":0.5,"move_x":1.0},{"duration":0.5,"move_z":-1.0,"jump":true}]}"#;
+        std::fs::write(&path, json).expect("write");
+
+        let mut player = ScriptedInputPlayer::from_path(&path).expect("load");
+        let state_first = player.advance(0.25);
+        assert_eq!(state_first.context, InputContext::Gameplay);
+        assert_eq!(state_first.move_x, 1.0);
+        assert_eq!(state_first.move_z, 0.0);
+
+        let state_second = player.advance(0.30);
+        assert_eq!(state_second.move_x, 0.0);
+        assert_eq!(state_second.move_z, -1.0);
+        assert!(state_second.jump);
+
+        let _ = std::fs::remove_file(&path);
+    }
+}

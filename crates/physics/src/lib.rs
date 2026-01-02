@@ -27,3 +27,29 @@ impl Aabb {
             && self.max[2] >= other.min[2]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aabb_intersects_when_overlapping() {
+        let a = Aabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+        let b = Aabb::new([0.5, 0.5, 0.5], [1.5, 1.5, 1.5]);
+        assert!(a.intersects(&b));
+    }
+
+    #[test]
+    fn aabb_intersects_on_touching_faces() {
+        let a = Aabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+        let b = Aabb::new([1.0, 0.25, 0.25], [2.0, 0.75, 0.75]);
+        assert!(a.intersects(&b));
+    }
+
+    #[test]
+    fn aabb_does_not_intersect_when_separated() {
+        let a = Aabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]);
+        let b = Aabb::new([1.1, 0.0, 0.0], [2.0, 1.0, 1.0]);
+        assert!(!a.intersects(&b));
+    }
+}

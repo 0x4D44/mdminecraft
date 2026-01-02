@@ -20,14 +20,14 @@ struct Args {
     seed: u64,
 }
 
-#[derive(Clone, Copy, Component)]
+#[derive(Clone, Copy, Component, Debug, PartialEq)]
 struct Position {
     x: f32,
     y: f32,
     z: f32,
 }
 
-#[derive(Clone, Copy, Component)]
+#[derive(Clone, Copy, Component, Debug, PartialEq)]
 struct Velocity {
     x: f32,
     y: f32,
@@ -82,18 +82,7 @@ fn benchmark_bevy(entities: usize, ticks: usize, seed: u64) -> Duration {
 }
 
 fn spawn_entities_bevy(world: &mut World, entities: usize, seed: u64) {
-    let mut rng = StdRng::seed_from_u64(seed);
-    for _ in 0..entities {
-        let vel = Velocity {
-            x: rng.gen_range(-1.0..1.0),
-            y: rng.gen_range(-1.0..1.0),
-            z: rng.gen_range(-1.0..1.0),
-        };
-        let pos = Position {
-            x: rng.gen_range(-512.0..512.0),
-            y: rng.gen_range(0.0..256.0),
-            z: rng.gen_range(-512.0..512.0),
-        };
+    for (pos, vel) in generate_components(entities, seed) {
         world.spawn((pos, vel));
     }
 }
@@ -114,7 +103,14 @@ fn benchmark_hecs(entities: usize, ticks: usize, seed: u64) -> Duration {
 }
 
 fn spawn_entities_hecs(world: &mut HecsWorld, entities: usize, seed: u64) {
+    for (pos, vel) in generate_components(entities, seed) {
+        world.spawn((pos, vel));
+    }
+}
+
+fn generate_components(entities: usize, seed: u64) -> Vec<(Position, Velocity)> {
     let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = Vec::with_capacity(entities);
     for _ in 0..entities {
         let vel = Velocity {
             x: rng.gen_range(-1.0..1.0),
@@ -126,6 +122,54 @@ fn spawn_entities_hecs(world: &mut HecsWorld, entities: usize, seed: u64) {
             y: rng.gen_range(0.0..256.0),
             z: rng.gen_range(-512.0..512.0),
         };
-        world.spawn((pos, vel));
+        out.push((pos, vel));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn args_parse_overrides() {
+        let args = Args::parse_from([
+            "ecs_compare",
+            "--entities",
+            "10",
+            "--ticks",
+            "5",
+            "--seed",
+            "7",
+        ]);
+        assert_eq!(args.entities, 10);
+        assert_eq!(args.ticks, 5);
+        assert_eq!(args.seed, 7);
+    }
+
+    #[test]
+    fn generate_components_is_deterministic() {
+        let a = generate_components(3, 42);
+        let b = generate_components(3, 42);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn spawn_entities_bevy_count() {
+        let mut world = World::new();
+        spawn_entities_bevy(&mut world, 5, 1);
+        let count = world
+            .query::<(&Position, &Velocity)>()
+            .iter(&world)
+            .count();
+        assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn spawn_entities_hecs_count() {
+        let mut world = HecsWorld::new();
+        spawn_entities_hecs(&mut world, 5, 1);
+        let count = world.query::<(&Position, &Velocity)>().iter().count();
+        assert_eq!(count, 5);
     }
 }

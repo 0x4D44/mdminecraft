@@ -29,7 +29,13 @@ struct CliConfig {
 }
 
 fn config_from_args() -> Result<CliConfig> {
-    let mut args = env::args().skip(1);
+    config_from_iter(env::args().skip(1))
+}
+
+fn config_from_iter<I>(mut args: I) -> Result<CliConfig>
+where
+    I: Iterator<Item = String>,
+{
     let mut block_path: Option<PathBuf> = None;
     let mut metrics_path: Option<PathBuf> = None;
     while let Some(arg) = args.next() {
@@ -92,4 +98,47 @@ fn demo_mesher(registry: &BlockRegistry, metrics_path: &Path) -> Result<()> {
         tracing::info!(path = %metrics_path.display(), "wrote mesh metrics");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_defaults_use_local_registry_and_default_metrics_path() {
+        let config = config_from_iter(std::iter::empty()).expect("config");
+        assert!(config.registry.id_by_name("air").is_some());
+        assert!(config.registry.id_by_name("stone").is_some());
+        assert_eq!(
+            config.mesh_metrics,
+            PathBuf::from("target/mesh_metrics.json")
+        );
+    }
+
+    #[test]
+    fn config_accepts_metrics_override() {
+        let config = config_from_iter(
+            ["--mesh-metrics".to_string(), "target/custom_metrics.json".to_string()].into_iter(),
+        )
+        .expect("config");
+        assert_eq!(
+            config.mesh_metrics,
+            PathBuf::from("target/custom_metrics.json")
+        );
+    }
+
+    #[test]
+    fn config_loads_registry_from_blocks_file() {
+        let blocks_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("config")
+            .join("blocks.json");
+        let args = [
+            "--blocks".to_string(),
+            blocks_path.to_string_lossy().to_string(),
+        ];
+        let config = config_from_iter(args.into_iter()).expect("config");
+        assert!(config.registry.id_by_name("stone").is_some());
+    }
 }
