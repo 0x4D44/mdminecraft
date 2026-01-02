@@ -18,3 +18,14 @@ impl ScriptContext for NoopScript {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn noop_script_on_tick_is_ok() {
+        let mut script = NoopScript;
+        assert!(script.on_tick(SimTick(1)).is_ok());
+    }
+}

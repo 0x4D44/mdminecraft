@@ -478,6 +478,74 @@ fn pick<'a>(rng: &mut StdRng, pool: &'a [&'a str]) -> &'a str {
     pool[idx]
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_log_path(label: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("mdm-commentary-{label}-{nanos}.jsonl"));
+        path
+    }
+
+    #[test]
+    fn commentary_style_parse_variants() {
+        assert!(matches!(
+            CommentaryStyle::parse("teen"),
+            Some(CommentaryStyle::Teen)
+        ));
+        assert!(matches!(
+            CommentaryStyle::parse("Teen-Slang"),
+            Some(CommentaryStyle::Teen)
+        ));
+        assert!(matches!(
+            CommentaryStyle::parse("normal"),
+            Some(CommentaryStyle::Normal)
+        ));
+        assert!(matches!(
+            CommentaryStyle::parse("Standard"),
+            Some(CommentaryStyle::Normal)
+        ));
+        assert!(CommentaryStyle::parse("unknown").is_none());
+    }
+
+    #[test]
+    fn commentary_runtime_writes_event() {
+        let log_path = temp_log_path("event");
+        let cfg = CommentaryConfig {
+            log_path: log_path.clone(),
+            style: CommentaryStyle::Normal,
+            min_interval_ms: 0,
+            max_interval_ms: 0,
+        };
+        let mut runtime = CommentaryRuntime::new(cfg, 123).expect("runtime");
+        let sample = CommentarySample {
+            tick: 20,
+            time_of_day: 0.0,
+            weather: WeatherState::Clear,
+            mobs_nearby: 0,
+            nearby_mob: None,
+            pos: [0.0, 64.0, 0.0],
+            visual: None,
+        };
+
+        runtime.tick(sample);
+
+        let contents = std::fs::read_to_string(&log_path).expect("read");
+        let line = contents.lines().next().expect("line written");
+        let value: serde_json::Value = serde_json::from_str(line).expect("json");
+        assert_eq!(value["t_ms"], 1000);
+        assert!(value["text"].as_str().unwrap_or_default().len() > 0);
+
+        let _ = std::fs::remove_file(&log_path);
+    }
+}
+
 const VISUAL_SKY_PHRASES: &[&str] = &[
     "Yo the sky color is straight up clean.",
     "Okay that sky gradient is kinda fire.",

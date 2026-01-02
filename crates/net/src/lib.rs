@@ -68,3 +68,16 @@ impl<T> MessageEnvelope<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_envelope_dev_sets_schema_and_tick() {
+        let envelope = MessageEnvelope::dev("hello", 42);
+        assert_eq!(envelope.schema, SchemaHash::DEV);
+        assert_eq!(envelope.tick, 42);
+        assert_eq!(envelope.payload, "hello");
+    }
+}

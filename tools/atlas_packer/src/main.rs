@@ -371,3 +371,135 @@ fn texture_name(path: &Path, root: &Path) -> String {
     }
     name
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgba, RgbaImage};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn solid_image(size: u32, color: [u8; 4]) -> RgbaImage {
+        let mut img = RgbaImage::new(size, size);
+        for y in 0..size {
+            for x in 0..size {
+                img.put_pixel(x, y, Rgba(color));
+            }
+        }
+        img
+    }
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("mdm-atlas-{label}-{nanos}"));
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[test]
+    fn detects_texture_extensions() {
+        assert!(is_texture_file(Path::new("stone.png")));
+        assert!(is_texture_file(Path::new("stone.JPG")));
+        assert!(!is_texture_file(Path::new("stone.txt")));
+    }
+
+    #[test]
+    fn texture_name_strips_root_and_extension() {
+        let root = Path::new("assets");
+        let path = Path::new("assets/blocks/stone.png");
+        assert_eq!(texture_name(path, root), "blocks/stone");
+
+        let path = Path::new("./assets/blocks/grass.png");
+        assert_eq!(texture_name(path, root), "assets/blocks/grass");
+    }
+
+    #[test]
+    fn build_atlas_basic_layout() {
+        let textures = vec![
+            Texture {
+                name: "a".to_string(),
+                image: solid_image(2, [255, 0, 0, 255]),
+            },
+            Texture {
+                name: "b".to_string(),
+                image: solid_image(2, [0, 255, 0, 255]),
+            },
+        ];
+        let args = Args {
+            input: PathBuf::from("."),
+            output_image: PathBuf::from("atlas.png"),
+            output_meta: PathBuf::from("atlas.json"),
+            tile_size: Some(2),
+            padding: 1,
+            max_atlas_size: 64,
+            columns: Some(2),
+            allow_mixed_sizes: false,
+        };
+
+        let atlas = build_atlas(&textures, 2, &args).expect("atlas");
+        assert_eq!(atlas.metadata.columns, 2);
+        assert_eq!(atlas.metadata.rows, 1);
+        assert_eq!(atlas.metadata.atlas_width, 8);
+        assert_eq!(atlas.metadata.atlas_height, 4);
+        assert_eq!(atlas.metadata.entries.len(), 2);
+        assert_eq!(atlas.metadata.entries[0].x, 1);
+        assert_eq!(atlas.metadata.entries[0].y, 1);
+
+        let pixel = atlas.image.get_pixel(1, 1);
+        assert_eq!(*pixel, Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn load_textures_reads_pngs() {
+        let dir = temp_dir("load");
+        let img_path = dir.join("stone.png");
+        solid_image(2, [10, 20, 30, 255])
+            .save(&img_path)
+            .expect("save image");
+
+        let args = Args {
+            input: dir.clone(),
+            output_image: PathBuf::from("atlas.png"),
+            output_meta: PathBuf::from("atlas.json"),
+            tile_size: None,
+            padding: 0,
+            max_atlas_size: 64,
+            columns: None,
+            allow_mixed_sizes: false,
+        };
+
+        let (textures, tile_size) = load_textures(&args).expect("load");
+        assert_eq!(textures.len(), 1);
+        assert_eq!(tile_size, 2);
+
+        let _ = std::fs::remove_file(img_path);
+        let _ = std::fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn load_textures_rejects_non_square() {
+        let dir = temp_dir("nonsquare");
+        let img_path = dir.join("bad.png");
+        let img = RgbaImage::new(2, 3);
+        img.save(&img_path).expect("save image");
+
+        let args = Args {
+            input: dir.clone(),
+            output_image: PathBuf::from("atlas.png"),
+            output_meta: PathBuf::from("atlas.json"),
+            tile_size: None,
+            padding: 0,
+            max_atlas_size: 64,
+            columns: None,
+            allow_mixed_sizes: false,
+        };
+
+        let err = load_textures(&args).unwrap_err();
+        assert!(err.to_string().contains("not square"));
+
+        let _ = std::fs::remove_file(img_path);
+        let _ = std::fs::remove_dir(dir);
+    }
+}
