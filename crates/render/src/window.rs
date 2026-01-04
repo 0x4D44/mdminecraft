@@ -399,3 +399,84 @@ impl InputState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winit::event::{DeviceEvent, ElementState, MouseScrollDelta, TouchPhase, WindowEvent};
+
+    fn dummy_device_id() -> winit::event::DeviceId {
+        unsafe { winit::event::DeviceId::dummy() }
+    }
+
+    #[test]
+    fn input_state_tracks_mouse_buttons_and_clicks() {
+        let mut state = InputState::new();
+        let event = WindowEvent::MouseInput {
+            device_id: dummy_device_id(),
+            state: ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        };
+        state.handle_event(&event);
+        assert!(state.is_mouse_pressed(winit::event::MouseButton::Left));
+        assert!(state.is_mouse_clicked(winit::event::MouseButton::Left));
+
+        let event = WindowEvent::MouseInput {
+            device_id: dummy_device_id(),
+            state: ElementState::Released,
+            button: winit::event::MouseButton::Left,
+        };
+        state.handle_event(&event);
+        assert!(!state.is_mouse_pressed(winit::event::MouseButton::Left));
+    }
+
+    #[test]
+    fn input_state_tracks_cursor_and_scroll() {
+        let mut state = InputState::new();
+        let move_event = WindowEvent::CursorMoved {
+            device_id: dummy_device_id(),
+            position: winit::dpi::PhysicalPosition::new(10.0, 5.0),
+        };
+        state.handle_event(&move_event);
+        assert_eq!(state.mouse_pos, (10.0, 5.0));
+        assert_eq!(state.mouse_delta, (10.0, 5.0));
+
+        let scroll_event = WindowEvent::MouseWheel {
+            device_id: dummy_device_id(),
+            delta: MouseScrollDelta::LineDelta(0.0, 2.0),
+            phase: TouchPhase::Moved,
+        };
+        state.handle_event(&scroll_event);
+        assert_eq!(state.scroll_delta, 2.0);
+    }
+
+    #[test]
+    fn input_state_tracks_focus_and_raw_mouse() {
+        let mut state = InputState::new();
+        state.cursor_captured = true;
+        let focus_event = WindowEvent::Focused(false);
+        state.handle_event(&focus_event);
+        assert!(!state.focused);
+        assert!(state.wants_cursor_capture);
+
+        let device_event = DeviceEvent::MouseMotion { delta: (1.5, -2.0) };
+        state.handle_device_event(&device_event);
+        assert_eq!(state.raw_mouse_delta, (1.5, -2.0));
+    }
+
+    #[test]
+    fn snapshot_resets_frame_state() {
+        let mut state = InputState::new();
+        state.mouse_delta = (5.0, 6.0);
+        state.raw_mouse_delta = (1.0, 1.0);
+        state.scroll_delta = 3.0;
+        state.keys_just_pressed.insert(winit::keyboard::KeyCode::KeyW);
+        state.mouse_clicks.insert(winit::event::MouseButton::Right);
+
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.mouse_delta, (5.0, 6.0));
+        assert_eq!(state.mouse_delta, (0.0, 0.0));
+        assert!(state.keys_just_pressed.is_empty());
+        assert!(state.mouse_clicks.is_empty());
+    }
+}

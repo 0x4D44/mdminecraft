@@ -129,3 +129,108 @@ pub fn write_png(path: &Path, size: (u32, u32), rgba: &[u8]) -> Result<()> {
         .context("failed to write screenshot png")?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(prefix: &str, ext: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}_{nanos}.{ext}"))
+    }
+
+    fn test_device() -> (wgpu::Device, wgpu::Queue) {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: true,
+        }))
+        .expect("adapter");
+
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+            .expect("device")
+    }
+
+    fn read_back_texture(
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+        data: &[u8],
+    ) -> Vec<u8> {
+        let (device, queue) = test_device();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Test Texture"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(size.0 * 4),
+                rows_per_image: Some(size.1),
+            },
+            wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let readback = record_texture_readback(&device, &mut encoder, &texture, format, size);
+        queue.submit(Some(encoder.finish()));
+
+        readback.read_rgba8(&device).expect("read back")
+    }
+
+    #[test]
+    fn write_png_round_trip() {
+        let path = temp_path("mdm_screenshot", "png");
+        let rgba = vec![
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+        ];
+        write_png(&path, (2, 2), &rgba).expect("write png");
+
+        let image = image::open(&path).expect("open image").to_rgba8();
+        assert_eq!(image.as_raw(), &rgba);
+    }
+
+    #[test]
+    fn readback_rgba8_matches_source() {
+        let rgba = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = read_back_texture(wgpu::TextureFormat::Rgba8Unorm, (2, 1), &rgba);
+        assert_eq!(result, rgba);
+    }
+
+    #[test]
+    fn readback_bgra8_swaps_channels() {
+        let bgra = vec![3, 2, 1, 4, 7, 6, 5, 8];
+        let result = read_back_texture(wgpu::TextureFormat::Bgra8Unorm, (2, 1), &bgra);
+        assert_eq!(result, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+}

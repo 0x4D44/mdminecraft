@@ -185,3 +185,59 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 fn mix_scalar(a: f32, b: f32, factor: f32) -> f32 {
     a + (b - a) * factor.clamp(0.0, 1.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn time_updates_and_wraps() {
+        let mut time = TimeOfDay::new();
+        time.set_time(0.95);
+        time.update(60.0);
+        assert!(time.time() < 0.1, "expected wrap, got {}", time.time());
+    }
+
+    #[test]
+    fn time_pause_stops_progress() {
+        let mut time = TimeOfDay::new();
+        time.set_time(0.4);
+        time.toggle_pause();
+        time.update(10.0);
+        assert!((time.time() - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn speed_clamps_to_bounds() {
+        let mut time = TimeOfDay::new();
+        for _ in 0..20 {
+            time.increase_speed();
+        }
+        assert!(time.speed <= 10.0);
+
+        for _ in 0..40 {
+            time.decrease_speed();
+        }
+        assert!(time.speed >= 0.01);
+    }
+
+    #[test]
+    fn sun_direction_is_normalized() {
+        let time = TimeOfDay::new();
+        let dir = time.sun_direction();
+        let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+        assert!((len - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn period_name_and_daytime_match_ranges() {
+        let mut time = TimeOfDay::new();
+        time.set_time(0.1);
+        assert_eq!(time.period_name(), "Night");
+        assert!(!time.is_daytime());
+
+        time.set_time(0.5);
+        assert_eq!(time.period_name(), "Day");
+        assert!(time.is_daytime());
+    }
+}

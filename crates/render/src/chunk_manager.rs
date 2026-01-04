@@ -307,3 +307,118 @@ impl Frustum {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mesh::{MeshBuffers, MeshHash, MeshVertex};
+
+    fn test_device() -> (wgpu::Device, wgpu::Queue) {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: true,
+        }))
+        .expect("adapter");
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+            .expect("device")
+    }
+
+    fn test_bind_group(device: &wgpu::Device) -> wgpu::BindGroup {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Chunk Test Layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Chunk Test Buffer"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Chunk Test Bind Group"),
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        })
+    }
+
+    #[test]
+    fn chunk_manager_adds_and_removes_chunks() {
+        let (device, queue) = test_device();
+        let mut manager = ChunkManager::new();
+
+        let vertex = MeshVertex {
+            position: [0.0, 0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+            block_id: 0,
+            light: 0,
+            extra: 0,
+        };
+        let mesh = MeshBuffers {
+            vertices: vec![vertex],
+            indices_opaque: vec![0],
+            indices_alpha: Vec::new(),
+            hash: MeshHash([0; 32]),
+        };
+
+        let bind_group = test_bind_group(&device);
+        let pos = ChunkPos::new(0, 0);
+        manager.add_chunk(&device, &queue, &mesh, pos, bind_group);
+        assert_eq!(manager.chunk_count(), 1);
+
+        assert!(manager.remove_chunk(&pos));
+        assert_eq!(manager.chunk_count(), 0);
+        assert!(!manager.remove_chunk(&pos));
+    }
+
+    #[test]
+    fn chunk_manager_clear_releases_all() {
+        let (device, queue) = test_device();
+        let mut manager = ChunkManager::new();
+        let vertex = MeshVertex {
+            position: [0.0, 0.0, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+            block_id: 0,
+            light: 0,
+            extra: 0,
+        };
+        let mesh = MeshBuffers {
+            vertices: vec![vertex],
+            indices_opaque: vec![0],
+            indices_alpha: Vec::new(),
+            hash: MeshHash([0; 32]),
+        };
+
+        let bind_group = test_bind_group(&device);
+        manager.add_chunk(&device, &queue, &mesh, ChunkPos::new(0, 0), bind_group);
+        assert_eq!(manager.chunk_count(), 1);
+        manager.clear();
+        assert_eq!(manager.chunk_count(), 0);
+    }
+
+    #[test]
+    fn frustum_includes_nearby_chunk() {
+        let vp = glam::Mat4::orthographic_rh(-100.0, 100.0, -100.0, 100.0, -100.0, 100.0);
+        let frustum = Frustum::from_matrix(&vp);
+        assert!(frustum.is_chunk_visible(ChunkPos::new(0, 0)));
+        assert!(!frustum.is_chunk_visible(ChunkPos::new(100, 100)));
+    }
+}

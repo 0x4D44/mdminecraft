@@ -117,15 +117,15 @@ Record a deterministic 30s capture (frames + teen-style commentary):
 
 ```bash
 cargo run -- --headless --no-audio --no-save --world-seed 1 \
-  --record-dir video_+insights/run_capture \
+  --record-dir video_insights/run_capture \
   --record-duration-seconds 30 \
-  --commentary-log video_+insights/run_capture/commentary.jsonl
+  --commentary-log video_insights/run_capture/commentary.jsonl
 ```
 
 Postprocess to MP4 + TTS (WSL + Windows SAPI + ffmpeg):
 
 ```bash
-tools/record_postprocess.py video_+insights/run_capture
+tools/record_postprocess.py video_insights/run_capture
 ```
 
 Notes:
