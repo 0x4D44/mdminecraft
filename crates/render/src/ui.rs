@@ -330,6 +330,48 @@ impl DebugHud {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_mode_display_labels() {
+        assert_eq!(ControlMode::Menu.to_string(), "Menu");
+        assert_eq!(ControlMode::GameplayPhysics.to_string(), "Gameplay — Physics");
+        assert_eq!(ControlMode::GameplayFly.to_string(), "Gameplay — Fly");
+        assert_eq!(ControlMode::UiOverlay.to_string(), "UI Overlay");
+    }
+
+    #[test]
+    fn debug_hud_updates_fps_history() {
+        let mut hud = DebugHud::new();
+        for _ in 0..130 {
+            hud.update_fps(1.0 / 60.0);
+        }
+        assert_eq!(hud.fps_history.len(), 120);
+        assert!(hud.fps > 0.0);
+        assert!(hud.frame_time_ms > 0.0);
+    }
+
+    #[test]
+    fn debug_hud_toggle_visibility() {
+        let mut hud = DebugHud::new();
+        assert!(hud.visible);
+        hud.toggle();
+        assert!(!hud.visible);
+    }
+
+    #[test]
+    fn debug_hud_renders_without_panic() {
+        let mut hud = DebugHud::new();
+        hud.mining_progress = Some(42.0);
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            hud.render(ctx);
+        });
+    }
+}
+
 impl Default for DebugHud {
     fn default() -> Self {
         Self::new()

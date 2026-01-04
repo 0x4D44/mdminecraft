@@ -2112,6 +2112,7 @@ dependencies = [
  "mdminecraft-testkit",
  "mdminecraft-world",
  "pollster",
+ "serde_json",
  "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber",

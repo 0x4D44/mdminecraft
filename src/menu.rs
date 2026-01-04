@@ -933,6 +933,67 @@ fn render_help_ui(ui: &mut egui::Ui, goto_main: &mut bool) {
     });
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_with_ui<F: FnOnce(&mut egui::Ui)>(f: F) {
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput::default();
+        let _ = ctx.run(raw_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                f(ui);
+            });
+        });
+    }
+
+    #[test]
+    fn render_main_menu_ui_without_input_keeps_flags() {
+        let mut action = MenuAction::Continue;
+        let mut goto_settings = false;
+        let mut goto_help = false;
+
+        run_with_ui(|ui| {
+            render_main_menu_ui(ui, &mut action, &mut goto_settings, &mut goto_help);
+        });
+
+        assert!(matches!(action, MenuAction::Continue));
+        assert!(!goto_settings);
+        assert!(!goto_help);
+    }
+
+    #[test]
+    fn render_settings_menu_ui_without_input_keeps_state() {
+        let mut settings = GameSettings::default();
+        let mut settings_dirty = false;
+        let mut goto_main = false;
+        let mut save_settings = false;
+
+        run_with_ui(|ui| {
+            render_settings_menu_ui(
+                ui,
+                &mut settings,
+                &mut settings_dirty,
+                &mut goto_main,
+                &mut save_settings,
+            );
+        });
+
+        assert!(!settings_dirty);
+        assert!(!goto_main);
+        assert!(!save_settings);
+    }
+
+    #[test]
+    fn render_help_ui_without_input_keeps_flag() {
+        let mut goto_main = false;
+        run_with_ui(|ui| {
+            render_help_ui(ui, &mut goto_main);
+        });
+        assert!(!goto_main);
+    }
+}
+
 /// Helper to render a key binding row
 fn render_key_binding(ui: &mut egui::Ui, key: &str, description: &str) {
     ui.horizontal(|ui| {

@@ -43,6 +43,66 @@ impl TextVertex {
     }
 }
 
+fn build_text_mesh(atlas: &FontAtlas, text: &Text3D) -> (Vec<TextVertex>, Vec<u32>) {
+    let layouts = atlas.layout_text(&text.text, text.font_size);
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    let center = text.transform.position;
+    let color = text.color;
+
+    for layout in layouts {
+        let base_vertex = vertices.len() as u32;
+
+        // Create quad for this glyph
+        let x0 = layout.position_x;
+        let y0 = layout.position_y;
+        let x1 = x0 + layout.width;
+        let y1 = y0 + layout.height;
+
+        let (u0, v0) = layout.uv_min;
+        let (u1, v1) = layout.uv_max;
+
+        // Four corners of the quad (in local space, will be billboarded)
+        vertices.push(TextVertex {
+            position: [center.x + x0, center.y + y0, center.z],
+            uv: [u0, v0],
+            color,
+            billboard_center: [center.x, center.y, center.z],
+        });
+        vertices.push(TextVertex {
+            position: [center.x + x1, center.y + y0, center.z],
+            uv: [u1, v0],
+            color,
+            billboard_center: [center.x, center.y, center.z],
+        });
+        vertices.push(TextVertex {
+            position: [center.x + x1, center.y + y1, center.z],
+            uv: [u1, v1],
+            color,
+            billboard_center: [center.x, center.y, center.z],
+        });
+        vertices.push(TextVertex {
+            position: [center.x + x0, center.y + y1, center.z],
+            uv: [u0, v1],
+            color,
+            billboard_center: [center.x, center.y, center.z],
+        });
+
+        // Two triangles for the quad
+        indices.extend_from_slice(&[
+            base_vertex,
+            base_vertex + 1,
+            base_vertex + 2,
+            base_vertex,
+            base_vertex + 2,
+            base_vertex + 3,
+        ]);
+    }
+
+    (vertices, indices)
+}
+
 impl TextRenderer {
     /// Create a new text renderer
     pub fn new(
@@ -239,63 +299,7 @@ impl TextRenderer {
 
     /// Generate mesh for a Text3D component
     pub fn generate_text_mesh(&self, text: &Text3D) -> (Vec<TextVertex>, Vec<u32>) {
-        let layouts = self.atlas.layout_text(&text.text, text.font_size);
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-
-        let center = text.transform.position;
-        let color = text.color;
-
-        for layout in layouts {
-            let base_vertex = vertices.len() as u32;
-
-            // Create quad for this glyph
-            let x0 = layout.position_x;
-            let y0 = layout.position_y;
-            let x1 = x0 + layout.width;
-            let y1 = y0 + layout.height;
-
-            let (u0, v0) = layout.uv_min;
-            let (u1, v1) = layout.uv_max;
-
-            // Four corners of the quad (in local space, will be billboarded)
-            vertices.push(TextVertex {
-                position: [center.x + x0, center.y + y0, center.z],
-                uv: [u0, v0],
-                color,
-                billboard_center: [center.x, center.y, center.z],
-            });
-            vertices.push(TextVertex {
-                position: [center.x + x1, center.y + y0, center.z],
-                uv: [u1, v0],
-                color,
-                billboard_center: [center.x, center.y, center.z],
-            });
-            vertices.push(TextVertex {
-                position: [center.x + x1, center.y + y1, center.z],
-                uv: [u1, v1],
-                color,
-                billboard_center: [center.x, center.y, center.z],
-            });
-            vertices.push(TextVertex {
-                position: [center.x + x0, center.y + y1, center.z],
-                uv: [u0, v1],
-                color,
-                billboard_center: [center.x, center.y, center.z],
-            });
-
-            // Two triangles for the quad
-            indices.extend_from_slice(&[
-                base_vertex,
-                base_vertex + 1,
-                base_vertex + 2,
-                base_vertex,
-                base_vertex + 2,
-                base_vertex + 3,
-            ]);
-        }
-
-        (vertices, indices)
+        build_text_mesh(&self.atlas, text)
     }
 
     /// Get the render pipeline
@@ -315,5 +319,61 @@ impl TextRenderer {
     /// Get the font atlas
     pub fn atlas(&self) -> &FontAtlas {
         &self.atlas
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::font_atlas::FontAtlasBuilder;
+    use glam::Vec3;
+    use std::path::PathBuf;
+
+    fn test_font_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("DejaVuSans.ttf")
+    }
+
+    fn load_test_atlas() -> FontAtlas {
+        let path = test_font_path();
+        let builder = FontAtlasBuilder::from_file(path.to_str().expect("utf8 path"))
+            .expect("load font")
+            .with_font_size(8.0)
+            .with_padding(1)
+            .with_chars(vec!['A', 'B']);
+        builder.build().expect("build atlas")
+    }
+
+    #[test]
+    fn text_vertex_layout_matches_struct() {
+        let layout = TextVertex::desc();
+        assert_eq!(
+            layout.array_stride,
+            std::mem::size_of::<TextVertex>() as wgpu::BufferAddress
+        );
+        assert_eq!(layout.attributes.len(), 4);
+    }
+
+    #[test]
+    fn build_text_mesh_generates_quads() {
+        let atlas = load_test_atlas();
+        let text = Text3D::new(Vec3::ZERO, "AB").with_font_size(1.0);
+        let (vertices, indices) = build_text_mesh(&atlas, &text);
+
+        assert_eq!(vertices.len(), 8);
+        assert_eq!(indices.len(), 12);
+        assert_eq!(indices[0], 0);
+        assert_eq!(indices[5], 3);
+    }
+
+    #[test]
+    fn build_text_mesh_empty_text_is_empty() {
+        let atlas = load_test_atlas();
+        let text = Text3D::new(Vec3::ZERO, "");
+        let (vertices, indices) = build_text_mesh(&atlas, &text);
+        assert!(vertices.is_empty());
+        assert!(indices.is_empty());
     }
 }

@@ -198,3 +198,140 @@ pub fn atlas_exists() -> bool {
 pub fn warn_missing_atlas(err: &RuntimeAtlasError) {
     warn!("Falling back to debug texture atlas: {err}");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdminecraft_assets::AtlasEntry;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}_{nanos}"))
+    }
+
+    fn pixel_at(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+        let idx = ((y * width + x) * 4) as usize;
+        [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+    }
+
+    #[test]
+    fn load_from_disk_reads_metadata_and_bleeds_padding() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let dir = temp_dir("mdm_atlas");
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let meta_path = dir.join("atlas.json");
+        let image_path = dir.join("atlas.png");
+
+        let metadata = TextureAtlasMetadata {
+            tile_size: 2,
+            padding: 1,
+            columns: 1,
+            rows: 1,
+            atlas_width: 4,
+            atlas_height: 4,
+            entries: vec![AtlasEntry {
+                name: "tile".to_string(),
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+                u0: 0.25,
+                v0: 0.25,
+                u1: 0.75,
+                v1: 0.75,
+            }],
+        };
+        let json = serde_json::to_string_pretty(&metadata).expect("serialize metadata");
+        std::fs::write(&meta_path, json).expect("write metadata");
+
+        let mut image = image::RgbaImage::new(4, 4);
+        for y in 1..=2 {
+            for x in 1..=2 {
+                image.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        image.save(&image_path).expect("save image");
+
+        std::env::set_var("MDM_ATLAS_META", &meta_path);
+        std::env::set_var("MDM_ATLAS_IMAGE", &image_path);
+
+        let atlas = RuntimeAtlas::load_from_disk().expect("load atlas");
+        assert_eq!(atlas.metadata, metadata);
+        assert_eq!(pixel_at(&atlas.pixels, 4, 0, 1), [255, 0, 0, 255]);
+
+        std::env::remove_var("MDM_ATLAS_META");
+        std::env::remove_var("MDM_ATLAS_IMAGE");
+    }
+
+    #[test]
+    fn load_from_disk_detects_dimension_mismatch() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let dir = temp_dir("mdm_atlas_mismatch");
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let meta_path = dir.join("atlas.json");
+        let image_path = dir.join("atlas.png");
+
+        let metadata = TextureAtlasMetadata {
+            tile_size: 2,
+            padding: 1,
+            columns: 1,
+            rows: 1,
+            atlas_width: 4,
+            atlas_height: 4,
+            entries: vec![AtlasEntry {
+                name: "tile".to_string(),
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+                u0: 0.25,
+                v0: 0.25,
+                u1: 0.75,
+                v1: 0.75,
+            }],
+        };
+        let json = serde_json::to_string_pretty(&metadata).expect("serialize metadata");
+        std::fs::write(&meta_path, json).expect("write metadata");
+
+        let image = image::RgbaImage::new(2, 2);
+        image.save(&image_path).expect("save image");
+
+        std::env::set_var("MDM_ATLAS_META", &meta_path);
+        std::env::set_var("MDM_ATLAS_IMAGE", &image_path);
+
+        let err = RuntimeAtlas::load_from_disk().err().expect("expect mismatch");
+        match err {
+            RuntimeAtlasError::DimensionMismatch { .. } => {}
+            other => panic!("expected dimension mismatch, got {other:?}"),
+        }
+
+        std::env::remove_var("MDM_ATLAS_META");
+        std::env::remove_var("MDM_ATLAS_IMAGE");
+    }
+
+    #[test]
+    fn atlas_paths_respects_env_and_exists() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let dir = temp_dir("mdm_atlas_missing");
+        let meta_path = dir.join("missing.json");
+        let image_path = dir.join("missing.png");
+
+        std::env::set_var("MDM_ATLAS_META", &meta_path);
+        std::env::set_var("MDM_ATLAS_IMAGE", &image_path);
+
+        let (meta, image) = atlas_paths();
+        assert_eq!(meta, meta_path);
+        assert_eq!(image, image_path);
+        assert!(!atlas_exists());
+
+        std::env::remove_var("MDM_ATLAS_META");
+        std::env::remove_var("MDM_ATLAS_IMAGE");
+    }
+}

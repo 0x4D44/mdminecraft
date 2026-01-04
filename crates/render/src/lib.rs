@@ -68,6 +68,94 @@ pub struct Renderer {
     ui: Option<RefCell<UiManager>>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::HeadlessTarget;
+
+    #[test]
+    fn headless_renderer_initializes_and_resizes() {
+        let mut renderer = Renderer::new(RendererConfig {
+            width: 64,
+            height: 32,
+            headless: true,
+        });
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: true,
+            }))
+            .expect("adapter");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+                .expect("device");
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            width: 64,
+            height: 32,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+
+        let headless_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Headless Render Target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let headless_view = headless_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let context = RenderContext {
+            surface: None,
+            device,
+            queue,
+            config,
+            size: (64, 32),
+            headless: Some(HeadlessTarget {
+                texture: headless_texture,
+                view: headless_view,
+            }),
+        };
+
+        let pipeline = VoxelPipeline::new(&context).expect("voxel pipeline");
+        let skybox = SkyboxPipeline::new(&context).expect("skybox pipeline");
+        let wireframe =
+            WireframePipeline::new(&context, pipeline.camera_bind_group_layout()).expect("wire");
+        let particles =
+            ParticlePipeline::new(&context, pipeline.camera_bind_group_layout()).expect("particles");
+
+        renderer.context = Some(context);
+        renderer.pipeline = Some(pipeline);
+        renderer.skybox_pipeline = Some(skybox);
+        renderer.wireframe_pipeline = Some(wireframe);
+        renderer.particle_pipeline = Some(particles);
+        renderer.ui = None;
+
+        renderer.resize((32, 16));
+        assert_eq!(renderer.config().width, 32);
+        assert_eq!(renderer.config().height, 16);
+
+        let _ = renderer.atlas_metadata();
+    }
+}
+
 impl Renderer {
     /// Construct a renderer with the supplied config.
     pub fn new(config: RendererConfig) -> Self {

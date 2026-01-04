@@ -301,3 +301,64 @@ impl ConnectedClient {
         self.last_ack_tick = tick;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdminecraft_net::{InputBundle, MovementInput};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}_{nanos}"))
+    }
+
+    #[tokio::test]
+    async fn tick_advances_and_flushes_logs() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut server = MultiplayerServer::bind(addr).expect("bind server");
+        let log_dir = temp_dir("mdm_server_logs");
+        server
+            .enable_replay_logging(log_dir.clone())
+            .expect("enable logs");
+
+        let input = InputBundle {
+            tick: 0,
+            sequence: 0,
+            last_ack_tick: 0,
+            movement: MovementInput::zero(),
+            block_actions: Vec::new(),
+            inventory_actions: Vec::new(),
+        };
+        server.log_input(1, input).expect("log input");
+        server
+            .log_event(NetworkEvent::PlayerPosition {
+                tick: 0,
+                player_id: 1,
+                transform: Transform {
+                    dimension: DimensionId::DEFAULT,
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    yaw: 0,
+                    pitch: 0,
+                },
+            })
+            .expect("log event");
+
+        assert_eq!(server.client_count(), 0);
+        let before = server.current_tick();
+        server.tick().await.expect("tick");
+        assert_eq!(server.current_tick(), before.advance(1));
+
+        let input_log = std::fs::read_to_string(log_dir.join("inputs.jsonl"))
+            .expect("read input log");
+        let event_log = std::fs::read_to_string(log_dir.join("events.jsonl"))
+            .expect("read event log");
+        assert!(input_log.contains("\"player_id\":1"));
+        assert!(event_log.contains("\"player_id\":1"));
+    }
+}

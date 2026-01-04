@@ -368,3 +368,123 @@ impl Default for MultiplayerClient {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdminecraft_net::{EntityDeltaMessage, EntityUpdate, EntityUpdateType};
+
+    #[test]
+    fn apply_movement_updates_transform() {
+        let mut client = MultiplayerClient::new();
+        let movement = MovementInput {
+            forward: 1,
+            strafe: 0,
+            jump: true,
+            sprint: false,
+            yaw: 0,
+            pitch: 64,
+        };
+
+        client.apply_movement(&movement);
+
+        assert_eq!(client.player_transform.x, 0);
+        assert_eq!(client.player_transform.z, 16);
+        assert_eq!(client.player_transform.y, 16);
+        assert_eq!(client.player_transform.yaw, 0);
+        assert_eq!(client.player_transform.pitch, 64);
+
+        let strafe = MovementInput {
+            forward: 0,
+            strafe: 1,
+            jump: false,
+            sprint: false,
+            yaw: 0,
+            pitch: 0,
+        };
+        client.apply_movement(&strafe);
+
+        assert_eq!(client.player_transform.x, 16);
+        assert_eq!(client.player_transform.z, 16);
+    }
+
+    #[test]
+    fn handle_server_state_rolls_back_on_mismatch() {
+        let mut client = MultiplayerClient::new();
+        client.player_transform.x = 500;
+
+        let server_transform = Transform {
+            dimension: DimensionId::DEFAULT,
+            x: 0,
+            y: 0,
+            z: 0,
+            yaw: 0,
+            pitch: 0,
+        };
+        client
+            .handle_server_message(ServerMessage::ServerState {
+                tick: 5,
+                player_transform: server_transform.clone(),
+            })
+            .expect("handle server state");
+
+        assert_eq!(client.player_transform, server_transform);
+        assert_eq!(client.prediction_metrics().total_mismatches, 1);
+    }
+
+    #[test]
+    fn handle_entity_delta_updates_remote_entities() {
+        let mut client = MultiplayerClient::new();
+        let spawn_transform = Transform {
+            dimension: DimensionId::DEFAULT,
+            x: 0,
+            y: 0,
+            z: 0,
+            yaw: 0,
+            pitch: 0,
+        };
+        let updated_transform = Transform {
+            dimension: DimensionId::DEFAULT,
+            x: 32,
+            y: 0,
+            z: 0,
+            yaw: 0,
+            pitch: 0,
+        };
+
+        let delta = EntityDeltaMessage {
+            tick: 1,
+            entities: vec![
+                EntityUpdate {
+                    entity_id: 1,
+                    update: EntityUpdateType::Spawn {
+                        transform: spawn_transform,
+                        entity_type: "Test".to_string(),
+                    },
+                },
+                EntityUpdate {
+                    entity_id: 1,
+                    update: EntityUpdateType::Transform(updated_transform.clone()),
+                },
+                EntityUpdate {
+                    entity_id: 2,
+                    update: EntityUpdateType::Spawn {
+                        transform: updated_transform.clone(),
+                        entity_type: "Temp".to_string(),
+                    },
+                },
+                EntityUpdate {
+                    entity_id: 2,
+                    update: EntityUpdateType::Despawn,
+                },
+            ],
+        };
+
+        client
+            .handle_server_message(ServerMessage::EntityDelta(delta))
+            .expect("handle entity delta");
+
+        assert_eq!(client.remote_entities.get(&1), Some(&updated_transform));
+        assert!(!client.remote_entities.contains_key(&2));
+    }
+}
