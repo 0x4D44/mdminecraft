@@ -16,7 +16,7 @@ use mdminecraft_core::SimTick;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, warn};
@@ -291,6 +291,59 @@ fn chunk_to_region(chunk_pos: ChunkPos) -> (i32, i32) {
     )
 }
 
+fn atomic_write(path: &Path, write_fn: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("path has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("Failed to create save directory {}", parent.display()))?;
+
+    let filename = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("path has no filename: {}", path.display()))?
+        .to_string_lossy();
+    let pid = std::process::id();
+
+    let mut attempt = 0u32;
+    let (temp_path, mut file) = loop {
+        let candidate = parent.join(format!("{filename}.tmp.{pid}.{attempt}"));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => break (candidate, file),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempt = attempt.saturating_add(1);
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        }
+    };
+
+    let result = (|| {
+        write_fn(&mut file)?;
+        file.sync_all().context("Failed to sync temp file")?;
+        Ok(())
+    })();
+
+    if let Err(err) = result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+
+    if let Err(err) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err.into());
+    }
+
+    if let Ok(dir) = File::open(parent) {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
+}
+
 /// Region file manager for saving/loading chunks.
 pub struct RegionStore {
     world_dir: PathBuf,
@@ -555,17 +608,13 @@ impl RegionStore {
         // Create header.
         let header = RegionHeader::new(crc32, compressed.len() as u32);
 
-        // Write to file.
-        if let Some(parent) = region_path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create region directory {}", parent.display())
-            })?;
-        }
-        let mut file = File::create(&region_path).context("Failed to create region file")?;
-        file.write_all(&header.to_bytes())
-            .context("Failed to write header")?;
-        file.write_all(&compressed)
-            .context("Failed to write payload")?;
+        atomic_write(&region_path, |file| {
+            file.write_all(&header.to_bytes())
+                .context("Failed to write header")?;
+            file.write_all(&compressed)
+                .context("Failed to write payload")?;
+            Ok(())
+        })?;
 
         info!(
             path = %region_path.display(),
@@ -619,16 +668,13 @@ impl RegionStore {
 
         let header = WorldBlobHeader::new(magic, version, crc32, compressed.len() as u32);
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create save directory {}", parent.display()))?;
-        }
-
-        let mut file = File::create(path).context("Failed to create world blob file")?;
-        file.write_all(&header.to_bytes())
-            .context("Failed to write world blob header")?;
-        file.write_all(&compressed)
-            .context("Failed to write world blob payload")?;
+        atomic_write(path, |file| {
+            file.write_all(&header.to_bytes())
+                .context("Failed to write world blob header")?;
+            file.write_all(&compressed)
+                .context("Failed to write world blob payload")?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -1576,5 +1622,34 @@ mod tests {
         }
 
         fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn atomic_write_removes_temp_file_on_rename_failure() {
+        let temp_dir = env::temp_dir().join("mdminecraft_atomic_write_test");
+        if temp_dir.exists() {
+            let _ = fs::remove_dir_all(&temp_dir);
+        }
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let target_dir = temp_dir.join("world.state");
+        fs::create_dir_all(&target_dir).expect("create target dir");
+
+        let result = atomic_write(&target_dir, |file| {
+            file.write_all(b"test payload")?;
+            Ok(())
+        });
+        assert!(result.is_err(), "expected rename failure");
+
+        let tmp_left = fs::read_dir(&temp_dir)
+            .expect("read temp dir")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name().to_string_lossy().contains(".tmp."));
+        assert!(
+            !tmp_left,
+            "temporary file should be cleaned up on failure"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

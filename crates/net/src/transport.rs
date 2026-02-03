@@ -200,9 +200,10 @@ impl ClientEndpoint {
     pub async fn connect(&self, server_addr: SocketAddr) -> Result<quinn::Connection> {
         info!("Connecting to server at {}", server_addr);
 
+        let server_name = resolve_server_name(server_addr)?;
         let connection = self
             .endpoint
-            .connect(server_addr, "localhost")
+            .connect(server_addr, server_name.as_str())
             .context("Failed to initiate connection")?
             .await
             .context("Failed to establish connection")?;
@@ -216,6 +217,20 @@ impl ClientEndpoint {
     pub fn close(&self) {
         self.endpoint.close(0u32.into(), b"Client shutting down");
     }
+}
+
+fn resolve_server_name(server_addr: SocketAddr) -> Result<String> {
+    if let Ok(name) = std::env::var("MDM_TLS_SERVER_NAME") {
+        rustls::pki_types::ServerName::try_from(name.as_str())
+            .map_err(|_| anyhow::anyhow!("Invalid MDM_TLS_SERVER_NAME: {}", name))?;
+        return Ok(name);
+    }
+
+    if server_addr.ip().is_loopback() {
+        return Ok("localhost".to_string());
+    }
+
+    Ok(server_addr.ip().to_string())
 }
 
 impl Default for ClientEndpoint {
@@ -466,5 +481,34 @@ mod tests {
         std::env::remove_var("MDM_INSECURE_TLS");
 
         assert_eq!(mode, TlsMode::Secure);
+    }
+
+    #[test]
+    fn test_server_name_defaults_to_localhost_for_loopback() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("MDM_TLS_SERVER_NAME");
+
+        let name = resolve_server_name("127.0.0.1:1234".parse().unwrap()).expect("server name");
+        assert_eq!(name, "localhost");
+    }
+
+    #[test]
+    fn test_server_name_defaults_to_ip_for_non_loopback() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::remove_var("MDM_TLS_SERVER_NAME");
+
+        let name = resolve_server_name("192.0.2.10:1234".parse().unwrap()).expect("server name");
+        assert_eq!(name, "192.0.2.10");
+    }
+
+    #[test]
+    fn test_server_name_env_override() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("MDM_TLS_SERVER_NAME", "example.com");
+
+        let name = resolve_server_name("127.0.0.1:1234".parse().unwrap()).expect("server name");
+        assert_eq!(name, "example.com");
+
+        std::env::remove_var("MDM_TLS_SERVER_NAME");
     }
 }

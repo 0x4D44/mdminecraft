@@ -107,7 +107,8 @@ impl MultiplayerServer {
         run_tick(&mut self.world, &mut self.schedules, self.current_tick);
 
         // Send server state to all clients
-        for client in self.clients.values_mut() {
+        let mut disconnected = Vec::new();
+        for (addr, client) in self.clients.iter_mut() {
             // Send server state update
             let state_message = ServerMessage::ServerState {
                 tick: self.current_tick.0,
@@ -123,7 +124,13 @@ impl MultiplayerServer {
 
             if let Err(e) = client.connection.send(state_message).await {
                 warn!("Failed to send state update: {}", e);
+                disconnected.push(*addr);
             }
+        }
+
+        for addr in disconnected {
+            self.clients.remove(&addr);
+            warn!("Removed disconnected client {}", addr);
         }
 
         // Flush replay logs
@@ -177,6 +184,12 @@ impl MultiplayerServer {
                 self.next_entity_id += 1;
 
                 info!(player_entity_id, "Client authenticated successfully");
+
+                // Send handshake response with assigned entity id
+                connection
+                    .accept_handshake_with_entity(player_entity_id)
+                    .await
+                    .context("Failed to send handshake response")?;
 
                 // Create client state
                 let client = ConnectedClient {
@@ -307,6 +320,15 @@ mod tests {
     use super::*;
     use mdminecraft_net::{InputBundle, MovementInput};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::time::{sleep, timeout, Duration};
+
+    fn should_skip_socket_tests(err: &anyhow::Error) -> bool {
+        err.chain().any(|cause| {
+            cause
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::PermissionDenied)
+        })
+    }
 
     fn temp_dir(prefix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -360,5 +382,108 @@ mod tests {
             .expect("read event log");
         assert!(input_log.contains("\"player_id\":1"));
         assert!(event_log.contains("\"player_id\":1"));
+    }
+
+    #[tokio::test]
+    async fn handshake_completes_for_new_client() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut server = match MultiplayerServer::bind(addr) {
+            Ok(server) => server,
+            Err(err) if should_skip_socket_tests(&err) => {
+                eprintln!("skipping (socket sandbox): unable to bind server endpoint: {err:#}");
+                return;
+            }
+            Err(err) => panic!("Failed to bind server: {err:#}"),
+        };
+        let server_addr = server.local_addr();
+
+        let server_handle = tokio::spawn(async move {
+            server.accept_client().await.expect("accept client");
+            server
+        });
+
+        let endpoint = match mdminecraft_net::ClientEndpoint::new(
+            mdminecraft_net::TlsMode::InsecureSkipVerify,
+        ) {
+            Ok(endpoint) => endpoint,
+            Err(err) if should_skip_socket_tests(&err) => {
+                eprintln!("skipping (socket sandbox): unable to create client endpoint: {err:#}");
+                return;
+            }
+            Err(err) => panic!("Failed to create client endpoint: {err:#}"),
+        };
+
+        let quinn_connection = endpoint
+            .connect(server_addr)
+            .await
+            .expect("connect");
+        let connection = mdminecraft_net::ClientConnection::new(quinn_connection);
+
+        let handshake_result = timeout(Duration::from_secs(2), connection.handshake()).await;
+        assert!(handshake_result.is_ok(), "handshake timed out");
+        handshake_result
+            .expect("timeout handled")
+            .expect("handshake failed");
+
+        let _server = server_handle.await.expect("server task failed");
+    }
+
+    #[tokio::test]
+    async fn tick_prunes_disconnected_clients() {
+        let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let mut server = match MultiplayerServer::bind(addr) {
+            Ok(server) => server,
+            Err(err) if should_skip_socket_tests(&err) => {
+                eprintln!("skipping (socket sandbox): unable to bind server endpoint: {err:#}");
+                return;
+            }
+            Err(err) => panic!("Failed to bind server: {err:#}"),
+        };
+        let server_addr = server.local_addr();
+
+        let server_handle = tokio::spawn(async move {
+            server.accept_client().await.expect("accept client");
+            server
+        });
+
+        let endpoint = match mdminecraft_net::ClientEndpoint::new(
+            mdminecraft_net::TlsMode::InsecureSkipVerify,
+        ) {
+            Ok(endpoint) => endpoint,
+            Err(err) if should_skip_socket_tests(&err) => {
+                eprintln!("skipping (socket sandbox): unable to create client endpoint: {err:#}");
+                return;
+            }
+            Err(err) => panic!("Failed to create client endpoint: {err:#}"),
+        };
+
+        let quinn_connection = endpoint
+            .connect(server_addr)
+            .await
+            .expect("connect");
+        let connection = mdminecraft_net::ClientConnection::new(quinn_connection);
+
+        connection
+            .handshake()
+            .await
+            .expect("handshake completes");
+
+        let mut server = server_handle.await.expect("server task failed");
+        assert_eq!(server.client_count(), 1);
+
+        connection.close("test disconnect");
+        sleep(Duration::from_millis(50)).await;
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            server.tick().await.expect("tick");
+            if server.client_count() == 0 {
+                break;
+            }
+            if tokio::time::Instant::now() > deadline {
+                panic!("client was not pruned after disconnect");
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
     }
 }

@@ -4,8 +4,11 @@
 
 use crate::codec::MAX_FRAME_SIZE;
 use anyhow::{Context, Result};
-use quinn::Connection;
+use quinn::{Connection, ReadExactError, RecvStream, SendStream};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tracing::trace;
 
 /// Channel type identifier for message routing.
@@ -57,12 +60,47 @@ impl TryFrom<u8> for ChannelType {
 /// Multiplexed channel manager for QUIC connections.
 pub struct ChannelManager {
     connection: Connection,
+    reliable_rx: Mutex<mpsc::UnboundedReceiver<(ChannelType, Vec<u8>)>>,
+    send_streams: Mutex<HashMap<ChannelType, SendStream>>,
 }
 
 impl ChannelManager {
     /// Create a new channel manager for the given connection.
     pub fn new(connection: Connection) -> Self {
-        Self { connection }
+        let (tx, rx) = mpsc::unbounded_channel();
+        let connection_clone = connection.clone();
+        let tx_clone = tx.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let incoming = match connection_clone.accept_uni().await {
+                    Ok(stream) => stream,
+                    Err(_) => break,
+                };
+                let tx = tx_clone.clone();
+                tokio::spawn(async move {
+                    let mut stream = incoming;
+                    loop {
+                        match read_reliable_frame(&mut stream).await {
+                            Ok(Some((channel, data))) => {
+                                let _ = tx.send((channel, data));
+                            }
+                            Ok(None) => break,
+                            Err(err) => {
+                                tracing::debug!("reliable stream decode error: {err}");
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        Self {
+            connection,
+            reliable_rx: Mutex::new(rx),
+            send_streams: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Send a message on a reliable channel (QUIC stream).
@@ -76,35 +114,20 @@ impl ChannelManager {
         );
 
         trace!("Sending {} bytes on reliable {:?}", data.len(), channel);
-
-        // Open a new unidirectional stream
+        let mut streams = self.send_streams.lock().await;
+        if let Some(stream) = streams.get_mut(&channel) {
+            if write_reliable_frame(stream, channel, data).await.is_ok() {
+                return Ok(());
+            }
+        }
+        streams.remove(&channel);
         let mut send_stream = self
             .connection
             .open_uni()
             .await
             .context("Failed to open unidirectional stream")?;
-
-        // Write channel type header
-        send_stream
-            .write_all(&[channel as u8])
-            .await
-            .context("Failed to write channel type")?;
-
-        // Write length prefix
-        let len = data.len() as u32;
-        send_stream
-            .write_all(&len.to_le_bytes())
-            .await
-            .context("Failed to write length prefix")?;
-
-        // Write data
-        send_stream
-            .write_all(data)
-            .await
-            .context("Failed to write data")?;
-
-        // Finish the stream
-        send_stream.finish().context("Failed to finish stream")?;
+        write_reliable_frame(&mut send_stream, channel, data).await?;
+        streams.insert(channel, send_stream);
 
         trace!("Sent {} bytes on reliable {:?}", data.len(), channel);
 
@@ -140,48 +163,10 @@ impl ChannelManager {
     ///
     /// Returns the channel type and message data.
     pub async fn recv_reliable(&self) -> Result<(ChannelType, Vec<u8>)> {
-        // Accept the next unidirectional stream
-        let mut recv_stream = self
-            .connection
-            .accept_uni()
+        let mut rx = self.reliable_rx.lock().await;
+        rx.recv()
             .await
-            .context("Failed to accept unidirectional stream")?;
-
-        // Read channel type header
-        let mut channel_byte = [0u8; 1];
-        recv_stream
-            .read_exact(&mut channel_byte)
-            .await
-            .context("Failed to read channel type")?;
-        let channel = ChannelType::try_from(channel_byte[0])?;
-
-        // Read length prefix
-        let mut len_bytes = [0u8; 4];
-        recv_stream
-            .read_exact(&mut len_bytes)
-            .await
-            .context("Failed to read length prefix")?;
-        let len = u32::from_le_bytes(len_bytes) as usize;
-
-        // Validate length to prevent DoS via memory exhaustion
-        if len > MAX_FRAME_SIZE {
-            return Err(anyhow::anyhow!(
-                "Message too large: {} bytes (max {})",
-                len,
-                MAX_FRAME_SIZE
-            ));
-        }
-
-        // Read data
-        let mut data = vec![0u8; len];
-        recv_stream
-            .read_exact(&mut data)
-            .await
-            .context("Failed to read data")?;
-
-        trace!("Received {} bytes on reliable {:?}", data.len(), channel);
-
-        Ok((channel, data))
+            .ok_or_else(|| anyhow::anyhow!("Reliable channel closed"))
     }
 
     /// Receive the next message on an unreliable channel (QUIC datagram).
@@ -221,10 +206,68 @@ impl ChannelManager {
     }
 }
 
+async fn write_reliable_frame(
+    stream: &mut SendStream,
+    channel: ChannelType,
+    data: &[u8],
+) -> Result<()> {
+    stream
+        .write_all(&[channel as u8])
+        .await
+        .context("Failed to write channel type")?;
+    let len = data.len() as u32;
+    stream
+        .write_all(&len.to_le_bytes())
+        .await
+        .context("Failed to write length prefix")?;
+    stream
+        .write_all(data)
+        .await
+        .context("Failed to write data")?;
+    Ok(())
+}
+
+async fn read_reliable_frame(
+    stream: &mut RecvStream,
+) -> Result<Option<(ChannelType, Vec<u8>)>> {
+    let mut channel_byte = [0u8; 1];
+    match stream.read_exact(&mut channel_byte).await {
+        Ok(()) => {}
+        Err(ReadExactError::FinishedEarly(0)) => return Ok(None),
+        Err(err) => return Err(err.into()),
+    }
+    let channel = ChannelType::try_from(channel_byte[0])?;
+
+    let mut len_bytes = [0u8; 4];
+    stream
+        .read_exact(&mut len_bytes)
+        .await
+        .context("Failed to read length prefix")?;
+    let len = u32::from_le_bytes(len_bytes) as usize;
+
+    if len > MAX_FRAME_SIZE {
+        return Err(anyhow::anyhow!(
+            "Message too large: {} bytes (max {})",
+            len,
+            MAX_FRAME_SIZE
+        ));
+    }
+
+    let mut data = vec![0u8; len];
+    stream
+        .read_exact(&mut data)
+        .await
+        .context("Failed to read data")?;
+
+    trace!("Received {} bytes on reliable {:?}", data.len(), channel);
+    Ok(Some((channel, data)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::transport::{ClientEndpoint, ServerEndpoint, TlsMode};
+    use tokio::time::{timeout, Duration};
 
     fn should_skip_socket_tests(err: &anyhow::Error) -> bool {
         err.chain().any(|cause| {
@@ -383,6 +426,80 @@ mod tests {
         assert_eq!(data, b"Position update");
 
         // Wait for server task
+        server_handle.await.expect("Server task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_reliable_channel_accepts_multi_frame_stream() {
+        let server = match ServerEndpoint::bind("127.0.0.1:0".parse().unwrap()) {
+            Ok(server) => server,
+            Err(err) if should_skip_socket_tests(&err) => {
+                eprintln!("skipping (socket sandbox): unable to bind server endpoint: {err:#}");
+                return;
+            }
+            Err(err) => panic!("Failed to bind server: {err:#}"),
+        };
+        let server_addr = server.local_addr();
+
+        let client = match ClientEndpoint::new(TlsMode::InsecureSkipVerify) {
+            Ok(client) => client,
+            Err(err) if should_skip_socket_tests(&err) => {
+                server.close();
+                eprintln!("skipping (socket sandbox): unable to create client endpoint: {err:#}");
+                return;
+            }
+            Err(err) => panic!("Failed to create client: {err:#}"),
+        };
+
+        let server_handle = tokio::spawn(async move {
+            let incoming = server.accept().await.expect("No incoming connection");
+            let connection = incoming.await.expect("Failed to accept connection");
+            let manager = ChannelManager::new(connection);
+
+            let (channel_a, data_a) = timeout(Duration::from_secs(2), manager.recv_reliable())
+                .await
+                .expect("timeout")
+                .expect("recv");
+            assert_eq!(channel_a, ChannelType::Chat);
+            assert_eq!(data_a, b"first");
+
+            let (channel_b, data_b) = timeout(Duration::from_secs(2), manager.recv_reliable())
+                .await
+                .expect("timeout")
+                .expect("recv");
+            assert_eq!(channel_b, ChannelType::Chat);
+            assert_eq!(data_b, b"second");
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let connection = client
+            .connect(server_addr)
+            .await
+            .expect("Failed to connect");
+        let manager = ChannelManager::new(connection);
+
+        let mut stream = manager
+            .connection
+            .open_uni()
+            .await
+            .expect("open uni stream");
+
+        let payloads: [&[u8]; 2] = [b"first".as_slice(), b"second".as_slice()];
+        for payload in payloads {
+            stream
+                .write_all(&[ChannelType::Chat as u8])
+                .await
+                .expect("write channel");
+            let len = payload.len() as u32;
+            stream
+                .write_all(&len.to_le_bytes())
+                .await
+                .expect("write len");
+            stream.write_all(payload).await.expect("write payload");
+        }
+        stream.finish().expect("finish stream");
+
         server_handle.await.expect("Server task panicked");
     }
 }
