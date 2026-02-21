@@ -1,0 +1,44 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: forward walk
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_forward"}
+# log-04: turn left
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"set_view","yaw":-1.2,"pitch":0.0}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_turn_left"}
+# log-05: strafe
+{"op":"set_actions","actions":{"move_x":-1.0}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_strafe"}
+# log-06: jump
+{"op":"set_actions","actions":{"move_x":0.0}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_jump"}
+# log-07: attack
+{"op":"set_view","yaw":-1.2,"pitch":-0.75}
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_attack"}
+# log-08: use
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_use"}
+# log-09: teleport offset
+{"op":"command","line":"/tp ~8 80 ~-6"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_tp_offset"}
+# log-10: look up
+{"op":"set_view","yaw":0.0,"pitch":0.9}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_look_up"}
+{"op":"shutdown"}

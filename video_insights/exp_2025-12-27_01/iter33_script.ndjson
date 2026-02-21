@@ -1,0 +1,3 @@
+{"op":"command","line":"/tp nan 0 0"}
+{"op":"get_state"}
+{"op":"shutdown"}

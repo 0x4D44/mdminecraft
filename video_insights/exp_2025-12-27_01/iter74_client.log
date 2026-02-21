@@ -1,0 +1,14 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"command_result","lines":["Weather set to Clear"],"ok":true,"tick":0}
+{"event":"command_result","lines":["Gamemode set to Creative"],"ok":true,"tick":0}
+{"event":"command_result","lines":["Teleported to -6.00 86.00 0.00"],"ok":true,"tick":0}
+{"event":"ok"}
+{"event":"command_result","lines":["Filled 25 blocks (replace) from -2 84 -2 to 2 84 2 with id=1 state=0"],"ok":true,"tick":0}
+{"event":"command_result","lines":["Set block at 0 90 0 to id=4 state=0"],"ok":true,"tick":0}
+{"event":"stepped","tick":1}
+{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000001_tag-iter74_sand_fall_t1.png","tick":1,"width":1280}
+{"event":"stepped","tick":5}
+{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000005_tag-iter74_sand_fall_t5.png","tick":5,"width":1280}
+{"event":"stepped","tick":15}
+{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000015_tag-iter74_sand_fall_t15.png","tick":15,"width":1280}
+{"event":"ok"}

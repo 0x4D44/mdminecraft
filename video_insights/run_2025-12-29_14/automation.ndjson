@@ -1,0 +1,53 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: gamemode -> creative
+{"op":"command","line":"/gamemode creative"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_gm_creative"}
+# log-04: look down
+{"op":"set_view","yaw":0.0,"pitch":-0.85}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_down"}
+# log-05: slot 1 place
+{"op":"pulse","actions":{"hotbar_slot":0}}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_slot1_place"}
+# log-06: slot 1 break
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_slot1_break"}
+# log-07: slot 2 place
+{"op":"pulse","actions":{"hotbar_slot":1}}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_slot2_place"}
+# log-08: slot 2 break
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_slot2_break"}
+# log-09: slot 3 place
+{"op":"pulse","actions":{"hotbar_slot":2}}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_slot3_place"}
+# log-10: slot 3 break
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_slot3_break"}
+# log-11: slot 4 place
+{"op":"pulse","actions":{"hotbar_slot":3}}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_slot4_place"}
+# log-12: slot 4 break
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_slot4_break"}
+{"op":"shutdown"}

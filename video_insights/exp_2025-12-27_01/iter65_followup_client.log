@@ -1,0 +1,5 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"dimension":"overworld","event":"state","mobs_active":62,"mobs_nearby":58,"mobs_total":62,"player":{"health":20.0,"hunger":20.0,"pitch":-1.2000000476837158,"pos":[0.0,90.0,0.0],"yaw":0.0},"tick":30}
+{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000030_tag-iter65_fire_spawn_post.png","tick":30,"width":1280}
+{"event":"stepped","tick":40}
+{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000040_tag-iter65_fire_spawn_post_t10.png","tick":40,"width":1280}

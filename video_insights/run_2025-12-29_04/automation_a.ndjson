@@ -1,0 +1,27 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: state snapshot
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_state"}
+# log-03: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_time_day"}
+# log-04: short walk
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_walk"}
+# log-05: attack click
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"set_view","yaw":0.8,"pitch":-0.7}
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_attack"}
+# log-06: look up
+{"op":"set_view","yaw":0.0,"pitch":0.9}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_look_up"}
+{"op":"shutdown"}

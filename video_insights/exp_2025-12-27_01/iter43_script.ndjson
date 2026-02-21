@@ -1,0 +1,12 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.15}
+{"op":"command","line":"/fill ~-4 ~-6 ~-4 ~4 ~-6 ~4 stone"}
+{"op":"command","line":"/setblock ~2 ~-5 ~ lava"}
+{"op":"step","ticks":8}
+{"op":"command","line":"/setblock ~ ~-5 ~ water"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter43_cobble_t10"}
+{"op":"step","ticks":8}
+{"op":"screenshot","tag":"iter43_cobble_t18"}
+{"op":"shutdown"}

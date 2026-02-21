@@ -1,0 +1,27 @@
+# log-01: initial spawn
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: look forward
+{"op":"set_view","yaw":0.0,"pitch":0.0}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_forward"}
+# log-03: walk forward (very short steps)
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_walk"}
+# log-04: stop + turn right
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"set_view","yaw":1.57,"pitch":0.1}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_turn"}
+# log-05: sprint forward
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_sprint"}
+# log-06: stop + jump
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_jump"}
+{"op":"shutdown"}

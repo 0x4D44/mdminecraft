@@ -1,0 +1,49 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: pan left
+{"op":"set_view","yaw":-0.6,"pitch":-0.2}
+{"op":"step","ticks":8}
+{"op":"screenshot","tag":"log-03_pan_left"}
+# log-04: pan right
+{"op":"set_view","yaw":0.6,"pitch":-0.2}
+{"op":"step","ticks":8}
+{"op":"screenshot","tag":"log-04_pan_right"}
+# log-05: time -> sunset
+{"op":"command","line":"/time set 12000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_time_sunset"}
+# log-06: weather rain
+{"op":"command","line":"/weather rain"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_weather_rain"}
+# log-07: look up
+{"op":"set_view","yaw":0.0,"pitch":0.85}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_look_up"}
+# log-08: weather clear
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_weather_clear"}
+# log-09: time -> night
+{"op":"command","line":"/time set 18000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_time_night"}
+# log-10: pan down
+{"op":"set_view","yaw":0.0,"pitch":-0.7}
+{"op":"step","ticks":8}
+{"op":"screenshot","tag":"log-10_pan_down"}
+# log-11: time -> dawn
+{"op":"command","line":"/time set 23000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_time_dawn"}
+# log-12: horizon look
+{"op":"set_view","yaw":0.2,"pitch":-0.1}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_look_horizon"}
+{"op":"shutdown"}

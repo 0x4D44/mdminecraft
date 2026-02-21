@@ -1,0 +1,24 @@
+{"event":"connect","peer":"127.0.0.1:49792"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:49792","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:49792"}
+{"event":"request","id":2,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:49792"}
+{"event":"response","payload":{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:49792"}
+{"event":"request","id":3,"line":"/tp 0 90 0","op":"command","peer":"127.0.0.1:49792"}
+{"event":"response","payload":{"event":"command_result","id":3,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:49792"}
+{"event":"request","id":4,"op":"set_view","peer":"127.0.0.1:49792","pitch":-1.2000000476837158,"yaw":0.0}
+{"event":"response","payload":{"event":"ok","id":4},"peer":"127.0.0.1:49792"}
+{"event":"request","id":5,"line":"/fill ~-2 ~-6 ~-2 ~2 ~-6 ~2 stone","op":"command","peer":"127.0.0.1:49792"}
+{"event":"response","payload":{"event":"command_result","id":5,"lines":["Filled 25 blocks (replace) from -2 84 -2 to 2 84 2 with id=1 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:49792"}
+{"event":"request","id":6,"line":"/setblock ~ ~-5 ~ stone_slab[waterlogged=true]","op":"command","peer":"127.0.0.1:49792"}
+{"event":"response","payload":{"event":"command_result","id":6,"lines":["Set block at 0 85 0 to id=33 state=32768"],"ok":true,"tick":0},"peer":"127.0.0.1:49792"}
+{"event":"request","id":7,"op":"step","peer":"127.0.0.1:49792","ticks":2}
+{"event":"response","payload":{"event":"stepped","id":7,"tick":2},"peer":"127.0.0.1:49792"}
+{"event":"request","id":8,"op":"screenshot","peer":"127.0.0.1:49792","tag":"iter54_waterlogged_prop_t2"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":8,"path":"video_+insights/exp_2025-12-27_01/tick_00000002_tag-iter54_waterlogged_prop_t2.png","tick":2,"width":1280},"peer":"127.0.0.1:49792"}
+{"event":"request","id":9,"op":"step","peer":"127.0.0.1:49792","ticks":6}
+{"event":"response","payload":{"event":"stepped","id":9,"tick":8},"peer":"127.0.0.1:49792"}
+{"event":"request","id":10,"op":"screenshot","peer":"127.0.0.1:49792","tag":"iter54_waterlogged_prop_t8"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":10,"path":"video_+insights/exp_2025-12-27_01/tick_00000008_tag-iter54_waterlogged_prop_t8.png","tick":8,"width":1280},"peer":"127.0.0.1:49792"}
+{"event":"request","id":11,"op":"shutdown","peer":"127.0.0.1:49792"}
+{"event":"response","payload":{"event":"ok","id":11},"peer":"127.0.0.1:49792"}
+{"event":"disconnect","peer":"127.0.0.1:49792"}

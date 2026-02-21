@@ -1,0 +1,50 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> night
+{"op":"command","line":"/time set 18000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_night"}
+# log-03: weather rain
+{"op":"command","line":"/weather rain"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_weather_rain"}
+# log-04: look up
+{"op":"set_view","yaw":0.0,"pitch":0.85}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_up"}
+# log-05: state snapshot
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_state"}
+# log-06: attack click
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_attack"}
+# log-07: use click
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_use"}
+# log-08: weather clear
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_weather_clear"}
+# log-09: time -> dawn
+{"op":"command","line":"/time set 23000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_time_dawn"}
+# log-10: teleport to overlook
+{"op":"command","line":"/tp 24 85 8"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_tp_overlook"}
+# log-11: look down
+{"op":"set_view","yaw":0.5,"pitch":-0.7}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_look_down"}
+# log-12: step forward
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-12_step_forward"}
+{"op":"shutdown"}

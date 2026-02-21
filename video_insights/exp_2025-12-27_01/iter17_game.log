@@ -1,0 +1,3 @@
+   Compiling mdminecraft v0.1.0 (/home/md/language/mdminecraft)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.90s
+     Running `target/debug/mdminecraft --headless --automation-listen '127.0.0.1:4242' --automation-step --no-render --no-audio --world-seed 1 --automation-log video_+insights/exp_2025-12-27_01/iter17_automation.log`

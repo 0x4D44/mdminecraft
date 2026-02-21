@@ -1,0 +1,8 @@
+{"event":"connect","peer":"127.0.0.1:34436"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:34436","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:34436"}
+{"event":"request","id":2,"op":"screenshot","peer":"127.0.0.1:34436","tag":"iter27_no_render"}
+{"event":"response","payload":{"code":"unsupported","event":"error","id":2,"message":"render disabled"},"peer":"127.0.0.1:34436"}
+{"event":"request","id":3,"op":"shutdown","peer":"127.0.0.1:34436"}
+{"event":"response","payload":{"event":"ok","id":3},"peer":"127.0.0.1:34436"}
+{"event":"disconnect","peer":"127.0.0.1:34436"}

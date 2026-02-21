@@ -1,0 +1,26 @@
+{"event":"connect","peer":"127.0.0.1:56960"}
+{"event":"request","id":1400,"op":"hello","peer":"127.0.0.1:56960","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1400,"version":1},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1401,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"event":"command_result","id":1401,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1402,"line":"/tp 0 90 0","op":"command","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"event":"command_result","id":1402,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1403,"op":"step","peer":"127.0.0.1:56960","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":1403,"tick":5},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1404,"line":"/dimension nether","op":"command","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"event":"command_result","id":1404,"lines":["Changed dimension to nether"],"ok":true,"tick":5},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1405,"op":"step","peer":"127.0.0.1:56960","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":1405,"tick":10},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1406,"line":"/dimension end","op":"command","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"event":"command_result","id":1406,"lines":["Changed dimension to end"],"ok":true,"tick":10},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1407,"op":"step","peer":"127.0.0.1:56960","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":1407,"tick":15},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1408,"line":"/dimension overworld","op":"command","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"event":"command_result","id":1408,"lines":["Changed dimension to overworld"],"ok":true,"tick":15},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1409,"op":"step","peer":"127.0.0.1:56960","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":1409,"tick":20},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1410,"op":"get_state","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"dimension":"overworld","event":"state","id":1410,"mobs_active":26,"mobs_nearby":26,"mobs_total":27,"player":{"health":20.0,"hunger":20.0,"pitch":-0.30000001192092896,"pos":[-5.5,60.62099838256836,-5.5],"yaw":0.0},"tick":20},"peer":"127.0.0.1:56960"}
+{"event":"request","id":1411,"op":"shutdown","peer":"127.0.0.1:56960"}
+{"event":"response","payload":{"event":"ok","id":1411},"peer":"127.0.0.1:56960"}
+{"event":"disconnect","peer":"127.0.0.1:56960"}

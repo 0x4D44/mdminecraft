@@ -1,0 +1,6 @@
+{"event":"connect","peer":"127.0.0.1:39292"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:39292","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:39292"}
+{"event":"request","id":2,"op":"screenshot","peer":"127.0.0.1:39292","tag":"iter26_exit_on_disconnect"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":2,"path":"video_+insights/exp_2025-12-27_01/tick_00000000_tag-iter26_exit_on_disconnect.png","tick":0,"width":1280},"peer":"127.0.0.1:39292"}
+{"event":"disconnect","peer":"127.0.0.1:39292"}

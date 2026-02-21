@@ -1,0 +1,6 @@
+{"op":"screenshot","tag":"iter25_turn_right"}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter25_jump"}
+{"op":"shutdown"}

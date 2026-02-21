@@ -1,0 +1,27 @@
+# log-07: teleport offset
+{"op":"command","line":"/tp ~8 80 ~-8"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_tp_offset"}
+# log-08: sprint burst
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"screenshot","tag":"log-08_sprint"}
+# log-09: use click
+{"op":"set_view","yaw":-0.6,"pitch":-0.7}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_use"}
+# log-10: jump
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_jump"}
+# log-11: time -> night
+{"op":"command","line":"/time set night"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_time_night"}
+# log-12: weather -> rain
+{"op":"command","line":"/weather rain"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_weather_rain"}
+{"op":"shutdown"}

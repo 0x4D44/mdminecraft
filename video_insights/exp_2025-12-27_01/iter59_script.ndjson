@@ -1,0 +1,8 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.2}
+{"op":"command","line":"/fill ~-2 ~-6 ~-2 ~2 ~-6 ~2 stone"}
+{"op":"command","line":"/setblock ~ ~-5 ~ glass_pane[waterlogged=true]"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter59_waterlogged_pane_t2"}
+{"op":"shutdown"}

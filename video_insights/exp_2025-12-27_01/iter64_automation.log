@@ -1,0 +1,54 @@
+{"event":"connect","peer":"127.0.0.1:40662"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:40662","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:40662"}
+{"event":"request","id":2,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":3,"line":"/tp 0 90 0","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":3,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":4,"op":"set_view","peer":"127.0.0.1:40662","pitch":-1.2000000476837158,"yaw":0.0}
+{"event":"response","payload":{"event":"ok","id":4},"peer":"127.0.0.1:40662"}
+{"event":"request","id":5,"line":"/fill ~-2 ~-6 ~-2 ~2 ~-6 ~2 stone","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":5,"lines":["Filled 25 blocks (replace) from -2 84 -2 to 2 84 2 with id=1 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":6,"line":"/setblock ~1 ~-6 ~ oak_planks","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":6,"lines":["Set block at 1 84 0 to id=12 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":7,"line":"/setblock ~-1 ~-6 ~ oak_planks","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":7,"lines":["Set block at -1 84 0 to id=12 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":8,"line":"/setblock ~ ~-6 ~1 oak_planks","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":8,"lines":["Set block at 0 84 1 to id=12 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":9,"line":"/setblock ~ ~-6 ~-1 oak_planks","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":9,"lines":["Set block at 0 84 -1 to id=12 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":10,"line":"/setblock ~ ~-5 ~ lava","op":"command","peer":"127.0.0.1:40662"}
+{"event":"response","payload":{"event":"command_result","id":10,"lines":["Set block at 0 85 0 to id=20 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:40662"}
+{"event":"request","id":11,"op":"step","peer":"127.0.0.1:40662","ticks":20}
+{"event":"response","payload":{"event":"stepped","id":11,"tick":20},"peer":"127.0.0.1:40662"}
+{"event":"request","id":12,"op":"screenshot","peer":"127.0.0.1:40662","tag":"iter64_fire_spawn_t20"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":12,"path":"video_+insights/exp_2025-12-27_01/tick_00000020_tag-iter64_fire_spawn_t20.png","tick":20,"width":1280},"peer":"127.0.0.1:40662"}
+{"event":"request","id":13,"op":"step","peer":"127.0.0.1:40662","ticks":40}
+{"event":"response","payload":{"code":"internal","event":"error","message":"timeout waiting for response"},"peer":"127.0.0.1:40662"}
+{"event":"disconnect","peer":"127.0.0.1:40662"}
+{"event":"connect","peer":"127.0.0.1:35214"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:35214","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:35214"}
+{"event":"request","id":2,"op":"step","peer":"127.0.0.1:35214","ticks":40}
+{"event":"response","payload":{"code":"internal","event":"error","message":"timeout waiting for response"},"peer":"127.0.0.1:35214"}
+{"event":"disconnect","peer":"127.0.0.1:35214"}
+{"event":"connect","peer":"127.0.0.1:59746"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:59746","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:59746"}
+{"event":"request","id":2,"op":"step","peer":"127.0.0.1:59746","ticks":40}
+{"event":"response","payload":{"code":"internal","event":"error","message":"timeout waiting for response"},"peer":"127.0.0.1:59746"}
+{"event":"disconnect","peer":"127.0.0.1:59746"}
+{"event":"connect","peer":"127.0.0.1:33772"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:33772","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:33772"}
+{"event":"request","id":2,"op":"get_state","peer":"127.0.0.1:33772"}
+{"event":"response","payload":{"dimension":"overworld","event":"state","id":2,"mobs_active":65,"mobs_nearby":38,"mobs_total":65,"player":{"health":20.0,"hunger":20.0,"pitch":-1.2000000476837158,"pos":[0.0,90.0,0.0],"yaw":0.0},"tick":140},"peer":"127.0.0.1:33772"}
+{"event":"request","id":3,"op":"shutdown","peer":"127.0.0.1:33772"}
+{"event":"response","payload":{"event":"ok","id":3},"peer":"127.0.0.1:33772"}
+{"event":"disconnect","peer":"127.0.0.1:33772"}
+{"event":"connect","peer":"127.0.0.1:50584"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:50584","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:50584"}
+{"event":"request","id":2,"op":"screenshot","peer":"127.0.0.1:50584","tag":"iter64_fire_spawn_t140"}
+{"event":"response","payload":{"code":"internal","event":"error","message":"timeout waiting for response"},"peer":"127.0.0.1:50584"}
+{"event":"disconnect","peer":"127.0.0.1:50584"}

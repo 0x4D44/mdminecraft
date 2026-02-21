@@ -1,0 +1,34 @@
+# Focused mob rendering/visibility scenario for headless QA.
+# Run with:
+#   python3 tools/harness_client/mdm_harness_client.py --tcp 127.0.0.1:4242 --auto-id --script <this_file>
+
+{"op":"get_state"}
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/time set day"}
+
+# Flat platform for visibility
+{"op":"command","line":"/fill -12 99 36 12 99 60 stone"}
+{"op":"command","line":"/fill -12 100 36 12 110 60 air"}
+
+# Passive mobs
+{"op":"command","line":"/tp 0 101 48"}
+{"op":"command","line":"/summon pig ~-4 ~ ~4"}
+{"op":"command","line":"/summon cow ~-2 ~ ~4"}
+{"op":"command","line":"/summon sheep ~ ~ ~4"}
+{"op":"command","line":"/summon chicken ~2 ~ ~4"}
+{"op":"command","line":"/summon villager ~4 ~ ~4"}
+{"op":"set_view","yaw":1.5707964,"pitch":-0.25}
+{"op":"step","ticks":20}
+{"op":"screenshot","tag":"mobs_passive"}
+
+# Hostile mobs
+{"op":"command","line":"/tp 0 101 56"}
+{"op":"command","line":"/summon zombie ~-4 ~ ~4"}
+{"op":"command","line":"/summon skeleton ~-2 ~ ~4"}
+{"op":"command","line":"/summon spider ~ ~ ~4"}
+{"op":"command","line":"/summon creeper ~2 ~ ~4"}
+{"op":"set_view","yaw":1.5707964,"pitch":-0.25}
+{"op":"step","ticks":20}
+{"op":"screenshot","tag":"mobs_hostile"}
+
+{"op":"shutdown"}

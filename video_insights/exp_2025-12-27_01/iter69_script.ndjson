@@ -1,0 +1,17 @@
+{"op":"command","line":"/weather clear"}
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.2}
+{"op":"command","line":"/fill -2 83 -2 2 83 2 stone"}
+{"op":"command","line":"/setblock 1 83 0 oak_planks"}
+{"op":"command","line":"/setblock -1 83 0 oak_planks"}
+{"op":"command","line":"/setblock 0 83 1 oak_planks"}
+{"op":"command","line":"/setblock 0 83 -1 oak_planks"}
+{"op":"command","line":"/setblock 0 84 0 lava"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter69_fire_lava_t2"}
+{"op":"step","ticks":4}
+{"op":"screenshot","tag":"iter69_fire_lava_t6"}
+{"op":"step","ticks":8}
+{"op":"screenshot","tag":"iter69_fire_lava_t14"}
+{"op":"shutdown"}

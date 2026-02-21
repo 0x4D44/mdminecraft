@@ -1,0 +1,4 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"stepped","tick":92}
+{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000092_tag-iter76_weather_clear_t60.png","tick":92,"width":1280}
+{"event":"ok"}

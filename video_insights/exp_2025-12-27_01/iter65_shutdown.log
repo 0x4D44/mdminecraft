@@ -1,0 +1,2 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"ok"}

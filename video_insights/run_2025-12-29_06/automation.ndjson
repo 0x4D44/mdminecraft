@@ -1,0 +1,51 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> sunset-ish
+{"op":"command","line":"/time set 12000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_sunset"}
+# log-03: look left
+{"op":"set_view","yaw":-1.0,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_look_left"}
+# log-04: look right
+{"op":"set_view","yaw":1.0,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_right"}
+# log-05: sprint forward
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_sprint"}
+# log-06: crouch forward
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":false,"crouch":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_crouch"}
+# log-07: jump
+{"op":"set_actions","actions":{"move_y":0.0,"crouch":false}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_jump"}
+# log-08: attack click
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_attack"}
+# log-09: use click
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_use"}
+# log-10: mid-run state snapshot
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_state"}
+# log-11: step back
+{"op":"set_actions","actions":{"move_y":-1.0}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-11_step_back"}
+# log-12: look up
+{"op":"set_view","yaw":0.0,"pitch":0.85}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_look_up"}
+{"op":"shutdown"}

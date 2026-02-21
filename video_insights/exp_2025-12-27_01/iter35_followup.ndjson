@@ -1,0 +1,9 @@
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter35_lava_water_t2"}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"iter35_lava_water_t12"}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"iter35_lava_water_t22"}
+{"op":"step","ticks":20}
+{"op":"screenshot","tag":"iter35_lava_water_t42"}
+{"op":"shutdown"}

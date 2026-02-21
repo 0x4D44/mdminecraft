@@ -50,8 +50,14 @@ enum Command {
 }
 
 fn parse_args() -> Result<Config, String> {
-    let args: Vec<String> = env::args().collect();
+    parse_args_from_iter(env::args())
+}
 
+fn parse_args_from_iter<I>(args: I) -> Result<Config, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let args: Vec<String> = args.into_iter().collect();
     if args.len() < 2 {
         return Ok(Config {
             command: Command::Help,
@@ -83,24 +89,7 @@ fn parse_args() -> Result<Config, String> {
                 if i + 1 >= args.len() {
                     return Err("--region requires an argument".to_string());
                 }
-                // Parse format: min_x,min_z,max_x,max_z
-                let parts: Vec<&str> = args[i + 1].split(',').collect();
-                if parts.len() != 4 {
-                    return Err("--region format: min_x,min_z,max_x,max_z".to_string());
-                }
-                let min_x: i32 = parts[0]
-                    .parse()
-                    .map_err(|e| format!("Invalid min_x: {}", e))?;
-                let min_z: i32 = parts[1]
-                    .parse()
-                    .map_err(|e| format!("Invalid min_z: {}", e))?;
-                let max_x: i32 = parts[2]
-                    .parse()
-                    .map_err(|e| format!("Invalid max_x: {}", e))?;
-                let max_z: i32 = parts[3]
-                    .parse()
-                    .map_err(|e| format!("Invalid max_z: {}", e))?;
-                region = Some((min_x, min_z, max_x, max_z));
+                region = Some(parse_region(&args[i + 1])?);
                 i += 2;
             }
             "--output" | "-o" => {
@@ -160,6 +149,26 @@ fn parse_args() -> Result<Config, String> {
         seed,
         output,
     })
+}
+
+fn parse_region(raw: &str) -> Result<(i32, i32, i32, i32), String> {
+    let parts: Vec<&str> = raw.split(',').collect();
+    if parts.len() != 4 {
+        return Err("--region format: min_x,min_z,max_x,max_z".to_string());
+    }
+    let min_x: i32 = parts[0]
+        .parse()
+        .map_err(|e| format!("Invalid min_x: {}", e))?;
+    let min_z: i32 = parts[1]
+        .parse()
+        .map_err(|e| format!("Invalid min_z: {}", e))?;
+    let max_x: i32 = parts[2]
+        .parse()
+        .map_err(|e| format!("Invalid max_x: {}", e))?;
+    let max_z: i32 = parts[3]
+        .parse()
+        .map_err(|e| format!("Invalid max_z: {}", e))?;
+    Ok((min_x, min_z, max_x, max_z))
 }
 
 fn print_help() {
@@ -267,7 +276,7 @@ fn visualize_heightmap(
             if let Some(hm) = hm {
                 let h = hm.get(local_x, local_z);
                 let normalized = if global_max > global_min {
-                    ((h - global_min) as f32 / (global_max - global_min) as f32)
+                    (h - global_min) as f32 / (global_max - global_min) as f32
                 } else {
                     0.5
                 };
@@ -394,6 +403,50 @@ fn validate_seams(seed: u64, min_x: i32, min_z: i32, max_x: i32, max_z: i32) {
     );
     println!();
 
+    let stats = validate_seams_stats(seed, min_x, min_z, max_x, max_z);
+    let total_seams = stats.total_seams;
+    let mismatches = stats.mismatches;
+    let max_discrepancy = stats.max_discrepancy;
+    let match_rate = if total_seams == 0 {
+        100.0
+    } else {
+        (total_seams - mismatches) as f64 / total_seams as f64 * 100.0
+    };
+
+    // Report results
+    println!("╔══════════════════════════════════════════════════════════╗");
+    println!("║              Seam Validation Results                    ║");
+    println!("╚══════════════════════════════════════════════════════════╝");
+    println!();
+    println!("  Total seams checked:     {}", total_seams);
+    println!("  Mismatches found:        {}", mismatches);
+    println!("  Match rate:              {:.2}%", match_rate);
+
+    if mismatches > 0 {
+        println!("  Max discrepancy:         {} blocks", max_discrepancy);
+        println!();
+        println!("❌ FAILED: Heightmap seams are not continuous");
+        std::process::exit(1);
+    } else {
+        println!();
+        println!("✅ SUCCESS: All heightmap seams are perfectly continuous");
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SeamStats {
+    total_seams: usize,
+    mismatches: usize,
+    max_discrepancy: i32,
+}
+
+fn validate_seams_stats(
+    seed: u64,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+) -> SeamStats {
     let mut total_seams = 0;
     let mut mismatches = 0;
     let mut max_discrepancy = 0i32;
@@ -444,26 +497,10 @@ fn validate_seams(seed: u64, min_x: i32, min_z: i32, max_x: i32, max_z: i32) {
         }
     }
 
-    // Report results
-    println!("╔══════════════════════════════════════════════════════════╗");
-    println!("║              Seam Validation Results                    ║");
-    println!("╚══════════════════════════════════════════════════════════╝");
-    println!();
-    println!("  Total seams checked:     {}", total_seams);
-    println!("  Mismatches found:        {}", mismatches);
-    println!(
-        "  Match rate:              {:.2}%",
-        (total_seams - mismatches) as f64 / total_seams as f64 * 100.0
-    );
-
-    if mismatches > 0 {
-        println!("  Max discrepancy:         {} blocks", max_discrepancy);
-        println!();
-        println!("❌ FAILED: Heightmap seams are not continuous");
-        std::process::exit(1);
-    } else {
-        println!();
-        println!("✅ SUCCESS: All heightmap seams are perfectly continuous");
+    SeamStats {
+        total_seams,
+        mismatches,
+        max_discrepancy,
     }
 }
 
@@ -506,5 +543,64 @@ fn main() {
         Command::Help => {
             print_help();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_args_defaults_to_help() {
+        let config = parse_args_from_iter(vec!["debug-world".to_string()]).expect("config");
+        assert!(matches!(config.command, Command::Help));
+    }
+
+    #[test]
+    fn parse_args_heightmap_region() {
+        let config = parse_args_from_iter(vec![
+            "debug-world".to_string(),
+            "heightmap".to_string(),
+            "--seed".to_string(),
+            "7".to_string(),
+            "--region".to_string(),
+            "0,1,2,3".to_string(),
+            "--output".to_string(),
+            "out.txt".to_string(),
+        ])
+        .expect("config");
+        assert_eq!(config.seed, 7);
+        assert_eq!(config.output.unwrap(), PathBuf::from("out.txt"));
+        match config.command {
+            Command::Heightmap {
+                min_x,
+                min_z,
+                max_x,
+                max_z,
+            } => {
+                assert_eq!((min_x, min_z, max_x, max_z), (0, 1, 2, 3));
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[test]
+    fn parse_region_rejects_bad_format() {
+        let err = parse_region("0,1,2").unwrap_err();
+        assert!(err.contains("--region format"));
+    }
+
+    #[test]
+    fn biome_to_char_maps_known_values() {
+        assert_eq!(biome_to_char(BiomeId::Ocean), 'O');
+        assert_eq!(biome_to_char(BiomeId::Forest), 'F');
+        assert_eq!(biome_to_char(BiomeId::Savanna), 'S');
+    }
+
+    #[test]
+    fn seam_stats_counts_match_expected() {
+        let stats = validate_seams_stats(12345, 0, 0, 1, 0);
+        assert_eq!(stats.total_seams, CHUNK_SIZE_Z as usize);
+        assert!(stats.mismatches <= stats.total_seams);
     }
 }

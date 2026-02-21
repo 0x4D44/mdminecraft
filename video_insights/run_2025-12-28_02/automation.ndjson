@@ -1,0 +1,44 @@
+# log-01: initial spawn
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: look down
+{"op":"set_view","yaw":0.0,"pitch":-0.6}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_look_down"}
+# log-03: walk forward
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"log-03_walk_forward"}
+# log-04: strafe left
+{"op":"set_actions","actions":{"move_y":0.0,"move_x":-1.0}}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"log-04_strafe_left"}
+# log-05: turn back
+{"op":"set_actions","actions":{"move_x":0.0}}
+{"op":"set_view","yaw":3.14,"pitch":-0.1}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_turn_back"}
+# log-06: sprint forward
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"log-06_sprint"}
+# log-07: crouch
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false,"crouch":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_crouch"}
+# log-08: jump
+{"op":"set_actions","actions":{"crouch":false}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_jump"}
+# log-09: attack click (look down)
+{"op":"set_view","yaw":3.14,"pitch":-0.75}
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_attack"}
+# log-10: use click (look down)
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_use"}
+{"op":"shutdown"}

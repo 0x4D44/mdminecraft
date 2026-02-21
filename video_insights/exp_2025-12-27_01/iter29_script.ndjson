@@ -1,0 +1,10 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-0.8}
+{"op":"command","line":"/fill ~-2 ~-6 ~-2 ~2 ~-6 ~2 stone"}
+{"op":"command","line":"/setblock ~ ~-5 ~ water"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter29_water_place"}
+{"op":"step","ticks":40}
+{"op":"screenshot","tag":"iter29_water_after"}
+{"op":"shutdown"}

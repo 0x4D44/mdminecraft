@@ -1,0 +1,12 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0}
+{"event":"command_result","id":3,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0}
+{"event":"ok","id":4}
+{"event":"command_result","id":5,"lines":["Filled 25 blocks (replace) from -2 84 -2 to 2 84 2 with id=1 state=0"],"ok":true,"tick":0}
+{"event":"command_result","id":6,"lines":["Set block at 0 85 0 to id=6 state=0"],"ok":true,"tick":0}
+{"event":"command_result","id":7,"lines":["Set block at 0 85 0 to id=33 state=32768"],"ok":true,"tick":0}
+{"event":"stepped","id":8,"tick":2}
+{"event":"screenshot","height":720,"id":9,"path":"video_+insights/exp_2025-12-27_01/tick_00000002_tag-iter52_waterlogged_slab_t2.png","tick":2,"width":1280}
+{"event":"stepped","id":10,"tick":8}
+{"event":"screenshot","height":720,"id":11,"path":"video_+insights/exp_2025-12-27_01/tick_00000008_tag-iter52_waterlogged_slab_t8.png","tick":8,"width":1280}
+{"event":"ok","id":12}

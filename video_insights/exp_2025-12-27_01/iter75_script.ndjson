@@ -1,0 +1,13 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-0.6}
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter75_weather_clear"}
+{"op":"command","line":"/weather rain"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter75_weather_rain"}
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter75_weather_clear_again"}
+{"op":"shutdown"}

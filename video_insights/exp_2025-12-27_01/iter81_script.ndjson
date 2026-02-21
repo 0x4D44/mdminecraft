@@ -1,0 +1,13 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/weather clear"}
+{"op":"command","line":"/tp 0 96 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.4}
+{"op":"command","line":"/fill -2 80 -2 2 80 2 stone"}
+{"op":"command","line":"/setblock 0 90 0 sand"}
+{"op":"screenshot","tag":"iter81_sand_before"}
+{"op":"step","ticks":10}
+{"op":"command","line":"/setblock 0 90 0 stone keep"}
+{"op":"command","line":"/setblock 0 81 0 stone keep"}
+{"op":"step","ticks":1}
+{"op":"screenshot","tag":"iter81_sand_after"}
+{"op":"shutdown"}

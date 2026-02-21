@@ -1,0 +1,8 @@
+{"event":"connect","peer":"127.0.0.1:33492"}
+{"event":"request","id":1300,"op":"hello","peer":"127.0.0.1:33492","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1300,"version":1},"peer":"127.0.0.1:33492"}
+{"event":"request","id":1301,"op":"get_state","peer":"127.0.0.1:33492"}
+{"event":"response","payload":{"dimension":"overworld","event":"state","id":1301,"mobs_active":20,"mobs_nearby":19,"mobs_total":20,"player":{"health":20.0,"hunger":20.0,"pitch":-0.30000001192092896,"pos":[15.5,81.62100219726562,10.5],"yaw":0.0},"tick":0},"peer":"127.0.0.1:33492"}
+{"event":"request","id":1302,"op":"shutdown","peer":"127.0.0.1:33492"}
+{"event":"response","payload":{"event":"ok","id":1302},"peer":"127.0.0.1:33492"}
+{"event":"disconnect","peer":"127.0.0.1:33492"}

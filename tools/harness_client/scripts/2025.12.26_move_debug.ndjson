@@ -1,0 +1,15 @@
+{"op":"get_state"}
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/time set day"}
+{"op":"command","line":"/tp 0 101 0"}
+{"op":"set_view","yaw":0.0,"pitch":-0.25}
+{"op":"get_state"}
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":40}
+{"op":"get_state"}
+{"op":"screenshot","tag":"move_1"}
+{"op":"step","ticks":40}
+{"op":"get_state"}
+{"op":"screenshot","tag":"move_2"}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"shutdown"}

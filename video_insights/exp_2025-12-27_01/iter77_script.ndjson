@@ -1,0 +1,13 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/weather clear"}
+{"op":"command","line":"/tp -6 86 0"}
+{"op":"set_view","yaw":1.5708,"pitch":-0.2}
+{"op":"command","line":"/fill -2 83 -2 2 83 2 stone"}
+{"op":"command","line":"/setblock 0 90 0 gravel"}
+{"op":"step","ticks":1}
+{"op":"screenshot","tag":"iter77_gravel_fall_t1"}
+{"op":"step","ticks":4}
+{"op":"screenshot","tag":"iter77_gravel_fall_t5"}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"iter77_gravel_fall_t15"}
+{"op":"shutdown"}

@@ -1,0 +1,53 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> morning
+{"op":"command","line":"/time set 1000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_morning"}
+# log-03: weather clear
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_weather_clear"}
+# log-04: look left
+{"op":"set_view","yaw":-1.2,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_left"}
+# log-05: look right
+{"op":"set_view","yaw":1.2,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_look_right"}
+# log-06: sprint forward
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"screenshot","tag":"log-06_sprint"}
+# log-07: jump
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_jump"}
+# log-08: slot 2 use
+{"op":"pulse","actions":{"hotbar_slot":1}}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_use_slot2"}
+# log-09: slot 3 attack
+{"op":"pulse","actions":{"hotbar_slot":2}}
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_attack_slot3"}
+# log-10: crouch walk
+{"op":"set_actions","actions":{"move_y":1.0,"crouch":true}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0,"crouch":false}}
+{"op":"screenshot","tag":"log-10_crouch_walk"}
+# log-11: teleport reframe
+{"op":"command","line":"/tp 20 75 20"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_tp_reframe"}
+# log-12: look down
+{"op":"set_view","yaw":0.0,"pitch":-0.8}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_look_down"}
+{"op":"shutdown"}

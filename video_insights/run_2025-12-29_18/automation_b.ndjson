@@ -1,0 +1,8 @@
+# log-12: slot 8 place (fresh run)
+{"op":"command","line":"/gamemode creative"}
+{"op":"set_view","yaw":0.0,"pitch":-0.85}
+{"op":"pulse","actions":{"hotbar_slot":7}}
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_slot8_place"}
+{"op":"shutdown"}

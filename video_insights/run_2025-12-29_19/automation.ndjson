@@ -1,0 +1,55 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: teleport mid elevation
+{"op":"command","line":"/tp 32 80 32"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_tp_mid"}
+# log-04: look down
+{"op":"set_view","yaw":0.1,"pitch":-0.8}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_down"}
+# log-05: walk long
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":14}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-05_walk_long"}
+# log-06: sprint long
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":14}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"screenshot","tag":"log-06_sprint_long"}
+# log-07: jump hold
+{"op":"set_actions","actions":{"jump_hold":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"jump_hold":false}}
+{"op":"screenshot","tag":"log-07_jump_hold"}
+# log-08: crouch hold
+{"op":"set_actions","actions":{"crouch":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"crouch":false}}
+{"op":"screenshot","tag":"log-08_crouch_hold"}
+# log-09: use hold
+{"op":"set_actions","actions":{"use_hold":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"use_hold":false}}
+{"op":"screenshot","tag":"log-09_use_hold"}
+# log-10: attack hold
+{"op":"set_actions","actions":{"attack_hold":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"attack_hold":false}}
+{"op":"screenshot","tag":"log-10_attack_hold"}
+# log-11: look up
+{"op":"set_view","yaw":0.0,"pitch":0.85}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_look_up"}
+# log-12: teleport reframe
+{"op":"command","line":"/tp -24 85 12"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_tp_reframe"}
+{"op":"shutdown"}

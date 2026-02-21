@@ -1,0 +1,14 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.2}
+{"op":"command","line":"/fill ~-3 ~-6 ~-3 ~3 ~-6 ~3 stone"}
+{"op":"command","line":"/setblock ~1 ~-6 ~ oak_planks"}
+{"op":"command","line":"/setblock ~-1 ~-6 ~ oak_planks"}
+{"op":"command","line":"/setblock ~ ~-5 ~ lava"}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter40_fire_t2"}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"iter40_fire_t12"}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"iter40_fire_t22"}
+{"op":"shutdown"}

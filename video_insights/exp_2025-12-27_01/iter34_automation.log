@@ -1,0 +1,8 @@
+{"event":"connect","peer":"127.0.0.1:35596"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:35596","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:35596"}
+{"event":"request","id":2,"line":"/tp nan 0 0","op":"command","peer":"127.0.0.1:35596"}
+{"event":"response","payload":{"event":"command_result","id":2,"lines":["Error: Invalid coordinate: nan"],"ok":false,"tick":0},"peer":"127.0.0.1:35596"}
+{"event":"request","id":3,"op":"shutdown","peer":"127.0.0.1:35596"}
+{"event":"response","payload":{"event":"ok","id":3},"peer":"127.0.0.1:35596"}
+{"event":"disconnect","peer":"127.0.0.1:35596"}

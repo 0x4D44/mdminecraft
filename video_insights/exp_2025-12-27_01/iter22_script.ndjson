@@ -1,0 +1,9 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 80 0"}
+{"op":"step","ticks":2}
+{"op":"command","line":"/setblock ~ ~ ~ 9999"}
+{"op":"command","line":"/fill ~-1 ~-1 ~-1 ~1 ~1 ~1 9999"}
+{"op":"step","ticks":1}
+{"op":"screenshot","tag":"iter22_invalid_block_rejected"}
+{"op":"get_state"}
+{"op":"shutdown"}

@@ -1,0 +1,8 @@
+   Compiling mdminecraft-world v0.1.0 (/home/md/language/mdminecraft/crates/world)
+   Compiling mdminecraft-assets v0.1.0 (/home/md/language/mdminecraft/crates/assets)
+   Compiling mdminecraft-render v0.1.0 (/home/md/language/mdminecraft/crates/render)
+   Compiling mdminecraft-ui3d v0.1.0 (/home/md/language/mdminecraft/crates/ui3d)
+   Compiling mdminecraft v0.1.0 (/home/md/language/mdminecraft)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.84s
+     Running `target/debug/mdminecraft --headless --no-audio --no-save --world-seed 1 --automation-listen '127.0.0.1:4242' --automation-step --automation-log video_+insights/exp_2025-12-27_01/iter47_automation.log --screenshot-dir video_+insights/exp_2025-12-27_01`
+[2m2025-12-27T17:41:05.399601Z[0m [33m WARN[0m [2mwgpu_hal::vulkan::instance[0m[2m:[0m InstanceFlags::VALIDATION requested, but unable to find layer: VK_LAYER_KHRONOS_validation

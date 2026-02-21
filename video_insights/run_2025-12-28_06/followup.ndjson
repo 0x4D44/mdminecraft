@@ -1,0 +1,5 @@
+# log-15: stop + settle + screenshot
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-15_walk_back"}
+{"op":"shutdown"}

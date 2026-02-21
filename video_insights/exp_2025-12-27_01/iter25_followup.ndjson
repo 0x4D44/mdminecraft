@@ -1,0 +1,12 @@
+{"op":"screenshot","tag":"iter25_forward"}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"set_view","yaw":1.5708,"pitch":-0.1}
+{"op":"step","ticks":10}
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":15}
+{"op":"screenshot","tag":"iter25_turn_right"}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"iter25_jump"}
+{"op":"shutdown"}

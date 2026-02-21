@@ -1,0 +1,41 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: weather -> clear
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_weather_clear"}
+# log-04: look up
+{"op":"set_view","yaw":0.0,"pitch":0.9}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_up"}
+# log-05: weather -> rain
+{"op":"command","line":"/weather rain"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_weather_rain"}
+# log-06: look forward
+{"op":"set_view","yaw":0.0,"pitch":0.0}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_look_forward"}
+# log-07: time -> night
+{"op":"command","line":"/time set night"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_time_night"}
+# log-08: weather -> thunder
+{"op":"command","line":"/weather thunder"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_weather_thunder"}
+# log-09: look up at night storm
+{"op":"set_view","yaw":0.2,"pitch":0.9}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_look_up_night"}
+# log-10: weather -> clear
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_weather_clear"}
+{"op":"shutdown"}

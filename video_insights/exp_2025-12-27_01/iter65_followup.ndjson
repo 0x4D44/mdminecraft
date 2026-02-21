@@ -1,0 +1,4 @@
+{"op":"get_state"}
+{"op":"screenshot","tag":"iter65_fire_spawn_post"}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"iter65_fire_spawn_post_t10"}

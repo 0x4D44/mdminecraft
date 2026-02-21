@@ -1,0 +1,34 @@
+{"event":"connect","peer":"127.0.0.1:39872"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:39872","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:39872"}
+{"event":"request","id":2,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:39872"}
+{"event":"request","id":3,"line":"/tp 0 90 0","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":3,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:39872"}
+{"event":"request","id":4,"op":"set_view","peer":"127.0.0.1:39872","pitch":-1.149999976158142,"yaw":0.0}
+{"event":"response","payload":{"event":"ok","id":4},"peer":"127.0.0.1:39872"}
+{"event":"request","id":5,"line":"/fill ~-3 ~-6 ~-3 ~3 ~-6 ~3 stone","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":5,"lines":["Filled 49 blocks (replace) from -3 84 -3 to 3 84 3 with id=1 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:39872"}
+{"event":"request","id":6,"line":"/setblock ~-1 ~-5 ~ water","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":6,"lines":["Set block at -1 85 0 to id=6 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:39872"}
+{"event":"request","id":7,"line":"/setblock ~1 ~-5 ~ water","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":7,"lines":["Set block at 1 85 0 to id=6 state=0"],"ok":true,"tick":0},"peer":"127.0.0.1:39872"}
+{"event":"request","id":8,"line":"/setblock ~ ~-5 ~ water_flowing 1","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":8,"lines":["Set block at 0 85 0 to id=21 state=1"],"ok":true,"tick":0},"peer":"127.0.0.1:39872"}
+{"event":"request","id":9,"op":"step","peer":"127.0.0.1:39872","ticks":2}
+{"event":"response","payload":{"event":"stepped","id":9,"tick":2},"peer":"127.0.0.1:39872"}
+{"event":"request","id":10,"op":"screenshot","peer":"127.0.0.1:39872","tag":"iter47_infinite_t2"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":10,"path":"video_+insights/exp_2025-12-27_01/tick_00000002_tag-iter47_infinite_t2.png","tick":2,"width":1280},"peer":"127.0.0.1:39872"}
+{"event":"request","id":11,"op":"step","peer":"127.0.0.1:39872","ticks":8}
+{"event":"response","payload":{"event":"stepped","id":11,"tick":10},"peer":"127.0.0.1:39872"}
+{"event":"request","id":12,"op":"screenshot","peer":"127.0.0.1:39872","tag":"iter47_infinite_t10"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":12,"path":"video_+insights/exp_2025-12-27_01/tick_00000010_tag-iter47_infinite_t10.png","tick":10,"width":1280},"peer":"127.0.0.1:39872"}
+{"event":"request","id":13,"line":"/setblock ~-1 ~-5 ~ air","op":"command","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"command_result","id":13,"lines":["Set block at -1 85 0 to id=0 state=0"],"ok":true,"tick":10},"peer":"127.0.0.1:39872"}
+{"event":"request","id":14,"op":"step","peer":"127.0.0.1:39872","ticks":8}
+{"event":"response","payload":{"event":"stepped","id":14,"tick":18},"peer":"127.0.0.1:39872"}
+{"event":"request","id":15,"op":"screenshot","peer":"127.0.0.1:39872","tag":"iter47_infinite_t18"}
+{"event":"response","payload":{"event":"screenshot","height":720,"id":15,"path":"video_+insights/exp_2025-12-27_01/tick_00000018_tag-iter47_infinite_t18.png","tick":18,"width":1280},"peer":"127.0.0.1:39872"}
+{"event":"request","id":16,"op":"shutdown","peer":"127.0.0.1:39872"}
+{"event":"response","payload":{"event":"ok","id":16},"peer":"127.0.0.1:39872"}
+{"event":"disconnect","peer":"127.0.0.1:39872"}

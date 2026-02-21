@@ -1,0 +1,45 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: gamemode -> creative
+{"op":"command","line":"/gamemode creative"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_gm_creative"}
+# log-04: look down for placement
+{"op":"set_view","yaw":0.0,"pitch":-0.75}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_down"}
+# log-05: use click (place)
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-05_use_click"}
+# log-06: attack click (break)
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_attack_click"}
+# log-07: hotbar slot 2
+{"op":"pulse","actions":{"hotbar_slot":1}}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"log-07_hotbar_2"}
+# log-08: hotbar slot 3
+{"op":"pulse","actions":{"hotbar_slot":2}}
+{"op":"step","ticks":2}
+{"op":"screenshot","tag":"log-08_hotbar_3"}
+# log-09: use click (place again)
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_use_click2"}
+# log-10: gamemode -> survival
+{"op":"command","line":"/gamemode survival"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_gm_survival"}
+# log-11: jump pulse
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_jump"}
+{"op":"shutdown"}

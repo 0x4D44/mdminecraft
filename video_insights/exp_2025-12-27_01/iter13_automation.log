@@ -1,0 +1,38 @@
+{"event":"connect","peer":"127.0.0.1:56854"}
+{"event":"request","id":900,"op":"hello","peer":"127.0.0.1:56854","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":900,"version":1},"peer":"127.0.0.1:56854"}
+{"event":"request","id":901,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":901,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:56854"}
+{"event":"request","id":902,"line":"/time set day","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":902,"lines":["Time set to tick 1000"],"ok":true,"tick":0},"peer":"127.0.0.1:56854"}
+{"event":"request","id":903,"line":"/tp 0 80 0","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":903,"lines":["Teleported to 0.00 80.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:56854"}
+{"event":"request","id":904,"op":"set_view","peer":"127.0.0.1:56854","pitch":-0.10000000149011612,"yaw":0.0}
+{"event":"response","payload":{"event":"ok","id":904},"peer":"127.0.0.1:56854"}
+{"event":"request","id":905,"op":"step","peer":"127.0.0.1:56854","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":905,"tick":5},"peer":"127.0.0.1:56854"}
+{"event":"request","id":906,"line":"/weather rain","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":906,"lines":["Weather set to Precipitation"],"ok":true,"tick":5},"peer":"127.0.0.1:56854"}
+{"event":"request","id":907,"op":"step","peer":"127.0.0.1:56854","ticks":20}
+{"event":"response","payload":{"event":"stepped","id":907,"tick":25},"peer":"127.0.0.1:56854"}
+{"event":"request","id":908,"op":"screenshot","peer":"127.0.0.1:56854","tag":"iter13_rain"}
+{"event":"response","payload":{"event":"screenshot","height":360,"id":908,"path":"video_+insights/exp_2025-12-27_01/tick_00000025_tag-iter13_rain.png","tick":25,"width":640},"peer":"127.0.0.1:56854"}
+{"event":"request","id":909,"line":"/weather clear","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":909,"lines":["Weather set to Clear"],"ok":true,"tick":25},"peer":"127.0.0.1:56854"}
+{"event":"request","id":910,"op":"step","peer":"127.0.0.1:56854","ticks":10}
+{"event":"response","payload":{"event":"stepped","id":910,"tick":35},"peer":"127.0.0.1:56854"}
+{"event":"request","id":911,"op":"screenshot","peer":"127.0.0.1:56854","tag":"iter13_clear"}
+{"event":"response","payload":{"event":"screenshot","height":360,"id":911,"path":"video_+insights/exp_2025-12-27_01/tick_00000035_tag-iter13_clear.png","tick":35,"width":640},"peer":"127.0.0.1:56854"}
+{"event":"request","id":912,"line":"/weather thunder","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":912,"lines":["Weather set to Thunderstorm"],"ok":true,"tick":35},"peer":"127.0.0.1:56854"}
+{"event":"request","id":913,"op":"step","peer":"127.0.0.1:56854","ticks":20}
+{"event":"response","payload":{"event":"stepped","id":913,"tick":55},"peer":"127.0.0.1:56854"}
+{"event":"request","id":914,"op":"screenshot","peer":"127.0.0.1:56854","tag":"iter13_thunder"}
+{"event":"response","payload":{"event":"screenshot","height":360,"id":914,"path":"video_+insights/exp_2025-12-27_01/tick_00000055_tag-iter13_thunder.png","tick":55,"width":640},"peer":"127.0.0.1:56854"}
+{"event":"request","id":915,"line":"/help","op":"command","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"command_result","id":915,"lines":["Commands:","  /help","  /seed","  /say <message...>","  /clear [@s/@p/@a/@r] [item] [maxCount]","  /kill [@s/@p/@a/@r]","  /tp [@s/@p/@a/@r] <x> <y> <z>  (supports ~offset)","  /dimension <overworld|nether|end>","  /give [@s/@p/@a/@r] <item> [count]  item = minecraft:<name> | block:<name> | item:<id> | tool:<type>:<material>","  /time set <tick|day|noon|night|midnight>","  /time add <delta>","  /weather <clear|rain>","  /gamemode <survival|creative> [@s/@p/@a/@r]","  /effect give [@s/@p/@a/@r] <effect> [seconds] [amplifier]","  /effect clear [@s/@p/@a/@r] [effect]","  /setblock <x> <y> <z> <block|id>[props] [state] [replace|keep|destroy]   (supports ~offset; coords are ints)","  /fill <x1> <y1> <z1> <x2> <y2> <z2> <block|id>[props] [state] [replace|outline|hollow|keep|destroy] [filter]","       (limit: 32768 blocks)","  /clone <x1> <y1> <z1> <x2> <y2> <z2> <x> <y> <z> [replace|masked]","       (limit: 32768 blocks)","  /summon <mob> [x y z]       (supports ~offset)","Note: commands are local-only in this build."],"ok":true,"tick":55},"peer":"127.0.0.1:56854"}
+{"event":"request","id":916,"op":"get_state","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"dimension":"overworld","event":"state","id":916,"mobs_active":62,"mobs_nearby":59,"mobs_total":62,"player":{"health":20.0,"hunger":20.0,"pitch":-0.10000000149011612,"pos":[0.0,80.0,0.0],"yaw":0.0},"tick":55},"peer":"127.0.0.1:56854"}
+{"event":"request","id":917,"op":"shutdown","peer":"127.0.0.1:56854"}
+{"event":"response","payload":{"event":"ok","id":917},"peer":"127.0.0.1:56854"}
+{"event":"disconnect","peer":"127.0.0.1:56854"}

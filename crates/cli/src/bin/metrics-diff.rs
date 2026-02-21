@@ -50,7 +50,7 @@ enum DiffStatus {
 }
 
 impl DiffStatus {
-    fn to_emoji(&self) -> &'static str {
+    fn emoji(self) -> &'static str {
         match self {
             DiffStatus::Pass => "✅",
             DiffStatus::Warning => "⚠️",
@@ -58,7 +58,7 @@ impl DiffStatus {
         }
     }
 
-    fn to_string(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             DiffStatus::Pass => "PASS",
             DiffStatus::Warning => "WARN",
@@ -68,7 +68,18 @@ impl DiffStatus {
 }
 
 fn parse_args() -> Result<Config, String> {
-    let args: Vec<String> = std::env::args().collect();
+    parse_args_from_iter(std::env::args())
+}
+
+fn parse_args_from_iter<I>(args: I) -> Result<Config, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let args: Vec<String> = args.into_iter().collect();
+    let program = args
+        .get(0)
+        .map(|s| s.as_str())
+        .unwrap_or("metrics-diff");
 
     if args.len() < 3 {
         return Err(format!(
@@ -77,7 +88,7 @@ fn parse_args() -> Result<Config, String> {
                --format <text|json>           Output format (default: text)\n\
                --threshold-warning <percent>  Warning threshold (default: 0.05)\n\
                --threshold-failure <percent>  Failure threshold (default: 0.10)",
-            args[0]
+            program
         ));
     }
 
@@ -318,7 +329,7 @@ fn print_text_report(
     );
 
     for diff in diffs {
-        let status_str = format!("{} {}", diff.status.to_emoji(), diff.status.to_string());
+        let status_str = format!("{} {}", diff.status.emoji(), diff.status.as_str());
         println!(
             "│ {:<34} │ {:>12.3} │ {:>12.3} │ {:>7.2}% │ {:<6} │",
             truncate(&diff.name, 34),
@@ -375,6 +386,11 @@ fn print_text_report(
 }
 
 fn print_json_report(diffs: &[MetricDiff]) {
+    let report = build_json_report(diffs);
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+}
+
+fn build_json_report(diffs: &[MetricDiff]) -> serde_json::Value {
     let mut report = HashMap::new();
 
     let metrics: Vec<HashMap<&str, serde_json::Value>> = diffs
@@ -385,7 +401,7 @@ fn print_json_report(diffs: &[MetricDiff]) {
             m.insert("baseline", serde_json::json!(d.baseline));
             m.insert("current", serde_json::json!(d.current));
             m.insert("change_percent", serde_json::json!(d.change_percent));
-            m.insert("status", serde_json::json!(d.status.to_string()));
+            m.insert("status", serde_json::json!(d.status.as_str()));
             m
         })
         .collect();
@@ -415,7 +431,7 @@ fn print_json_report(diffs: &[MetricDiff]) {
         }),
     );
 
-    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    serde_json::json!(report)
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
@@ -423,6 +439,115 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..max_len - 3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mdminecraft_testkit::{MetricsReportBuilder, TestExecutionMetrics, TestResult};
+
+    fn default_config() -> Config {
+        Config {
+            baseline_path: PathBuf::from("baseline.json"),
+            current_path: PathBuf::from("current.json"),
+            threshold_warning: 0.05,
+            threshold_failure: 0.10,
+            format: OutputFormat::Text,
+        }
+    }
+
+    fn report_with_duration(name: &str, duration: f64) -> MetricsReport {
+        MetricsReportBuilder::new(name)
+            .result(TestResult::Pass)
+            .execution(TestExecutionMetrics {
+                duration_seconds: duration,
+                peak_memory_mb: None,
+                assertions_checked: None,
+                validations_passed: None,
+            })
+            .build()
+    }
+
+    #[test]
+    fn parse_args_defaults() {
+        let config = parse_args_from_iter(vec![
+            "metrics-diff".to_string(),
+            "base.json".to_string(),
+            "curr.json".to_string(),
+        ])
+        .expect("config");
+        assert_eq!(config.baseline_path, PathBuf::from("base.json"));
+        assert_eq!(config.current_path, PathBuf::from("curr.json"));
+        assert_eq!(config.threshold_warning, 0.05);
+        assert_eq!(config.threshold_failure, 0.10);
+        assert!(matches!(config.format, OutputFormat::Text));
+    }
+
+    #[test]
+    fn parse_args_format_json() {
+        let config = parse_args_from_iter(vec![
+            "metrics-diff".to_string(),
+            "base.json".to_string(),
+            "curr.json".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ])
+        .expect("config");
+        assert!(matches!(config.format, OutputFormat::Json));
+    }
+
+    #[test]
+    fn compare_metric_thresholds_lower_is_better() {
+        let config = default_config();
+        let fail = compare_metric("t", 100.0, 120.0, &config, true);
+        assert_eq!(fail.status, DiffStatus::Failure);
+        let warn = compare_metric("t", 100.0, 107.0, &config, true);
+        assert_eq!(warn.status, DiffStatus::Warning);
+        let pass = compare_metric("t", 100.0, 101.0, &config, true);
+        assert_eq!(pass.status, DiffStatus::Pass);
+    }
+
+    #[test]
+    fn compare_metric_thresholds_higher_is_better() {
+        let config = default_config();
+        let fail = compare_metric("t", 100.0, 80.0, &config, false);
+        assert_eq!(fail.status, DiffStatus::Failure);
+        let warn = compare_metric("t", 100.0, 94.0, &config, false);
+        assert_eq!(warn.status, DiffStatus::Warning);
+        let pass = compare_metric("t", 100.0, 101.0, &config, false);
+        assert_eq!(pass.status, DiffStatus::Pass);
+    }
+
+    #[test]
+    fn compare_metrics_includes_execution() {
+        let config = default_config();
+        let baseline = report_with_duration("baseline", 1.0);
+        let current = report_with_duration("current", 1.2);
+        let diffs = compare_metrics(&baseline, &current, &config);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].name, "execution.duration_seconds");
+        assert_eq!(diffs[0].status, DiffStatus::Failure);
+    }
+
+    #[test]
+    fn build_json_report_counts_summary() {
+        let config = default_config();
+        let diff_pass = compare_metric("a", 1.0, 1.0, &config, true);
+        let diff_warn = compare_metric("b", 1.0, 1.06, &config, true);
+        let diff_fail = compare_metric("c", 1.0, 1.2, &config, true);
+        let report = build_json_report(&[diff_pass, diff_warn, diff_fail]);
+        let summary = &report["summary"];
+        assert_eq!(summary["total"].as_u64(), Some(3));
+        assert_eq!(summary["passed"].as_u64(), Some(1));
+        assert_eq!(summary["warnings"].as_u64(), Some(1));
+        assert_eq!(summary["failures"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn truncate_short_and_long() {
+        assert_eq!(truncate("short", 10), "short");
+        assert_eq!(truncate("longer-than", 8), "longe...");
     }
 }
 

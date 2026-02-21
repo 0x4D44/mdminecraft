@@ -1,0 +1,3 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"dimension":"overworld","event":"state","id":2,"mobs_active":65,"mobs_nearby":38,"mobs_total":65,"player":{"health":20.0,"hunger":20.0,"pitch":-1.2000000476837158,"pos":[0.0,90.0,0.0],"yaw":0.0},"tick":140}
+{"event":"ok","id":3}

@@ -1,0 +1,10 @@
+{"event":"connect","peer":"127.0.0.1:53084"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:53084","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:53084"}
+{"event":"request","id":2,"line":"/tp nan 0 0","op":"command","peer":"127.0.0.1:53084"}
+{"event":"response","payload":{"event":"command_result","id":2,"lines":["Teleported to NaN 0.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:53084"}
+{"event":"request","id":3,"op":"get_state","peer":"127.0.0.1:53084"}
+{"event":"response","payload":{"dimension":"overworld","event":"state","id":3,"mobs_active":26,"mobs_nearby":0,"mobs_total":26,"player":{"health":20.0,"hunger":20.0,"pitch":-0.30000001192092896,"pos":[0,0.0,0.0],"yaw":0.0},"tick":0},"peer":"127.0.0.1:53084"}
+{"event":"request","id":4,"op":"shutdown","peer":"127.0.0.1:53084"}
+{"event":"response","payload":{"event":"ok","id":4},"peer":"127.0.0.1:53084"}
+{"event":"disconnect","peer":"127.0.0.1:53084"}

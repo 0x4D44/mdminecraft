@@ -1,0 +1,66 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: weather -> clear
+{"op":"command","line":"/weather clear"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_weather_clear"}
+# log-04: look forward
+{"op":"set_view","yaw":0.3,"pitch":0.0}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_forward"}
+# log-05: sprint forward
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":10}
+{"op":"screenshot","tag":"log-05_sprint_forward"}
+# log-06: turn right
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"set_view","yaw":1.6,"pitch":-0.1}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_turn_right"}
+# log-07: strafe right
+{"op":"set_actions","actions":{"move_x":1.0}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_strafe_right"}
+# log-08: jump
+{"op":"set_actions","actions":{"move_x":0.0}}
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-08_jump"}
+# log-09: attack click at ground
+{"op":"set_view","yaw":1.6,"pitch":-0.75}
+{"op":"pulse","actions":{"attack_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_attack"}
+# log-10: use click at ground
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_use"}
+# log-11: time -> night
+{"op":"command","line":"/time set night"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_time_night"}
+# log-12: weather -> rain
+{"op":"command","line":"/weather rain"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_weather_rain"}
+# log-13: look up
+{"op":"set_view","yaw":0.0,"pitch":0.9}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-13_look_up"}
+# log-14: teleport offset
+{"op":"command","line":"/tp ~-12 80 ~8"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-14_tp_offset"}
+# log-15: walk after teleport
+{"op":"set_view","yaw":-2.0,"pitch":0.0}
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":10}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-15_walk_back"}
+{"op":"shutdown"}

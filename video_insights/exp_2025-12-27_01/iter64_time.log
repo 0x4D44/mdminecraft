@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "/home/md/language/mdminecraft/tools/harness_client/mdm_harness_client.py", line 196, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/md/language/mdminecraft/tools/harness_client/mdm_harness_client.py", line 178, in main
+    resp = read_json_line(reader)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/md/language/mdminecraft/tools/harness_client/mdm_harness_client.py", line 88, in read_json_line
+    raise EOFError("connection closed")
+EOFError: connection closed
+real 210.45
+user 0.08
+sys 0.02

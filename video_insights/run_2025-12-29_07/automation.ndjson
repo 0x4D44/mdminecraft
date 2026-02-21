@@ -1,0 +1,53 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> noon
+{"op":"command","line":"/time set 6000"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_noon"}
+# log-03: teleport high
+{"op":"command","line":"/tp 16 90 16"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_tp_high"}
+# log-04: look down
+{"op":"set_view","yaw":0.3,"pitch":-0.7}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_down"}
+# log-05: walk forward
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-05_walk_forward"}
+# log-06: jump
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_jump"}
+# log-07: crouch edge
+{"op":"set_actions","actions":{"crouch":true}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"crouch":false}}
+{"op":"screenshot","tag":"log-07_crouch_edge"}
+# log-08: step back
+{"op":"set_actions","actions":{"move_y":-1.0}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-08_step_back"}
+# log-09: teleport low
+{"op":"command","line":"/tp 16 63 24"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_tp_low"}
+# log-10: look right
+{"op":"set_view","yaw":1.2,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_look_right"}
+# log-11: walk forward
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-11_walk_forward"}
+# log-12: use click
+{"op":"pulse","actions":{"use_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_use"}
+{"op":"shutdown"}

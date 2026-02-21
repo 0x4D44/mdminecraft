@@ -1,0 +1,53 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: teleport mid elevation
+{"op":"command","line":"/tp 24 78 -24"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_tp_mid"}
+# log-04: look down
+{"op":"set_view","yaw":0.1,"pitch":-0.8}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_look_down"}
+# log-05: sprint A
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"screenshot","tag":"log-05_sprint_a"}
+# log-06: crouch A
+{"op":"set_actions","actions":{"move_y":1.0,"crouch":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"move_y":0.0,"crouch":false}}
+{"op":"screenshot","tag":"log-06_crouch_a"}
+# log-07: sprint B
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"screenshot","tag":"log-07_sprint_b"}
+# log-08: crouch B
+{"op":"set_actions","actions":{"move_y":1.0,"crouch":true}}
+{"op":"step","ticks":8}
+{"op":"set_actions","actions":{"move_y":0.0,"crouch":false}}
+{"op":"screenshot","tag":"log-08_crouch_b"}
+# log-09: jump
+{"op":"pulse","actions":{"jump_click":true}}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_jump"}
+# log-10: look left
+{"op":"set_view","yaw":-0.9,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_look_left"}
+# log-11: look right
+{"op":"set_view","yaw":0.9,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_look_right"}
+# log-12: teleport reframe
+{"op":"command","line":"/tp -32 82 16"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_tp_reframe"}
+{"op":"shutdown"}

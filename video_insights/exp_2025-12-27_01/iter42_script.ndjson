@@ -1,0 +1,13 @@
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.15}
+{"op":"command","line":"/fill ~-4 ~-6 ~-4 ~4 ~-6 ~4 stone"}
+{"op":"command","line":"/setblock ~ ~-5 ~ water"}
+{"op":"command","line":"/setblock ~2 ~-5 ~ lava"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"iter42_lava_flow_t5"}
+{"op":"step","ticks":7}
+{"op":"screenshot","tag":"iter42_lava_flow_t12"}
+{"op":"step","ticks":8}
+{"op":"screenshot","tag":"iter42_lava_flow_t20"}
+{"op":"shutdown"}

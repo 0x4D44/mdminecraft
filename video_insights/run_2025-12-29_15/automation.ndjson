@@ -1,0 +1,52 @@
+# log-01: spawn baseline
+{"op":"get_state"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-01_spawn"}
+# log-02: time -> day
+{"op":"command","line":"/time set day"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-02_time_day"}
+# log-03: teleport coord A
+{"op":"command","line":"/tp 64 63 64"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-03_tp_a"}
+# log-04: scan A
+{"op":"set_view","yaw":0.2,"pitch":-0.75}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-04_scan_a"}
+# log-05: walk A
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":10}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-05_walk_a"}
+# log-06: teleport coord B
+{"op":"command","line":"/tp -48 63 96"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-06_tp_b"}
+# log-07: scan B
+{"op":"set_view","yaw":-0.6,"pitch":-0.75}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-07_scan_b"}
+# log-08: sprint B
+{"op":"set_actions","actions":{"move_y":1.0,"sprint":true}}
+{"op":"step","ticks":10}
+{"op":"set_actions","actions":{"move_y":0.0,"sprint":false}}
+{"op":"screenshot","tag":"log-08_walk_b"}
+# log-09: teleport coord C
+{"op":"command","line":"/tp 96 63 -48"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-09_tp_c"}
+# log-10: scan C
+{"op":"set_view","yaw":1.0,"pitch":-0.2}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-10_scan_c"}
+# log-11: walk C
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":10}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-11_walk_c"}
+# log-12: teleport reframe
+{"op":"command","line":"/tp 0 70 -80"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_tp_reframe"}
+{"op":"shutdown"}

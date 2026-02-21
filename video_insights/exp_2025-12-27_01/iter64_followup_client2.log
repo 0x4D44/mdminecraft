@@ -1,0 +1,12 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"code":"internal","event":"error","message":"timeout waiting for response"}
+Traceback (most recent call last):
+  File "/home/md/language/mdminecraft/tools/harness_client/mdm_harness_client.py", line 196, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/md/language/mdminecraft/tools/harness_client/mdm_harness_client.py", line 178, in main
+    resp = read_json_line(reader)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/md/language/mdminecraft/tools/harness_client/mdm_harness_client.py", line 88, in read_json_line
+    raise EOFError("connection closed")
+EOFError: connection closed

@@ -1,0 +1,4 @@
+{"op":"screenshot","tag":"iter31_water_t12"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"iter31_water_t17"}
+{"op":"shutdown"}

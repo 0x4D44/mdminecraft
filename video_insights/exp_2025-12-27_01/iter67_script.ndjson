@@ -1,0 +1,12 @@
+{"op":"command","line":"/weather clear"}
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp 0 90 0"}
+{"op":"set_view","yaw":0.0,"pitch":-1.2}
+{"op":"command","line":"/fill -2 84 -2 2 84 2 stone"}
+{"op":"command","line":"/setblock 0 85 0 fire"}
+{"op":"step","ticks":1}
+{"op":"screenshot","tag":"iter67_fire_direct_t1"}
+{"op":"command","line":"/tp 0 86 -4"}
+{"op":"set_view","yaw":0.0,"pitch":-0.6}
+{"op":"screenshot","tag":"iter67_fire_direct_side"}
+{"op":"shutdown"}

@@ -1,0 +1,11 @@
+# log-11: walk C (fresh run)
+{"op":"command","line":"/tp 192 63 -320"}
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":12}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-11_walk_c"}
+# log-12: teleport reframe
+{"op":"command","line":"/tp 0 80 -200"}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-12_tp_reframe"}
+{"op":"shutdown"}

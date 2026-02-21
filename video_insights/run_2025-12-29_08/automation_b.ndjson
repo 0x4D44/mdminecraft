@@ -1,0 +1,13 @@
+# log-11: look down (fresh run)
+{"op":"command","line":"/time set 23000"}
+{"op":"command","line":"/weather clear"}
+{"op":"command","line":"/tp 24 85 8"}
+{"op":"set_view","yaw":0.5,"pitch":-0.7}
+{"op":"step","ticks":5}
+{"op":"screenshot","tag":"log-11_look_down"}
+# log-12: step forward
+{"op":"set_actions","actions":{"move_y":1.0}}
+{"op":"step","ticks":5}
+{"op":"set_actions","actions":{"move_y":0.0}}
+{"op":"screenshot","tag":"log-12_step_forward"}
+{"op":"shutdown"}

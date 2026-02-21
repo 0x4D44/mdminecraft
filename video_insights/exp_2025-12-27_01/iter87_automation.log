@@ -1,0 +1,15 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0}
+{"event":"command_result","id":3,"lines":["Weather set to Clear"],"ok":true,"tick":0}
+{"event":"command_result","id":4,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0}
+{"event":"ok","id":5}
+{"event":"command_result","id":6,"lines":["Filled 25 blocks (replace) from -2 80 -2 to 2 80 2 with id=1 state=0"],"ok":true,"tick":0}
+{"event":"command_result","id":7,"lines":["Filled 27 blocks (replace) from -1 81 -1 to 1 83 1 with id=1 state=0"],"ok":true,"tick":0}
+{"event":"command_result","id":8,"lines":["Set block at 0 90 0 to id=4 state=0"],"ok":true,"tick":0}
+{"event":"screenshot","height":720,"id":9,"path":"video_+insights/exp_2025-12-27_01/tick_00000000_tag-iter87_sand_before.png","tick":0,"width":1280}
+{"event":"stepped","id":10,"tick":10}
+{"event":"command_result","id":11,"lines":["Set block at 0 90 0 to id=1 state=0"],"ok":true,"tick":10}
+{"event":"command_result","id":12,"lines":["Skipped setblock at 0 81 0 (keep; existing id=1)"],"ok":true,"tick":10}
+{"event":"stepped","id":13,"tick":11}
+{"event":"screenshot","height":720,"id":14,"path":"video_+insights/exp_2025-12-27_01/tick_00000011_tag-iter87_sand_after.png","tick":11,"width":1280}
+{"event":"ok","id":15}

@@ -1,0 +1,36 @@
+{"event":"connect","peer":"127.0.0.1:54750"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:54750","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:54750"}
+{"event":"response","payload":{"event":"command_result","lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"line":"/tp 0 90 0","op":"command","peer":"127.0.0.1:54750"}
+{"event":"response","payload":{"event":"command_result","lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"op":"set_view","peer":"127.0.0.1:54750","pitch":-0.6000000238418579,"yaw":0.0}
+{"event":"response","payload":{"event":"ok"},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"line":"/weather clear","op":"command","peer":"127.0.0.1:54750"}
+{"event":"response","payload":{"event":"command_result","lines":["Weather set to Clear"],"ok":true,"tick":0},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"op":"step","peer":"127.0.0.1:54750","ticks":2}
+{"event":"response","payload":{"event":"stepped","tick":2},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"op":"screenshot","peer":"127.0.0.1:54750","tag":"iter76_weather_clear"}
+{"event":"response","payload":{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000002_tag-iter76_weather_clear.png","tick":2,"width":1280},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"line":"/weather rain","op":"command","peer":"127.0.0.1:54750"}
+{"event":"response","payload":{"event":"command_result","lines":["Weather set to Precipitation"],"ok":true,"tick":2},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"op":"step","peer":"127.0.0.1:54750","ticks":30}
+{"event":"response","payload":{"event":"stepped","tick":32},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"op":"screenshot","peer":"127.0.0.1:54750","tag":"iter76_weather_rain_t30"}
+{"event":"response","payload":{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000032_tag-iter76_weather_rain_t30.png","tick":32,"width":1280},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"line":"/weather clear","op":"command","peer":"127.0.0.1:54750"}
+{"event":"response","payload":{"event":"command_result","lines":["Weather set to Clear"],"ok":true,"tick":32},"peer":"127.0.0.1:54750"}
+{"event":"request","id":null,"op":"step","peer":"127.0.0.1:54750","ticks":30}
+{"event":"response","payload":{"event":"stepped","tick":62},"peer":"127.0.0.1:54750"}
+{"event":"disconnect","peer":"127.0.0.1:54750"}
+{"event":"connect","peer":"127.0.0.1:54004"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:54004","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:54004"}
+{"event":"request","id":null,"op":"step","peer":"127.0.0.1:54004","ticks":30}
+{"event":"response","payload":{"event":"stepped","tick":92},"peer":"127.0.0.1:54004"}
+{"event":"request","id":null,"op":"screenshot","peer":"127.0.0.1:54004","tag":"iter76_weather_clear_t60"}
+{"event":"response","payload":{"event":"screenshot","height":720,"path":"video_+insights/exp_2025-12-27_01/tick_00000092_tag-iter76_weather_clear_t60.png","tick":92,"width":1280},"peer":"127.0.0.1:54004"}
+{"event":"request","id":null,"op":"shutdown","peer":"127.0.0.1:54004"}
+{"event":"response","payload":{"event":"ok"},"peer":"127.0.0.1:54004"}
+{"event":"disconnect","peer":"127.0.0.1:54004"}

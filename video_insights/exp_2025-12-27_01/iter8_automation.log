@@ -1,0 +1,40 @@
+{"event":"connect","peer":"127.0.0.1:46378"}
+{"event":"request","id":400,"op":"hello","peer":"127.0.0.1:46378","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":400,"version":1},"peer":"127.0.0.1:46378"}
+{"event":"request","id":401,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"command_result","id":401,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:46378"}
+{"event":"request","id":402,"line":"/time set day","op":"command","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"command_result","id":402,"lines":["Time set to tick 1000"],"ok":true,"tick":0},"peer":"127.0.0.1:46378"}
+{"event":"request","id":403,"line":"/tp 0 65 0","op":"command","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"command_result","id":403,"lines":["Teleported to 0.00 65.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:46378"}
+{"event":"request","id":404,"op":"set_view","peer":"127.0.0.1:46378","pitch":-0.10000000149011612,"yaw":0.0}
+{"event":"response","payload":{"event":"ok","id":404},"peer":"127.0.0.1:46378"}
+{"event":"request","id":405,"op":"step","peer":"127.0.0.1:46378","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":405,"tick":5},"peer":"127.0.0.1:46378"}
+{"event":"request","id":406,"line":"/summon cow ~3 ~0 ~0","op":"command","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"command_result","id":406,"lines":["Summoned Cow at 3.00 65.00 0.00"],"ok":true,"tick":5},"peer":"127.0.0.1:46378"}
+{"event":"request","id":407,"line":"/summon zombie ~-3 ~0 ~0","op":"command","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"command_result","id":407,"lines":["Summoned Zombie at -3.00 65.00 0.00"],"ok":true,"tick":5},"peer":"127.0.0.1:46378"}
+{"event":"request","id":408,"line":"/summon skeleton ~0 ~0 ~3","op":"command","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"command_result","id":408,"lines":["Summoned Skeleton at 0.00 65.00 3.00"],"ok":true,"tick":5},"peer":"127.0.0.1:46378"}
+{"event":"request","id":409,"op":"step","peer":"127.0.0.1:46378","ticks":5}
+{"event":"response","payload":{"event":"stepped","id":409,"tick":10},"peer":"127.0.0.1:46378"}
+{"event":"request","id":410,"op":"screenshot","peer":"127.0.0.1:46378","tag":"iter8_mobs_ground"}
+{"event":"response","payload":{"event":"screenshot","height":360,"id":410,"path":"video_+insights/exp_2025-12-27_01/tick_00000010_tag-iter8_mobs_ground.png","tick":10,"width":640},"peer":"127.0.0.1:46378"}
+{"event":"request","id":411,"op":"set_view","peer":"127.0.0.1:46378","pitch":-0.10000000149011612,"yaw":1.5707963705062866}
+{"event":"response","payload":{"event":"ok","id":411},"peer":"127.0.0.1:46378"}
+{"event":"request","id":412,"op":"step","peer":"127.0.0.1:46378","ticks":2}
+{"event":"response","payload":{"event":"stepped","id":412,"tick":12},"peer":"127.0.0.1:46378"}
+{"event":"request","id":413,"op":"screenshot","peer":"127.0.0.1:46378","tag":"iter8_turn_90"}
+{"event":"response","payload":{"event":"screenshot","height":360,"id":413,"path":"video_+insights/exp_2025-12-27_01/tick_00000012_tag-iter8_turn_90.png","tick":12,"width":640},"peer":"127.0.0.1:46378"}
+{"event":"request","id":414,"op":"set_view","peer":"127.0.0.1:46378","pitch":-0.10000000149011612,"yaw":3.1415927410125732}
+{"event":"response","payload":{"event":"ok","id":414},"peer":"127.0.0.1:46378"}
+{"event":"request","id":415,"op":"step","peer":"127.0.0.1:46378","ticks":2}
+{"event":"response","payload":{"event":"stepped","id":415,"tick":14},"peer":"127.0.0.1:46378"}
+{"event":"request","id":416,"op":"screenshot","peer":"127.0.0.1:46378","tag":"iter8_turn_180"}
+{"event":"response","payload":{"event":"screenshot","height":360,"id":416,"path":"video_+insights/exp_2025-12-27_01/tick_00000014_tag-iter8_turn_180.png","tick":14,"width":640},"peer":"127.0.0.1:46378"}
+{"event":"request","id":417,"op":"get_state","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"dimension":"overworld","event":"state","id":417,"mobs_active":44,"mobs_nearby":44,"mobs_total":44,"player":{"health":20.0,"hunger":20.0,"pitch":-0.10000000149011612,"pos":[0.0,65.0,0.0],"yaw":3.1415927410125732},"tick":14},"peer":"127.0.0.1:46378"}
+{"event":"request","id":418,"op":"shutdown","peer":"127.0.0.1:46378"}
+{"event":"response","payload":{"event":"ok","id":418},"peer":"127.0.0.1:46378"}
+{"event":"disconnect","peer":"127.0.0.1:46378"}

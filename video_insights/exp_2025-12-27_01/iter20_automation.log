@@ -1,0 +1,22 @@
+{"event":"connect","peer":"127.0.0.1:49456"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:49456","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:49456"}
+{"event":"request","id":2,"op":"hello","peer":"127.0.0.1:49456","token_present":false,"version":1}
+{"event":"response","payload":{"code":"bad_request","event":"error","id":2,"message":"hello already completed"},"peer":"127.0.0.1:49456"}
+{"event":"request","id":3,"line":"/gamemode creative","op":"command","peer":"127.0.0.1:49456"}
+{"event":"response","payload":{"event":"command_result","id":3,"lines":["Gamemode set to Creative"],"ok":true,"tick":0},"peer":"127.0.0.1:49456"}
+{"event":"request","id":4,"line":"/tp 0 80 0","op":"command","peer":"127.0.0.1:49456"}
+{"event":"response","payload":{"event":"command_result","id":4,"lines":["Teleported to 0.00 80.00 0.00"],"ok":true,"tick":0},"peer":"127.0.0.1:49456"}
+{"event":"request","id":5,"op":"step","peer":"127.0.0.1:49456","ticks":2}
+{"event":"response","payload":{"event":"stepped","id":5,"tick":2},"peer":"127.0.0.1:49456"}
+{"event":"request","id":6,"line":"/setblock ~ ~ ~ 9999","op":"command","peer":"127.0.0.1:49456"}
+{"event":"response","payload":{"event":"command_result","id":6,"lines":["Set block at 0 80 0 to id=9999 state=0"],"ok":true,"tick":2},"peer":"127.0.0.1:49456"}
+{"event":"request","id":7,"op":"step","peer":"127.0.0.1:49456","ticks":1}
+{"event":"response","payload":{"event":"stepped","id":7,"tick":3},"peer":"127.0.0.1:49456"}
+{"event":"disconnect","peer":"127.0.0.1:49456"}
+{"event":"connect","peer":"127.0.0.1:54704"}
+{"event":"request","id":1,"op":"hello","peer":"127.0.0.1:54704","token_present":false,"version":1}
+{"event":"response","payload":{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1},"peer":"127.0.0.1:54704"}
+{"event":"request","id":2,"op":"shutdown","peer":"127.0.0.1:54704"}
+{"event":"response","payload":{"event":"ok","id":2},"peer":"127.0.0.1:54704"}
+{"event":"disconnect","peer":"127.0.0.1:54704"}

@@ -7,15 +7,27 @@ struct TimeUniform {
     sun_dir: vec4<f32>,
     fog_color: vec4<f32>,
     fog_params: vec4<f32>,
+    sky_color: vec4<f32>,
 }
 
 @group(0) @binding(0)
 var<uniform> time_uniform: TimeUniform;
 
+struct CameraUniform {
+    forward: vec4<f32>,
+    right: vec4<f32>,
+    up: vec4<f32>,
+    // x: tan_half_fov (vertical), y: aspect, z/w: reserved
+    params: vec4<f32>,
+}
+
+@group(1) @binding(0)
+var<uniform> camera_uniform: CameraUniform;
+
 // Vertex output / Fragment input
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(0) view_dir: vec3<f32>,
+    @location(0) uv: vec2<f32>,
 }
 
 // Vertex shader - generates full-screen triangle
@@ -28,10 +40,11 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let x = f32((vertex_index & 1u) << 2u) - 1.0;  // -1 or 3
     let y = f32((vertex_index & 2u) << 1u) - 1.0;  // -1 or 3
 
-    let dir = normalize(vec3<f32>(x, y, 1.0));
-
     out.clip_position = vec4<f32>(x, y, 1.0, 1.0);  // Far plane (z=1)
-    out.view_dir = dir;
+    // Map clip-space [-1,1] across the screen to UV [0,1]. The full-screen triangle uses
+    // vertices outside [-1,1] (x/y = 3), so UVs outside [0,1] are expected at vertices and
+    // will interpolate correctly across the covered area.
+    out.uv = vec2<f32>(x, y) * 0.5 + vec2<f32>(0.5, 0.5);
 
     return out;
 }
@@ -95,15 +108,57 @@ fn get_sky_colors(time: f32) -> SkyColors {
 // Fragment shader - creates gradient with time-of-day
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Normalize Y coordinate from [-1, 1] to [0, 1]
-    // -1 (bottom) -> 0, +1 (top) -> 1
-    let dir = normalize(in.view_dir);
+    let ndc = in.uv * 2.0 - vec2<f32>(1.0, 1.0);
+    let tan_half_fov = camera_uniform.params.x;
+    let aspect = camera_uniform.params.y;
+    let dir = normalize(
+        camera_uniform.forward.xyz
+            + camera_uniform.right.xyz * (ndc.x * tan_half_fov * aspect)
+            + camera_uniform.up.xyz * (ndc.y * tan_half_fov)
+    );
+
     let t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+    let env = time_uniform.time.y;
+
+    if (env > 0.5) {
+        // Dimension-specific sky approximations:
+        // - Nether: dark red haze
+        // - End: near-black with sparse star-like specks
+        if (env < 1.5) {
+            // Nether
+            let base = vec3<f32>(0.12, 0.02, 0.01);
+            let haze = vec3<f32>(0.35, 0.07, 0.04);
+            var color = mix(base, haze, smoothstep(0.0, 1.0, t) * 0.35);
+            let noise_uv = dir.xz * 3.0
+                + vec2<f32>(time_uniform.time.x * 0.03, time_uniform.time.x * 0.025);
+            let n = cloud_noise(noise_uv);
+            color += vec3<f32>(0.02, 0.01, 0.0) * (n - 0.5) * 0.6;
+            return vec4<f32>(color, 1.0);
+        } else {
+            // End
+            var color = vec3<f32>(0.01, 0.0, 0.02);
+            let p = dir.xz * 2.0
+                + vec2<f32>(time_uniform.time.x * 0.02, -time_uniform.time.x * 0.017);
+            let cell = floor(p * 40.0);
+            let n = hash(cell);
+            let star = step(0.992, n);
+            let twinkle = 0.4 + 0.6 * (0.5 + 0.5 * sin(time_uniform.time.x * 200.0 + n * 6.2831853));
+            color += vec3<f32>(0.55, 0.3, 0.9) * star * twinkle;
+            return vec4<f32>(color, 1.0);
+        }
+    }
 
     // Get colors for current time of day
     let colors = get_sky_colors(time_uniform.time.x);
-    let horizon_color = colors.horizon;
-    let zenith_color = colors.zenith;
+    var horizon_color = colors.horizon;
+    var zenith_color = colors.zenith;
+
+    // Biome-tinted sky: blend the horizon toward fog (vanilla-ish),
+    // and tint the zenith toward a biome-provided sky color during daytime.
+    let day_weight = smoothstep(0.2, 0.3, time_uniform.time.x)
+        * (1.0 - smoothstep(0.7, 0.8, time_uniform.time.x));
+    horizon_color = mix(horizon_color, time_uniform.fog_color.rgb, 0.35);
+    zenith_color = mix(zenith_color, time_uniform.sky_color.rgb, 0.35 * day_weight);
 
     // Smooth interpolation from horizon to zenith
     let gradient_t = smoothstep(0.0, 1.0, t);
@@ -125,6 +180,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         + sun_color * sun_intensity
         + moon_color * moon_intensity * 0.4;
 
+    // Stars (Overworld): simple procedural star field visible at night.
+    let night_weight = 1.0 - day_weight;
+    if (night_weight > 0.001) {
+        // Fade stars toward the horizon for a more vanilla-ish look.
+        let star_fade = night_weight * smoothstep(0.2, 0.7, t);
+        // Project the view direction onto a pseudo-sky plane for stable star noise.
+        let star_p = dir.xz / max(0.15, abs(dir.y)) * 0.5;
+        let cell = floor(star_p * 120.0);
+        let n = hash(cell);
+        let star = step(0.996, n);
+        // Twinkle based on deterministic sim-time (time.w).
+        let twinkle = 0.5 + 0.5 * sin(time_uniform.time.w * 4.0 + n * 6.2831853);
+        // Weather suppresses star visibility.
+        let precipitation = time_uniform.fog_params.w;
+        let weather_fade = 1.0 - clamp(precipitation * 1.2, 0.0, 1.0);
+        color += vec3<f32>(1.0, 1.0, 1.0) * star * (0.2 + 0.8 * twinkle) * star_fade * weather_fade;
+    }
+
     // Simple procedural clouds
     let uv = dir.xz * 0.5 + vec2<f32>(time_uniform.time.x * 0.02, time_uniform.time.x * 0.015);
     let cloud = cloud_noise(uv * 4.0);
@@ -136,6 +209,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let overcast = vec3<f32>(0.55, 0.58, 0.65);
         color = mix(color, overcast, clamp(precipitation * 0.7, 0.0, 1.0));
         color -= vec3<f32>(0.0, 0.0, 0.05) * precipitation * 0.3;
+    }
+
+    let underwater = time_uniform.time.z;
+    let thunder = time_uniform.fog_color.w;
+    if (env < 0.5 && underwater < 0.5 && thunder > 0.001) {
+        let gloom = vec3<f32>(0.18, 0.18, 0.22);
+        color = mix(color, gloom, clamp(thunder, 0.0, 1.0) * 0.55);
+    }
+    let lightning = time_uniform.sky_color.w;
+    if (env < 0.5 && underwater < 0.5 && lightning > 0.001) {
+        let flash = clamp(lightning, 0.0, 1.0);
+        color = mix(color, vec3<f32>(1.0, 1.0, 1.0), flash * 0.65);
+    }
+    if (underwater > 0.5) {
+        // Vanilla applies strong underwater color grading. Approximate with a tint toward the
+        // current fog color (which is set to biome water-fog color while underwater).
+        color = mix(color, time_uniform.fog_color.rgb, 0.85);
+        color *= vec3<f32>(0.85, 0.9, 0.95);
     }
 
     return vec4<f32>(color, 1.0);

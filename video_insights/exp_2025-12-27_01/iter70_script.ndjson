@@ -1,0 +1,13 @@
+{"op":"command","line":"/weather clear"}
+{"op":"command","line":"/gamemode creative"}
+{"op":"command","line":"/tp -4 85 0"}
+{"op":"set_view","yaw":90.0,"pitch":-0.2}
+{"op":"command","line":"/fill -3 83 -3 3 83 3 stone"}
+{"op":"command","line":"/setblock 1 83 0 oak_log"}
+{"op":"command","line":"/setblock 1 84 0 air"}
+{"op":"command","line":"/setblock 0 84 0 lava_flowing 1"}
+{"op":"step","ticks":4}
+{"op":"screenshot","tag":"iter70_flowing_fire_t4"}
+{"op":"step","ticks":4}
+{"op":"screenshot","tag":"iter70_flowing_fire_t8"}
+{"op":"shutdown"}

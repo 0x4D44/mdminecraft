@@ -1,0 +1,3 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running `target/debug/mdminecraft --headless --no-audio --no-save --world-seed 1 --automation-listen '127.0.0.1:4242' --automation-step --automation-log video_+insights/exp_2025-12-27_01/iter64_automation.log --screenshot-dir video_+insights/exp_2025-12-27_01`
+[2m2025-12-27T23:58:22.814675Z[0m [33m WARN[0m [2mwgpu_hal::vulkan::instance[0m[2m:[0m InstanceFlags::VALIDATION requested, but unable to find layer: VK_LAYER_KHRONOS_validation

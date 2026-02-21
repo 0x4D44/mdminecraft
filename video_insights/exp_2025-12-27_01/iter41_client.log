@@ -1,0 +1,14 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0}
+{"event":"command_result","id":3,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0}
+{"event":"ok","id":4}
+{"event":"command_result","id":5,"lines":["Filled 81 blocks (replace) from -4 84 -4 to 4 84 4 with id=1 state=0"],"ok":true,"tick":0}
+{"event":"command_result","id":6,"lines":["Set block at 0 85 0 to id=20 state=0"],"ok":true,"tick":0}
+{"event":"stepped","id":7,"tick":5}
+{"event":"screenshot","height":720,"id":8,"path":"video_+insights/exp_2025-12-27_01/tick_00000005_tag-iter41_lava_flow_t5.png","tick":5,"width":1280}
+{"event":"command_result","id":9,"lines":["Set block at 2 85 0 to id=6 state=0"],"ok":true,"tick":5}
+{"event":"stepped","id":10,"tick":7}
+{"event":"screenshot","height":720,"id":11,"path":"video_+insights/exp_2025-12-27_01/tick_00000007_tag-iter41_cobble_t7.png","tick":7,"width":1280}
+{"event":"stepped","id":12,"tick":17}
+{"event":"screenshot","height":720,"id":13,"path":"video_+insights/exp_2025-12-27_01/tick_00000017_tag-iter41_cobble_t17.png","tick":17,"width":1280}
+{"event":"ok","id":14}

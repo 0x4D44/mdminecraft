@@ -1,0 +1,11 @@
+{"capabilities":["hello","set_actions","pulse","set_view","command","get_state","step","screenshot","shutdown"],"event":"hello","id":1,"version":1}
+{"event":"command_result","id":2,"lines":["Gamemode set to Creative"],"ok":true,"tick":0}
+{"event":"command_result","id":3,"lines":["Teleported to 0.00 90.00 0.00"],"ok":true,"tick":0}
+{"event":"ok","id":4}
+{"event":"stepped","id":5,"tick":2}
+{"event":"screenshot","height":720,"id":6,"path":"video_+insights/exp_2025-12-27_01/tick_00000002_tag-iter38_baseline_t2.png","tick":2,"width":1280}
+{"event":"stepped","id":7,"tick":12}
+{"event":"screenshot","height":720,"id":8,"path":"video_+insights/exp_2025-12-27_01/tick_00000012_tag-iter38_baseline_t12.png","tick":12,"width":1280}
+{"event":"stepped","id":9,"tick":22}
+{"event":"screenshot","height":720,"id":10,"path":"video_+insights/exp_2025-12-27_01/tick_00000022_tag-iter38_baseline_t22.png","tick":22,"width":1280}
+{"event":"ok","id":11}
