@@ -16,6 +16,12 @@ pub struct Server {
     current_tick: SimTick,
 }
 
+impl Default for Server {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Server {
     /// Create a new server with default schedules.
     pub fn new() -> Self {

@@ -26,6 +26,7 @@ egui-winit = { workspace = true }
 pollster = { workspace = true }
 image = { workspace = true }
 thiserror = { workspace = true }
+raw-window-handle = "0.5"
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

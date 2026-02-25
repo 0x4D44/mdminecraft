@@ -1,7 +1,16 @@
 #![warn(missing_docs)]
 //! Thin client façade for prediction + presentation glue.
 
+pub mod camera;
+pub mod config;
+pub mod events;
+pub mod game_loop;
+pub mod input;
+pub mod interaction;
 pub mod multiplayer;
+pub mod player;
+pub mod ui;
+pub mod window;
 
 use anyhow::Result;
 use mdminecraft_server::Server;

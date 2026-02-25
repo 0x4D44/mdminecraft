@@ -1,5 +1,15 @@
 #![warn(missing_docs)]
-//! Physics primitives (AABB, collisions, etc.).
+//! Physics primitives, collision detection, and character controller.
+
+mod character;
+mod collision;
+mod constants;
+mod raycast;
+
+pub use character::CharacterController;
+pub use collision::{resolve_capsule_aabb, Capsule, CollisionResult};
+pub use constants::*;
+pub use raycast::{ray_cast_voxel, RaycastHit};
 
 /// Axis-aligned bounding box used for collisions.
 #[derive(Debug, Clone, Copy, PartialEq)]

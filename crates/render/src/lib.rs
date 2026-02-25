@@ -7,10 +7,13 @@ mod cache;
 mod camera;
 mod chunk_manager;
 mod driver;
+mod gpu;
+mod headless;
 mod mesh;
 mod particles;
 mod pipeline;
 mod raycast;
+mod renderer;
 mod screenshot;
 mod texture_atlas;
 mod time;
@@ -34,17 +37,10 @@ pub use texture_atlas::{atlas_exists, warn_missing_atlas};
 pub use time::{TimeOfDay, TimeUniform};
 pub use ui::{ControlMode, DebugHud, UiManager, UiRenderContext};
 pub use window::{InputContext, InputSnapshot, InputState, WindowConfig, WindowManager};
+pub use gpu::{BufferManager, GpuContext, GpuContextConfig, SurfaceManager};
+pub use headless::{FrameHash, HeadlessRenderer};
+pub use texture_atlas::{AtlasConfig, AtlasHash, RawTexture, TextureAtlas, TextureHandle, UvRect};
 
-/// Renderer configuration for headless + onscreen paths.
-#[derive(Debug, Clone)]
-pub struct RendererConfig {
-    /// Target width in pixels.
-    pub width: u32,
-    /// Target height in pixels.
-    pub height: u32,
-    /// Request a headless (off-screen) surface.
-    pub headless: bool,
-}
 
 impl Default for RendererConfig {
     fn default() -> Self {

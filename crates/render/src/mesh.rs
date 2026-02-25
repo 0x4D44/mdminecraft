@@ -1212,6 +1212,7 @@ impl GreedyMesher {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_quad(
         chunk: &Chunk,
         builder: &mut MeshBuilder,

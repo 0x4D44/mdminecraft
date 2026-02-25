@@ -21,3 +21,9 @@ Thumbs.db
 metrics.json
 snapshots/*.png
 sha256.txt
+
+# Node
+node_modules/
+
+# Rust backup files
+**/*.rs.bk

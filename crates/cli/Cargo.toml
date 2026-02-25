@@ -10,6 +10,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
+winit = "0.29"
+wgpu = { workspace = true }
 mdminecraft-client = { path = "../client" }
 mdminecraft-render = { path = "../render" }
 mdminecraft-world = { path = "../world" }

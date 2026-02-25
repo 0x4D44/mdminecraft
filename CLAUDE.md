@@ -63,7 +63,7 @@ Tools:
 
 1. **Determinism**: All gameplay uses `SimTick` (u64) at 20 TPS. Same seed + inputs = same outputs. Scoped RNG seeded from `world_seed XOR chunk_hash XOR tick`.
 
-2. **Chunk-Based World**: 16×256×16 voxel chunks. `Voxel` stores BlockId + BlockState + skylight + blocklight. SoA layout for efficient serialization.
+2. **Chunk-Based World**: 16x256x16 voxel chunks. `Voxel` stores BlockId + BlockState + skylight + blocklight. SoA layout for efficient serialization.
 
 3. **Multiplayer Model**: Server-authoritative with client prediction. `ClientPredictor` handles rollback/reconciliation. QUIC transport via quinn with postcard serialization.
 
@@ -75,8 +75,8 @@ Tools:
 |------|----------|---------|
 | `SimTick` | core | Deterministic time unit (20 TPS) |
 | `Voxel` | world | Block data (id, state, lighting) |
-| `Chunk` / `ChunkPos` | world | 16×256×16 voxel array |
-| `BlockRegistry` | assets | Block ID ↔ name/texture mapping |
+| `Chunk` / `ChunkPos` | world | 16x256x16 voxel array |
+| `BlockRegistry` | assets | Block ID <-> name/texture mapping |
 | `ServerSnapshot` | net | Tick + entity deltas + chunk data |
 | `InputBundle` | net | Player movement + actions |
 | `GameWorld` | src/game.rs | Main game state (renderer, chunks, player) |

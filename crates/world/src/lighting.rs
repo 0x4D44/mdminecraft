@@ -914,6 +914,77 @@ pub fn recompute_block_light_local(
     seam_chunks
 }
 
+/// Lighting configuration shared between skylight and block light propagation.
+#[derive(Debug, Clone, Copy)]
+pub struct LightingConfig {
+    /// Maximum skylight level.
+    pub skylight_max: u8,
+    /// Maximum block-emitted light level.
+    pub block_light_max: u8,
+    /// Light falloff per step.
+    pub attenuation: u8,
+}
+
+impl Default for LightingConfig {
+    fn default() -> Self {
+        Self {
+            skylight_max: 15,
+            block_light_max: 15,
+            attenuation: 1,
+        }
+    }
+}
+
+/// Represents a pending lighting update for a chunk.
+#[derive(Debug, Clone)]
+pub struct LightingUpdate {
+    pub chunk: ChunkPos,
+    pub positions: Vec<[u8; 3]>,
+    pub new_level: u8,
+}
+
+/// Skeleton lighting system that owns propagation queues (implementation TBD).
+#[derive(Default)]
+pub struct LightingSystem {
+    pending: Vec<LightingUpdate>,
+    config: LightingConfig,
+}
+
+impl LightingSystem {
+    /// Create a new lighting system with the given configuration.
+    pub fn new(config: LightingConfig) -> Self {
+        Self {
+            config,
+            pending: Vec::new(),
+        }
+    }
+
+    /// Queue a lighting update for the given chunk.
+    pub fn queue_update(&mut self, chunk: ChunkPos, positions: Vec<[u8; 3]>, new_level: u8) {
+        self.pending.push(LightingUpdate {
+            chunk,
+            positions,
+            new_level,
+        });
+    }
+
+    /// Drain pending updates (actual propagation will be implemented in later stages).
+    pub fn drain_updates(&mut self) -> Vec<LightingUpdate> {
+        self.pending.drain(..).collect()
+    }
+
+    /// Convert a normalized sunlight scalar into a discrete skylight value.
+    pub fn skylight_from_scalar(&self, scalar: f32) -> u8 {
+        let clamped = scalar.clamp(0.0, 1.0);
+        (clamped * self.config.skylight_max as f32).round() as u8
+    }
+
+    /// Placeholder for block-light propagation hook.
+    pub fn mark_emissive_block(&mut self, _chunk: &Chunk, _pos: [u8; 3], _voxel: Voxel) {
+        // Implementation will follow in a later Stage 2 task.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1457,5 +1528,13 @@ mod tests {
         let chunk_b = chunks.get(&pos_b).expect("chunk B exists");
         assert_eq!(chunk_b.voxel(0, 50, 8).light_sky, MAX_LIGHT_LEVEL - 1);
         assert_eq!(chunk_b.voxel(1, 50, 8).light_sky, MAX_LIGHT_LEVEL - 2);
+    }
+
+    #[test]
+    fn skylight_from_scalar_respects_bounds() {
+        let lighting = LightingSystem::new(LightingConfig::default());
+        assert_eq!(lighting.skylight_from_scalar(1.0), 15);
+        assert_eq!(lighting.skylight_from_scalar(0.0), 0);
+        assert!(lighting.skylight_from_scalar(0.5) >= 7);
     }
 }

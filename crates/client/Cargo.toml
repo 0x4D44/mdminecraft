@@ -11,8 +11,19 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+winit = "0.29"
 mdminecraft-server = { path = "../server" }
 mdminecraft-net = { path = "../net" }
 mdminecraft-core = { path = "../core" }
+mdminecraft-render = { path = "../render" }
+mdminecraft-world = { path = "../world" }
+mdminecraft-physics = { path = "../physics" }
+mdminecraft-assets = { path = "../assets" }
 tokio = { workspace = true }
 quinn = { workspace = true }
+
+[dev-dependencies]
+mdminecraft-testkit = { path = "../testkit" }
