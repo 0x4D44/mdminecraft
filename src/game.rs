@@ -2468,6 +2468,7 @@ impl GameWorld {
             width,
             height,
             headless: false,
+            ..Default::default()
         };
         let mut renderer = Renderer::new(renderer_config);
 
@@ -2934,6 +2935,7 @@ impl GameWorld {
             width,
             height,
             headless: true,
+            ..Default::default()
         };
         let mut renderer = Renderer::new(renderer_config);
         if !no_render {

@@ -76,8 +76,8 @@ struct ChunkGpuMesh {
     index_count: u32,
 }
 
-/// Main renderer for voxel chunks.
-pub struct Renderer {
+/// Chunk-level renderer that owns GPU context and mesh cache.
+pub struct ChunkRenderer {
     gpu: GpuContext,
     mesh_cache: ChunkMeshCache,
     texture_atlas: TextureAtlas,
@@ -92,7 +92,7 @@ pub struct Renderer {
     depth_texture_view: TextureView,
 }
 
-impl Renderer {
+impl ChunkRenderer {
     /// Create a new renderer with the given configuration.
     ///
     /// # Arguments
@@ -286,10 +286,10 @@ impl Renderer {
         let pos = chunk.position();
 
         // Update mesh in cache - returns a reference
-        let mesh = self.mesh_cache.update_chunk(chunk, dirty, registry);
+        let mesh = self.mesh_cache.update_chunk(chunk, dirty, registry, None);
 
         // Check if we need to upload
-        let should_upload = !mesh.vertices.is_empty() && !mesh.indices.is_empty();
+        let should_upload = !mesh.vertices.is_empty() && !mesh.indices_opaque.is_empty();
         let should_remove = !should_upload;
 
         // Clone mesh data for upload to avoid borrow issues
@@ -318,14 +318,14 @@ impl Renderer {
         // Create index buffer
         let index_buffer = self.gpu.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(&format!("chunk_index_buffer_{:?}", pos)),
-            contents: bytemuck::cast_slice(&mesh.indices),
+            contents: bytemuck::cast_slice(&mesh.indices_opaque),
             usage: wgpu::BufferUsages::INDEX,
         });
 
         let gpu_mesh = ChunkGpuMesh {
             vertex_buffer,
             index_buffer,
-            index_count: mesh.indices.len() as u32,
+            index_count: mesh.indices_opaque.len() as u32,
         };
 
         self.gpu_meshes.insert(pos, gpu_mesh);

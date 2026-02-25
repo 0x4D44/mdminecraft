@@ -4,7 +4,7 @@
 //! queues for deterministic propagation. Light updates track changes for cross-
 //! chunk border handling and event logging.
 
-use crate::chunk::{Chunk, ChunkPos, LocalPos, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
+use crate::chunk::{Chunk, ChunkPos, LocalPos, Voxel, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
 /// Maximum light level (0-15 range).

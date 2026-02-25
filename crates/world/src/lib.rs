@@ -77,7 +77,7 @@ pub use dispenser::*;
 pub use drop_item::*;
 pub use dungeon::*;
 pub use enchanting::*;
-pub use environment::*;
+pub use environment::{EnvironmentConfig, EnvironmentSnapshot, EnvironmentState, sun_scalar};
 pub use farming::*;
 pub use fluid::*;
 pub use fortress::*;

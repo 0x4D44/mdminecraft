@@ -39,18 +39,8 @@ pub use ui::{ControlMode, DebugHud, UiManager, UiRenderContext};
 pub use window::{InputContext, InputSnapshot, InputState, WindowConfig, WindowManager};
 pub use gpu::{BufferManager, GpuContext, GpuContextConfig, SurfaceManager};
 pub use headless::{FrameHash, HeadlessRenderer};
+pub use renderer::{ChunkRenderer, RendererConfig};
 pub use texture_atlas::{AtlasConfig, AtlasHash, RawTexture, TextureAtlas, TextureHandle, UvRect};
-
-
-impl Default for RendererConfig {
-    fn default() -> Self {
-        Self {
-            width: 1280,
-            height: 720,
-            headless: false,
-        }
-    }
-}
 
 /// Main renderer owning GPU resources.
 pub struct Renderer {

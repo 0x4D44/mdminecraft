@@ -8,7 +8,7 @@ use blake3::Hasher;
 use std::path::Path;
 use wgpu::{Texture, TextureView};
 
-use crate::{Camera, Renderer};
+use crate::renderer::{Camera, ChunkRenderer};
 
 /// Hash of a rendered frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +23,7 @@ impl FrameHash {
 
 /// Headless renderer for snapshot testing.
 pub struct HeadlessRenderer {
-    renderer: Renderer,
+    renderer: ChunkRenderer,
     offscreen_texture: Texture,
     offscreen_view: TextureView,
     width: u32,
@@ -38,7 +38,7 @@ impl HeadlessRenderer {
     ///
     /// # Returns
     /// A headless renderer with an off-screen render target.
-    pub fn new(renderer: Renderer) -> Result<Self> {
+    pub fn new(renderer: ChunkRenderer) -> Result<Self> {
         if !renderer.gpu().is_headless() {
             anyhow::bail!("Renderer must be in headless mode for HeadlessRenderer");
         }
@@ -78,12 +78,12 @@ impl HeadlessRenderer {
     }
 
     /// Get a reference to the underlying renderer.
-    pub fn renderer(&self) -> &Renderer {
+    pub fn renderer(&self) -> &ChunkRenderer {
         &self.renderer
     }
 
     /// Get a mutable reference to the underlying renderer.
-    pub fn renderer_mut(&mut self) -> &mut Renderer {
+    pub fn renderer_mut(&mut self) -> &mut ChunkRenderer {
         &mut self.renderer
     }
 
@@ -242,7 +242,7 @@ impl HeadlessRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RendererConfig, Camera};
+    use crate::renderer::{RendererConfig, Camera};
     use mdminecraft_assets::{BlockDescriptor, BlockRegistry};
 
     fn test_registry() -> BlockRegistry {
@@ -268,7 +268,7 @@ mod tests {
         };
         let registry = test_registry();
 
-        let renderer = Renderer::new(config, &registry)?;
+        let renderer = ChunkRenderer::new(config, &registry)?;
         let _headless = HeadlessRenderer::new(renderer)?;
 
         Ok(())
@@ -286,7 +286,7 @@ mod tests {
 
         // This will fail because we can't create a windowed renderer in CI,
         // but if we could, the HeadlessRenderer should reject it
-        if let Ok(renderer) = Renderer::new(config, &registry) {
+        if let Ok(renderer) = ChunkRenderer::new(config, &registry) {
             let result = HeadlessRenderer::new(renderer);
             assert!(result.is_err());
         }
@@ -302,7 +302,7 @@ mod tests {
         };
         let registry = test_registry();
 
-        let renderer = Renderer::new(config, &registry)?;
+        let renderer = ChunkRenderer::new(config, &registry)?;
         let mut headless = HeadlessRenderer::new(renderer)?;
 
         let camera = Camera {
@@ -330,7 +330,7 @@ mod tests {
         };
         let registry = test_registry();
 
-        let renderer = Renderer::new(config, &registry)?;
+        let renderer = ChunkRenderer::new(config, &registry)?;
         let headless = HeadlessRenderer::new(renderer)?;
 
         let (w, h) = headless.dimensions();
